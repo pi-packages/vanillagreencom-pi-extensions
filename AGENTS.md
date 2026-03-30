@@ -78,7 +78,7 @@ dependencies:
 ### Mapping config (`vstack.toml`)
 ```toml
 [agent-skills]
-iced = ["iced-rs", "trading-design", "price-handling"]
+iced = ["iced-rs", "iced-shadcn"]
 
 [role-skills]
 engineer = ["issue-lifecycle", "github", "worktree"]

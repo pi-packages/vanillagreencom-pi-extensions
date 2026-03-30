@@ -296,6 +296,7 @@ Windows note:
 | Skill | Brief | Arguments |
 |---|---|---|
 | `iced-rs` | Iced 0.14 patterns, reactive UI rules, and Elm-style structure. | — |
+| `iced-shadcn` | shadcn Base UI component planning, family decomposition, and parity audits for Iced. | — |
 | `price-handling` | Price rounding, epsilon comparison, and market-price handling. | — |
 | `trading-design` | Dense, professional trading-style interface design guidance. | — |
 
