@@ -23,6 +23,8 @@ pub struct ProjectConfig {
     pub agent_guidance: HashMap<String, String>,
     #[serde(rename = "agent-instructions")]
     pub agent_instructions: HashMap<String, String>,
+    #[serde(rename = "skill-instructions")]
+    pub skill_instructions: HashMap<String, String>,
     #[serde(rename = "custom-hooks", default)]
     pub custom_hooks: Vec<CustomHook>,
 }
@@ -90,6 +92,14 @@ impl ProjectConfig {
     /// Get additional instructions for an agent
     pub fn instructions_for(&self, agent_name: &str) -> Option<&str> {
         self.agent_instructions.get(agent_name).map(|s| s.as_str())
+    }
+
+    /// Get project-specific instructions for a skill
+    pub fn skill_instructions_for(&self, skill_name: &str) -> Option<&str> {
+        self.skill_instructions
+            .get(skill_name)
+            .map(|s| s.as_str())
+            .filter(|s| !s.is_empty())
     }
 
     /// Get custom hooks that apply to a specific agent, as CustomHookEntry for agent frontmatter
@@ -239,6 +249,17 @@ fn create_project_config(path: &Path, agents: &[String], skills: &[String]) {
         out.push_str(&format!("{} = \"\"\n", name));
     }
 
+    // ── skill-instructions ──
+    out.push_str("\n\n# ── Skill Instructions ────────────────────────────────\n");
+    out.push_str("# Adds a \"## Additional Instructions\" section at the\n");
+    out.push_str("# bottom of each skill's SKILL.md. Project-specific\n");
+    out.push_str("# context for how this skill applies to your codebase.\n");
+    out.push_str("#\n");
+    out.push_str("[skill-instructions]\n");
+    for name in skills {
+        out.push_str(&format!("{} = \"\"\n", name));
+    }
+
     // ── custom-skills ──
     out.push_str("\n\n# ── Custom Skills ────────────────────────────────────\n");
     out.push_str("# Attach extra skills to agents beyond automatic\n");
@@ -282,13 +303,28 @@ fn update_project_config(path: &Path, agents: &[String], skills: &[String]) {
         .filter(|name| agent_mentioned_in(&existing, name))
         .collect();
 
+    // Find skills not already mentioned
+    let new_skills: Vec<&String> = skills
+        .iter()
+        .filter(|name| agent_mentioned_in(&existing, name))
+        .collect();
+
     // Strip old skills reference block and re-append with current list
     let content = strip_skills_reference(&existing);
     let mut out = content.trim_end().to_string();
     out.push('\n');
 
+    let mut all_new_keys: Vec<(&str, Vec<&String>)> = Vec::new();
     if !new_agents.is_empty() {
-        out = insert_keys_into_sections(&out, &new_agents);
+        all_new_keys.push(("[agent-guidance]", new_agents.clone()));
+        all_new_keys.push(("[agent-instructions]", new_agents));
+    }
+    if !new_skills.is_empty() {
+        all_new_keys.push(("[skill-instructions]", new_skills));
+    }
+
+    for (section, keys) in all_new_keys {
+        out = insert_keys_into_section(&out, section, &keys);
     }
 
     append_skills_reference(&mut out, skills);
@@ -315,38 +351,28 @@ fn append_skills_reference(out: &mut String, skills: &[String]) {
     }
 }
 
-/// Insert new agent keys into existing [agent-guidance] and [agent-instructions]
-/// sections, preserving all other content including comments.
-fn insert_keys_into_sections(content: &str, new_agents: &[&String]) -> String {
+/// Insert new keys into a specific TOML section, preserving all other content.
+fn insert_keys_into_section(content: &str, section_header: &str, new_keys: &[&String]) -> String {
     let lines: Vec<&str> = content.lines().collect();
     let mut result: Vec<String> = Vec::new();
-
-    let target_sections = ["[agent-guidance]", "[agent-instructions]"];
     let mut i = 0;
 
     while i < lines.len() {
         let trimmed = lines[i].trim();
         result.push(lines[i].to_string());
 
-        // Check if this line is a target section header
-        if target_sections.contains(&trimmed) {
-            // Scan forward to find the last key = value line in this section
+        if trimmed == section_header {
+            // Scan forward past existing keys in this section
             i += 1;
             while i < lines.len() {
                 let next = lines[i].trim();
-                // Stop at next section header, a comment-only divider line, or blank line
-                // that's followed by a section header or divider
                 let is_key_line = next.contains(" = ") || next.contains("= ");
                 let is_comment = next.starts_with('#');
-                let is_blank = next.is_empty();
 
                 if next.starts_with('[') && !next.starts_with("# [") {
-                    // Hit next section — insert before it
                     break;
                 }
-
-                if is_blank || (is_comment && next.starts_with("# ──")) {
-                    // Blank line or section divider — insert before it
+                if next.is_empty() || (is_comment && next.starts_with("# ──")) {
                     break;
                 }
 
@@ -359,8 +385,7 @@ fn insert_keys_into_sections(content: &str, new_agents: &[&String]) -> String {
                 i += 1;
             }
 
-            // Insert new agent keys here
-            for name in new_agents {
+            for name in new_keys {
                 result.push(format!("{} = \"\"", name));
             }
             continue;

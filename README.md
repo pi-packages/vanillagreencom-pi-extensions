@@ -154,6 +154,10 @@ rust = [
 ]
 generalist = []    # empty = no extra skills
 
+# Per-skill instructions appended at the bottom of each skill's SKILL.md
+[skill-instructions]
+trading-design = "Focus on dark theme with green/red accent colors."
+
 # Project-local hooks (Claude Code runs the command; other harnesses get the description as inline instructions)
 [[custom-hooks]]
 event = "PreToolUse"
@@ -163,7 +167,7 @@ description = "Never run git push --force on main or master."
 agents = "all"     # "all", a role ("engineer"), or a list ["rust", "iced"]
 ```
 
-If you edit a generated agent file directly (e.g., add an "Additional Instructions" section), vstack extracts your edits and saves them to `vstack.toml` before the next regeneration — so both approaches work.
+If you edit a generated agent or skill file directly (e.g., add an "Additional Instructions" section), vstack extracts your edits and saves them to `vstack.toml` before the next regeneration — so both approaches work.
 
 ### Architecture
 

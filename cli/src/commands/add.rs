@@ -388,7 +388,8 @@ pub fn run(
         }
 
         for s in &selected_skills {
-            let result = installer::install_skill(s, *harness, global, method)?;
+            let skill_instr = project_config.skill_instructions_for(&s.name);
+            let result = installer::install_skill(s, *harness, global, method, skill_instr)?;
             log_lines.push(result.detail.clone());
             results.push(result);
         }

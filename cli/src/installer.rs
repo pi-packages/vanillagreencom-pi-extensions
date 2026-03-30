@@ -54,6 +54,7 @@ pub fn install_skill(
     harness: Harness,
     global: bool,
     method: InstallMethod,
+    instructions: Option<&str>,
 ) -> Result<InstallResult> {
     let dest = harness.install_skill(skill, global)?;
 
@@ -78,6 +79,12 @@ pub fn install_skill(
             // Step 1: Copy to canonical location (always refresh from source)
             remove_existing(&canonical)?;
             copy_dir(&skill.source_dir, &canonical)?;
+
+            // Inject skill instructions from project config
+            if let Some(text) = instructions {
+                let skill_md = canonical.join("SKILL.md");
+                crate::skill::inject_skill_instructions(&skill_md, text);
+            }
 
             // Step 2: If this harness IS the canonical path, we're done
             if dest == canonical {
@@ -114,6 +121,13 @@ pub fn install_skill(
         InstallMethod::Copy => {
             remove_existing(&dest)?;
             copy_dir(&skill.source_dir, &dest)?;
+
+            // Inject skill instructions from project config
+            if let Some(text) = instructions {
+                let skill_md = dest.join("SKILL.md");
+                crate::skill::inject_skill_instructions(&skill_md, text);
+            }
+
             format!(
                 "{} → {} (copy, {})",
                 skill.name,

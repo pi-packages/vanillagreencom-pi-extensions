@@ -111,6 +111,10 @@ rust = """
 Always run clippy before committing.
 Prefer zero-copy APIs in hot paths.
 """
+
+# Additional instructions appended at the bottom of each skill's SKILL.md
+[skill-instructions]
+trading-design = "Focus on dark theme with green/red accent colors for this project."
 ```
 
 ## Per-Harness Model Mapping

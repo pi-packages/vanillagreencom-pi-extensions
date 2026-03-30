@@ -159,7 +159,8 @@ pub fn run(global: bool) -> Result<()> {
 
         for harness_id in &entry.harnesses {
             if let Some(harness) = Harness::from_id(harness_id) {
-                let _ = installer::install_skill(skill, harness, global, entry.method);
+                let skill_instr = project_config.skill_instructions_for(&skill.name);
+                let _ = installer::install_skill(skill, harness, global, entry.method, skill_instr);
             }
         }
         skills_refreshed += 1;

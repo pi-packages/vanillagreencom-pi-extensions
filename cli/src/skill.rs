@@ -58,6 +58,36 @@ impl Skill {
     }
 }
 
+/// Inject an "## Additional Instructions" section at the bottom of a SKILL.md file.
+/// Replaces any existing Additional Instructions section.
+pub fn inject_skill_instructions(skill_md_path: &Path, instructions: &str) {
+    let Ok(content) = std::fs::read_to_string(skill_md_path) else {
+        return;
+    };
+
+    // Strip any existing "## Additional Instructions" section
+    let clean = strip_additional_instructions(&content);
+    let section = format!("\n\n## Additional Instructions\n\n{}\n", instructions.trim());
+    let new_content = format!("{}{}", clean.trim_end(), section);
+
+    let _ = std::fs::write(skill_md_path, new_content);
+}
+
+fn strip_additional_instructions(content: &str) -> String {
+    if let Some(start) = content.find("\n## Additional Instructions") {
+        let after = &content[start + "\n## Additional Instructions".len()..];
+        // Find the next ## heading or end
+        if let Some(next) = after.find("\n## ") {
+            let end = start + "\n## Additional Instructions".len() + next;
+            format!("{}{}", &content[..start], &content[end..])
+        } else {
+            content[..start].to_string()
+        }
+    } else {
+        content.to_string()
+    }
+}
+
 /// Discover all skills in a directory (looks for SKILL.md in subdirs)
 pub fn discover_skills(dir: &Path) -> Result<Vec<Skill>> {
     let mut skills = Vec::new();
