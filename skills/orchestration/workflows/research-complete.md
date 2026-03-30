@@ -281,7 +281,9 @@ For each blocked issue:
 **Implement changes** from agent reports:
 - Update architecture docs as described
 - Add DXXX references to affected files
-- If agents reported project-specific insights, add them to the appropriate section in `./vstack.toml` (`[agent-instructions]` or `[skill-instructions]`) and run `vstack refresh`
+- If agents reported reusable rules for a skill, add as `.md` files in the skill's `project-rules/` directory
+- If agents reported project-specific insights, add to `./vstack.toml` (`[agent-instructions]` or `[skill-instructions]`)
+- Run `vstack refresh` to rebuild skill AGENTS.md and apply config
 - For Pervasive: combine updates from all domain agents
 
 ### 6.4 Extract Requirements

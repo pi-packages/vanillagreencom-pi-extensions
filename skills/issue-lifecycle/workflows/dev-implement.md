@@ -256,12 +256,11 @@ Use visual QA skills as necessary to validate that UI changes render correctly. 
 - Spent multiple cycles on something a rule could prevent
 - Discovered optimal approaches that differ from documented patterns
 
-**Action**: Update the relevant documentation.
+**Action**: Update the relevant documentation. Three options depending on what you learned:
 
-- **Repeated mistake** → Add to architecture docs or project rules
-- **Missing context** → Update architecture doc or reference table
-- **Project-specific insight** → Add to the appropriate section in `./vstack.toml` (`[agent-instructions]` for agent-level guidance, `[skill-instructions]` for skill-level context). Run `vstack refresh` to apply.
-- **Wrong guidance** → Fix incorrect architecture doc or project rule
+- **Architecture docs** → Update if patterns, APIs, or documented behavior changed.
+- **Project rule file** → Add a `.md` file to the relevant skill's `project-rules/` directory. Follow the rule template format (YAML frontmatter with title/impact + body). Run `vstack refresh` to rebuild.
+- **Project config** → Add to `./vstack.toml` (`[agent-instructions]` or `[skill-instructions]`). Run `vstack refresh` to apply.
 
 Criteria: Would this save 5+ minutes in a future session? If yes, update. One surgical addition per lesson. No verbose examples.
 
