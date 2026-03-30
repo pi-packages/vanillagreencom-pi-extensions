@@ -10,6 +10,8 @@ metadata:
 
 # Linux Profiling for Low-Latency Systems
 
+> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
+
 Profiling patterns for sub-millisecond latency systems on Linux, prioritized by impact.
 
 ## When to Apply

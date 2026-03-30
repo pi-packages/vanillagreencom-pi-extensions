@@ -10,6 +10,8 @@ metadata:
 
 # Rust FFI
 
+> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
+
 Safe and correct patterns for Rust Foreign Function Interface boundaries, prioritized by impact.
 
 ## When to Apply

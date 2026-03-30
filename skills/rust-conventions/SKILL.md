@@ -10,6 +10,8 @@ metadata:
 
 # Rust Conventions
 
+> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
+
 Style, testing, structure, and completeness rules for Rust codebases, prioritized by impact.
 
 ## When to Apply

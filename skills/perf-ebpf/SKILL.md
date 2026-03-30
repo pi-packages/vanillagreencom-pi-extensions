@@ -10,6 +10,8 @@ metadata:
 
 # eBPF/Aya Observability
 
+> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
+
 Kernel-level observability with eBPF and the Aya framework in Rust, prioritized by impact.
 
 ## When to Apply

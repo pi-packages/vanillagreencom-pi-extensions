@@ -10,6 +10,8 @@ metadata:
 
 # Rust Debugging
 
+> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
+
 Debugger setup, panic analysis, runtime introspection, and debug symbol management for Rust programs, prioritized by impact.
 
 ## When to Apply

@@ -10,6 +10,8 @@ metadata:
 
 # Rust Async Patterns
 
+> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
+
 Async runtime internals, concurrency composition, and task management patterns for Rust, prioritized by impact.
 
 ## When to Apply

@@ -10,6 +10,8 @@ metadata:
 
 # Price Handling Patterns
 
+> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
+
 f64 price handling rules for trading systems — epsilon comparison, tick-size rounding, feed normalization, and display formatting, prioritized by impact.
 
 ## When to Apply

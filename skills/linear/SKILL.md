@@ -10,6 +10,8 @@ metadata:
 
 # Linear CLI
 
+> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
+
 CLI wrapper for Linear's GraphQL API with local cache, bulk operations, and structured output.
 
 ## When to Apply

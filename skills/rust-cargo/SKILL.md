@@ -10,6 +10,8 @@ metadata:
 
 # Cargo Workflows & Build Optimization
 
+> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
+
 Workspace management, build tooling, compilation performance, and release/CI configuration for Rust projects, prioritized by impact.
 
 ## When to Apply

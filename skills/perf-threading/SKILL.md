@@ -10,6 +10,8 @@ metadata:
 
 # Perf Threading
 
+> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
+
 Topology-aware thread pinning, core isolation, SPSC patterns, and page fault prevention for Rust low-latency systems.
 
 ## When to Apply

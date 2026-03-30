@@ -10,6 +10,8 @@ metadata:
 
 # Architecture Patterns
 
+> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
+
 Anti-patterns, scoring rubrics, error handling, and layered design patterns for architecture reviews, prioritized by impact.
 
 ## When to Apply

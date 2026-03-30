@@ -10,6 +10,8 @@ metadata:
 
 # Decider
 
+> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
+
 Architectural decision document management with canonical templates, creation/update workflows, and a search CLI. Provides the single source of truth for decision entry format and lifecycle.
 
 ## When to Apply

@@ -10,6 +10,8 @@ metadata:
 
 # Professional Trading UI Design
 
+> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
+
 Stack-agnostic design principles for professional trading applications. Sierra Chart density + Bloomberg grid structure + Vercel dark refinement. Monospace-forward typography, zero-radius sharp corners, left-aligned grid layouts, 1px hairline separators, two-hue directional color, opacity-driven depth. Every pixel earns its place.
 
 ## When to Apply

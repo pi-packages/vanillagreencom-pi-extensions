@@ -10,6 +10,8 @@ metadata:
 
 # Perf SIMD
 
+> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
+
 SIMD intrinsics, auto-vectorization, and runtime dispatch for Rust hot paths, prioritized by impact.
 
 ## When to Apply

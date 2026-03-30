@@ -10,6 +10,8 @@ metadata:
 
 # Rust no_std Development
 
+> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
+
 Guidelines for `#![no_std]` Rust development covering environment tiers, runtime handlers, portable library design, embedded patterns, and testing strategies.
 
 ## When to Apply

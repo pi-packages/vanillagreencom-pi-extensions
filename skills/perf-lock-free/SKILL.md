@@ -10,6 +10,8 @@ metadata:
 
 # Lock-Free Safety Patterns
 
+> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
+
 Verification patterns and correctness rules for lock-free data structures, atomic orderings, and epoch-based memory reclamation.
 
 ## When to Apply

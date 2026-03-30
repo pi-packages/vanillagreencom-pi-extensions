@@ -10,6 +10,8 @@ metadata:
 
 # Zero-Allocation Rust Patterns
 
+> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
+
 Patterns for eliminating heap allocations in performance-critical Rust hot paths, achieving sub-500us latency.
 
 ## When to Apply

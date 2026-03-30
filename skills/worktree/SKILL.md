@@ -11,6 +11,8 @@ metadata:
 
 # Worktree Management
 
+> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
+
 Portable git worktree manager. Layout: `project/main` (repo) + `project/trees/{id}` (worktrees).
 
 Resolves project root via `git rev-parse`, detects default branch automatically, and reads all project-specific config from `.env.local`.

@@ -10,6 +10,8 @@ metadata:
 
 # Rust Cross-Compilation
 
+> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
+
 Target configuration, cross-compilation tools, static binary recipes, and multi-platform CI for Rust projects.
 
 ## When to Apply

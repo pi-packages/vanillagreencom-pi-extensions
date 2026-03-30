@@ -12,6 +12,8 @@ metadata:
 
 # Project Management
 
+> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
+
 TPM methodology for roadmap planning, cycle planning, issue auditing, and progress tracking. Workflows analyze state and return structured JSON recommendations — the orchestrator or user handles execution.
 
 ## When to Apply

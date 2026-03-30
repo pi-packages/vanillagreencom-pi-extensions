@@ -10,6 +10,8 @@ metadata:
 
 # Benchmarking
 
+> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
+
 Record, query, and detect regressions in benchmark results using a structured JSON schema. Supports multiple measurement tools and auto-detects project components.
 
 ## When to Apply

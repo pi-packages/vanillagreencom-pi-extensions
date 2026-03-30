@@ -10,6 +10,8 @@ metadata:
 
 # Latency Measurement
 
+> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
+
 Patterns for accurate latency measurement, percentile tracking, and regression detection in sub-millisecond systems.
 
 ## When to Apply

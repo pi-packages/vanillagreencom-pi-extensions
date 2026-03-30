@@ -10,6 +10,8 @@ metadata:
 
 # CPU Cache Optimization
 
+> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
+
 Data layout, false sharing prevention, prefetching, memory locking, and cache measurement for Rust hot paths.
 
 ## When to Apply

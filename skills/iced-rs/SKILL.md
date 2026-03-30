@@ -10,6 +10,8 @@ metadata:
 
 # Iced 0.14 Patterns
 
+> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
+
 Patterns for building Iced 0.14 applications with Elm-style state management, prioritized by impact.
 
 ## When to Apply
