@@ -76,18 +76,32 @@ pub fn install_skill(
 
     let detail = match method {
         InstallMethod::Symlink => {
-            // Step 1: Copy to canonical location (always refresh from source)
-            remove_existing(&canonical)?;
-            copy_dir(&skill.source_dir, &canonical)?;
+            // Step 1: Copy to canonical location (refresh from source).
+            // Use a marker file to avoid re-copying if another harness
+            // already refreshed the canonical in this process.
+            let marker = canonical.join(".vstack-refreshed");
+            let current_pid = std::process::id().to_string();
+            let already_refreshed = marker
+                .exists()
+                && std::fs::read_to_string(&marker).is_ok_and(|s| s.trim() == current_pid);
+            if !already_refreshed {
+                let project_rules_backup = preserve_project_rules(&canonical);
+                remove_existing(&canonical)?;
+                copy_dir(&skill.source_dir, &canonical)?;
+                restore_project_rules(&canonical, project_rules_backup);
 
-            // Inject skill instructions from project config
-            if let Some(text) = instructions {
-                let skill_md = canonical.join("SKILL.md");
-                crate::skill::inject_skill_instructions(&skill_md, text);
+                // Inject skill instructions from project config
+                if let Some(text) = instructions {
+                    let skill_md = canonical.join("SKILL.md");
+                    crate::skill::inject_skill_instructions(&skill_md, text);
+                }
+
+                // Rebuild AGENTS.md from rule files if skill uses the rules pattern
+                crate::rules::rebuild_agents_md(&canonical).ok();
+
+                // Mark as done for this process
+                let _ = std::fs::write(&marker, std::process::id().to_string());
             }
-
-            // Rebuild AGENTS.md from rule files if skill uses the rules pattern
-            crate::rules::rebuild_agents_md(&canonical).ok();
 
             // Step 2: If this harness IS the canonical path, we're done
             if dest == canonical {
@@ -122,8 +136,10 @@ pub fn install_skill(
             }
         }
         InstallMethod::Copy => {
+            let project_rules_backup = preserve_project_rules(&dest);
             remove_existing(&dest)?;
             copy_dir(&skill.source_dir, &dest)?;
+            restore_project_rules(&dest, project_rules_backup);
 
             // Inject skill instructions from project config
             if let Some(text) = instructions {
@@ -676,6 +692,33 @@ pub fn record_install(
                 installed_at: crate::config::now_iso(),
             });
         }
+    }
+}
+
+/// Preserve the project-rules/ directory from a skill dir before re-copying.
+fn preserve_project_rules(skill_dir: &Path) -> Option<std::path::PathBuf> {
+    let pr = skill_dir.join("project-rules");
+    if !pr.is_dir() {
+        return None;
+    }
+    let backup = std::env::temp_dir().join(format!(
+        "vstack-project-rules-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&backup);
+    if copy_dir(&pr, &backup).is_ok() {
+        Some(backup)
+    } else {
+        None
+    }
+}
+
+/// Restore project-rules/ from backup into the skill dir.
+fn restore_project_rules(skill_dir: &Path, backup: Option<std::path::PathBuf>) {
+    if let Some(backup) = backup {
+        let dest = skill_dir.join("project-rules");
+        let _ = copy_dir(&backup, &dest);
+        let _ = std::fs::remove_dir_all(&backup);
     }
 }
 

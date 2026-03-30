@@ -173,7 +173,7 @@ fn parse_sections(path: &Path) -> Result<Vec<Section>> {
 
     while let Some(line) = lines.next() {
         // Match: ## N. Section Name (prefix-)
-        let re = regex_lite::Regex::new(r"^## (\d+)\.\s+(.+?)\s+\((\w+)-\)").unwrap();
+        let re = regex_lite::Regex::new(r"^## (\d+)\.\s+(.+?)\s+\((\w+)-?\)").unwrap();
         if let Some(caps) = re.captures(line) {
             let number: u32 = caps[1].parse().unwrap_or(0);
             let name = caps[2].to_string();
@@ -450,6 +450,47 @@ mod tests {
         assert!(output.contains("Some scripts."));
         // Old content replaced
         assert!(!output.contains("Old content."));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rebuild_with_project_rules() {
+        let dir = std::env::temp_dir().join(format!("vstack_projrules_{}", std::process::id()));
+        let rules = dir.join("rules");
+        let proj_rules = dir.join("project-rules");
+        let _ = std::fs::create_dir_all(&rules);
+        let _ = std::fs::create_dir_all(&proj_rules);
+
+        std::fs::write(
+            rules.join("_sections.md"),
+            "## 1. Core (core-)\n\n**Impact:** CRITICAL\n",
+        )
+        .unwrap();
+
+        std::fs::write(
+            rules.join("core-base.md"),
+            "---\ntitle: Base Rule\nimpact: HIGH\n---\n\n## Base Rule\n\nBase content.\n",
+        )
+        .unwrap();
+
+        std::fs::write(
+            proj_rules.join("my-custom.md"),
+            "---\ntitle: My Custom Rule\nimpact: HIGH\n---\n\n## My Custom Rule\n\nCustom content.\n",
+        )
+        .unwrap();
+
+        let result = rebuild_agents_md(&dir).unwrap();
+        assert!(result);
+
+        let output = std::fs::read_to_string(dir.join("AGENTS.md")).unwrap();
+        assert!(
+            output.contains("## 2. Project Rules"),
+            "Should have Project Rules section. Output:\n{}",
+            &output[output.len().saturating_sub(500)..]
+        );
+        assert!(output.contains("### My Custom Rule"));
+        assert!(output.contains("Custom content."));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
