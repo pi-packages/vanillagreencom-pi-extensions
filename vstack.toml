@@ -5,13 +5,17 @@
 
 # Extra skill mappings per agent (beyond prefix matching)
 [agent-skills]
-iced = ["iced-rs", "iced-shadcn"]
+iced = ["iced-rs", "iced-shadcn", "trading-design", "price-handling"]
+safety = ["rust-safety"]
+arch = ["rust-arch"]
+structure = ["rust-arch"]
+test = ["rust-conventions"]
 
 # Skills given to all agents of a role
 [role-skills]
-engineer = ["issue-lifecycle", "github", "worktree"]
-manager = ["issue-lifecycle", "github", "worktree", "project-management", "linear"]
-reviewer = ["issue-lifecycle"]
+engineer = ["issue-lifecycle", "github", "worktree", "decider", "linear"]
+manager = ["issue-lifecycle", "github", "worktree", "project-management", "linear", "decider"]
+reviewer = ["issue-lifecycle", "linear"]
 
 # Hook assignment by event:matcher → roles
 # "all" assigns to every role. Otherwise list specific roles.
