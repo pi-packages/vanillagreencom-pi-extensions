@@ -676,12 +676,14 @@ pub fn record_install(
     source: &str,
     method: InstallMethod,
 ) {
+    let now = crate::config::now_iso();
     for result in results {
         let harness_id = result.harness.id().to_string();
         if let Some(existing) = lock.entries.get_mut(&result.name) {
             if !existing.harnesses.contains(&harness_id) {
                 existing.harnesses.push(harness_id);
             }
+            existing.installed_at = now.clone();
         } else {
             lock.add(LockEntry {
                 name: result.name.clone(),
@@ -689,7 +691,7 @@ pub fn record_install(
                 source: source.into(),
                 harnesses: vec![harness_id],
                 method,
-                installed_at: crate::config::now_iso(),
+                installed_at: now.clone(),
             });
         }
     }

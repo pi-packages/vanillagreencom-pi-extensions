@@ -166,6 +166,14 @@ pub fn run(global: bool) -> Result<()> {
         skills_refreshed += 1;
     }
 
+    // Update lock file timestamps so mtime-based outdated checks stay in sync
+    let mut lock = config::LockFile::load(&lock_path)?;
+    let now = config::now_iso();
+    for entry in lock.entries.values_mut() {
+        entry.installed_at = now.clone();
+    }
+    lock.save(&lock_path)?;
+
     eprintln!(
         "Refreshed {} agent(s), {} skill(s)",
         agents_refreshed, skills_refreshed

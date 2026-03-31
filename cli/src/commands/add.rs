@@ -412,6 +412,7 @@ pub fn run(
     );
 
     // Also record hooks in the lock file
+    let now = config::now_iso();
     for harness in &harnesses {
         for h in &selected_hooks {
             let harness_id = harness.id().to_string();
@@ -419,6 +420,7 @@ pub fn run(
                 if !existing.harnesses.contains(&harness_id) {
                     existing.harnesses.push(harness_id);
                 }
+                existing.installed_at = now.clone();
             } else {
                 lock.add(config::LockEntry {
                     name: h.name.clone(),
@@ -426,7 +428,7 @@ pub fn run(
                     source: source.as_deref().unwrap_or(".").into(),
                     harnesses: vec![harness_id],
                     method,
-                    installed_at: config::now_iso(),
+                    installed_at: now.clone(),
                 });
             }
         }
