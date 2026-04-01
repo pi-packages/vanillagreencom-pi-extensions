@@ -120,7 +120,7 @@ fn draw_header(
             Style::default().fg(Color::White).bold(),
         ),
     ];
-    let default_step_labels = ["Packages", "Scope", "Harnesses", "Method"];
+    let default_step_labels = ["Packages", "Scope", "Harnesses", "Method", "Install"];
 
     let top_y = title_area.y.saturating_add(1);
     let brand_title_width = Line::from(title_spans.clone()).width() as u16;
