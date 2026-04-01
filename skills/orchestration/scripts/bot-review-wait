@@ -5,7 +5,6 @@
 # Usage: bot-review-wait <PR#> [poll_interval] [max_wait] [--json] [--reviewers "bot1,bot2"]
 #
 # Environment:
-#   GIT_HOST_CLI     - Path to git host CLI script (e.g., github.sh)
 #   BOT_REVIEWERS    - Comma-separated bot usernames (fallback if --reviewers not passed)
 #                      Default: auto-detect from PR reviews
 #   BOT_CHECK_NAME   - Optional CI check name to treat as an early review signal
@@ -25,6 +24,8 @@
 #   2 - Partial timeout (some reviewers terminal, others still pending)
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILLS_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 ENV_FILE="$PROJECT_ROOT/.env.local"
 if [[ -f "$ENV_FILE" ]]; then
@@ -32,9 +33,10 @@ if [[ -f "$ENV_FILE" ]]; then
   source "$ENV_FILE"
 fi
 
-# Require GIT_HOST_CLI
-if [[ -z "${GIT_HOST_CLI:-}" ]]; then
-  echo "Error: GIT_HOST_CLI not set. Set to path of git host CLI script." >&2
+# Resolve GIT_HOST_CLI from sibling skill
+GIT_HOST_CLI="${GIT_HOST_CLI:-$SKILLS_DIR/github/scripts/github.sh}"
+if [[ ! -x "$GIT_HOST_CLI" ]]; then
+  echo "Error: GIT_HOST_CLI not found at '$GIT_HOST_CLI'. Is the github skill installed?" >&2
   exit 1
 fi
 

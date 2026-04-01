@@ -1,6 +1,6 @@
 # PR Comment Triage Workflow
 
-> **Dependencies**: `$GIT_HOST_CLI`, `$WORKTREE_CLI`, `$ISSUE_CLI` (optional), `$DECISIONS_CMD` (optional), `scripts/workflow-state`, `scripts/workflow-sections`
+> **Dependencies**: `.agents/skills/github/scripts/github.sh`, `.agents/skills/worktree/scripts/worktree`, `.agents/skills/linear/scripts/linear.sh` (optional), `.agents/skills/decider/scripts/decisions` (optional), `.agents/skills/orchestration/scripts/workflow-state`, `.agents/skills/orchestration/scripts/workflow-sections`
 
 Route PR review comments to domain agents for analysis, auto-fix valid items, loop until stable.
 
@@ -26,15 +26,15 @@ Route PR review comments to domain agents for analysis, auto-fix valid items, lo
 ```bash
 ISSUE_ID=$(git rev-parse --abbrev-ref HEAD | grep -oiP "$ISSUE_PATTERN")
 PR_NUMBER=$(gh pr view --json number -q .number 2>/dev/null)
-if ! scripts/workflow-state exists $ISSUE_ID; then
-  WT_PATH=$($WORKTREE_CLI path $ISSUE_ID 2>/dev/null || echo ".")
-  scripts/workflow-state init $ISSUE_ID --worktree "$WT_PATH" --branch "$(git rev-parse --abbrev-ref HEAD)"
+if ! .agents/skills/orchestration/scripts/workflow-state exists $ISSUE_ID; then
+  WT_PATH=$(.agents/skills/worktree/scripts/worktree path $ISSUE_ID 2>/dev/null || echo ".")
+  .agents/skills/orchestration/scripts/workflow-state init $ISSUE_ID --worktree "$WT_PATH" --branch "$(git rev-parse --abbrev-ref HEAD)"
 fi
 ```
 
 ## API Error Handling
 
-On any `gh` or `$GIT_HOST_CLI` command failure: halt, report error, ask user: `Retry` | `Skip step` | `Abort`.
+On any `gh` or `.agents/skills/github/scripts/github.sh` command failure: halt, report error, ask user: `Retry` | `Skip step` | `Abort`.
 
 ---
 
@@ -45,7 +45,7 @@ On any `gh` or `$GIT_HOST_CLI` command failure: halt, report error, ask user: `R
 Multiple bots may review on different timelines. Wait for all configured reviewers before triaging.
 
 ```bash
-WAIT_RESULT=$(scripts/bot-review-wait [PR_NUMBER] 15 600 --json --reviewers "$BOT_REVIEWERS")
+WAIT_RESULT=$(.agents/skills/orchestration/scripts/bot-review-wait [PR_NUMBER] 15 600 --json --reviewers "$BOT_REVIEWERS")
 ```
 
 `$BOT_REVIEWERS` is a comma-separated list of bot usernames to wait for (e.g., `review-bot-a[bot],review-bot-b[bot]`). Default: wait for any bot with a sticky/review comment.
@@ -55,7 +55,7 @@ WAIT_RESULT=$(scripts/bot-review-wait [PR_NUMBER] 15 600 --json --reviewers "$BO
 ### 1.2 Fetch Actionable Data
 
 ```bash
-PR_DATA=$($GIT_HOST_CLI pr-data "[PR_NUMBER]" --actionable)
+PR_DATA=$(.agents/skills/github/scripts/github.sh pr-data "[PR_NUMBER]" --actionable)
 ```
 
 Output contains: `threads` (inline) + `comments` (PR-level).
@@ -66,7 +66,7 @@ Output contains: `threads` (inline) + `comments` (PR-level).
    ```bash
    mkdir -p tmp
    GH_USER=$(gh api user -q .login)
-   $GIT_HOST_CLI find-comment [PR_NUMBER] --pattern "Recommendations.*Processed" --author "$GH_USER" > tmp/summary_comment_[PR_NUMBER].json
+   .agents/skills/github/scripts/github.sh find-comment [PR_NUMBER] --pattern "Recommendations.*Processed" --author "$GH_USER" > tmp/summary_comment_[PR_NUMBER].json
    SUMMARY_TS=$(jq -r '.updated_at // empty' tmp/summary_comment_[PR_NUMBER].json)
    ```
 
@@ -90,7 +90,7 @@ Output contains: `threads` (inline) + `comments` (PR-level).
    # Get sticky/summary comments from each bot reviewer
    IFS=',' read -ra REVIEW_BOTS <<< "$BOT_REVIEWERS"
    for BOT in "${REVIEW_BOTS[@]}"; do
-     $GIT_HOST_CLI find-comment [PR_NUMBER] --author "$BOT" --review-summary
+     .agents/skills/github/scripts/github.sh find-comment [PR_NUMBER] --author "$BOT" --review-summary
    done
    ```
    If no bot reviews found: ask user `Wait` | `Skip triage`.
@@ -130,10 +130,10 @@ Output contains: `threads` (inline) + `comments` (PR-level).
 
 2. **Get worktree context**:
    ```bash
-   WT_PATH=$($WORKTREE_CLI path [ISSUE_ID] 2>/dev/null || echo ".")
+   WT_PATH=$(.agents/skills/worktree/scripts/worktree path [ISSUE_ID] 2>/dev/null || echo ".")
    ```
 
-3. **Gather decision context** (decider skill): `$DECISIONS_CMD search --issue [ISSUE_ID]`. Collect matching decision IDs and summaries for § 3 delegation prompt.
+3. **Gather decision context** (decider skill): `.agents/skills/decider/scripts/decisions search --issue [ISSUE_ID]`. Collect matching decision IDs and summaries for § 3 delegation prompt.
 
 ---
 
@@ -317,11 +317,11 @@ Issue suggestions: [N] items → § 6.2 audit
 
 **Skip if** no items marked "Fixing" in § 5. → § 6.2
 
-1. **Ensure worktree**: `WT_PATH=$($WORKTREE_CLI path [ISSUE_ID] 2>/dev/null || $WORKTREE_CLI create [ISSUE_ID] --pr [PR_NUMBER])`
+1. **Ensure worktree**: `WT_PATH=$(.agents/skills/worktree/scripts/worktree path [ISSUE_ID] 2>/dev/null || .agents/skills/worktree/scripts/worktree create [ISSUE_ID] --pr [PR_NUMBER])`
 
 2. **Group items** by `agent` field.
 
-3. **Detect team context**: `scripts/workflow-state exists [ISSUE_ID] && TEAM=$(scripts/workflow-state get [ISSUE_ID] .team_name)`
+3. **Detect team context**: `.agents/skills/orchestration/scripts/workflow-state exists [ISSUE_ID] && TEAM=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] .team_name)`
 
 4. **Delegate fixes** per agent group:
 
@@ -372,12 +372,12 @@ After fixes are pushed, bots re-review. Wait for new comments, then loop.
 
 1. **Update state**:
    ```bash
-   scripts/workflow-state increment [ISSUE_ID] pr_comment_review.iterations
+   .agents/skills/orchestration/scripts/workflow-state increment [ISSUE_ID] pr_comment_review.iterations
    ```
 
 2. **Check iteration limit**:
    ```bash
-   ITERATIONS=$(scripts/workflow-state get [ISSUE_ID] .pr_comment_review.iterations)
+   ITERATIONS=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] .pr_comment_review.iterations)
    ```
    **If** `ITERATIONS >= 5` → § 7 (max iterations, present skipped summary)
 
@@ -389,8 +389,8 @@ After fixes are pushed, bots re-review. Wait for new comments, then loop.
 4. **Check for new comments**:
    ```bash
    # Count unresolved threads + new PR-level comments since last triage
-   LAST_TS=$(scripts/workflow-state get [ISSUE_ID] '.pr_review_baseline.last_ts // empty')
-   NEW_THREADS=$($GIT_HOST_CLI pr-threads [PR_NUMBER] --unresolved --since "$LAST_TS" | jq '.count')
+   LAST_TS=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] '.pr_review_baseline.last_ts // empty')
+   NEW_THREADS=$(.agents/skills/github/scripts/github.sh pr-threads [PR_NUMBER] --unresolved --since "$LAST_TS" | jq '.count')
    ```
 
 5. **Route**:
@@ -403,7 +403,7 @@ After fixes are pushed, bots re-review. Wait for new comments, then loop.
 6. **Update baseline** (before looping):
    ```bash
    NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-   scripts/workflow-state set [ISSUE_ID] pr_review_baseline "{\"last_ts\":\"$NOW\",\"last_threads\":$NEW_THREADS}"
+   .agents/skills/orchestration/scripts/workflow-state set [ISSUE_ID] pr_review_baseline "{\"last_ts\":\"$NOW\",\"last_threads\":$NEW_THREADS}"
    ```
 
 7. **Loop**: Return to § 1.2 (skip § 1.1 bot-wait on re-triage — comments already arrived).
@@ -429,13 +429,13 @@ After fixes are pushed, bots re-review. Wait for new comments, then loop.
    **For questions** (automatic): Post `draft_response` from JSON.
 
    **Posting mechanism:**
-   - Inline threads: `$GIT_HOST_CLI post-reply "[THREAD_ID]" "[RESPONSE]" --pr "[PR_NUMBER]"`
-   - PR-level comments: `$GIT_HOST_CLI post-comment "[PR_NUMBER]" "> Re: [QUOTE]\n\n[RESPONSE]"`
+   - Inline threads: `.agents/skills/github/scripts/github.sh post-reply "[THREAD_ID]" "[RESPONSE]" --pr "[PR_NUMBER]"`
+   - PR-level comments: `.agents/skills/github/scripts/github.sh post-comment "[PR_NUMBER]" "> Re: [QUOTE]\n\n[RESPONSE]"`
    - Use `1.` `2.` `3.` numbering, never `#N` (GitHub auto-links `#N` to PRs/issues)
 
    **Contested bot reviews** — when domain agent classifies a bot's blocking comment as noise:
    - Tag bot: `@[BOT_NAME] [RATIONALE]. Please re-review.`
-   - Dismiss `CHANGES_REQUESTED`: `$GIT_HOST_CLI dismiss-review [PR_NUMBER] --bot --message "[RATIONALE]"`
+   - Dismiss `CHANGES_REQUESTED`: `.agents/skills/github/scripts/github.sh dismiss-review [PR_NUMBER] --bot --message "[RATIONALE]"`
    - Resolve the thread
    - **Human reviewers**: Tag `@[AUTHOR]` but do NOT dismiss
 
@@ -489,8 +489,8 @@ If user requests fixes for skipped items → delegate via § 6.1 (single item), 
 
 2. **Post summary** — skip if no fixes AND no issues created:
    ```bash
-   $GIT_HOST_CLI post-comment [PR_NUMBER] "[SUMMARY_CONTENT]"
-   $ISSUE_CLI comments create [ISSUE_ID] --body "[SUMMARY_CONTENT]"
+   .agents/skills/github/scripts/github.sh post-comment [PR_NUMBER] "[SUMMARY_CONTENT]"
+   .agents/skills/linear/scripts/linear.sh comments create [ISSUE_ID] --body "[SUMMARY_CONTENT]"
    ```
 
    ```markdown
@@ -513,13 +513,13 @@ If user requests fixes for skipped items → delegate via § 6.1 (single item), 
 1. **Update state** with cumulative results:
    ```bash
    # For each fixed item:
-   scripts/workflow-state append [ISSUE_ID] pr_comment_review.fixes '{"description":"[DESC]","location":"[LOC]","commit":"[SHA]","source":"[SOURCE]"}'
+   .agents/skills/orchestration/scripts/workflow-state append [ISSUE_ID] pr_comment_review.fixes '{"description":"[DESC]","location":"[LOC]","commit":"[SHA]","source":"[SOURCE]"}'
 
    # For each issue created:
-   scripts/workflow-state append [ISSUE_ID] pr_comment_review.issues_created "[CREATED_ISSUE_ID]"
+   .agents/skills/orchestration/scripts/workflow-state append [ISSUE_ID] pr_comment_review.issues_created "[CREATED_ISSUE_ID]"
 
    # For each skipped item:
-   scripts/workflow-state append [ISSUE_ID] pr_comment_review.skipped '{"description":"[DESC]","reason":"[REASON]"}'
+   .agents/skills/orchestration/scripts/workflow-state append [ISSUE_ID] pr_comment_review.skipped '{"description":"[DESC]","reason":"[REASON]"}'
    ```
 
 2. **Return**:

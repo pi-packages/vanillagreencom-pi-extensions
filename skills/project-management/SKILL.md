@@ -34,15 +34,14 @@ Workflows reference these companion skills. Install and configure per your proje
 
 | Dependency | Purpose | Variable |
 |------------|---------|----------|
-| Issue tracker CLI (e.g., `linear` skill) | Issue CRUD, cache, comments, labels, relations | `$ISSUE_CLI` |
-| Decider skill (optional) | Decision search for audit/roadmap contradiction checks | `$DECISIONS_CMD` |
+| Issue tracker CLI (e.g., `linear` skill) | Issue CRUD, cache, comments, labels, relations | `.agents/skills/linear/scripts/linear.sh` |
+| Decider skill (optional) | Decision search for audit/roadmap contradiction checks | `.agents/skills/decider/scripts/decisions` |
 
 Project-level configuration:
 
 | Variable | Purpose |
 |----------|---------|
-| `$VALIDATE_CMD` | Build + test + lint command (optional) |
-| `$DECISIONS_CMD` | Decision document lookup (optional) |
+| `.agents/skills/decider/scripts/decisions` | Decision document lookup (optional) |
 
 ## Hierarchy
 
@@ -103,7 +102,7 @@ TPM workflows return JSON recommendations only. Orchestrator or user handles int
 | Dependencies | [references/dependencies.md](references/dependencies.md) |
 | Prioritization factors | [references/prioritization.md](references/prioritization.md) |
 | Label management | [references/labels.md](references/labels.md) |
-| Issue tracker CLI | Companion issue tracker skill (`$ISSUE_CLI`) |
+| Issue tracker CLI | Companion issue tracker skill (`.agents/skills/linear/scripts/linear.sh`) |
 
 ## Full Compiled Document
 

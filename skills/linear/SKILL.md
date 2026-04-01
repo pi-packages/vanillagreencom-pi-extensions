@@ -26,10 +26,8 @@ Reference these guidelines when:
 ## Entry Point
 
 ```bash
-$ISSUE_CLI <resource> <action> [options]
+.agents/skills/linear/scripts/linear.sh <resource> <action> [options]
 ```
-
-> `$ISSUE_CLI` is set in `.env.local` (defaults to `.agents/skills/linear/scripts/linear.sh`).
 
 ## Hierarchy
 

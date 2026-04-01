@@ -118,7 +118,7 @@ When invoked as `/orchestration <command> [args]`, route to the corresponding wo
 ### Execution Mode
 
 When executing a command's workflow, follow ALL [Workflow Execution](#rule-categories-by-priority) rules:
-- Pre-create tasks from `scripts/workflow-sections`
+- Pre-create tasks from `.agents/skills/orchestration/scripts/workflow-sections`
 - Process sections sequentially
 - Never skip based on scope assessment
 - Use `⤵` markers for nested workflow invocation
@@ -129,26 +129,24 @@ Workflows reference these companion skills. Install and configure per your proje
 
 | Dependency | Purpose | Variable |
 |------------|---------|----------|
-| Issue tracker CLI (e.g., `linear` skill) | Issue CRUD, cache, comments, labels | `$ISSUE_CLI` |
-| Git host CLI (e.g., `github` skill) | PR operations, CI status, comments | `$GIT_HOST_CLI` |
-| Worktree CLI (e.g., `worktree` skill) | Create/remove git worktrees | `$WORKTREE_CLI` |
+| Issue tracker CLI (e.g., `linear` skill) | Issue CRUD, cache, comments, labels | `.agents/skills/linear/scripts/linear.sh` |
+| Git host CLI (e.g., `github` skill) | PR operations, CI status, comments | `.agents/skills/github/scripts/github.sh` |
+| Worktree CLI (e.g., `worktree` skill) | Create/remove git worktrees | `.agents/skills/worktree/scripts/worktree` |
 | Issue lifecycle skill | Dev implement/fix/review workflows | Referenced in delegation |
 | Project management skill | TPM audit/cycle/roadmap workflows | Referenced in delegation |
-| Decider skill | Decision templates, creation workflows, search CLI | `$DECISIONS_CMD` |
+| Decider skill | Decision templates, creation workflows, search CLI | `.agents/skills/decider/scripts/decisions` |
 | Visual QA skill (optional) | Screenshot baselines, optional target-specific baseline routing | Referenced in submit-pr |
 
 Project-level configuration:
 
 | Variable | Purpose |
 |----------|---------|
-| `$VALIDATE_CMD` | Build + test + lint command |
-| `$DIFF_SUMMARY_CMD` | Diff summary with domain grouping (optional) |
-| `$DECISIONS_CMD` | Decision document lookup (optional) |
+| `.agents/skills/github/scripts/git-diff-summary` | Diff summary with domain grouping (optional) |
+| `.agents/skills/decider/scripts/decisions` | Decision document lookup (optional) |
 | `$VISUAL_QA_BASELINE_CMD` | Optional project helper for baseline-capable target routing | Optional |
 | `$ISSUE_PATTERN` | Regex for issue IDs in branch names |
 | `$BOT_REVIEWERS` | Comma-separated bot usernames to wait for (e.g., `review-bot-a[bot],review-bot-b[bot]`). Auto-detects if unset. |
 | `$BOT_CHECK_NAME` | Optional CI check name to treat as an early review signal | Optional |
-| `$HARNESS_CMD` | Optional command template used by `parallel-launch` (`{issue}` placeholder) | Optional |
 
 ## Workflows
 
@@ -217,8 +215,8 @@ Project-level configuration:
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/workflow-sections` | Parse `## N.` headers from workflow markdown → JSON for task creation |
-| `scripts/workflow-state` | Read/write/append persistent state (init, get, set, append, increment) |
+| `.agents/skills/orchestration/scripts/workflow-sections` | Parse `## N.` headers from workflow markdown → JSON for task creation |
+| `.agents/skills/orchestration/scripts/workflow-state` | Read/write/append persistent state (init, get, set, append, increment) |
 
 ## Schemas
 

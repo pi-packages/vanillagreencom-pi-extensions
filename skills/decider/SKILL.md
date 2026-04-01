@@ -39,7 +39,7 @@ Project-level configuration:
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| `$DECISIONS_CMD` | Path to decisions CLI | `scripts/decisions` |
+| `.agents/skills/decider/scripts/decisions` | Path to decisions CLI | `scripts/decisions` |
 | `$DECISIONS_DIR` | Path to decision documents directory | — (required) |
 
 ## Templates
@@ -67,18 +67,18 @@ Project-level configuration:
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/decisions` | CLI entry point for `$DECISIONS_CMD` — search, next-id, get |
+| `scripts/decisions` | CLI entry point for `.agents/skills/decider/scripts/decisions` — search, next-id, get |
 
 ## CLI Commands
 
 | Command | Purpose | Output |
 |---------|---------|--------|
-| `$DECISIONS_CMD search --issue [ID]` | Find decisions linked to an issue | JSON `[{id, decision, path}]` |
-| `$DECISIONS_CMD search "[KEYWORDS]"` | Ranked keyword search (AND, scored) | JSON `[{id, decision, path, score}]` |
-| `$DECISIONS_CMD search "a\|b"` | Regex OR search | JSON `[{id, decision, path}]` |
-| `$DECISIONS_CMD list` | List all active decisions | JSON `[{id, decision, path}]` |
-| `$DECISIONS_CMD next-id` | Get next available DXXX | Single `DXXX` line |
-| `$DECISIONS_CMD get [DXXX]` | Get decision details | JSON `{id, decision, status, date, path}` |
+| `.agents/skills/decider/scripts/decisions search --issue [ID]` | Find decisions linked to an issue | JSON `[{id, decision, path}]` |
+| `.agents/skills/decider/scripts/decisions search "[KEYWORDS]"` | Ranked keyword search (AND, scored) | JSON `[{id, decision, path, score}]` |
+| `.agents/skills/decider/scripts/decisions search "a\|b"` | Regex OR search | JSON `[{id, decision, path}]` |
+| `.agents/skills/decider/scripts/decisions list` | List all active decisions | JSON `[{id, decision, path}]` |
+| `.agents/skills/decider/scripts/decisions next-id` | Get next available DXXX | Single `DXXX` line |
+| `.agents/skills/decider/scripts/decisions get [DXXX]` | Get decision details | JSON `{id, decision, status, date, path}` |
 
 Options: `--limit N` (default: 5) for search results.
 
@@ -100,7 +100,7 @@ Research Complete → Create Decision (§ 6.1)
 
 ### Creating Decisions
 
-1. Get next ID: `$DECISIONS_CMD next-id`
+1. Get next ID: `.agents/skills/decider/scripts/decisions next-id`
 2. Select template size (minimal/standard/comprehensive) from `templates/decision-entry.md`
 3. Write decision file to `[project decision documents]/[DECISION_ID]-[DESCRIPTOR].md`
 4. Add row to `[project decision documents]/INDEX.md`
@@ -108,8 +108,8 @@ Research Complete → Create Decision (§ 6.1)
 
 ### Searching Decisions
 
-1. By issue: `$DECISIONS_CMD search --issue [ISSUE_ID]`
-2. By keywords: `$DECISIONS_CMD search "[RELEVANT_KEYWORDS]"`
+1. By issue: `.agents/skills/decider/scripts/decisions search --issue [ISSUE_ID]`
+2. By keywords: `.agents/skills/decider/scripts/decisions search "[RELEVANT_KEYWORDS]"`
 3. Read full decision files — index summaries are insufficient for understanding scope and rejected alternatives
 4. Suggestions contradicting active decisions are invalid unless decision is flawed
 

@@ -11,7 +11,7 @@ vanillagreen
 
 ## Abstract
 
-A methodology-based skill for technical program management (TPM). Covers roadmap planning, cycle planning, issue auditing, prioritization scoring, dependency management, label taxonomy, and project health tracking. All workflows return structured JSON recommendations — the orchestrator or user handles execution. Designed to be portable across any issue tracker that exposes a CLI (`$ISSUE_CLI`).
+A methodology-based skill for technical program management (TPM). Covers roadmap planning, cycle planning, issue auditing, prioritization scoring, dependency management, label taxonomy, and project health tracking. All workflows return structured JSON recommendations — the orchestrator or user handles execution. Designed to be portable across any issue tracker that exposes a CLI (`.agents/skills/linear/scripts/linear.sh`).
 
 ---
 
@@ -79,7 +79,7 @@ Score = (Critical Path x 3) + (Dependencies x 2) + (Risk x 2) + (Value x 1) - (E
 
 **Tip**: Query issue relations to count blocked issues:
 ```bash
-$ISSUE_CLI cache issues list-relations [ISSUE_ID]
+.agents/skills/linear/scripts/linear.sh cache issues list-relations [ISSUE_ID]
 ```
 
 #### Risk (x2)
@@ -215,13 +215,13 @@ Blocking relations are valuable — always preserve them by fixing the structura
 
 ```bash
 # This issue blocks another
-$ISSUE_CLI issues add-relation [ISSUE_ID] --blocks [OTHER_ISSUE_ID]
+.agents/skills/linear/scripts/linear.sh issues add-relation [ISSUE_ID] --blocks [OTHER_ISSUE_ID]
 
 # This issue is blocked by another
-$ISSUE_CLI issues add-relation [ISSUE_ID] --blocked-by [BLOCKER_ID]
+.agents/skills/linear/scripts/linear.sh issues add-relation [ISSUE_ID] --blocked-by [BLOCKER_ID]
 
 # View all relations
-$ISSUE_CLI cache issues list-relations [ISSUE_ID]
+.agents/skills/linear/scripts/linear.sh cache issues list-relations [ISSUE_ID]
 ```
 
 ### Project Dependencies
@@ -230,10 +230,10 @@ Use when one project must complete before another can start.
 
 ```bash
 # This project depends on another
-$ISSUE_CLI projects add-dependency [PROJECT_ID] --blocked-by [OTHER_PROJECT_ID]
+.agents/skills/linear/scripts/linear.sh projects add-dependency [PROJECT_ID] --blocked-by [OTHER_PROJECT_ID]
 
 # View dependencies
-$ISSUE_CLI cache projects list-dependencies [PROJECT_ID]
+.agents/skills/linear/scripts/linear.sh cache projects list-dependencies [PROJECT_ID]
 ```
 
 **Visualization**: In issue tracker timeline view:
@@ -243,12 +243,12 @@ $ISSUE_CLI cache projects list-dependencies [PROJECT_ID]
 ### Integration with Workflows
 
 **Cycle Planning** — when pulling issues:
-1. Query blocked issues: `$ISSUE_CLI cache issues list --label "blocked" --max`
-2. Check issue relations: `$ISSUE_CLI cache issues list-relations [ISSUE_ID]`
+1. Query blocked issues: `.agents/skills/linear/scripts/linear.sh cache issues list --label "blocked" --max`
+2. Check issue relations: `.agents/skills/linear/scripts/linear.sh cache issues list-relations [ISSUE_ID]`
 3. Score higher on Dependencies factor for issues that block many others
 
 **Roadmap Review**:
-1. Check project dependencies: `$ISSUE_CLI cache projects list-dependencies [PROJECT_ID]`
+1. Check project dependencies: `.agents/skills/linear/scripts/linear.sh cache projects list-dependencies [PROJECT_ID]`
 2. Look for violated dependencies (red lines in timeline)
 3. Adjust project dates or priorities accordingly
 
@@ -256,7 +256,7 @@ $ISSUE_CLI cache projects list-dependencies [PROJECT_ID]
 
 **Adding a Blocker**:
 1. Identify what's blocking
-2. **If tracked issue**: `$ISSUE_CLI issues add-relation [ISSUE_ID] --blocked-by [BLOCKER_ID]`
+2. **If tracked issue**: `.agents/skills/linear/scripts/linear.sh issues add-relation [ISSUE_ID] --blocked-by [BLOCKER_ID]`
 3. **If external**: Add `blocked` label + comment explaining blocker
 4. Update issue state if needed
 
@@ -282,7 +282,7 @@ $ISSUE_CLI cache projects list-dependencies [PROJECT_ID]
 ### Check for Duplicates
 
 ```bash
-$ISSUE_CLI cache issues list --state "Backlog,Todo,In Progress" --max | grep -iE "keyword"
+.agents/skills/linear/scripts/linear.sh cache issues list --state "Backlog,Todo,In Progress" --max | grep -iE "keyword"
 ```
 
 | Finding | Action |
@@ -337,9 +337,9 @@ Use `--parent [ISSUE_ID]` when:
 - Incorrect: All backend issues grouped (layer grouping)
 
 ```bash
-$ISSUE_CLI issues create --title "Parse input data" --parent [ISSUE_ID]
-$ISSUE_CLI cache issues children [ISSUE_ID]              # Direct children only
-$ISSUE_CLI cache issues children [ISSUE_ID] --recursive  # All descendants (3 levels, includes blocks/blocked_by)
+.agents/skills/linear/scripts/linear.sh issues create --title "Parse input data" --parent [ISSUE_ID]
+.agents/skills/linear/scripts/linear.sh cache issues children [ISSUE_ID]              # Direct children only
+.agents/skills/linear/scripts/linear.sh cache issues children [ISSUE_ID] --recursive  # All descendants (3 levels, includes blocks/blocked_by)
 ```
 
 **Max depth**: Initiative → Project → Issue → Sub-Issue (no deeper)
@@ -365,7 +365,7 @@ $ISSUE_CLI cache issues children [ISSUE_ID] --recursive  # All descendants (3 le
 ### CLI Command
 
 ```bash
-$ISSUE_CLI issues create \
+.agents/skills/linear/scripts/linear.sh issues create \
   --title "Implement user authentication service" \
   --project "Phase 1: Foundation" \
   --labels "backend,agent:[TYPE],critical-path" \
@@ -382,8 +382,8 @@ Auth service for user login and session management.
 ### Cancellation
 
 ```bash
-$ISSUE_CLI comments create [ISSUE_ID] --body "CANCELED: [REASON]"
-$ISSUE_CLI issues update [ISSUE_ID] --state "Canceled"
+.agents/skills/linear/scripts/linear.sh comments create [ISSUE_ID] --body "CANCELED: [REASON]"
+.agents/skills/linear/scripts/linear.sh issues update [ISSUE_ID] --state "Canceled"
 ```
 
 Valid reasons: Requirement changed, superseded by [OTHER_ISSUE_ID], no longer needed.
@@ -461,18 +461,18 @@ Examples: "Initial Auth Service", "Phase 2: API Integration", "Spike: GraphQL vs
 
 ```bash
 # Initiative
-$ISSUE_CLI initiatives create --name "[NAME]" \
+.agents/skills/linear/scripts/linear.sh initiatives create --name "[NAME]" \
   --description "[DESCRIPTION]" \
   --content "[CONTENT]"
 
 # Project
-$ISSUE_CLI projects create --name "[NAME]" \
+.agents/skills/linear/scripts/linear.sh projects create --name "[NAME]" \
   --priority 2 \
   --description "[DESCRIPTION]" \
   --content "[CONTENT]"
 
 # Milestone
-$ISSUE_CLI milestones create --project "[PROJECT_NAME]" --name "[NAME]" --target-date [TARGET_DATE]
+.agents/skills/linear/scripts/linear.sh milestones create --project "[PROJECT_NAME]" --name "[NAME]" --target-date [TARGET_DATE]
 ```
 
 **Two-field pattern**: `--description` (255 char subtitle) + `--content` (markdown body, no limit)
@@ -493,8 +493,8 @@ $ISSUE_CLI milestones create --project "[PROJECT_NAME]" --name "[NAME]" --target
 
 **Starting**:
 ```bash
-$ISSUE_CLI projects update [PROJECT_ID] --state started
-$ISSUE_CLI issues update [ISSUE_ID] --state "In Progress"  # First issue
+.agents/skills/linear/scripts/linear.sh projects update [PROJECT_ID] --state started
+.agents/skills/linear/scripts/linear.sh issues update [ISSUE_ID] --state "In Progress"  # First issue
 ```
 
 **Pausing**:
@@ -566,7 +566,7 @@ Agent labels are special — MUST have agent definition AND parent group.
 2. **Update** project label taxonomy
 3. **tpm** creates label:
    ```bash
-   $ISSUE_CLI labels create --name "agent:[NAME]" --color "#9C27B0" --parent "Agent"
+   .agents/skills/linear/scripts/linear.sh labels create --name "agent:[NAME]" --color "#9C27B0" --parent "Agent"
    ```
 
 **TPM should NOT create any labels unprompted** — even workflow or classification labels require explicit user authorization. `agent:*` labels additionally require the agent definition and taxonomy entry to exist first.
@@ -575,13 +575,13 @@ Agent labels are special — MUST have agent definition AND parent group.
 
 ```bash
 # Workflow labels (no parent - independent)
-$ISSUE_CLI labels create --name "needs-[ACTION]" --color "#757575"
+.agents/skills/linear/scripts/linear.sh labels create --name "needs-[ACTION]" --color "#757575"
 
 # Classification labels (no parent - independent)
-$ISSUE_CLI labels create --name "[TYPE]" --color "#E53935"
+.agents/skills/linear/scripts/linear.sh labels create --name "[TYPE]" --color "#E53935"
 
 # Stack labels (requires review)
-$ISSUE_CLI labels create --name "[STACK_NAME]" --color "#FF6B35"
+.agents/skills/linear/scripts/linear.sh labels create --name "[STACK_NAME]" --color "#FF6B35"
 ```
 
 After creating, update project label taxonomy.

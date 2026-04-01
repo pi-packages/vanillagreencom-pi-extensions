@@ -1,6 +1,6 @@
 # Research Complete Workflow
 
-> **Dependencies**: `$ISSUE_CLI`, `$DECISIONS_CMD` (decider skill), `scripts/workflow-state`, `scripts/parallel-groups`, `schemas/audit-issues-input.md`
+> **Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/decider/scripts/decisions` (decider skill), `.agents/skills/orchestration/scripts/workflow-state`, `.agents/skills/orchestration/scripts/parallel-groups`, `schemas/audit-issues-input.md`
 
 Link completed research to blocked issues, analyze impact, create follow-up work.
 
@@ -22,7 +22,7 @@ Link completed research to blocked issues, analyze impact, create follow-up work
 
 1. **Fetch issue**:
    ```bash
-   $ISSUE_CLI cache issues get [ISSUE_ID]
+   .agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID]
    ```
 
 2. **Read findings**: project research docs `[ISSUE_ID]/findings.md`. Briefly summarize key findings.
@@ -46,7 +46,7 @@ From § 1 response, check `.labels` array for domain/stack labels.
 
 2. **Update labels** (must include existing + new):
    ```bash
-   $ISSUE_CLI issues update [ISSUE_ID] --labels "[EXISTING_LABELS],[INFERRED_LABELS]"
+   .agents/skills/linear/scripts/linear.sh issues update [ISSUE_ID] --labels "[EXISTING_LABELS],[INFERRED_LABELS]"
    ```
 
 3. **If unclear or multi-domain** → add all likely domains; routing handles escalation
@@ -71,7 +71,7 @@ From § 1 response, check the `.blocks` array for blocked issue identifiers.
 
 For each blocked issue:
 
-1. **Get current description**: `$ISSUE_CLI cache issues get [BLOCKED_ISSUE_ID]`
+1. **Get current description**: `.agents/skills/linear/scripts/linear.sh cache issues get [BLOCKED_ISSUE_ID]`
 
 2. **Check existing**: If path to findings already exists in description (single-line OR list format) -- skip if present.
 
@@ -79,7 +79,7 @@ For each blocked issue:
 
 4. **Propagate to children**: Get sub-issues and apply same update:
    ```bash
-   $ISSUE_CLI cache issues children [BLOCKED_ISSUE_ID] --recursive --format=safe | jq -r '.[].id'
+   .agents/skills/linear/scripts/linear.sh cache issues children [BLOCKED_ISSUE_ID] --recursive --format=safe | jq -r '.[].id'
    ```
    For each child: repeat steps 1-3 (skip if reference already present)
 
@@ -131,7 +131,7 @@ Execute ONE flow based on § 3 unless meets escalation criteria as defined.
 
 3. **Check for escalation**
    - If cross-domain impact reported:
-     - Add domain labels from agent report: `$ISSUE_CLI issues update [ISSUE_ID] --labels "[EXISTING_LABELS],[NEW_DOMAINS]"`
+     - Add domain labels from agent report: `.agents/skills/linear/scripts/linear.sh issues update [ISSUE_ID] --labels "[EXISTING_LABELS],[NEW_DOMAINS]"`
      - Update issue description -- append `## Affected Domains` section with domains from agent report
      - **Switch to § 5.2**. Do not assess severity--let each affected domain analyze its own impact.
    - If initiative-level scope (10+ issues, needs phasing):
@@ -200,7 +200,7 @@ Execute ONE flow based on § 3 unless meets escalation criteria as defined.
 
    **Identify origin issue**: From § 1 `.blocks` array, if there is a single blocked issue, it is the origin issue for hierarchy analysis. Fetch its details:
    ```bash
-   $ISSUE_CLI cache issues get [BLOCKED_ISSUE_ID]
+   .agents/skills/linear/scripts/linear.sh cache issues get [BLOCKED_ISSUE_ID]
    ```
    Store as `$ORIGIN_ISSUE` (id, title, project). If multiple blocked issues or none, set `$ORIGIN_ISSUE` = null.
 
@@ -228,7 +228,7 @@ All flows converge here. Orchestrator executes these steps using agent reports.
 
 Follow the decider skill's create-decision workflow:
 
-1. **Get next ID**: `$DECISIONS_CMD next-id`
+1. **Get next ID**: `.agents/skills/decider/scripts/decisions next-id`
 
 2. **Select template** from the decider skill's `templates/decision-entry.md` based on scope:
    - Minimal (15-30 lines): single technology choice, clear winner
@@ -260,7 +260,7 @@ Update blocked issues (from § 1 `.blocks` array) to append DXXX to existing Res
 
 For each blocked issue:
 
-1. **Get current description**: `$ISSUE_CLI cache issues get [BLOCKED_ISSUE_ID] | jq -r '.description'`
+1. **Get current description**: `.agents/skills/linear/scripts/linear.sh cache issues get [BLOCKED_ISSUE_ID] | jq -r '.description'`
 
 2. **Check if** `**Decision**: [DECISION_ID]` already exists -- skip if present
 
@@ -268,11 +268,11 @@ For each blocked issue:
 
 4. **Add decision reference** `**Decision [DECISION_ID]**: [project decision documents]/[DECISION_ID]-[DESCRIPTOR].md` after the Research block (after list if multiple refs)
 
-5. **Update**: `$ISSUE_CLI issues update [BLOCKED_ISSUE_ID] --description "..."`
+5. **Update**: `.agents/skills/linear/scripts/linear.sh issues update [BLOCKED_ISSUE_ID] --description "..."`
 
 6. **Propagate to children**:
    ```bash
-   $ISSUE_CLI cache issues children [BLOCKED_ISSUE_ID] --recursive --format=safe | jq -r '.[].id'
+   .agents/skills/linear/scripts/linear.sh cache issues children [BLOCKED_ISSUE_ID] --recursive --format=safe | jq -r '.[].id'
    ```
    For each child: repeat steps 1-5
 
@@ -327,7 +327,7 @@ Count distinct domains across merged requirements from § 6.4. If 2+ domains, de
 
 Update each blocked issue (from § 1 `.blocks` array) to reflect research outcomes:
 
-1. **Get current description**: `$ISSUE_CLI cache issues get [BLOCKED_ISSUE_ID] | jq -r '.description'`
+1. **Get current description**: `.agents/skills/linear/scripts/linear.sh cache issues get [BLOCKED_ISSUE_ID] | jq -r '.description'`
 
 2. **If children created (§ 6.5)** -- apply project-level templates parent-issue-template:
    - **Keep**: Research/Decision refs, Effort (rollup), Dependencies
@@ -349,17 +349,17 @@ Update each blocked issue (from § 1 `.blocks` array) to reflect research outcom
 6. **Invalidate parallel groups**: Description rewrites change issue scope, invalidating cached parallel-check results.
    ```bash
    for BLOCKED_ISSUE in [BLOCKED_ISSUES]; do
-     scripts/parallel-groups lookup $BLOCKED_ISSUE
+     .agents/skills/orchestration/scripts/parallel-groups lookup $BLOCKED_ISSUE
    done
    ```
-   For each group found, clear it: `scripts/parallel-groups clear --group [GROUP_ID]`
+   For each group found, clear it: `.agents/skills/orchestration/scripts/parallel-groups clear --group [GROUP_ID]`
 
 ### 6.7 Post Research Summary Comment
 
 Post a comment on the research issue documenting completion:
 
 ```bash
-$ISSUE_CLI comments create [ISSUE_ID] --body "## Research Complete
+.agents/skills/linear/scripts/linear.sh comments create [ISSUE_ID] --body "## Research Complete
 
 ### Decision
 [DECISION_ID] - [SUMMARY]
@@ -388,7 +388,7 @@ $ISSUE_CLI comments create [ISSUE_ID] --body "## Research Complete
 ### 6.8 Mark Research Done
 
 ```bash
-$ISSUE_CLI issues update [ISSUE_ID] --state "Done"
+.agents/skills/linear/scripts/linear.sh issues update [ISSUE_ID] --state "Done"
 ```
 
 ---

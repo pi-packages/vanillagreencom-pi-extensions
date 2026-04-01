@@ -1,6 +1,6 @@
 # Research Issue Workflow
 
-> **Dependencies**: `$ISSUE_CLI`, `$DECISIONS_CMD` (decider skill, optional), `scripts/workflow-state`
+> **Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/decider/scripts/decisions` (decider skill, optional), `.agents/skills/orchestration/scripts/workflow-state`
 
 Create research issue in issue tracker and prepare assets for human execution.
 
@@ -46,7 +46,7 @@ Strategic requires explicit caller designation (initiative-level scope).
 Create issue using input variables.
 
 ```bash
-$ISSUE_CLI issues create \
+.agents/skills/linear/scripts/linear.sh issues create \
   --title "Research: [TOPIC]" \
   --project "[PROJECT]" \
   --labels "agent:human,research,[DOMAINS]" \
@@ -64,7 +64,7 @@ $ISSUE_CLI issues create \
 [QUESTIONS]
 [TYPE_SECTION]
 ## Expected Decision
-Next available DXXX via `$DECISIONS_CMD next-id` (decider skill)
+Next available DXXX via `.agents/skills/decider/scripts/decisions next-id` (decider skill)
 ```
 
 **[TYPE_SECTION]** — insert based on [TYPE]:
@@ -84,7 +84,7 @@ Capture returned identifier as `[RESEARCH_ISSUE_ID]`.
 Blocking relations are managed via the issue tracker's relation system -- never via description text.
 
 ```bash
-$ISSUE_CLI issues add-relation [RESEARCH_ISSUE_ID] --blocks [BLOCKED_ISSUE_ID]
+.agents/skills/linear/scripts/linear.sh issues add-relation [RESEARCH_ISSUE_ID] --blocks [BLOCKED_ISSUE_ID]
 ```
 
 CLI enforces same-project constraint for blocking relations.
@@ -137,7 +137,7 @@ Start fresh with full context. **Delegation prompt:** Follow exactly, fill place
 Research: [RESEARCH_ISSUE_ID] - [TOPIC]
 
 Blocked Issue: [BLOCKED_ISSUE_ID]
-Read blocked issue context: `$ISSUE_CLI cache issues get [BLOCKED_ISSUE_ID]`
+Read blocked issue context: `.agents/skills/linear/scripts/linear.sh cache issues get [BLOCKED_ISSUE_ID]`
 
 Read: [RESEARCH_PATHS]
 Read: [project decision documents]/INDEX.md
@@ -191,7 +191,7 @@ Assets complete. Update issue description with asset paths, then set state to To
 
 **If batch**: Repeat per issue. After all: "Research assets ready for [ID1], [ID2], ...".
 
-1. **Get current description**: `$ISSUE_CLI cache issues get [RESEARCH_ISSUE_ID] | jq -r '.description'`
+1. **Get current description**: `.agents/skills/linear/scripts/linear.sh cache issues get [RESEARCH_ISSUE_ID] | jq -r '.description'`
 
 2. **Append to description**:
    ```
@@ -206,9 +206,9 @@ Assets complete. Update issue description with asset paths, then set state to To
    `/research-complete [RESEARCH_ISSUE_ID]`
    ```
 
-3. **Update**: `$ISSUE_CLI issues update [RESEARCH_ISSUE_ID] --description "[FULL_DESCRIPTION]"`
+3. **Update**: `.agents/skills/linear/scripts/linear.sh issues update [RESEARCH_ISSUE_ID] --description "[FULL_DESCRIPTION]"`
 
-4. **Set state**: `$ISSUE_CLI issues update [RESEARCH_ISSUE_ID] --state "Todo"`
+4. **Set state**: `.agents/skills/linear/scripts/linear.sh issues update [RESEARCH_ISSUE_ID] --state "Todo"`
 
 Present to user: "Research assets ready for [RESEARCH_ISSUE_ID]".
 

@@ -22,7 +22,7 @@
 
 **Tip**: Query issue relations to count blocked issues:
 ```bash
-$ISSUE_CLI cache issues list-relations [ISSUE_ID]
+.agents/skills/linear/scripts/linear.sh cache issues list-relations [ISSUE_ID]
 ```
 
 ### Risk (x2)

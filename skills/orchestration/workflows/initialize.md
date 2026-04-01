@@ -1,6 +1,6 @@
 # Initialize Session
 
-> **Dependencies**: workflow-state, workflow-sections, session-init, issue tracker CLI (`$ISSUE_CLI`), worktree CLI (`$WORKTREE_CLI`)
+> **Dependencies**: workflow-state, workflow-sections, session-init, issue tracker CLI (`.agents/skills/linear/scripts/linear.sh`), worktree CLI (`.agents/skills/worktree/scripts/worktree`)
 >
 > **Requires**: issue tracker CLI (e.g., linear skill), worktree management CLI (e.g., worktree skill)
 
@@ -36,11 +36,11 @@ Set up team, auth, cache, and workflow state for a worktree session.
 
 3. **Pre-create workflow tasks** (skip if `lifecycle: "self"`):
    ```bash
-   scripts/workflow-sections workflows/start-worktree.md
+   .agents/skills/orchestration/scripts/workflow-sections workflows/start-worktree.md
    ```
    Create task for each section.
 
-4. **Run**: `scripts/session-init`
+4. **Run**: `.agents/skills/orchestration/scripts/session-init`
 
 5. **If `gh_auth` is false or issue tracker auth is false** → report error and fix before proceeding.
 
@@ -48,15 +48,15 @@ Set up team, auth, cache, and workflow state for a worktree session.
 
 7. **Sync cache**:
    ```bash
-   $ISSUE_CLI sync --reconcile
+   .agents/skills/linear/scripts/linear.sh sync --reconcile
    ```
 
 8. **Init workflow state**:
    ```bash
-   scripts/workflow-state init [ISSUE_ID] --team "[ISSUE_ID_LOWERCASE]" \
+   .agents/skills/orchestration/scripts/workflow-state init [ISSUE_ID] --team "[ISSUE_ID_LOWERCASE]" \
      --agent "[AGENT]" --worktree "[WORKTREE_PATH]" --branch "[BRANCH]"
    ```
-   QA fields (`--qa-labels`, `--sub-issues`) set later via `scripts/workflow-state set` when known.
+   QA fields (`--qa-labels`, `--sub-issues`) set later via `.agents/skills/orchestration/scripts/workflow-state set` when known.
 
 ---
 

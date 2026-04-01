@@ -26,10 +26,8 @@ Reference these guidelines when:
 ## Entry Point
 
 ```bash
-$GIT_HOST_CLI <command> [options]
+.agents/skills/github/scripts/github.sh <command> [options]
 ```
-
-> `$GIT_HOST_CLI` is set in `.env.local` (defaults to `.agents/skills/github/scripts/github.sh`).
 
 ## Commands
 

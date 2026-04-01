@@ -1,6 +1,6 @@
 # QA Review Lifecycle
 
-> **Dependencies**: `$ISSUE_CLI`, `$DECISIONS_CMD` (optional), `$DIFF_SUMMARY_CMD` (optional), `$BENCH_CLI` (optional), `$BENCH_PARSER` (optional), orchestration skill (review-finding schema)
+> **Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/decider/scripts/decisions` (optional), `.agents/skills/github/scripts/git-diff-summary` (optional), `$BENCH_CLI` (optional), `$BENCH_PARSER` (optional), orchestration skill (review-finding schema)
 
 **The workflow for QA agents (safety, perf-qa, arch-review) invoked via `needs-*` labels.**
 
@@ -15,8 +15,8 @@ QA agents are review-only. They are never assigned as issue owners.
 ### 1.1 Read Context
 
 ```bash
-$ISSUE_CLI cache issues get [ISSUE_ID]
-$ISSUE_CLI cache comments list [ISSUE_ID]
+.agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID]
+.agents/skills/linear/scripts/linear.sh cache comments list [ISSUE_ID]
 ```
 
 Extract from delegation prompt:
@@ -29,14 +29,14 @@ Extract from delegation prompt:
 
 ### 2.1 Read Decision/Research Context
 
-Before reviewing, use the decider skill's search workflow: `$DECISIONS_CMD search "[RELEVANT_KEYWORDS]"` for decisions governing the changed areas. If matches found, read the full decision files — index summaries are insufficient for understanding scope and rejected alternatives. If the delegation prompt includes additional decision context, read those too.
+Before reviewing, use the decider skill's search workflow: `.agents/skills/decider/scripts/decisions search "[RELEVANT_KEYWORDS]"` for decisions governing the changed areas. If matches found, read the full decision files — index summaries are insufficient for understanding scope and rejected alternatives. If the delegation prompt includes additional decision context, read those too.
 
 **Suggestions that contradict active decisions are invalid** unless the decision itself is flawed (flag as blocker with justification, citing the specific decision and why it's wrong).
 
 ### 2.2 Identify Changed Files
 
 ```bash
-$DIFF_SUMMARY_CMD -C [WORKTREE_PATH]
+.agents/skills/github/scripts/git-diff-summary -C [WORKTREE_PATH]
 ```
 
 Use domain grouping and risk flags to focus review on changed files relevant to your domain.
@@ -105,7 +105,7 @@ File: tmp/review-[AGENT]-YYYYMMDD-HHMMSS.json
 ## Constraints
 
 **Do NOT**:
-- Claim the issue (`$ISSUE_CLI issues activate`)
+- Claim the issue (`.agents/skills/linear/scripts/linear.sh issues activate`)
 - Modify issue tracker state (labels, status)
 - Mark issue done
 - Create commits for code changes or push changes

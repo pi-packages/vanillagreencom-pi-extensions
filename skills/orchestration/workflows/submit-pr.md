@@ -1,6 +1,6 @@
 # Submit PR Workflow
 
-> **Dependencies**: `$GIT_HOST_CLI`, `$WORKTREE_CLI`, `$ISSUE_CLI` (optional), `$VALIDATE_CMD`, `$DECISIONS_CMD` (optional), `$VISUAL_QA_BASELINE_CMD` (optional), `scripts/workflow-state`, `scripts/workflow-sections`, `scripts/bot-review-wait`, `scripts/ci-wait`
+> **Dependencies**: `.agents/skills/github/scripts/github.sh`, `.agents/skills/worktree/scripts/worktree`, `.agents/skills/linear/scripts/linear.sh` (optional), `.agents/skills/decider/scripts/decisions` (optional), `$VISUAL_QA_BASELINE_CMD` (optional), `.agents/skills/orchestration/scripts/workflow-state`, `.agents/skills/orchestration/scripts/workflow-sections`, `.agents/skills/orchestration/scripts/bot-review-wait`, `.agents/skills/orchestration/scripts/ci-wait`
 
 Push changes, create/update PR, handle bot review, triage PR comments, and trigger CI.
 
@@ -19,8 +19,8 @@ Push changes, create/update PR, handle bot review, triage PR comments, and trigg
 
 **If PR# provided:**
 ```bash
-ISSUE_ID=$($GIT_HOST_CLI pr-issue [PR_NUMBER] --format=text)
-WT_PATH=$($WORKTREE_CLI path $ISSUE_ID 2>/dev/null || echo ".")
+ISSUE_ID=$(.agents/skills/github/scripts/github.sh pr-issue [PR_NUMBER] --format=text)
+WT_PATH=$(.agents/skills/worktree/scripts/worktree path $ISSUE_ID 2>/dev/null || echo ".")
 ```
 
 **If no argument:** Set `WT_PATH` to current directory.
@@ -29,10 +29,10 @@ WT_PATH=$($WORKTREE_CLI path $ISSUE_ID 2>/dev/null || echo ".")
 ```bash
 # Extract issue from branch if not provided
 ISSUE_ID=$(git rev-parse --abbrev-ref HEAD | grep -oiP "$ISSUE_PATTERN")
-WT_PATH=$($WORKTREE_CLI path $ISSUE_ID 2>/dev/null || echo ".")
+WT_PATH=$(.agents/skills/worktree/scripts/worktree path $ISSUE_ID 2>/dev/null || echo ".")
 # Init workflow state if not exists
-if ! scripts/workflow-state exists $ISSUE_ID; then
-  scripts/workflow-state init $ISSUE_ID --worktree "$WT_PATH" --branch "$(git rev-parse --abbrev-ref HEAD)"
+if ! .agents/skills/orchestration/scripts/workflow-state exists $ISSUE_ID; then
+  .agents/skills/orchestration/scripts/workflow-state init $ISSUE_ID --worktree "$WT_PATH" --branch "$(git rev-parse --abbrev-ref HEAD)"
 fi
 ```
 
@@ -42,12 +42,12 @@ fi
 
 1. **Push branch**:
    ```bash
-   $WORKTREE_CLI push "[WORKTREE_PATH]" --set-upstream
+   .agents/skills/worktree/scripts/worktree push "[WORKTREE_PATH]" --set-upstream
    ```
 
 2. **Check for existing PR**:
    ```bash
-   PR_NUM=$($GIT_HOST_CLI -C "[WORKTREE_PATH]" pr-view --json number,state 2>/dev/null | jq -r .number)
+   PR_NUM=$(.agents/skills/github/scripts/github.sh -C "[WORKTREE_PATH]" pr-view --json number,state 2>/dev/null | jq -r .number)
    ```
 
 3. **Build PR body** from current workflow state using template (omit empty sections):
@@ -57,7 +57,7 @@ fi
    [1-3 bullets describing changes]
 
    ## Context
-   [For each matching decision from `$DECISIONS_CMD search --issue [ISSUE_ID]` (decider skill):]
+   [For each matching decision from `.agents/skills/decider/scripts/decisions search --issue [ISSUE_ID]` (decider skill):]
    - **[DECISION_ID]**: [ONE_LINE_SUMMARY] — `[DECISION_FILE_PATH]`
    [For each research file linked to the issue:]
    - **Research**: [TITLE] — `[RESEARCH_FILE_PATH]`
@@ -85,9 +85,9 @@ fi
 
    **No existing PR** → create with `defer-ci` label:
    ```bash
-   ISSUE_TITLE=$($ISSUE_CLI cache issues get [ISSUE_ID] | jq -r '.title')
+   ISSUE_TITLE=$(.agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID] | jq -r '.title')
 
-   $GIT_HOST_CLI -C "[WORKTREE_PATH]" pr-create \
+   .agents/skills/github/scripts/github.sh -C "[WORKTREE_PATH]" pr-create \
      --title "[PREFIX]([ISSUE_ID]): $ISSUE_TITLE" \
      --body "[PR_BODY]" \
      --label defer-ci
@@ -105,7 +105,7 @@ fi
 Wait for bot review to complete (sticky comment with verdict). CI is deferred via label.
 
 ```bash
-WAIT_RESULT=$(scripts/bot-review-wait [PR_NUMBER] 15 600 --json --reviewers "$BOT_REVIEWERS")
+WAIT_RESULT=$(.agents/skills/orchestration/scripts/bot-review-wait [PR_NUMBER] 15 600 --json --reviewers "$BOT_REVIEWERS")
 BOT_STATUS=$(echo "$WAIT_RESULT" | jq -r '.status')
 BOT_VERDICT=$(echo "$WAIT_RESULT" | jq -r '.verdict')
 ```
@@ -132,7 +132,7 @@ Waits for all configured bot reviewers (`$BOT_REVIEWERS` — e.g., `review-bot-a
 # "Wait 5 min" path: extend checklist wait
 EXT_ELAPSED=0
 while [ $EXT_ELAPSED -lt 300 ]; do
-  CHECKLIST_DONE=$($GIT_HOST_CLI sticky-comment [PR_NUMBER] --body 2>/dev/null \
+  CHECKLIST_DONE=$(.agents/skills/github/scripts/github.sh sticky-comment [PR_NUMBER] --body 2>/dev/null \
     | grep -c '^\s*- \[ \]' || true)
   if [ "$CHECKLIST_DONE" -eq 0 ]; then break; fi
   sleep 30
@@ -146,7 +146,7 @@ done
 # Poll sticky verdict every 30s for up to 300s more
 EXT_ELAPSED=0
 while [ $EXT_ELAPSED -lt 300 ]; do
-  BOT_VERDICT=$($GIT_HOST_CLI sticky-comment [PR_NUMBER] --verdict 2>/dev/null || echo "pending")
+  BOT_VERDICT=$(.agents/skills/github/scripts/github.sh sticky-comment [PR_NUMBER] --verdict 2>/dev/null || echo "pending")
   if [[ "$BOT_VERDICT" == "approved" || "$BOT_VERDICT" == "changes" ]]; then
     break
   fi
@@ -164,14 +164,14 @@ done
 
 1. **Bot completion pre-check** — ensure sticky verdict is terminal before triaging:
    ```bash
-   VERDICT=$($GIT_HOST_CLI sticky-comment [PR_NUMBER] --verdict 2>/dev/null || echo "pending")
+   VERDICT=$(.agents/skills/github/scripts/github.sh sticky-comment [PR_NUMBER] --verdict 2>/dev/null || echo "pending")
    if [[ "$VERDICT" == "pending" ]]; then
      # Poll every 30s for up to 180s
      PRE_ELAPSED=0
      while [ $PRE_ELAPSED -lt 180 ]; do
        sleep 30
        PRE_ELAPSED=$((PRE_ELAPSED + 30))
-       VERDICT=$($GIT_HOST_CLI sticky-comment [PR_NUMBER] --verdict 2>/dev/null || echo "pending")
+       VERDICT=$(.agents/skills/github/scripts/github.sh sticky-comment [PR_NUMBER] --verdict 2>/dev/null || echo "pending")
        if [[ "$VERDICT" != "pending" ]]; then break; fi
      done
    fi
@@ -186,16 +186,16 @@ done
 3. **Update state**:
    ```bash
    # For each fixed item:
-   scripts/workflow-state append [ISSUE_ID] pr_comment_review.fixes '{"description":"[DESC]","location":"[LOC]","commit":"[SHA]","source":"[SOURCE]"}'
+   .agents/skills/orchestration/scripts/workflow-state append [ISSUE_ID] pr_comment_review.fixes '{"description":"[DESC]","location":"[LOC]","commit":"[SHA]","source":"[SOURCE]"}'
 
    # For each issue created:
-   scripts/workflow-state append [ISSUE_ID] pr_comment_review.issues_created "[CREATED_ISSUE_ID]"
+   .agents/skills/orchestration/scripts/workflow-state append [ISSUE_ID] pr_comment_review.issues_created "[CREATED_ISSUE_ID]"
 
    # For each skipped item:
-   scripts/workflow-state append [ISSUE_ID] pr_comment_review.skipped '{"description":"[DESC]","reason":"[REASON]"}'
+   .agents/skills/orchestration/scripts/workflow-state append [ISSUE_ID] pr_comment_review.skipped '{"description":"[DESC]","reason":"[REASON]"}'
 
    # Increment iteration count
-   scripts/workflow-state increment [ISSUE_ID] pr_comment_review.iterations
+   .agents/skills/orchestration/scripts/workflow-state increment [ISSUE_ID] pr_comment_review.iterations
    ```
 
 4. **Route**:
@@ -212,7 +212,7 @@ After fixes pushed, wait for bot re-review (CI still deferred). Re-run `/review-
 
 1. **Check iteration count**:
    ```bash
-   ITERATIONS=$(scripts/workflow-state get [ISSUE_ID] .pr_comment_review.iterations)
+   ITERATIONS=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] .pr_comment_review.iterations)
    # Max 3 iterations
    if [ "$ITERATIONS" -ge 3 ]; then
      # → Max iterations exceeded → § 4
@@ -222,14 +222,14 @@ After fixes pushed, wait for bot re-review (CI still deferred). Re-run `/review-
 2. **Wait for bot re-review** after fixes pushed:
    ```bash
    # 1. Wait for bot to update review
-   scripts/bot-review-wait [PR_NUMBER]
+   .agents/skills/orchestration/scripts/bot-review-wait [PR_NUMBER]
 
    # 2. Read baseline from state
-   LAST_TS=$(scripts/workflow-state get [ISSUE_ID] '.pr_review_baseline.last_ts // empty')
-   LAST_THREADS=$(scripts/workflow-state get [ISSUE_ID] '.pr_review_baseline.last_threads // 0')
+   LAST_TS=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] '.pr_review_baseline.last_ts // empty')
+   LAST_THREADS=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] '.pr_review_baseline.last_threads // 0')
 
    # 3. Check status against baseline
-   $GIT_HOST_CLI pr-review-status [PR_NUMBER] --baseline-ts "$LAST_TS" --baseline-threads "$LAST_THREADS" > tmp/pr_status_[PR_NUMBER].json
+   .agents/skills/github/scripts/github.sh pr-review-status [PR_NUMBER] --baseline-ts "$LAST_TS" --baseline-threads "$LAST_THREADS" > tmp/pr_status_[PR_NUMBER].json
    ```
 
 3. **Route based on status**:
@@ -245,14 +245,14 @@ After fixes pushed, wait for bot re-review (CI still deferred). Re-run `/review-
 4. **Update state** after `/review-pr-comments` — if no fixes applied → § 4. Otherwise:
    ```bash
    # Increment iteration count
-   scripts/workflow-state increment [ISSUE_ID] pr_comment_review.iterations
+   .agents/skills/orchestration/scripts/workflow-state increment [ISSUE_ID] pr_comment_review.iterations
 
    # Add fixes/issues/skipped (same as § 3.1 step 3)
 
    # Update baseline
    NEW_TS=$(jq -r '.sticky_updated_at' tmp/pr_status_[PR_NUMBER].json)
    NEW_THREADS=$(jq -r '.unresolved_threads' tmp/pr_status_[PR_NUMBER].json)
-   scripts/workflow-state set [ISSUE_ID] pr_review_baseline "{\"last_ts\":\"$NEW_TS\",\"last_threads\":$NEW_THREADS}"
+   .agents/skills/orchestration/scripts/workflow-state set [ISSUE_ID] pr_review_baseline "{\"last_ts\":\"$NEW_TS\",\"last_threads\":$NEW_THREADS}"
    ```
 
 5. **Max iterations exceeded**: Report to user with status, recommendation, and proceed to § 4.
@@ -263,13 +263,13 @@ Sub-issues created during comment triage need implementation before CI.
 
 1. **Check cycle count**:
    ```bash
-   SUBMIT_CYCLES=$(scripts/workflow-state get [ISSUE_ID] '.submit_cycles // 0')
+   SUBMIT_CYCLES=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] '.submit_cycles // 0')
    ```
    **If** `SUBMIT_CYCLES >= 2` → § 4 with note: "Max re-submit cycles reached, created issues may need manual implementation."
 
 2. **Increment**:
    ```bash
-   scripts/workflow-state increment [ISSUE_ID] submit_cycles
+   .agents/skills/orchestration/scripts/workflow-state increment [ISSUE_ID] submit_cycles
    ```
 
 3. **Implement**: `⤵ /dev-start § 1-4 → § 3.3 step 4` with context:
@@ -292,7 +292,7 @@ Sub-issues created during comment triage need implementation before CI.
 **Skip if** the issue does not have the `design` label.
 
 ```bash
-LABELS=$($ISSUE_CLI cache issues get "$ISSUE_ID" --format=compact 2>/dev/null | jq -r '.labels[]' 2>/dev/null)
+LABELS=$(.agents/skills/linear/scripts/linear.sh cache issues get "$ISSUE_ID" --format=compact 2>/dev/null | jq -r '.labels[]' 2>/dev/null)
 ```
 
 If `design` label present:
@@ -303,7 +303,7 @@ If `design` label present:
    ```bash
    git -C [WT_PATH] add [BASELINE_PATH]/
    git -C [WT_PATH] commit -m "chore: update golden baselines [skip ci]"
-   $WORKTREE_CLI push [WT_PATH] --no-rebase
+   .agents/skills/worktree/scripts/worktree push [WT_PATH] --no-rebase
    ```
 
 3. **Report**: `Golden baselines: updated (N scenarios)` or if capture fails, include failure reason from baseline report.
@@ -318,13 +318,13 @@ All bot review comments resolved (or max iterations). Verify no late-arriving th
    ```bash
    # Wait for late-arriving threads (bot posts inline comments after sticky update)
    sleep 15
-   UNRESOLVED=$($GIT_HOST_CLI pr-threads [PR_NUMBER] --unresolved | jq '.unresolved_count')
+   UNRESOLVED=$(.agents/skills/github/scripts/github.sh pr-threads [PR_NUMBER] --unresolved | jq '.unresolved_count')
    if [ "$UNRESOLVED" -eq 0 ]; then
      # Double-check after additional delay to catch very late threads
      sleep 15
-     UNRESOLVED=$($GIT_HOST_CLI pr-threads [PR_NUMBER] --unresolved | jq '.unresolved_count')
+     UNRESOLVED=$(.agents/skills/github/scripts/github.sh pr-threads [PR_NUMBER] --unresolved | jq '.unresolved_count')
    fi
-   CI_GATE_REROUTED=$(scripts/workflow-state get [ISSUE_ID] '.pr_comment_review.ci_gate_rerouted // false')
+   CI_GATE_REROUTED=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] '.pr_comment_review.ci_gate_rerouted // false')
    ```
 
    | `UNRESOLVED` | `CI_GATE_REROUTED` | Action |
@@ -336,7 +336,7 @@ All bot review comments resolved (or max iterations). Verify no late-arriving th
    ```bash
    if [ "$UNRESOLVED" -gt 0 ]; then
      if [ "$CI_GATE_REROUTED" = "false" ]; then
-       scripts/workflow-state set [ISSUE_ID] pr_comment_review.ci_gate_rerouted true
+       .agents/skills/orchestration/scripts/workflow-state set [ISSUE_ID] pr_comment_review.ci_gate_rerouted true
        # → § 3.1
      else
        # Ask user with 3 options
@@ -351,7 +351,7 @@ All bot review comments resolved (or max iterations). Verify no late-arriving th
 
 3. **Wait for CI**:
    ```bash
-   scripts/ci-wait [PR_NUMBER]
+   .agents/skills/orchestration/scripts/ci-wait [PR_NUMBER]
    ```
 
 4. **Handle CI result**:
@@ -391,8 +391,8 @@ All bot review comments resolved (or max iterations). Verify no late-arriving th
 
 2. **Post summary** — skip if no fixes AND no issues created:
    ```bash
-   $GIT_HOST_CLI post-comment [PR_NUMBER] "[SUMMARY_CONTENT]"
-   $ISSUE_CLI comments create [ISSUE_ID] --body "[SUMMARY_CONTENT]"
+   .agents/skills/github/scripts/github.sh post-comment [PR_NUMBER] "[SUMMARY_CONTENT]"
+   .agents/skills/linear/scripts/linear.sh comments create [ISSUE_ID] --body "[SUMMARY_CONTENT]"
    ```
 
    **Summary content template** (omit empty sections):

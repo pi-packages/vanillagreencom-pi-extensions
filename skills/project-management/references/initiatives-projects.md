@@ -59,18 +59,18 @@ See issue tracker CLI skill for full CLI reference.
 
 ```bash
 # Initiative
-$ISSUE_CLI initiatives create --name "[NAME]" \
+.agents/skills/linear/scripts/linear.sh initiatives create --name "[NAME]" \
   --description "[DESCRIPTION]" \
   --content "[CONTENT]"
 
 # Project
-$ISSUE_CLI projects create --name "[NAME]" \
+.agents/skills/linear/scripts/linear.sh projects create --name "[NAME]" \
   --priority 2 \
   --description "[DESCRIPTION]" \
   --content "[CONTENT]"
 
 # Milestone
-$ISSUE_CLI milestones create --project "[PROJECT_NAME]" --name "[NAME]" --target-date [TARGET_DATE]
+.agents/skills/linear/scripts/linear.sh milestones create --project "[PROJECT_NAME]" --name "[NAME]" --target-date [TARGET_DATE]
 ```
 
 **Two-field pattern**: `--description` (255 char subtitle) + `--content` (markdown body, no limit)
@@ -92,8 +92,8 @@ $ISSUE_CLI milestones create --project "[PROJECT_NAME]" --name "[NAME]" --target
 ### Starting
 
 ```bash
-$ISSUE_CLI projects update [PROJECT_ID] --state started
-$ISSUE_CLI issues update [ISSUE_ID] --state "In Progress"  # First issue
+.agents/skills/linear/scripts/linear.sh projects update [PROJECT_ID] --state started
+.agents/skills/linear/scripts/linear.sh issues update [ISSUE_ID] --state "In Progress"  # First issue
 ```
 
 ### Pausing

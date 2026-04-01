@@ -1,6 +1,6 @@
 # Start Session Workflow (Worktree)
 
-> **Dependencies**: workflow-state, workflow-sections, session-init, issue tracker CLI (`$ISSUE_CLI`), git host CLI (`$GIT_HOST_CLI`)
+> **Dependencies**: workflow-state, workflow-sections, session-init, issue tracker CLI (`.agents/skills/linear/scripts/linear.sh`), git host CLI (`.agents/skills/github/scripts/github.sh`)
 >
 > **Requires**: issue tracker CLI (e.g., linear skill), git host CLI (e.g., github skill)
 
@@ -81,13 +81,13 @@ Post-review cleanup: reconcile fixes, post summaries, handoff to downstream issu
 
 1. **Read final state**:
    ```bash
-   CYCLES=$(scripts/workflow-state get [ISSUE_ID] .cycles)
-   FIXED_COUNT=$(scripts/workflow-state get [ISSUE_ID] '.fixed_items | length')
-   ESCALATED_COUNT=$(scripts/workflow-state get [ISSUE_ID] '.escalated_items | length')
-   PR_ITERATIONS=$(scripts/workflow-state get [ISSUE_ID] .pr_comment_review.iterations)
-   PR_FIXES=$(scripts/workflow-state get [ISSUE_ID] '.pr_comment_review.fixes | length')
-   PR_ISSUES=$(scripts/workflow-state get [ISSUE_ID] '.pr_comment_review.issues_created | length')
-   AUDIT_ISSUES=$(scripts/workflow-state get [ISSUE_ID] '.audit_issues_created | length')
+   CYCLES=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] .cycles)
+   FIXED_COUNT=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] '.fixed_items | length')
+   ESCALATED_COUNT=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] '.escalated_items | length')
+   PR_ITERATIONS=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] .pr_comment_review.iterations)
+   PR_FIXES=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] '.pr_comment_review.fixes | length')
+   PR_ISSUES=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] '.pr_comment_review.issues_created | length')
+   AUDIT_ISSUES=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] '.audit_issues_created | length')
    ```
 
 2. **Output session summary**:
@@ -136,7 +136,7 @@ Post-review cleanup: reconcile fixes, post summaries, handoff to downstream issu
 
 ### 5.4 Shutdown Team
 
-1. **Shutdown all teammates**: Read `child_sessions` from `scripts/workflow-state get [ISSUE_ID] .child_sessions` (or the harness-local agent registry if the harness keeps teammate state elsewhere). For each still-active teammate:
+1. **Shutdown all teammates**: Read `child_sessions` from `.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] .child_sessions` (or the harness-local agent registry if the harness keeps teammate state elsewhere). For each still-active teammate:
    ```
    Send shutdown request to [AGENT]
    ```

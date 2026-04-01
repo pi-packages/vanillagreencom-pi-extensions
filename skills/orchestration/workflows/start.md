@@ -1,6 +1,6 @@
 # Start Session Workflow
 
-> **Dependencies**: issue tracker CLI (`$ISSUE_CLI`), git host CLI (`$GIT_HOST_CLI`), worktree CLI (`$WORKTREE_CLI`), workflow-state, workflow-sections, session-init, open-terminal, parallel-launch, parallel-groups, `$VALIDATE_CMD`, `$DECISIONS_CMD`
+> **Dependencies**: issue tracker CLI (`.agents/skills/linear/scripts/linear.sh`), git host CLI (`.agents/skills/github/scripts/github.sh`), worktree CLI (`.agents/skills/worktree/scripts/worktree`), workflow-state, workflow-sections, session-init, open-terminal, parallel-launch, parallel-groups, `.agents/skills/decider/scripts/decisions`
 >
 > **Requires**: issue tracker CLI (e.g., linear skill), git host CLI (e.g., github skill), worktree management CLI (e.g., worktree skill)
 
@@ -11,12 +11,12 @@ Initialize development session, display status, select work, evaluate research, 
 ### 1.1 Sync Cache
 
 ```bash
-$ISSUE_CLI sync --reconcile
+.agents/skills/linear/scripts/linear.sh sync --reconcile
 ```
 
 ### 1.2 Present Dashboard
 
-1. **Run**: `scripts/session-init`
+1. **Run**: `.agents/skills/orchestration/scripts/session-init`
 
 2. **Output the result exactly as shown** — no reformatting, no additions, no commentary before/after the dashboard. The script output IS the dashboard. Script output uses backticks and markdown syntax.
 
@@ -79,7 +79,7 @@ After all issues processed → § 3.
 
 1. **Fetch issue data** (from `/start [ISSUE_ID]` argument or § 1.3 selection):
    ```bash
-   PARENT_ID=$($ISSUE_CLI cache issues get [ISSUE_ID] --with-bundle | jq -r '.parent_id // empty')
+   PARENT_ID=$(.agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID] --with-bundle | jq -r '.parent_id // empty')
    ```
 
 2. **If `PARENT_ID` set** (single-issue only; parallel groups pre-resolved in § 2.1): Use parent issue, restart § 2
@@ -157,7 +157,7 @@ After all issues processed → § 3.
 1. **Parse issue description(s)** for:
    - Research document paths → list as `[RESEARCH_PATHS]`
    - Decision references → list as `[DECISION_IDS]` — read from individual decision files
-   - `$DECISIONS_CMD search --issue [ISSUE_ID]` → find linked decisions not explicitly referenced
+   - `.agents/skills/decider/scripts/decisions search --issue [ISSUE_ID]` → find linked decisions not explicitly referenced
 
 2. **If bundled (from § 2.3)**: Parse parent + all sub-issue descriptions. Dedupe paths/refs.
 
@@ -179,17 +179,17 @@ After all issues processed → § 3.
    <delegation_format>
    CONSULTATION ONLY.
 
-   Read issue: $ISSUE_CLI cache issues get [ISSUE_ID].
+   Read issue: .agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID].
 
    [If bundle from § 2.3:]
    Sub-issues (tree):
-   ↳ [SUB_ISSUE_1]: $ISSUE_CLI cache issues get [SUB_ISSUE_1]
-   ↳ [SUB_ISSUE_2]: $ISSUE_CLI cache issues get [SUB_ISSUE_2]
-      ↳ [SUB_ISSUE_3]: $ISSUE_CLI cache issues get [SUB_ISSUE_3]  ← nested child
+   ↳ [SUB_ISSUE_1]: .agents/skills/linear/scripts/linear.sh cache issues get [SUB_ISSUE_1]
+   ↳ [SUB_ISSUE_2]: .agents/skills/linear/scripts/linear.sh cache issues get [SUB_ISSUE_2]
+      ↳ [SUB_ISSUE_3]: .agents/skills/linear/scripts/linear.sh cache issues get [SUB_ISSUE_3]  ← nested child
    [End if]
 
    - Read: [RESEARCH_PATHS]
-   - Run: $DECISIONS_CMD search --issue [ISSUE_ID] (find linked decisions)
+   - Run: .agents/skills/decider/scripts/decisions search --issue [ISSUE_ID] (find linked decisions)
    - Read: [DECISION_FILES]
    - Read: Relevant architecture docs
    - Read: Relevant in-project code
@@ -243,7 +243,7 @@ Invoke workflow: `⤵ /research-issue § 1-5 → § 1` with context:
 - `topic`: from § 3.3 agent "Research:" response
 - `questions`: from § 3.3 agent response
 - `domains`: from children's `agent:[TYPE]` labels if `agent:multi`, else from issue's stack labels
-- `project`: from `$ISSUE_CLI cache projects list --state started`
+- `project`: from `.agents/skills/linear/scripts/linear.sh cache projects list --state started`
 - `blocked_issue`: [ISSUE_ID] from § 2
 - `type`: Targeted (1 domain) or Pervasive (2+ domains)
 - `consultation_agent_name`: from § 3.3 step 4 if single agent (omit for multi-agent)
@@ -251,7 +251,7 @@ Invoke workflow: `⤵ /research-issue § 1-5 → § 1` with context:
 - `decision_ids`: from § 3.2 [DECISION_IDS]
 
 **If batch** (from § 3.1):
-- `project`: from `$ISSUE_CLI cache projects list --state started`
+- `project`: from `.agents/skills/linear/scripts/linear.sh cache projects list --state started`
 - `batch_issues`: list of per-issue objects, each containing: `topic`, `questions`, `domains`, `blocked_issue`, `type`, `consultation_agent_name`, `research_paths`, `decision_ids` — all sourced from § 3.2/3.3 per issue
 
 Research issues block their `blocked_issue`. After `/research-issue` completes, user executes research externally, then runs `/research-complete [ISSUE_ID]` to continue.
@@ -290,7 +290,7 @@ After `/research-issue` returns → § 3.6.
 
 Worktree creation is idempotent: existing worktrees are reused (rebased onto latest main), and PRs with matching branches are auto-detected. Fails on rebase conflicts.
 
-1. **Run check**: `$WORKTREE_CLI check` — returns `{uncommitted, unpushed, unpushed_commits}`
+1. **Run check**: `.agents/skills/worktree/scripts/worktree check` — returns `{uncommitted, unpushed, unpushed_commits}`
 
 2. **If uncommitted** → present uncommitted options (stash/commit/push)
 
@@ -303,18 +303,18 @@ Worktree creation is idempotent: existing worktrees are reused (rebased onto lat
 
 4. **Active work conflict scan**: Check for agent overlap with in-progress worktrees.
    ```bash
-   $WORKTREE_CLI list
+   .agents/skills/worktree/scripts/worktree list
    ```
-   For each active worktree issue: `$ISSUE_CLI cache issues get [WT_ISSUE] --format=compact` → compare `agent` with current issue.
+   For each active worktree issue: `.agents/skills/linear/scripts/linear.sh cache issues get [WT_ISSUE] --format=compact` → compare `agent` with current issue.
    - **No overlap** → continue
-   - **Same agent** → `scripts/parallel-groups needs-refresh [ISSUE_ID] [WT_ISSUE]`. If exit 1 (fresh, cached safe) → continue. Otherwise ask user: `Run /parallel-check [ISSUE_ID] [WT_ISSUE]` | `Continue anyway`. If check → `⤵ /parallel-check [ISSUE_ID] [WT_ISSUE] § 1-11 → § 4.3`. If conflicts verdict → warn with details, do not block.
+   - **Same agent** → `.agents/skills/orchestration/scripts/parallel-groups needs-refresh [ISSUE_ID] [WT_ISSUE]`. If exit 1 (fresh, cached safe) → continue. Otherwise ask user: `Run /parallel-check [ISSUE_ID] [WT_ISSUE]` | `Continue anyway`. If check → `⤵ /parallel-check [ISSUE_ID] [WT_ISSUE] § 1-11 → § 4.3`. If conflicts verdict → warn with details, do not block.
 
-5. **Create worktree**: `WT_PATH=$($WORKTREE_CLI create [ISSUE_ID])`
+5. **Create worktree**: `WT_PATH=$(.agents/skills/worktree/scripts/worktree create [ISSUE_ID])`
 
 6. **Open terminal**: Detect environment:
-   - **If `$TMUX` is set** → launch directly (no ask user): Run `scripts/open-terminal "$WT_PATH" --tmux [ISSUE_ID] --title [ISSUE_ID] --cmd "[LAUNCH_CMD]"`. Output: "Opened tmux window [ISSUE_ID] for worktree. This session is complete."
+   - **If `$TMUX` is set** → launch directly (no ask user): Run `.agents/skills/orchestration/scripts/open-terminal "$WT_PATH" --tmux [ISSUE_ID] --title [ISSUE_ID] --cmd "[LAUNCH_CMD]"`. Output: "Opened tmux window [ISSUE_ID] for worktree. This session is complete."
    - **Otherwise** → Ask user with: `Auto-open terminal` | `I'll open it myself`
-     - **Auto**: Run `scripts/open-terminal "$WT_PATH" --title [ISSUE_ID] --cmd "[LAUNCH_CMD]"`. Output: "Opened worktree terminal for [ISSUE_ID]. This session is complete."
+     - **Auto**: Run `.agents/skills/orchestration/scripts/open-terminal "$WT_PATH" --title [ISSUE_ID] --cmd "[LAUNCH_CMD]"`. Output: "Opened worktree terminal for [ISSUE_ID]. This session is complete."
      - **Manual**: Output: "Worktree ready at `$WT_PATH`. Run the launch command in your new terminal. This session is complete."
    - **→ § 1** (restart dashboard in current session).
 
@@ -327,8 +327,8 @@ Worktree creation is idempotent: existing worktrees are reused (rebased onto lat
 2. **Detect terminal**: If `$TMUX` set → `FLAG=--tmux`. Otherwise → Ask user: `Auto-open terminal` | `I'll open them myself` → `FLAG=--auto` or skip launch.
 
 4. **Ask user**: `Launch [N] issues` | `Select subset` | `Cancel`
-   - **Launch**: `scripts/parallel-launch [ISSUE_IDS] $FLAG`
-   - **Select subset**: Ask user with individual issues as options (multiSelect) → `scripts/parallel-launch [SELECTED_ISSUES] $FLAG`
+   - **Launch**: `.agents/skills/orchestration/scripts/parallel-launch [ISSUE_IDS] $FLAG`
+   - **Select subset**: Ask user with individual issues as options (multiSelect) → `.agents/skills/orchestration/scripts/parallel-launch [SELECTED_ISSUES] $FLAG`
    - **Cancel** → § 1
 
 5. **→ § 1** (restart dashboard in current session).

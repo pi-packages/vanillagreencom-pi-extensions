@@ -1,6 +1,6 @@
 # PR Merge Workflow
 
-> **Dependencies**: `$GIT_HOST_CLI`, `$WORKTREE_CLI`, `$ISSUE_CLI` (optional)
+> **Dependencies**: `.agents/skills/github/scripts/github.sh`, `.agents/skills/worktree/scripts/worktree`, `.agents/skills/linear/scripts/linear.sh` (optional)
 
 Verify conditions and safely merge PR(s).
 
@@ -15,7 +15,7 @@ Verify conditions and safely merge PR(s).
 ## 1. Identify Candidates
 
 ```bash
-$GIT_HOST_CLI pr-list-ready
+.agents/skills/github/scripts/github.sh pr-list-ready
 ```
 
 If no argument provided: present list, ask user for selection.
@@ -29,7 +29,7 @@ When `all` or 2+ PRs requested:
 ### 2.1 Run Quick Pre-Check
 
 ```bash
-QUICK=$($GIT_HOST_CLI pr-cross-check [PR_NUMBERS] --quick --json)
+QUICK=$(.agents/skills/github/scripts/github.sh pr-cross-check [PR_NUMBERS] --quick --json)
 ```
 
 If quick check finds high-severity issues (conflicts): Show issues, abort early.
@@ -38,7 +38,7 @@ If quick check finds high-severity issues (conflicts): Show issues, abort early.
 
 ```bash
 echo "Running full verification (merge + build + test)..."
-VERIFY=$($GIT_HOST_CLI pr-cross-check [PR_NUMBERS] --verify --json)
+VERIFY=$(.agents/skills/github/scripts/github.sh pr-cross-check [PR_NUMBERS] --verify --json)
 ```
 
 **Full verification does:**
@@ -66,7 +66,7 @@ Verification failed:
 For each PR:
 
 ```bash
-CHECK=$($GIT_HOST_CLI pr-merge [PR_NUMBER] --check)
+CHECK=$(.agents/skills/github/scripts/github.sh pr-merge [PR_NUMBER] --check)
 ```
 
 Parse result and present to user:
@@ -95,8 +95,8 @@ PR #N ready with warnings:
 ### 4.1 Check Worktree Cleanup
 
 ```bash
-ISSUE=$($GIT_HOST_CLI pr-issue [PR_NUMBER] --format=text)
-[ -n "$ISSUE" ] && $WORKTREE_CLI exists "$ISSUE"
+ISSUE=$(.agents/skills/github/scripts/github.sh pr-issue [PR_NUMBER] --format=text)
+[ -n "$ISSUE" ] && .agents/skills/worktree/scripts/worktree exists "$ISSUE"
 ```
 
 If worktree exists: Ask user `"Cleanup worktree for [ISSUE_ID]?"` → store for § 5.
@@ -104,7 +104,7 @@ If worktree exists: Ask user `"Cleanup worktree for [ISSUE_ID]?"` → store for 
 ### 4.2 Verify Bot Token
 
 ```bash
-$GIT_HOST_CLI bot-token | jq -r '.configured'
+.agents/skills/github/scripts/github.sh bot-token | jq -r '.configured'
 ```
 
 If `false`: Ask user: `Merge as current user` | `Abort`
@@ -122,12 +122,12 @@ If `false`: Ask user: `Merge as current user` | `Abort`
 
 2. **Merge** (before cleanup — worktree survives if merge fails):
    ```bash
-   (cd [MAIN_REPO_ROOT] && $GIT_HOST_CLI pr-merge [PR_NUMBER] [--force])
+   (cd [MAIN_REPO_ROOT] && .agents/skills/github/scripts/github.sh pr-merge [PR_NUMBER] [--force])
    ```
 
 3. **Sync issue tracker cache** (merged PRs close issues via magic words — cache must reflect done states):
    ```bash
-   (cd [MAIN_REPO_ROOT] && $ISSUE_CLI sync --reconcile)
+   (cd [MAIN_REPO_ROOT] && .agents/skills/linear/scripts/linear.sh sync --reconcile)
    ```
 
 4. **Sync main repo** (ALWAYS runs after merge):
@@ -149,7 +149,7 @@ If `false`: Ask user: `Merge as current user` | `Abort`
    ```
 
    - **MERGED/CLOSED with no worktree**: Auto-delete (`git branch -D [BRANCH]`). Report in § 7.
-   - **MERGED/CLOSED with worktree**: Ask user `"Stale worktree for [BRANCH] (PR already merged). Remove?"`. If yes: `(cd [MAIN_REPO_ROOT] && $WORKTREE_CLI remove [ISSUE_ID])` then `git branch -D [BRANCH]`.
+   - **MERGED/CLOSED with worktree**: Ask user `"Stale worktree for [BRANCH] (PR already merged). Remove?"`. If yes: `(cd [MAIN_REPO_ROOT] && .agents/skills/worktree/scripts/worktree remove [ISSUE_ID])` then `git branch -D [BRANCH]`.
    - **OPEN**: Leave alone (active work).
    - **No PR found**: Ask user `"Local branch [BRANCH] has no associated PR. Delete?"`. Show last commit for context.
 
@@ -163,7 +163,7 @@ If `false`: Ask user: `Merge as current user` | `Abort`
 
 6. **Cleanup current worktree** (if cleanup requested in § 4.1 — **must be last**, destroys session cwd):
    ```bash
-   (cd [MAIN_REPO_ROOT] && $WORKTREE_CLI remove "[ISSUE_ID]")
+   (cd [MAIN_REPO_ROOT] && .agents/skills/worktree/scripts/worktree remove "[ISSUE_ID]")
    ```
    **Session launched from worktree**: If this prints `SESSION CWD DESTROYED`, the shell cwd no longer exists. Present § 7 results immediately, then tell the user to end the session. No further shell calls will succeed.
 

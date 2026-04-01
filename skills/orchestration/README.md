@@ -40,8 +40,8 @@ Multi-agent session coordination — front-to-back issue workflows, delegation p
 - `workflows/recommendation-bias.md` - Review finding categorization (fix vs issue)
 
 ### Scripts
-- `scripts/workflow-sections` - Parse workflow markdown headers → JSON for task creation
-- `scripts/workflow-state` - Read/write persistent state files with atomic locking
+- `.agents/skills/orchestration/scripts/workflow-sections` - Parse workflow markdown headers → JSON for task creation
+- `.agents/skills/orchestration/scripts/workflow-state` - Read/write persistent state files with atomic locking
 
 ### Schemas
 - `schemas/workflow-state.md` - Persistent state file schema
@@ -71,34 +71,31 @@ Set these in `.env.local` or export them in the shell that runs the workflow. `.
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `ORCH_STATE_DIR` | Override state file directory | `tmp` |
-| `$ISSUE_CLI` | Issue tracker CLI path | — |
-| `$GIT_HOST_CLI` | Git host CLI path | — |
-| `$WORKTREE_CLI` | Worktree CLI path | — |
-| `$VALIDATE_CMD` | Build + test + lint command | — |
+| `.agents/skills/linear/scripts/linear.sh` | Issue tracker CLI path | — |
+| `.agents/skills/github/scripts/github.sh` | Git host CLI path | — |
+| `.agents/skills/worktree/scripts/worktree` | Worktree CLI path | — |
 | `$VISUAL_QA_BASELINE_CMD` | Optional helper to route baseline capture to a baseline-capable target | — |
 | `$ISSUE_PATTERN` | Issue ID regex for branch names | — |
 | `$BOT_REVIEWERS` | Comma-separated review bot usernames | — |
 | `$BOT_CHECK_NAME` | Optional CI check name for early review detection | — |
-| `$HARNESS_CMD` | Optional `parallel-launch` command template with `{issue}` placeholder | — |
 
 ## Minimum Setup
 
 To make orchestration workflows usable in a project:
 
 1. Configure the core command aliases in `.env.local`:
-   - `$ISSUE_CLI`
-   - `$GIT_HOST_CLI`
-   - `$WORKTREE_CLI`
-   - `$VALIDATE_CMD`
+   - `.agents/skills/linear/scripts/linear.sh`
+   - `.agents/skills/github/scripts/github.sh`
+   - `.agents/skills/worktree/scripts/worktree`
 2. Install the companion skills those commands point at.
 3. Verify each command works from the project root before invoking a workflow.
 
 Typical first checks:
 
 ```bash
-$ISSUE_CLI --help
-$GIT_HOST_CLI --help
-$WORKTREE_CLI list
+.agents/skills/linear/scripts/linear.sh --help
+.agents/skills/github/scripts/github.sh --help
+.agents/skills/worktree/scripts/worktree list
 ```
 
 ## Creating a New Rule

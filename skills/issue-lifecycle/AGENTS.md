@@ -31,7 +31,7 @@ Workflows reference these companion skills and tools. Install and configure per 
 
 | Dependency | Purpose | Variable |
 |------------|---------|----------|
-| Issue tracker CLI (e.g., `linear` skill) | Issue CRUD, cache, comments, labels | `$ISSUE_CLI` |
+| Issue tracker CLI (e.g., `linear` skill) | Issue CRUD, cache, comments, labels | `.agents/skills/linear/scripts/linear.sh` |
 | Orchestration skill | Review-finding schema, recommendation-bias patterns | Referenced by name |
 | Benchmarking skill (optional, project-provided) | Baseline capture, regression classification, recording | `$BENCH_CLI`, `$BENCH_PARSER` |
 
@@ -39,9 +39,8 @@ Project-level configuration:
 
 | Variable | Purpose |
 |----------|---------|
-| `$VALIDATE_CMD` | Build + test + lint command |
-| `$DECISIONS_CMD` | Decision document lookup (optional) |
-| `$DIFF_SUMMARY_CMD` | Diff summary with domain grouping (optional) |
+| `.agents/skills/decider/scripts/decisions` | Decision document lookup (optional) |
+| `.agents/skills/github/scripts/git-diff-summary` | Diff summary with domain grouping (optional) |
 | `$VISUAL_QA_TARGET_CMD` | Optional project helper to select a visual-QA target and companion validation commands |
 | `$VISUAL_QA_FIXTURE` | Representative layout fixture path for map-capable targets |
 | `$VISUAL_QA_SMOKE_CMD` | Runtime smoke-test command for screenshot/OCR-only targets |
@@ -54,7 +53,7 @@ Project-level configuration:
 
 **File**: `workflows/dev-implement.md`
 **Agent type**: Dev agents receiving `Issue: [ISSUE_ID]` delegations
-**Dependencies**: `$ISSUE_CLI`, `$VALIDATE_CMD`, `$DECISIONS_CMD` (optional), `$VISUAL_QA_CLI` (optional), `$SCREENSHOT_CLI` (optional), `$VISUAL_QA_TARGET_CMD` (optional), `$VISUAL_QA_FIXTURE` (optional), `$VISUAL_QA_SMOKE_CMD` (optional), `$VISUAL_QA_SWEEP_CMD` (optional), `$VISUAL_QA_BATTERY_CMD` (optional), `$BENCH_CLI` (optional), orchestration skill
+**Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/decider/scripts/decisions` (optional), `$VISUAL_QA_CLI` (optional), `$SCREENSHOT_CLI` (optional), `$VISUAL_QA_TARGET_CMD` (optional), `$VISUAL_QA_FIXTURE` (optional), `$VISUAL_QA_SMOKE_CMD` (optional), `$VISUAL_QA_SWEEP_CMD` (optional), `$VISUAL_QA_BATTERY_CMD` (optional), `$BENCH_CLI` (optional), orchestration skill
 
 **The workflow for all dev/QA agents receiving `Issue: [ISSUE_ID]` delegations.**
 
@@ -97,22 +96,22 @@ git -C [WORKTREE_PATH] fetch origin "$BASE_BRANCH"
 
 ```bash
 # Activate issue (or parent if bundled), replace [AGENT_TYPE] with your agent type
-$ISSUE_CLI issues activate [ISSUE_ID] --agent [AGENT_TYPE]
-$ISSUE_CLI cache issues get [ISSUE_ID]
-$ISSUE_CLI cache comments list [ISSUE_ID]
+.agents/skills/linear/scripts/linear.sh issues activate [ISSUE_ID] --agent [AGENT_TYPE]
+.agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID]
+.agents/skills/linear/scripts/linear.sh cache comments list [ISSUE_ID]
 ```
 
 **If bundled**: Activate parent only. Sub-issues activated individually during § 4 loop.
 
 **If bundled with completed siblings**: Also read comments from completed sibling sub-issues listed in delegation to pick up handoff notes:
 ```bash
-$ISSUE_CLI cache comments list [COMPLETED_SIBLING_ID]
+.agents/skills/linear/scripts/linear.sh cache comments list [COMPLETED_SIBLING_ID]
 ```
 
 #### 2.2 Check for Research Context
 
 ```bash
-$ISSUE_CLI cache issues get [ISSUE_ID] | jq -r '.description'  # Look for Research/Decision/Context fields
+.agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID] | jq -r '.description'  # Look for Research/Decision/Context fields
 ```
 
 **If bundled**: Also check each sub-issue for research refs. Aggregate unique paths.
@@ -127,7 +126,7 @@ You have domain context the orchestrator lacks. You decide how research applies.
 
 1. **Read and evaluate**: Read project research documents (e.g., `[ISSUE_ID]/findings.md`). Consider how it applies to existing patterns and architecture documentation.
 
-2. **Check for existing decision**: `$DECISIONS_CMD search --issue [RESEARCH_ISSUE_ID]`. If a prior research-complete already recorded a decision, reference it — don't duplicate. Only create new decisions if evaluation reveals *additional* decisions.
+2. **Check for existing decision**: `.agents/skills/decider/scripts/decisions search --issue [RESEARCH_ISSUE_ID]`. If a prior research-complete already recorded a decision, reference it — don't duplicate. Only create new decisions if evaluation reveals *additional* decisions.
 
 3. **Update architecture docs** if research changes documented patterns.
 
@@ -137,7 +136,7 @@ You have domain context the orchestrator lacks. You decide how research applies.
 
 Before planning, check your domain's code (per your agent's Domain Setup):
 
-- **Prior decisions?** `$DECISIONS_CMD search "[RELEVANT_KEYWORDS]"` to find governing decision entries
+- **Prior decisions?** `.agents/skills/decider/scripts/decisions search "[RELEVANT_KEYWORDS]"` to find governing decision entries
 - **Description contradicts a decision?** Read the full decision file, not just the index summary. Report back to orchestrator with decision reference — do not implement approaches a decision explicitly rejects
 - **Can you proceed?** Do required APIs/types exist?
 - **Cross-domain dependency?** Need work in another domain first?
@@ -150,7 +149,7 @@ Before planning, check your domain's code (per your agent's Domain Setup):
 
 #### 2.4 Plan Approach
 
-- Update estimate if scope differs: `$ISSUE_CLI issues update [ISSUE_ID] --estimate N`
+- Update estimate if scope differs: `.agents/skills/linear/scripts/linear.sh issues update [ISSUE_ID] --estimate N`
   - Estimates: 1=hours, 2=half-day, 3=day, 4=2-3 days, 5=week+
 - Tasks pre-created by orchestrator. Do not create duplicates.
 - **If bundled**: Plan sub-issue order based on dependencies/overlap.
@@ -175,7 +174,7 @@ The perf-qa agent uses the baseline file during QA review.
 #### 3.1 Blocked by Existing Issue
 
 ```bash
-$ISSUE_CLI issues block [ISSUE_ID] --by [BLOCKER_ID] --reason "Cannot proceed until [REASON]"
+.agents/skills/linear/scripts/linear.sh issues block [ISSUE_ID] --by [BLOCKER_ID] --reason "Cannot proceed until [REASON]"
 ```
 
 #### 3.2 Cross-Domain Dependency Discovery
@@ -184,12 +183,12 @@ When you discover work in another domain must happen first (prerequisite issue d
 
 1. **Add blocked label**:
    ```bash
-   $ISSUE_CLI issues update [ISSUE_ID] --labels "agent:[AGENT_TYPE],[COMPONENT],blocked"
+   .agents/skills/linear/scripts/linear.sh issues update [ISSUE_ID] --labels "agent:[AGENT_TYPE],[COMPONENT],blocked"
    ```
 
 2. **Post structured comment**:
    ```bash
-   $ISSUE_CLI comments create [ISSUE_ID] --body "BLOCKED: Cross-domain prerequisite needed.
+   .agents/skills/linear/scripts/linear.sh comments create [ISSUE_ID] --body "BLOCKED: Cross-domain prerequisite needed.
 
    **Required Domain**: [DOMAIN]
    **Suggested Labels**: agent:[DOMAIN], [COMPONENT]
@@ -216,7 +215,7 @@ When you discover work in another domain must happen first (prerequisite issue d
 
 When blocker resolves:
 ```bash
-$ISSUE_CLI issues unblock [ISSUE_ID]
+.agents/skills/linear/scripts/linear.sh issues unblock [ISSUE_ID]
 ```
 
 ### § 4. Implement Solution
@@ -233,12 +232,12 @@ $ISSUE_CLI issues unblock [ISSUE_ID]
 
 **If bundled**: Before implementing this sub-issue:
 ```bash
-$ISSUE_CLI issues activate [SUB_ISSUE_ID] --agent [AGENT_TYPE]
+.agents/skills/linear/scripts/linear.sh issues activate [SUB_ISSUE_ID] --agent [AGENT_TYPE]
 ```
 
 Implement per your agent's domain expertise. Run quality gates before completion.
 
-**Scope growing?** Create sub-issues: `$ISSUE_CLI issues create --title "..." --parent [PARENT_ID]`
+**Scope growing?** Create sub-issues: `.agents/skills/linear/scripts/linear.sh issues create --title "..." --parent [PARENT_ID]`
 
 **Found work outside scope?** Note in completion summary under "Discovered Work".
 
@@ -262,12 +261,7 @@ Update relevant docs if implementation changes documented APIs or architecture.
 ### § 5. Validate
 
 ```bash
-# Choose ONE based on change scope:
-$VALIDATE_CMD --quick              # Fast: lint, unit tests (comment/minor changes)
-$VALIDATE_CMD --fail-fast          # Full but stops at first failure (recommended for first run)
-$VALIDATE_CMD                      # Full: build, all tests, docs, benchmarks (significant changes)
-# After fixing failures:
-$VALIDATE_CMD --recheck            # Only re-runs previously failed checks (skip cached passes)
+# Run the project's build/test/lint validation command
 ```
 
 **On failure:**
@@ -342,7 +336,7 @@ Development-only feature exception: do not apply `needs-perf-test` for work isol
 **Target issue**: Post to the issue you just implemented (for bundled work: current sub-issue, not parent).
 
 ```bash
-$ISSUE_CLI comments create [ISSUE_ID] --body "## Completion Summary
+.agents/skills/linear/scripts/linear.sh comments create [ISSUE_ID] --body "## Completion Summary
 
 **Agent**: [AGENT_NAME]
 **Branch**: \`[BRANCH]\`
@@ -397,7 +391,7 @@ Summary: [ISSUE_ID] ✓
 
 **If bundled**: Mark task completed. Next sub-issue is a separate task, or proceed to § 11 if none remain.
 
-**Sub-issue of a parent** → mark issue Done (`$ISSUE_CLI issues update [ISSUE_ID] --state "Done"`).
+**Sub-issue of a parent** → mark issue Done (`.agents/skills/linear/scripts/linear.sh issues update [ISSUE_ID] --state "Done"`).
 **Parent or standalone issue** → do NOT mark Done (handled by PR merge workflow and issue tracker sync).
 
 Do NOT push or submit PR — orchestrator handles after review passes.
@@ -409,12 +403,12 @@ Do NOT push or submit PR — orchestrator handles after review passes.
 1. **Update parent issue with aggregated QA labels** (issue tracker API):
    ```bash
    # Collect QA labels from all sub-issues (including nested), apply to parent
-   $ISSUE_CLI issues update [PARENT_ID] --labels "[EXISTING_LABELS],[AGGREGATED_QA_LABELS]"
+   .agents/skills/linear/scripts/linear.sh issues update [PARENT_ID] --labels "[EXISTING_LABELS],[AGGREGATED_QA_LABELS]"
    ```
 
 2. **Post parent summary** (tree format for sub-issues, blocking info shown):
    ```bash
-   $ISSUE_CLI comments create [PARENT_ID] --body "## Bundle Complete
+   .agents/skills/linear/scripts/linear.sh comments create [PARENT_ID] --body "## Bundle Complete
    **Agent**: [NAME] | **Branch**: [BRANCH]
 
    Sub-issues (tree):
@@ -442,7 +436,7 @@ Do NOT push or submit PR — orchestrator handles after review passes.
 
 **File**: `workflows/dev-fix.md`
 **Agent type**: Dev agents receiving review fix delegations
-**Dependencies**: `$ISSUE_CLI`, `$VALIDATE_CMD`, `$DECISIONS_CMD` (optional), `$VISUAL_QA_CLI` (optional), `$SCREENSHOT_CLI` (optional), `$VISUAL_QA_TARGET_CMD` (optional), `$VISUAL_QA_FIXTURE` (optional), `$VISUAL_QA_SMOKE_CMD` (optional), `$VISUAL_QA_SWEEP_CMD` (optional), `$VISUAL_QA_BATTERY_CMD` (optional)
+**Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/decider/scripts/decisions` (optional), `$VISUAL_QA_CLI` (optional), `$SCREENSHOT_CLI` (optional), `$VISUAL_QA_TARGET_CMD` (optional), `$VISUAL_QA_FIXTURE` (optional), `$VISUAL_QA_SMOKE_CMD` (optional), `$VISUAL_QA_SWEEP_CMD` (optional), `$VISUAL_QA_BATTERY_CMD` (optional)
 
 **The workflow for dev agents receiving review fix delegations.**
 
@@ -451,8 +445,8 @@ Do NOT push or submit PR — orchestrator handles after review passes.
 ### § 2. Read Issue Context
 
 ```bash
-$ISSUE_CLI cache issues get [ISSUE_ID]
-$ISSUE_CLI cache comments list [ISSUE_ID]
+.agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID]
+.agents/skills/linear/scripts/linear.sh cache comments list [ISSUE_ID]
 ```
 
 Understand prior work, decisions, and handoff notes before evaluating items.
@@ -466,7 +460,7 @@ For each item in `Review items:`:
 2. **Apply if**: related to parent issue, no new risks
 
 3. **Skip if** pattern conflicts with existing architecture, would break other functionality, does not follow your defined rules or conventions.
-   - **Before applying**: `$DECISIONS_CMD search "[RELEVANT_KEYWORDS]"` for decisions governing the affected area → if match found, read the full decision file
+   - **Before applying**: `.agents/skills/decider/scripts/decisions search "[RELEVANT_KEYWORDS]"` for decisions governing the affected area → if match found, read the full decision file
    - If review item contradicts an active decision, skip with decision reference (e.g., "Skipped — contradicts D010")
    - Expanding scope is OK if it relates to the parent issue/PR
 
@@ -483,12 +477,7 @@ Related improvements OK — unrelated changes should become separate issues.
 ### § 4. Validate
 
 ```bash
-# Choose based on change scope:
-$VALIDATE_CMD --quick              # Fast: lint, unit tests (comment/minor changes)
-$VALIDATE_CMD --fail-fast          # Full but stops at first failure (recommended for first run)
-$VALIDATE_CMD                      # Full: build, all tests, docs, benchmarks (significant changes)
-# After fixing failures:
-$VALIDATE_CMD --recheck            # Only re-runs previously failed checks (skip cached passes)
+# Run the project's build/test/lint validation command
 ```
 
 **On failure:**
@@ -633,7 +622,7 @@ File: [WORKTREE_PATH]/tmp/review-[AGENT]-YYYYMMDD-HHMMSS.json
 
 **File**: `workflows/qa-review.md`
 **Agent type**: QA agents (safety, perf-qa, arch-review) invoked via `needs-*` labels
-**Dependencies**: `$ISSUE_CLI`, `$DECISIONS_CMD` (optional), `$DIFF_SUMMARY_CMD` (optional), `$BENCH_CLI` (optional), `$BENCH_PARSER` (optional), orchestration skill (review-finding schema)
+**Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/decider/scripts/decisions` (optional), `.agents/skills/github/scripts/git-diff-summary` (optional), `$BENCH_CLI` (optional), `$BENCH_PARSER` (optional), orchestration skill (review-finding schema)
 
 **The workflow for QA agents.** QA agents are review-only. They are never assigned as issue owners.
 
@@ -644,8 +633,8 @@ File: [WORKTREE_PATH]/tmp/review-[AGENT]-YYYYMMDD-HHMMSS.json
 #### 1.1 Read Context
 
 ```bash
-$ISSUE_CLI cache issues get [ISSUE_ID]
-$ISSUE_CLI cache comments list [ISSUE_ID]
+.agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID]
+.agents/skills/linear/scripts/linear.sh cache comments list [ISSUE_ID]
 ```
 
 Extract from delegation prompt:
@@ -656,14 +645,14 @@ Extract from delegation prompt:
 
 #### 2.1 Read Decision/Research Context
 
-Before reviewing, run `$DECISIONS_CMD search "[RELEVANT_KEYWORDS]"` for decisions governing the changed areas. If matches found, read the full decision files — index summaries are insufficient for understanding scope and rejected alternatives. If the delegation prompt includes additional decision context, read those too.
+Before reviewing, run `.agents/skills/decider/scripts/decisions search "[RELEVANT_KEYWORDS]"` for decisions governing the changed areas. If matches found, read the full decision files — index summaries are insufficient for understanding scope and rejected alternatives. If the delegation prompt includes additional decision context, read those too.
 
 **Suggestions that contradict active decisions are invalid** unless the decision itself is flawed (flag as blocker with justification, citing the specific decision and why it's wrong).
 
 #### 2.2 Identify Changed Files
 
 ```bash
-$DIFF_SUMMARY_CMD -C [WORKTREE_PATH]
+.agents/skills/github/scripts/git-diff-summary -C [WORKTREE_PATH]
 ```
 
 Use domain grouping and risk flags to focus review on changed files relevant to your domain.
@@ -728,7 +717,7 @@ File: tmp/review-[AGENT]-YYYYMMDD-HHMMSS.json
 ### Constraints
 
 **Do NOT**:
-- Claim the issue (`$ISSUE_CLI issues activate`)
+- Claim the issue (`.agents/skills/linear/scripts/linear.sh issues activate`)
 - Modify issue tracker state (labels, status)
 - Mark issue done
 - Create commits for code changes or push changes

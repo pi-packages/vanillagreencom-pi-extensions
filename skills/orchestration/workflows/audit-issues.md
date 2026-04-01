@@ -1,6 +1,6 @@
 # Issue Audit Workflow
 
-> **Dependencies**: `$ISSUE_CLI`, `scripts/workflow-sections`, project-management skill workflows, `schemas/audit-issues-input.md`
+> **Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/orchestration/scripts/workflow-sections`, project-management skill workflows, `schemas/audit-issues-input.md`
 
 Audit tracked issues and projects for relations, hierarchy, project placement, duplicates, and obsolete items. Delegate analysis to TPM, present findings, confirm changes, execute approved actions.
 
@@ -47,8 +47,8 @@ Set MODE and TARGET from input:
 ### 1.2 Ensure Cache Fresh & Query Status
 
 ```bash
-$ISSUE_CLI sync --reconcile
-$ISSUE_CLI session-status
+.agents/skills/linear/scripts/linear.sh sync --reconcile
+.agents/skills/linear/scripts/linear.sh session-status
 ```
 
 Extract `project` field for fallback resolution.
@@ -77,7 +77,7 @@ Spawn sub-agent: type=[TPM] (NOT teammate -- one-shot analysis, no re-delegation
 <delegation_format>
 Create your tasks first:
 ```bash
-scripts/workflow-sections [project-management skill workflows]/tpm-audit-project-order.md --agent "tpm-audit" --emoji "🤹‍♂️"
+.agents/skills/orchestration/scripts/workflow-sections [project-management skill workflows]/tpm-audit-project-order.md --agent "tpm-audit" --emoji "🤹‍♂️"
 ```
 Run command, pass JSON to Create task. Process in § order.
 
@@ -159,9 +159,9 @@ Output: "Project order verified. No changes needed." → **END**
    | activate | "Activate next?" | `[RECOMMENDED]`, other ready projects, `None` |
 
 2. **Execute approved changes** in order:
-   1. Reorders: `$ISSUE_CLI projects set-sort-order [PROJECT_ID] --position [NEW_SORT_ORDER]`
-   2. Complete: `$ISSUE_CLI projects update [PROJECT_ID] --state completed`
-   3. Activate: `$ISSUE_CLI projects update [PROJECT_ID] --state started`
+   1. Reorders: `.agents/skills/linear/scripts/linear.sh projects set-sort-order [PROJECT_ID] --position [NEW_SORT_ORDER]`
+   2. Complete: `.agents/skills/linear/scripts/linear.sh projects update [PROJECT_ID] --state completed`
+   3. Activate: `.agents/skills/linear/scripts/linear.sh projects update [PROJECT_ID] --state started`
 
 ### 2.4 Continue to Full Audit
 
@@ -215,7 +215,7 @@ Output: "Project order verified. No changes needed." → **END**
 
    | Selection | Action |
    |-----------|--------|
-   | Activate | `$ISSUE_CLI projects update [PROJECT_ID] --state started` → § 4 |
+   | Activate | `.agents/skills/linear/scripts/linear.sh projects update [PROJECT_ID] --state started` → § 4 |
    | Skip | **END** |
 
 ---
@@ -231,7 +231,7 @@ Spawn sub-agent: type=[TPM] (NOT teammate -- one-shot analysis, no re-delegation
 <delegation_format>
 Create your tasks first:
 ```bash
-scripts/workflow-sections [project-management skill workflows]/tpm-audit.md --agent "tpm-audit" --emoji "🤹‍♂️"
+.agents/skills/orchestration/scripts/workflow-sections [project-management skill workflows]/tpm-audit.md --agent "tpm-audit" --emoji "🤹‍♂️"
 ```
 Run command, pass JSON to Create task. Process in § order.
 
@@ -248,7 +248,7 @@ Worktree: [WORKTREE_PATH] (empty if main repo)
 <delegation_format>
 Create your tasks first:
 ```bash
-scripts/workflow-sections [project-management skill workflows]/tpm-audit.md --agent "tpm-audit" --emoji "🤹‍♂️"
+.agents/skills/orchestration/scripts/workflow-sections [project-management skill workflows]/tpm-audit.md --agent "tpm-audit" --emoji "🤹‍♂️"
 ```
 Run command, pass JSON to Create task. Process in § order.
 
@@ -548,10 +548,10 @@ Process `create` actions first -- use created IDs to resolve `#N` references in 
 
 **Superseded issues**: After creating issues (which resolves `#N` → `[ISSUE_ID]`), for each approved supersession from `supersedes[]`:
 
-1. **Fetch children**: `$ISSUE_CLI cache issues children [SUPERSEDED_ID]`
-2. **Detach** any children with independent scope (not covered by replacement): `$ISSUE_CLI issues update [CHILD_ID] --remove-parent`
+1. **Fetch children**: `.agents/skills/linear/scripts/linear.sh cache issues children [SUPERSEDED_ID]`
+2. **Detach** any children with independent scope (not covered by replacement): `.agents/skills/linear/scripts/linear.sh issues update [CHILD_ID] --remove-parent`
 3. **Comment** on superseded issue: `"Superseded by [ISSUE_ID] (DXXX). Scope fully covered."`
-4. **Cancel**: `$ISSUE_CLI issues update [SUPERSEDED_ID] --state "Canceled"` -- remaining children cascade-canceled by issue tracker
+4. **Cancel**: `.agents/skills/linear/scripts/linear.sh issues update [SUPERSEDED_ID] --state "Canceled"` -- remaining children cascade-canceled by issue tracker
 
 #### 7.2.1 Position in Active Project
 
@@ -566,12 +566,12 @@ After each `create` action, determine whether the new issue should be moved to T
 
 1. Check project state:
    ```bash
-   $ISSUE_CLI cache projects get [PROJECT_ID] | jq -r '.state'
+   .agents/skills/linear/scripts/linear.sh cache projects get [PROJECT_ID] | jq -r '.state'
    ```
 
 2. If `started`, query existing Todo issues:
    ```bash
-   $ISSUE_CLI cache issues list --project "[PROJECT]" --state "Todo" --format=safe | jq 'sort_by(.sort_order)'
+   .agents/skills/linear/scripts/linear.sh cache issues list --project "[PROJECT]" --state "Todo" --format=safe | jq 'sort_by(.sort_order)'
    ```
 
 3. Calculate sort_order:
@@ -582,7 +582,7 @@ After each `create` action, determine whether the new issue should be moved to T
 
 4. Set state and position:
    ```bash
-   $ISSUE_CLI issues update [NEW_ID] --state "Todo" --sort-order [CALCULATED]
+   .agents/skills/linear/scripts/linear.sh issues update [NEW_ID] --state "Todo" --sort-order [CALCULATED]
    ```
 
 **Adding relations**: Use workflow-actions § Relations. CLI enforces same-project constraint for `blocks`/`blocked_by` -- use `related` for cross-project links.
@@ -595,7 +595,7 @@ For each approved `research_refs` issue:
 
 1. **Get current description**:
    ```bash
-   $ISSUE_CLI cache issues get [ISSUE_ID] | jq -r '.description'
+   .agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID] | jq -r '.description'
    ```
 
 2. **Check existing**: If `[RESEARCH_REF]` path already exists, skip.
@@ -609,7 +609,7 @@ For each approved `research_refs` issue:
 
 5. **Propagate to children**:
    ```bash
-   $ISSUE_CLI cache issues children [ISSUE_ID] --recursive --format=safe | jq -r '.[].id'
+   .agents/skills/linear/scripts/linear.sh cache issues children [ISSUE_ID] --recursive --format=safe | jq -r '.[].id'
    ```
    For each child: repeat steps 1-4. Skip if reference already present.
 
@@ -619,10 +619,10 @@ For each issue canceled during § 7.1 or § 7.2 (superseded, obsolete, or duplic
 
 **Relations**:
 
-1. **Fetch relations**: `$ISSUE_CLI issues list-relations [CANCELED_ID]`
+1. **Fetch relations**: `.agents/skills/linear/scripts/linear.sh issues list-relations [CANCELED_ID]`
 2. **Remove `blocks` relations** to non-canceled issues:
    ```bash
-   $ISSUE_CLI issues remove-relation [CANCELED_ID] --blocks [TARGET_ID]
+   .agents/skills/linear/scripts/linear.sh issues remove-relation [CANCELED_ID] --blocks [TARGET_ID]
    ```
 3. **Check unblocked targets**: If a target issue now has no remaining `blocked_by`, and new issues were created during this audit that cover the same domain -- present: "[ISSUE_ID] unblocked by cancellation of [ISSUE_ID]. Add blocker?" with created issue options. Execute approved additions.
 
@@ -633,14 +633,14 @@ For each issue canceled during § 7.1 or § 7.2 (superseded, obsolete, or duplic
 1. **Identify old pattern**: From `obsolete[].evidence.eliminated_pattern` or `supersedes[].reason`
 2. **Check parent and siblings**:
    ```bash
-   $ISSUE_CLI cache issues get [PARENT_ID]
-   $ISSUE_CLI cache issues children [PARENT_ID]
+   .agents/skills/linear/scripts/linear.sh cache issues get [PARENT_ID]
+   .agents/skills/linear/scripts/linear.sh cache issues children [PARENT_ID]
    ```
 3. **Flag matches**: Non-canceled issues where title or description references the old pattern
 4. **Present**: "Update stale references? #N: [ISSUE_ID]: [OLD] → [NEW]"
 5. **Execute approved**:
-   - Title: `$ISSUE_CLI issues update [ID] --title "[UPDATED]"`
-   - Description: `$ISSUE_CLI issues update [ID] --description "[UPDATED]"`
+   - Title: `.agents/skills/linear/scripts/linear.sh issues update [ID] --title "[UPDATED]"`
+   - Description: `.agents/skills/linear/scripts/linear.sh issues update [ID] --description "[UPDATED]"`
    - Comment: `"Updated: [OLD] → [NEW] per [DECISION_ID]"`
 
 ### 7.5 Relation Direction Reference

@@ -41,9 +41,9 @@ The workflow for QA agents (safety, perf-qa, arch-review) triggered via `needs-*
 
 | Dependency | Purpose | Variable |
 |------------|---------|----------|
-| Issue tracker CLI (e.g., `linear` skill) | Issue CRUD, cache, comments, labels | `$ISSUE_CLI` |
+| Issue tracker CLI (e.g., `linear` skill) | Issue CRUD, cache, comments, labels | `.agents/skills/linear/scripts/linear.sh` |
 | Orchestration skill | Review-finding schema, recommendation-bias patterns | Referenced by name |
-| Decider skill | Decision templates, search CLI, creation workflows | `$DECISIONS_CMD` |
+| Decider skill | Decision templates, search CLI, creation workflows | `.agents/skills/decider/scripts/decisions` |
 | Benchmarking skill (optional, project-provided) | Baseline capture, regression classification, recording | `$BENCH_CLI`, `$BENCH_PARSER` |
 
 ## Configuration
@@ -54,10 +54,9 @@ Set these in `.env.local` or export them in the shell that runs the workflow. `.
 
 | Variable | Purpose | Required |
 |----------|---------|----------|
-| `$ISSUE_CLI` | Issue tracker CLI command | Yes |
-| `$VALIDATE_CMD` | Build + test + lint command | Yes |
-| `$DECISIONS_CMD` | Decision document lookup | Optional |
-| `$DIFF_SUMMARY_CMD` | Diff summary with domain grouping | Optional |
+| `.agents/skills/linear/scripts/linear.sh` | Issue tracker CLI command | Yes |
+| `.agents/skills/decider/scripts/decisions` | Decision document lookup | Optional |
+| `.agents/skills/github/scripts/git-diff-summary` | Diff summary with domain grouping | Optional |
 | `$BENCH_CLI` | Benchmark CLI command | Optional |
 | `$BENCH_PARSER` | Benchmark output parser | Optional |
 | `$VISUAL_QA_CLI` | Visual QA CLI command | Optional |

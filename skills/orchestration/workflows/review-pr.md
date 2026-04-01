@@ -1,6 +1,6 @@
 # PR Review Workflow
 
-> **Dependencies**: `$GIT_HOST_CLI`, `$WORKTREE_CLI`, `$ISSUE_CLI` (optional), `$VALIDATE_CMD`, `$DECISIONS_CMD` (optional), `$DIFF_SUMMARY_CMD`, `scripts/workflow-state`, `scripts/workflow-sections`
+> **Dependencies**: `.agents/skills/github/scripts/github.sh`, `.agents/skills/worktree/scripts/worktree`, `.agents/skills/linear/scripts/linear.sh` (optional), `.agents/skills/decider/scripts/decisions` (optional), `.agents/skills/github/scripts/git-diff-summary`, `.agents/skills/orchestration/scripts/workflow-state`, `.agents/skills/orchestration/scripts/workflow-sections`
 
 Pre-submission code review with fix handling, QA checks, and issue audit.
 
@@ -21,8 +21,8 @@ Pre-submission code review with fix handling, QA checks, and issue audit.
 
 **If PR# provided:**
 ```bash
-ISSUE=$($GIT_HOST_CLI pr-issue [PR_NUMBER] --format=text)
-WT_PATH=$($WORKTREE_CLI path $ISSUE 2>/dev/null || $WORKTREE_CLI create $ISSUE --pr [PR_NUMBER])
+ISSUE=$(.agents/skills/github/scripts/github.sh pr-issue [PR_NUMBER] --format=text)
+WT_PATH=$(.agents/skills/worktree/scripts/worktree path $ISSUE 2>/dev/null || .agents/skills/worktree/scripts/worktree create $ISSUE --pr [PR_NUMBER])
 ```
 
 **If no argument:** Set `WT_PATH` to current directory.
@@ -32,10 +32,10 @@ WT_PATH=$($WORKTREE_CLI path $ISSUE 2>/dev/null || $WORKTREE_CLI create $ISSUE -
 # Extract issue from branch if not provided
 ISSUE_ID=$(git rev-parse --abbrev-ref HEAD | grep -oiP "$ISSUE_PATTERN")
 # Init workflow state if not exists
-if ! scripts/workflow-state exists $ISSUE_ID; then
-  scripts/workflow-state init $ISSUE_ID --worktree "$WT_PATH" --branch "$(git -C $WT_PATH rev-parse --abbrev-ref HEAD)"
-  QA_LABELS=$($ISSUE_CLI cache issues get $ISSUE_ID | jq '[.labels[] | select(startswith("needs-"))]')
-  scripts/workflow-state set $ISSUE_ID qa_labels "$QA_LABELS"
+if ! .agents/skills/orchestration/scripts/workflow-state exists $ISSUE_ID; then
+  .agents/skills/orchestration/scripts/workflow-state init $ISSUE_ID --worktree "$WT_PATH" --branch "$(git -C $WT_PATH rev-parse --abbrev-ref HEAD)"
+  QA_LABELS=$(.agents/skills/linear/scripts/linear.sh cache issues get $ISSUE_ID | jq '[.labels[] | select(startswith("needs-"))]')
+  .agents/skills/orchestration/scripts/workflow-state set $ISSUE_ID qa_labels "$QA_LABELS"
 fi
 ```
 
@@ -56,7 +56,7 @@ git -C [WORKTREE_PATH] diff "origin/$BASE_BRANCH"...HEAD --stat
 Extract issue ID from branch name (e.g., `[BRANCH_NAME]` → `[ISSUE_ID]`). Use the decider skill's search workflow:
 
 ```bash
-$DECISIONS_CMD search --issue [ISSUE_ID]
+.agents/skills/decider/scripts/decisions search --issue [ISSUE_ID]
 ```
 
 Collect decision IDs and summaries from the JSON output.
@@ -66,9 +66,9 @@ Collect decision IDs and summaries from the JSON output.
 ### 1.2 Check for Re-Review Context
 
 ```bash
-CYCLES=$(scripts/workflow-state get [ISSUE_ID] '.cycles // 0')
-FIXED=$(scripts/workflow-state get [ISSUE_ID] '.fixed_items // []')
-ESCALATED=$(scripts/workflow-state get [ISSUE_ID] '.escalated_items // []')
+CYCLES=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] '.cycles // 0')
+FIXED=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] '.fixed_items // []')
+ESCALATED=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] '.escalated_items // []')
 ```
 
 If `CYCLES > 0`: This is a re-review. Include the "Previous review cycle context" section in the delegation prompt below, populated from `FIXED` and `ESCALATED`.
@@ -77,7 +77,7 @@ If `CYCLES > 0`: This is a re-review. Include the "Previous review cycle context
 
 **Detect team context**:
 ```bash
-TEAM=$(scripts/workflow-state get [ISSUE_ID] '.team_name // empty')
+TEAM=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] '.team_name // empty')
 ```
 
 **Determine agent list**: If `agents` context provided, use only those. Otherwise default to all 5: security-review, test-review, doc-review, error-review, structure-review (configurable per project).
@@ -87,7 +87,7 @@ TEAM=$(scripts/workflow-state get [ISSUE_ID] '.team_name // empty')
 1. **Create agent tasks**:
    ```bash
    # For each agent in [AGENTS]:
-   scripts/workflow-sections [ISSUE_LIFECYCLE_WORKFLOW]/pr-review.md --agent "[AGENT_NAME]" --emoji "🐞"
+   .agents/skills/orchestration/scripts/workflow-sections [ISSUE_LIFECYCLE_WORKFLOW]/pr-review.md --agent "[AGENT_NAME]" --emoji "🐞"
    ```
    Create task for each.
 
@@ -101,7 +101,7 @@ TEAM=$(scripts/workflow-state get [ISSUE_ID] '.team_name // empty')
      Copy spawn prompt **verbatim** from spawn prompt templates (project-level) (fill `[PLACEHOLDERS]` only). Agents go idle waiting for delegation.
    - Store in state:
      ```bash
-     scripts/workflow-state set [ISSUE_ID] review_agents '[AGENT_LIST_JSON]'
+     .agents/skills/orchestration/scripts/workflow-state set [ISSUE_ID] review_agents '[AGENT_LIST_JSON]'
      ```
 
 3. **Delegate via messages** (one per agent, all in parallel):
@@ -151,7 +151,7 @@ Re-review cycle [N]. Already resolved — do NOT re-report:
 
 **If standalone**: Wait for all [AGENTS] returns. Store each agent's returned `agent_id` in state for re-review resume:
 ```bash
-scripts/workflow-state set [ISSUE_ID] review_agent_ids '{"[AGENT_NAME]":"[AGENT_ID]",...}'
+.agents/skills/orchestration/scripts/workflow-state set [ISSUE_ID] review_agent_ids '{"[AGENT_NAME]":"[AGENT_ID]",...}'
 ```
 
 Extract `Report` path and `Verdict` from each. If any agent fails to return expected format, halt and report error.
@@ -161,7 +161,7 @@ Overall verdict: `action_required` if any agent has blockers, `pass` otherwise.
 **Update state**:
 ```bash
 # For each agent JSON path:
-scripts/workflow-state append [ISSUE_ID] json_paths "[PATH]"
+.agents/skills/orchestration/scripts/workflow-state append [ISSUE_ID] json_paths "[PATH]"
 ```
 
 <output_format>
@@ -234,7 +234,7 @@ If >4 suggestion items: show first 3 + `All N fixes`. Refine via "Other".
 
 1. **Capture pre-fix state**:
    ```bash
-   scripts/workflow-state set [ISSUE_ID] pre_delegate_sha "$(git -C [WORKTREE_PATH] rev-parse HEAD)"
+   .agents/skills/orchestration/scripts/workflow-state set [ISSUE_ID] pre_delegate_sha "$(git -C [WORKTREE_PATH] rev-parse HEAD)"
    ```
 
 2. **Run Skill**: `⤵ /dev-fix § 1-3 → § 4 step 3` with context:
@@ -247,8 +247,8 @@ If >4 suggestion items: show first 3 + `All N fixes`. Refine via "Other".
 
 3. **Route based on fix scope**:
    ```bash
-   PRE_SHA=$(scripts/workflow-state get [ISSUE_ID] .pre_delegate_sha)
-   $DIFF_SUMMARY_CMD -C [WORKTREE_PATH] $PRE_SHA
+   PRE_SHA=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] .pre_delegate_sha)
+   .agents/skills/github/scripts/git-diff-summary -C [WORKTREE_PATH] $PRE_SHA
    ```
 
    | `files_changed` | `risk_flags` | `scope` | Route |
@@ -262,7 +262,7 @@ If >4 suggestion items: show first 3 + `All N fixes`. Refine via "Other".
    a. Read review JSONs. Reporting agents = agents whose JSON contained items.
    b. **Team session**: Shutdown non-reporters: Send message type="shutdown_request" to [AGENT]
    c. **Standalone**: Remove non-reporter IDs from `review_agent_ids` (reporters kept for resume).
-   d. Update state: `scripts/workflow-state set [ISSUE_ID] review_agents '[REPORTERS_ONLY]'`
+   d. Update state: `.agents/skills/orchestration/scripts/workflow-state set [ISSUE_ID] review_agents '[REPORTERS_ONLY]'`
 
 ## 5. Verdict Pass
 
@@ -270,17 +270,17 @@ If >4 suggestion items: show first 3 + `All N fixes`. Refine via "Other".
    - **Team session**: Send shutdown_request to each agent in state `review_agents`.
    - **Standalone**: Agents already returned — clear stored IDs.
    ```bash
-   scripts/workflow-state set [ISSUE_ID] review_agents '[]'
-   scripts/workflow-state set [ISSUE_ID] review_agent_ids '{}'
+   .agents/skills/orchestration/scripts/workflow-state set [ISSUE_ID] review_agents '[]'
+   .agents/skills/orchestration/scripts/workflow-state set [ISSUE_ID] review_agent_ids '{}'
    ```
 
 2. **Check skip_qa flag**:
    ```bash
-   SKIP_QA=$(scripts/workflow-state get [ISSUE_ID] '.skip_qa // false')
+   SKIP_QA=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] '.skip_qa // false')
    ```
-   If `true`: `scripts/workflow-state set [ISSUE_ID] skip_qa false` → § 8
+   If `true`: `.agents/skills/orchestration/scripts/workflow-state set [ISSUE_ID] skip_qa false` → § 8
 
-3. **Read state**: `scripts/workflow-state get [ISSUE_ID] .qa_labels`
+3. **Read state**: `.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] .qa_labels`
 
 4. **Route**:
    - QA labels present → § 6
@@ -298,7 +298,7 @@ If >4 suggestion items: show first 3 + `All N fixes`. Refine via "Other".
 
 3. **Create agent tasks**:
    ```bash
-   scripts/workflow-sections [ISSUE_LIFECYCLE_WORKFLOW]/qa-review.md --agent "qa-review" --emoji "🪲"
+   .agents/skills/orchestration/scripts/workflow-sections [ISSUE_LIFECYCLE_WORKFLOW]/qa-review.md --agent "qa-review" --emoji "🪲"
    ```
    Create task for each.
 
@@ -351,11 +351,11 @@ If >4 suggestion items: show first 3 + `All N fixes`. Refine via "Other".
    **If standalone**: Agent task already returned.
 
 8. **Process agent return.** Agent returns `verdict`, `json_path`, and (for perf-qa) `benchmark_commit`.
-   - **Update state**: `scripts/workflow-state append [ISSUE_ID] json_paths "[json_path]"`
+   - **Update state**: `.agents/skills/orchestration/scripts/workflow-state append [ISSUE_ID] json_paths "[json_path]"`
    - If `benchmark_commit` is not "none", verify: `git -C [WORKTREE_PATH] log -1 --oneline [SHA]`.
    - **If perf-qa**: post benchmark report to issue tracker as issue comment:
      ```bash
-     $ISSUE_CLI comments create [ISSUE_ID] --body "[PERF_REPORT]"
+     .agents/skills/linear/scripts/linear.sh comments create [ISSUE_ID] --body "[PERF_REPORT]"
      ```
      Build PERF_REPORT from perf-qa JSON `qa_metadata.perf_qa`:
      ```markdown
@@ -416,7 +416,7 @@ Follow § 4 pattern (collect → present → ask user → delegate via `/dev-fix
 
 ## 8. Review Summary
 
-**Read state**: `scripts/workflow-state get [ISSUE_ID] .json_paths`
+**Read state**: `.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] .json_paths`
 
 **Skip if** json_paths empty (no reviews ran). Output: "No review items." → § 9
 
@@ -489,13 +489,13 @@ Issue suggestions: [N] items → § 9 audit
 
 ## 9. Create Issues
 
-1. **Read state**: `scripts/workflow-state get [ISSUE_ID] .escalated_items`
+1. **Read state**: `.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] .escalated_items`
 
 2. **Extract discovered work** from completion summaries:
    ```bash
-   $ISSUE_CLI cache comments list [ISSUE_ID] | jq -r '.[] | select(.body | contains("Discovered Work")) | .body'
+   .agents/skills/linear/scripts/linear.sh cache comments list [ISSUE_ID] | jq -r '.[] | select(.body | contains("Discovered Work")) | .body'
    ```
-   If bundled: also extract from each sub-issue via `$ISSUE_CLI cache issues get [ISSUE_ID] --with-bundle | jq -r '.children[].id'`.
+   If bundled: also extract from each sub-issue via `.agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID] --with-bundle | jq -r '.children[].id'`.
    Parse "Discovered Work" section bullets into audit items with `origin: "discovered"`, `found_by: [agent]`. Skip if section absent or "(Skip if none)".
 
 3. **Skip if** no issue suggestions AND escalated_items empty AND no discovered work items. → § 10
@@ -512,21 +512,21 @@ Issue suggestions: [N] items → § 9 audit
 
 7. **Update state** — for each created issue from audit output:
    ```bash
-   scripts/workflow-state append [ISSUE_ID] audit_issues_created "[CREATED_ISSUE_ID]"
+   .agents/skills/orchestration/scripts/workflow-state append [ISSUE_ID] audit_issues_created "[CREATED_ISSUE_ID]"
    ```
 
 ## 10. Delegate Pending Children
 
 1. **Query pending children**:
    ```bash
-   $ISSUE_CLI cache issues children [ISSUE_ID] --recursive --pending --format=safe
+   .agents/skills/linear/scripts/linear.sh cache issues children [ISSUE_ID] --recursive --pending --format=safe
    ```
 
 2. **Skip if** no pending children → § 11.
 
 3. **Capture pre-delegate state**:
    ```bash
-   scripts/workflow-state set [ISSUE_ID] pre_delegate_sha "$(git -C [WORKTREE_PATH] rev-parse HEAD)"
+   .agents/skills/orchestration/scripts/workflow-state set [ISSUE_ID] pre_delegate_sha "$(git -C [WORKTREE_PATH] rev-parse HEAD)"
    ```
 
 4. **Delegate immediately** — no exceptions, no asking user, no deferral. Delegate regardless of how sub-issues were created or their perceived scope.
@@ -538,14 +538,14 @@ Issue suggestions: [N] items → § 9 audit
 
 5. **Assess re-review scope**:
    ```bash
-   PRE_SHA=$(scripts/workflow-state get [ISSUE_ID] .pre_delegate_sha)
-   $DIFF_SUMMARY_CMD -C [WORKTREE_PATH] $PRE_SHA
+   PRE_SHA=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] .pre_delegate_sha)
+   .agents/skills/github/scripts/git-diff-summary -C [WORKTREE_PATH] $PRE_SHA
    ```
 
    | `risk_flags` | `scope` | Action | Route |
    |--------------|---------|--------|-------|
    | non-empty | any | — | → § 1 (full re-review) |
-   | empty | `production` | `scripts/workflow-state set [ISSUE_ID] skip_qa true` | → § 1 |
+   | empty | `production` | `.agents/skills/orchestration/scripts/workflow-state set [ISSUE_ID] skip_qa true` | → § 1 |
    | empty | `support` | — | → § 11 |
 
 ## 11. Return State

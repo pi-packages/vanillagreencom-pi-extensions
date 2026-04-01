@@ -1,6 +1,6 @@
 # Research Spike Workflow
 
-> **Dependencies**: `$ISSUE_CLI`
+> **Dependencies**: `.agents/skills/linear/scripts/linear.sh`
 
 Human-initiated research with full agent consultation and asset preparation.
 
@@ -61,7 +61,7 @@ Ask any additional clarifying questions needed before proceeding, based on topic
 
 1. **Search for related research**:
    ```bash
-   $ISSUE_CLI cache issues list --label research --max --search "[TOPIC_KEYWORDS]"
+   .agents/skills/linear/scripts/linear.sh cache issues list --label research --max --search "[TOPIC_KEYWORDS]"
    ```
 
 2. **If matches found**:
@@ -81,7 +81,7 @@ Hand off to full research-issue workflow with context gathered above.
 ### 3.1 Query Active Project
 
 ```bash
-PROJECT=$($ISSUE_CLI cache projects list --state started --first)
+PROJECT=$(.agents/skills/linear/scripts/linear.sh cache projects list --state started --first)
 ```
 
 ### 3.2 Determine Type from Domain Count

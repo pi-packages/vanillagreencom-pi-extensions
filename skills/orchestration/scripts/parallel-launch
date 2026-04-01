@@ -2,14 +2,16 @@
 # Launch parallel worktrees for a group of issues.
 #
 # Usage:
-#   parallel-launch <group_id> [--tmux | --ghostty]
-#   parallel-launch ISSUE-1 ISSUE-2 ... [--tmux | --ghostty]
+#   parallel-launch <group_id> [--tmux | --ghostty] [--cmd "command {issue}"]
+#   parallel-launch ISSUE-1 ISSUE-2 ... [--tmux | --ghostty] [--cmd "command {issue}"]
+#
+# Options:
+#   --cmd "..."    Command to run in each worktree. Use {issue} as placeholder
+#                  for the issue ID. If omitted, opens a shell in the worktree.
+#   --tmux         Open tmux windows (requires active tmux session)
+#   --ghostty      Open Ghostty terminals
 #
 # Environment:
-#   WORKTREE_CLI   - Path to worktree CLI tool (required)
-#   HARNESS_CMD    - Command template to start agent harness in worktree.
-#                    Use {issue} as placeholder for the issue ID.
-#                    If unset, opens a shell in the worktree without auto-starting the harness.
 #   ISSUE_PATTERN  - Regex pattern matching issue IDs (default: "[A-Z]+-[0-9]+")
 
 set -euo pipefail
@@ -22,11 +24,15 @@ _git_common_dir=$(git -C "$PROJECT_ROOT" rev-parse --git-common-dir 2>/dev/null 
 if [[ "$_git_common_dir" != ".git" && -n "$_git_common_dir" ]]; then
   PROJECT_ROOT="$(dirname "$_git_common_dir")"
 fi
+SKILLS_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ENV_FILE="$PROJECT_ROOT/.env.local"
 if [[ -f "$ENV_FILE" ]]; then
   # shellcheck source=/dev/null
   source "$ENV_FILE"
 fi
+
+# Resolve WORKTREE_CLI from sibling skill
+WORKTREE_CLI="${WORKTREE_CLI:-$SKILLS_DIR/worktree/scripts/worktree}"
 
 # Configurable issue pattern (default: JIRA-style ABC-123)
 ISSUE_PATTERN="${ISSUE_PATTERN:-[A-Z]+-[0-9]+}"
@@ -34,23 +40,24 @@ ISSUE_PATTERN="${ISSUE_PATTERN:-[A-Z]+-[0-9]+}"
 TERMINAL_MODE=""
 ISSUES=()
 GROUP_ID=""
+CMD_TEMPLATE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --tmux) TERMINAL_MODE="tmux"; shift ;;
     --ghostty) TERMINAL_MODE="ghostty"; shift ;;
+    --cmd) CMD_TEMPLATE="$2"; shift 2 ;;
     --help|-h)
-      echo "Usage: parallel-launch <group_id> [--tmux | --ghostty]"
-      echo "       parallel-launch ISSUE-1 ISSUE-2 ... [--tmux | --ghostty]"
+      echo "Usage: parallel-launch <group_id> [--tmux | --ghostty] [--cmd \"command {issue}\"]"
+      echo "       parallel-launch ISSUE-1 ISSUE-2 ... [--tmux | --ghostty] [--cmd \"...\"]"
       echo ""
       echo "Options:"
-      echo "  --tmux      Open tmux windows (requires active tmux session)"
-      echo "  --ghostty   Open Ghostty terminals"
-      echo "  (default)   Auto-detect: tmux if \$TMUX set, else ghostty"
+      echo "  --tmux              Open tmux windows (requires active tmux session)"
+      echo "  --ghostty           Open Ghostty terminals"
+      echo "  --cmd \"command\"     Command to run in each worktree ({issue} is replaced)"
+      echo "  (default terminal)  Auto-detect: tmux if \$TMUX set, else ghostty"
       echo ""
       echo "Environment:"
-      echo "  WORKTREE_CLI   Path to worktree CLI tool (required)"
-      echo "  HARNESS_CMD    Optional command template with {issue} placeholder"
       echo "  ISSUE_PATTERN  Regex for issue IDs (default: [A-Z]+-[0-9]+)"
       exit 0
       ;;
@@ -89,21 +96,10 @@ if [[ ${#ISSUES[@]} -eq 0 && -n "$GROUP_ID" ]]; then
 fi
 
 # Require worktree CLI
-if [[ -z "${WORKTREE_CLI:-}" ]]; then
-  echo "Error: WORKTREE_CLI not set. Set to path of worktree management tool." >&2
+if [[ ! -x "$WORKTREE_CLI" ]]; then
+  echo "Error: WORKTREE_CLI not found at '$WORKTREE_CLI'. Is the worktree skill installed?" >&2
   exit 1
 fi
-
-launch_start_command() {
-  local issue="$1"
-  if [[ -n "${HARNESS_CMD:-}" ]]; then
-    # Replace {issue} placeholder with actual issue ID
-    echo "${HARNESS_CMD//\{issue\}/$issue}"
-  else
-    # Portable fallback: open a shell in the worktree and let the user start the harness manually.
-    echo ""
-  fi
-}
 
 if [[ ${#ISSUES[@]} -lt 2 ]]; then
   echo "Error: need at least 2 issues to launch in parallel" >&2
@@ -111,9 +107,6 @@ if [[ ${#ISSUES[@]} -lt 2 ]]; then
 fi
 
 echo "Launching ${#ISSUES[@]} parallel worktrees (${TERMINAL_MODE})..."
-if [[ -z "${HARNESS_CMD:-}" ]]; then
-  echo "HARNESS_CMD not set; opening terminals without an auto-start command." >&2
-fi
 
 LAUNCHED=0
 FAILED=()
@@ -126,7 +119,11 @@ for ISSUE in "${ISSUES[@]}"; do
     continue
   fi
 
-  START_CMD=$(launch_start_command "$ISSUE")
+  # Replace {issue} placeholder with actual issue ID
+  START_CMD=""
+  if [[ -n "$CMD_TEMPLATE" ]]; then
+    START_CMD="${CMD_TEMPLATE//\{issue\}/$ISSUE}"
+  fi
 
   if [[ "$TERMINAL_MODE" == "tmux" ]]; then
     "$SCRIPT_DIR/open-terminal" "$WT_PATH" --tmux "$ISSUE" --title "$ISSUE" --cmd "$START_CMD"

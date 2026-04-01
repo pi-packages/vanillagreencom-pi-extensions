@@ -1,6 +1,6 @@
 # Create Decision Workflow
 
-> **Dependencies**: `$DECISIONS_CMD` (optional for next-id), project decision documents directory
+> **Dependencies**: `.agents/skills/decider/scripts/decisions` (optional for next-id), project decision documents directory
 
 Create a new decision entry: assign ID, write decision file, add INDEX.md row, update code references.
 
@@ -21,10 +21,10 @@ Create a new decision entry: assign ID, write decision file, add INDEX.md row, u
 ### 1.1 Get Next ID
 
 ```bash
-$DECISIONS_CMD next-id
+.agents/skills/decider/scripts/decisions next-id
 ```
 
-**If `$DECISIONS_CMD` not configured**: Read `[project decision documents]/INDEX.md`, find last `DXXX` row, increment by 1. Zero-pad to 3 digits.
+**If `.agents/skills/decider/scripts/decisions` not configured**: Read `[project decision documents]/INDEX.md`, find last `DXXX` row, increment by 1. Zero-pad to 3 digits.
 
 ### 1.2 Generate Descriptor
 

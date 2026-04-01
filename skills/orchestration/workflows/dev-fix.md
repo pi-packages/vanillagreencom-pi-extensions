@@ -1,6 +1,6 @@
 # Dev Fix Workflow
 
-> **Dependencies**: `$ISSUE_CLI`, `$WORKTREE_CLI`, `scripts/workflow-state`, `scripts/workflow-sections`, issue-lifecycle skill workflows
+> **Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/worktree/scripts/worktree`, `.agents/skills/orchestration/scripts/workflow-state`, `.agents/skills/orchestration/scripts/workflow-sections`, issue-lifecycle skill workflows
 
 Delegate fix items to specialist dev agent. Works standalone (user-initiated) or managed (from review-pr).
 
@@ -24,7 +24,7 @@ Delegate fix items to specialist dev agent. Works standalone (user-initiated) or
 **Standalone init** (`lifecycle: "self"` only):
 ```bash
 ISSUE_ID=${ARG:-$(git rev-parse --abbrev-ref HEAD | grep -oiP "$ISSUE_PATTERN")}
-WT_PATH=$($WORKTREE_CLI path $ISSUE_ID 2>/dev/null || pwd)
+WT_PATH=$(.agents/skills/worktree/scripts/worktree path $ISSUE_ID 2>/dev/null || pwd)
 ```
 
 ---
@@ -73,20 +73,20 @@ WT_PATH=$($WORKTREE_CLI path $ISSUE_ID 2>/dev/null || pwd)
    - If `dev_agent` provided → use it (already alive)
    - Otherwise: from workflow state or issue labels
      ```bash
-     AGENT=$(scripts/workflow-state get $ISSUE_ID '.agent // empty' 2>/dev/null)
-     [[ -z "$AGENT" ]] && AGENT=$($ISSUE_CLI cache issues get $ISSUE_ID --format=compact | jq -r '[.labels[] | select(startswith("agent:"))] | first | split(":")[1] // empty')
+     AGENT=$(.agents/skills/orchestration/scripts/workflow-state get $ISSUE_ID '.agent // empty' 2>/dev/null)
+     [[ -z "$AGENT" ]] && AGENT=$(.agents/skills/linear/scripts/linear.sh cache issues get $ISSUE_ID --format=compact | jq -r '[.labels[] | select(startswith("agent:"))] | first | split(":")[1] // empty')
      ```
 
 2. **Group items by agent domain** if multi-domain. Sequential per [agent-sequencing.md](agent-sequencing.md).
 
 3. **Detect team context**:
    ```bash
-   TEAM=$(scripts/workflow-state get $ISSUE_ID '.team_name // empty')
+   TEAM=$(.agents/skills/orchestration/scripts/workflow-state get $ISSUE_ID '.team_name // empty')
    ```
 
 4. **Create agent tasks** (team session only):
    ```bash
-   scripts/workflow-sections [path-to-issue-lifecycle-dev-fix-workflow] --agent "dev-fix" --emoji "🐲"
+   .agents/skills/orchestration/scripts/workflow-sections [path-to-issue-lifecycle-dev-fix-workflow] --agent "dev-fix" --emoji "🐲"
    ```
    Create task for each section (via harness task API).
 
@@ -123,12 +123,12 @@ WT_PATH=$($WORKTREE_CLI path $ISSUE_ID 2>/dev/null || pwd)
 7. **Update state**:
    ```bash
    # For each applied item:
-   scripts/workflow-state append [ISSUE_ID] fixed_items '{"description":"[DESC]","location":"[LOC]","commit":"[SHA]","source":"[SOURCE]"}'
+   .agents/skills/orchestration/scripts/workflow-state append [ISSUE_ID] fixed_items '{"description":"[DESC]","location":"[LOC]","commit":"[SHA]","source":"[SOURCE]"}'
 
    # For each escalated/skipped item:
-   scripts/workflow-state append [ISSUE_ID] escalated_items '{"description":"[DESC]","location":"[LOC]","reason":"[REASON]","source":"[SOURCE]"}'
+   .agents/skills/orchestration/scripts/workflow-state append [ISSUE_ID] escalated_items '{"description":"[DESC]","location":"[LOC]","reason":"[REASON]","source":"[SOURCE]"}'
 
-   scripts/workflow-state increment [ISSUE_ID] cycles
+   .agents/skills/orchestration/scripts/workflow-state increment [ISSUE_ID] cycles
    ```
 
 ---

@@ -1,6 +1,6 @@
 # Roadmap Planning Workflow
 
-> **Dependencies**: `$ISSUE_CLI`, `scripts/workflow-sections`, project-management skill workflows, `schemas/roadmap-plan-input.md`
+> **Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/orchestration/scripts/workflow-sections`, project-management skill workflows, `schemas/roadmap-plan-input.md`
 
 Plan a new roadmap with research gate, specialist consultation, cross-project analysis, and architecture review.
 
@@ -22,7 +22,7 @@ Extract `FEATURE`, optional `RESEARCH_PATH`, and optional `--origin-issue [ISSUE
 
 If `--origin-issue` provided, fetch issue details and store as `ORIGIN_ISSUE`:
 ```bash
-$ISSUE_CLI cache issues get [ORIGIN_ISSUE_ID]
+.agents/skills/linear/scripts/linear.sh cache issues get [ORIGIN_ISSUE_ID]
 ```
 Store `id`, `title`, `project`, `description`, `children`. If not provided, set `ORIGIN_ISSUE` = null.
 
@@ -37,7 +37,7 @@ Store `id`, `title`, `project`, `description`, `children`. If not provided, set 
 
 1. **Search for research**:
    ```bash
-   $ISSUE_CLI cache issues list --label "research" --state "Done" --max
+   .agents/skills/linear/scripts/linear.sh cache issues list --label "research" --state "Done" --max
    ```
 
 2. **Filter results** for `FEATURE` keywords in title/description.
@@ -118,7 +118,7 @@ Write input per [roadmap-plan-input.md](../schemas/roadmap-plan-input.md) to `tm
 ### 4.2 Create Agent Tasks
 
 ```bash
-scripts/workflow-sections [project-management skill workflows]/tpm-roadmap-plan.md --agent "tpm-roadmap" --emoji "🤹‍♂️"
+.agents/skills/orchestration/scripts/workflow-sections [project-management skill workflows]/tpm-roadmap-plan.md --agent "tpm-roadmap" --emoji "🤹‍♂️"
 ```
 
 Create task for each.

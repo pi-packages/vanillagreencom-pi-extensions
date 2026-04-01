@@ -20,7 +20,7 @@ skills/decider/
 ├── schemas/
 │   └── decision-format.md  # Canonical format constraints for decision documents
 └── scripts/
-    └── decisions           # CLI entry point ($DECISIONS_CMD)
+    └── decisions           # CLI entry point (.agents/skills/decider/scripts/decisions)
 ```
 
 This skill is workflow-based with templates and a CLI script. There is no `rules/` directory.
@@ -31,7 +31,7 @@ The decider skill provides the single source of truth for:
 
 1. **Decision document format** — Three template sizes (minimal, standard, comprehensive) with consistent formatting rules
 2. **Creation workflow** — Step-by-step process for recording decisions: ID assignment, template selection, file writing, INDEX maintenance, supersession handling
-3. **Search/query CLI** — `$DECISIONS_CMD` interface for finding decisions by issue, keywords, or ID
+3. **Search/query CLI** — `.agents/skills/decider/scripts/decisions` interface for finding decisions by issue, keywords, or ID
 4. **Update workflow** — Supersession, partial supersession, and revisitation of existing decisions
 5. **Format schema** — Canonical constraints for file naming, metadata fields, status values, and cross-reference conventions
 
@@ -81,7 +81,7 @@ EOF
 
 ### CLI Setup
 
-Set `$DECISIONS_CMD` to point to the decisions CLI script:
+Set `.agents/skills/decider/scripts/decisions` to point to the decisions CLI script:
 
 ```bash
 export DECISIONS_CMD="/path/to/skills/decider/scripts/decisions"

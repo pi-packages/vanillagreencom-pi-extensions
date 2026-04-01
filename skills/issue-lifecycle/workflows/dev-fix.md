@@ -1,6 +1,6 @@
 # Fix Lifecycle
 
-> **Dependencies**: `$ISSUE_CLI`, `$VALIDATE_CMD`, `$DECISIONS_CMD` (optional), `$VISUAL_QA_CLI` (optional), `$SCREENSHOT_CLI` (optional), `$VISUAL_QA_TARGET_CMD` (optional), `$VISUAL_QA_FIXTURE` (optional), `$VISUAL_QA_SMOKE_CMD` (optional), `$VISUAL_QA_SWEEP_CMD` (optional), `$VISUAL_QA_BATTERY_CMD` (optional)
+> **Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/decider/scripts/decisions` (optional), `$VISUAL_QA_CLI` (optional), `$SCREENSHOT_CLI` (optional), `$VISUAL_QA_TARGET_CMD` (optional), `$VISUAL_QA_FIXTURE` (optional), `$VISUAL_QA_SMOKE_CMD` (optional), `$VISUAL_QA_SWEEP_CMD` (optional), `$VISUAL_QA_BATTERY_CMD` (optional)
 
 **The workflow for dev agents receiving review fix delegations.**
 
@@ -13,8 +13,8 @@
 ## 2. Read Issue Context
 
 ```bash
-$ISSUE_CLI cache issues get [ISSUE_ID]
-$ISSUE_CLI cache comments list [ISSUE_ID]
+.agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID]
+.agents/skills/linear/scripts/linear.sh cache comments list [ISSUE_ID]
 ```
 
 Understand prior work, decisions, and handoff notes before evaluating items.
@@ -30,7 +30,7 @@ For each item in `Review items:`:
 2. **Apply if**: related to parent issue, no new risks
 
 3. **Skip if** pattern conflicts with existing architecture, would break other functionality, does not follow your defined rules or conventions.
-   - **Before applying** (decider skill): `$DECISIONS_CMD search "[RELEVANT_KEYWORDS]"` for decisions governing the affected area → if match found, read the full decision file
+   - **Before applying** (decider skill): `.agents/skills/decider/scripts/decisions search "[RELEVANT_KEYWORDS]"` for decisions governing the affected area → if match found, read the full decision file
    - If review item contradicts an active decision, skip with decision reference (e.g., "Skipped — contradicts D010")
    - Expanding scope is OK if it relates to the parent issue/PR
 
@@ -49,12 +49,7 @@ Related improvements OK — unrelated changes should become separate issues.
 ## 4. Validate
 
 ```bash
-# Choose based on change scope:
-$VALIDATE_CMD --quick              # Fast: lint, unit tests (comment/minor changes)
-$VALIDATE_CMD --fail-fast          # Full but stops at first failure (recommended for first run)
-$VALIDATE_CMD                      # Full: build, all tests, docs, benchmarks (significant changes)
-# After fixing failures:
-$VALIDATE_CMD --recheck            # Only re-runs previously failed checks (skip cached passes)
+# Run the project's build/test/lint validation command
 ```
 
 **On failure:**

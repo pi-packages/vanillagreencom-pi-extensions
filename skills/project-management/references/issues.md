@@ -15,7 +15,7 @@
 ## Check for Duplicates
 
 ```bash
-$ISSUE_CLI cache issues list --state "Backlog,Todo,In Progress" --max | grep -iE "keyword"
+.agents/skills/linear/scripts/linear.sh cache issues list --state "Backlog,Todo,In Progress" --max | grep -iE "keyword"
 ```
 
 | Finding | Action |
@@ -70,9 +70,9 @@ Use `--parent [ISSUE_ID]` when:
 - Incorrect: All backend issues grouped (layer grouping)
 
 ```bash
-$ISSUE_CLI issues create --title "Parse input data" --parent [ISSUE_ID]
-$ISSUE_CLI cache issues children [ISSUE_ID]              # Direct children only
-$ISSUE_CLI cache issues children [ISSUE_ID] --recursive  # All descendants (3 levels, includes blocks/blocked_by)
+.agents/skills/linear/scripts/linear.sh issues create --title "Parse input data" --parent [ISSUE_ID]
+.agents/skills/linear/scripts/linear.sh cache issues children [ISSUE_ID]              # Direct children only
+.agents/skills/linear/scripts/linear.sh cache issues children [ISSUE_ID] --recursive  # All descendants (3 levels, includes blocks/blocked_by)
 ```
 
 **Max depth**: Initiative → Project → Issue → Sub-Issue (no deeper)
@@ -105,7 +105,7 @@ $ISSUE_CLI cache issues children [ISSUE_ID] --recursive  # All descendants (3 le
 ## CLI Command
 
 ```bash
-$ISSUE_CLI issues create \
+.agents/skills/linear/scripts/linear.sh issues create \
   --title "Implement user authentication service" \
   --project "Phase 1: Foundation" \
   --labels "backend,agent:[TYPE],critical-path" \
@@ -122,8 +122,8 @@ Auth service for user login and session management.
 ## Cancellation
 
 ```bash
-$ISSUE_CLI comments create [ISSUE_ID] --body "CANCELED: [REASON]"
-$ISSUE_CLI issues update [ISSUE_ID] --state "Canceled"
+.agents/skills/linear/scripts/linear.sh comments create [ISSUE_ID] --body "CANCELED: [REASON]"
+.agents/skills/linear/scripts/linear.sh issues update [ISSUE_ID] --state "Canceled"
 ```
 
 Valid reasons: Requirement changed, superseded by [OTHER_ISSUE_ID], no longer needed.

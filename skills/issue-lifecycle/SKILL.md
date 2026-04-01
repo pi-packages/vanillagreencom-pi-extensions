@@ -4,7 +4,7 @@ description: "Agent workflows for issue implementation, review fix delegation, p
 license: MIT
 user-invocable: true
 dependencies:
-  required: [orchestration]
+  required: [orchestration, github]
   optional: [linear, decider]
 metadata:
   author: vanillagreen
@@ -33,18 +33,17 @@ Workflows reference these companion skills and tools. Install and configure per 
 
 | Dependency | Purpose | Variable |
 |------------|---------|----------|
-| Issue tracker CLI (e.g., `linear` skill) | Issue CRUD, cache, comments, labels | `$ISSUE_CLI` |
+| Issue tracker CLI (e.g., `linear` skill) | Issue CRUD, cache, comments, labels | `.agents/skills/linear/scripts/linear.sh` |
 | Orchestration skill | Review-finding schema, recommendation-bias patterns | Referenced by name |
-| Decider skill | Decision templates, search CLI, creation workflows | `$DECISIONS_CMD` |
+| Decider skill | Decision templates, search CLI, creation workflows | `.agents/skills/decider/scripts/decisions` |
 | Benchmarking skill (optional, project-provided) | Baseline capture, regression classification, recording | `$BENCH_CLI`, `$BENCH_PARSER` |
 
 Project-level configuration:
 
 | Variable | Purpose |
 |----------|---------|
-| `$VALIDATE_CMD` | Build + test + lint command |
-| `$DECISIONS_CMD` | Decision document lookup (optional) |
-| `$DIFF_SUMMARY_CMD` | Diff summary with domain grouping (optional) |
+| `.agents/skills/decider/scripts/decisions` | Decision document lookup (optional) |
+| `.agents/skills/github/scripts/git-diff-summary` | Diff summary with domain grouping (optional) |
 
 ## Workflows
 

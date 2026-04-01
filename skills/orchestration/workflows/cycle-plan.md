@@ -1,6 +1,6 @@
 # Cycle Planning Workflow
 
-> **Dependencies**: `$ISSUE_CLI`, `scripts/workflow-sections`, project-management skill workflows
+> **Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/orchestration/scripts/workflow-sections`, project-management skill workflows
 
 Generate cycle plan via TPM agent with user approval.
 
@@ -8,7 +8,7 @@ Generate cycle plan via TPM agent with user approval.
 
 1. **Create agent tasks**:
    ```bash
-   scripts/workflow-sections [project-management skill workflows]/tpm-cycle-plan.md --agent "tpm-cycle-plan" --emoji "🤹‍♂️"
+   .agents/skills/orchestration/scripts/workflow-sections [project-management skill workflows]/tpm-cycle-plan.md --agent "tpm-cycle-plan" --emoji "🤹‍♂️"
    ```
    Create task for each.
 
@@ -40,7 +40,7 @@ JSON contains `completed_project`, `next_projects` (ordered by sort_order), `rec
 **Execute mark_complete action**:
 
 ```bash
-$ISSUE_CLI projects update [mark_complete.project_id] --state completed
+.agents/skills/linear/scripts/linear.sh projects update [mark_complete.project_id] --state completed
 ```
 
 ### 2.2 Present Next Options
@@ -69,7 +69,7 @@ $ISSUE_CLI projects update [mark_complete.project_id] --state completed
 
    | Selection | Action |
    |-----------|--------|
-   | Activate [NAME] | `$ISSUE_CLI projects update [PROJECT_ID] --state started` → § 1 |
+   | Activate [NAME] | `.agents/skills/linear/scripts/linear.sh projects update [PROJECT_ID] --state started` → § 1 |
    | Skip | End workflow |
 
    Only projects with `ready: true` should be activated. If user selects a blocked project, show blockers and ask to resolve first.
@@ -156,7 +156,7 @@ JSON contains full plan with `velocity`, `planned_work`, `not_included`, `action
 
 1. **Create cycle**:
    ```bash
-   $ISSUE_CLI cycles create --team [create_cycle.team] --start [create_cycle.start] --end [create_cycle.end]
+   .agents/skills/linear/scripts/linear.sh cycles create --team [create_cycle.team] --start [create_cycle.start] --end [create_cycle.end]
    ```
 
 2. **Store created cycle ID** for assignment.
@@ -169,7 +169,7 @@ JSON contains full plan with `velocity`, `planned_work`, `not_included`, `action
    |--------|------|------|
    | Set priorities | § Priority Updates | `actions.set_priorities[]` |
    | Assign to cycle | § Cycle Assignment | `actions.assign_to_cycle[]` (issue IDs) |
-   | Set sort order | `$ISSUE_CLI issues update [ID] --sort-order [VALUE]` | `actions.set_sort_order[]` (parent/standalone only, AFTER cycle assignment) |
+   | Set sort order | `.agents/skills/linear/scripts/linear.sh issues update [ID] --sort-order [VALUE]` | `actions.set_sort_order[]` (parent/standalone only, AFTER cycle assignment) |
    | Set estimates | § Estimate & Label Updates | `actions.set_estimates[]` |
    | Set agent labels | § Estimate & Label Updates | `actions.set_labels[]` |
    | Update initiative | § Initiative & Project Status | `actions.update_initiative` |
@@ -185,7 +185,7 @@ If `actions.add_relations[]` exists (from TPM architecture analysis):
 
 For each relation:
 ```bash
-$ISSUE_CLI issues add-relation [FROM_ID] --blocks [TO_ID]
+.agents/skills/linear/scripts/linear.sh issues add-relation [FROM_ID] --blocks [TO_ID]
 ```
 
 TPM populates this when § 1.4 architecture ordering reveals dependencies not yet recorded in issue tracker (e.g., one domain issue should block another domain issue in same project, but no relation exists).

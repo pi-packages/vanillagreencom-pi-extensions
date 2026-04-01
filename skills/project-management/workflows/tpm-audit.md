@@ -42,11 +42,11 @@ Parse arguments → set `MODE` (project | issues).
 
 Query ALL project states:
 ```bash
-$ISSUE_CLI cache projects list --state started
-$ISSUE_CLI cache projects list --state planned
-$ISSUE_CLI cache projects list --state backlog
-$ISSUE_CLI cache projects list --state completed
-$ISSUE_CLI cache projects list --state paused
+.agents/skills/linear/scripts/linear.sh cache projects list --state started
+.agents/skills/linear/scripts/linear.sh cache projects list --state planned
+.agents/skills/linear/scripts/linear.sh cache projects list --state backlog
+.agents/skills/linear/scripts/linear.sh cache projects list --state completed
+.agents/skills/linear/scripts/linear.sh cache projects list --state paused
 ```
 
 Store project IDs and metadata for cross-project analysis.
@@ -55,12 +55,12 @@ Store project IDs and metadata for cross-project analysis.
 
 **PROJECT**: Fetch all issues in target project (all states):
 ```bash
-$ISSUE_CLI cache issues list --project "[PROJECT]" --state "Backlog,Todo,In Progress,In Review,Done" --max
+.agents/skills/linear/scripts/linear.sh cache issues list --project "[PROJECT]" --state "Backlog,Todo,In Progress,In Review,Done" --max
 ```
 
 **ISSUES**: For existing issues, fetch each:
 ```bash
-$ISSUE_CLI cache issues get [ISSUE_ID]
+.agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID]
 ```
 For proposed issues, use provided fields directly.
 
@@ -68,7 +68,7 @@ For proposed issues, use provided fields directly.
 
 Fetch issues from ALL projects (from 1.2) for duplicate/obsolete/fit checking:
 ```bash
-$ISSUE_CLI cache issues list --project "[PROJECT_NAME]" --state "Backlog,Todo,In Progress,In Review,Done" --max
+.agents/skills/linear/scripts/linear.sh cache issues list --project "[PROJECT_NAME]" --state "Backlog,Todo,In Progress,In Review,Done" --max
 ```
 
 Run for each project. Store all issues for comparison in 6.
@@ -102,7 +102,7 @@ For each INPUT issue, extract from title + description:
 | **Creates** | New APIs, seams, types, tests this introduces |
 | **Consumes** | Existing APIs, seams, types this uses or extends |
 | **Problem** | What bug/gap/feature it addresses |
-| **Decisions** | Use decider skill: `$DECISIONS_CMD search "[TARGET_KEYWORDS]"` for decisions governing the target area. Flag if proposed approach contradicts an active decision |
+| **Decisions** | Use decider skill: `.agents/skills/decider/scripts/decisions search "[TARGET_KEYWORDS]"` for decisions governing the target area. Flag if proposed approach contradicts an active decision |
 
 **Build** contract table: `ID | Target | Creates | Consumes | Problem | Decision Conflict`
 
@@ -349,7 +349,7 @@ Detect issues that should be canceled because work is complete.
 
 **>=90% confidence required** to add to `obsolete[]`.
 
-**Decision-eliminated issues**: When `DECISION_REF` is present, also detect issues made unnecessary by the decision changing approach (not scope). Use decider skill's `$DECISIONS_CMD get [DECISION_REF]` to locate the file.
+**Decision-eliminated issues**: When `DECISION_REF` is present, also detect issues made unnecessary by the decision changing approach (not scope). Use decider skill's `.agents/skills/decider/scripts/decisions get [DECISION_REF]` to locate the file.
 
 1. **Read decision** document (path from decider CLI output)
 2. **Extract eliminated patterns**: From Context/Decision, identify approaches explicitly replaced

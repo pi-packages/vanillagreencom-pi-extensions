@@ -1,6 +1,6 @@
 # Post Summary Workflow
 
-> **Dependencies**: `$ISSUE_CLI`, `$GIT_HOST_CLI`, `$WORKTREE_CLI`, `scripts/workflow-state`
+> **Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/github/scripts/github.sh`, `.agents/skills/worktree/scripts/worktree`, `.agents/skills/orchestration/scripts/workflow-state`
 
 Post summary comments to git host and issue tracker, and selective handoff comments to downstream issues.
 
@@ -22,11 +22,11 @@ Post summary comments to git host and issue tracker, and selective handoff comme
 ```bash
 # Extract issue from branch if not provided
 ISSUE_ID=$(git rev-parse --abbrev-ref HEAD | grep -oiP "$ISSUE_PATTERN")
-WT_PATH=$($WORKTREE_CLI path $ISSUE_ID 2>/dev/null || echo ".")
-PR_NUMBER=$($GIT_HOST_CLI -C "$WT_PATH" pr-view --json number 2>/dev/null | jq -r .number)
+WT_PATH=$(.agents/skills/worktree/scripts/worktree path $ISSUE_ID 2>/dev/null || echo ".")
+PR_NUMBER=$(.agents/skills/github/scripts/github.sh -C "$WT_PATH" pr-view --json number 2>/dev/null | jq -r .number)
 # Init workflow state if not exists
-if ! scripts/workflow-state exists $ISSUE_ID; then
-  scripts/workflow-state init $ISSUE_ID --worktree "$WT_PATH" --branch "$(git rev-parse --abbrev-ref HEAD)"
+if ! .agents/skills/orchestration/scripts/workflow-state exists $ISSUE_ID; then
+  .agents/skills/orchestration/scripts/workflow-state init $ISSUE_ID --worktree "$WT_PATH" --branch "$(git rev-parse --abbrev-ref HEAD)"
 fi
 ```
 
@@ -36,19 +36,19 @@ fi
 
 1. **Read state**:
    ```bash
-   FIXED_COUNT=$(scripts/workflow-state get [ISSUE_ID] '.fixed_items | length')
-   ESCALATED_COUNT=$(scripts/workflow-state get [ISSUE_ID] '.escalated_items | length')
-   AUDIT_ISSUES=$(scripts/workflow-state get [ISSUE_ID] '.audit_issues_created | length')
-   PR_ISSUES=$(scripts/workflow-state get [ISSUE_ID] '.pr_comment_review.issues_created | length')
-   CYCLES=$(scripts/workflow-state get [ISSUE_ID] .cycles)
+   FIXED_COUNT=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] '.fixed_items | length')
+   ESCALATED_COUNT=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] '.escalated_items | length')
+   AUDIT_ISSUES=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] '.audit_issues_created | length')
+   PR_ISSUES=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] '.pr_comment_review.issues_created | length')
+   CYCLES=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] .cycles)
    ```
 
 2. **Skip if** `FIXED_COUNT == 0` AND `AUDIT_ISSUES == 0` AND `PR_ISSUES == 0` AND `ESCALATED_COUNT == 0`. → § 2
 
 3. **Post to git host and issue tracker** — consolidate all review cycle results from state:
    ```bash
-   $GIT_HOST_CLI post-comment [PR_NUMBER] "[SUMMARY_CONTENT]"
-   $ISSUE_CLI comments create [ISSUE_ID] --body "[SUMMARY_CONTENT]"
+   .agents/skills/github/scripts/github.sh post-comment [PR_NUMBER] "[SUMMARY_CONTENT]"
+   .agents/skills/linear/scripts/linear.sh comments create [ISSUE_ID] --body "[SUMMARY_CONTENT]"
    ```
 
    **Summary content template** (omit empty sections):
@@ -86,7 +86,7 @@ fi
 
 ## 2. Post Handoff Comments (selective)
 
-1. **Check unblocked issues**: `$ISSUE_CLI cache issues get [ISSUE_ID] | jq '.blocks'`
+1. **Check unblocked issues**: `.agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID] | jq '.blocks'`
 
 2. **Evaluate conditions** — post handoff only if:
    - Downstream description references files touched in this PR
@@ -97,7 +97,7 @@ fi
 
 4. **Post handoff** (if conditions met):
    ```bash
-   $ISSUE_CLI comments create [DOWNSTREAM_ISSUE_ID] --body "Handoff from [ISSUE_ID]:
+   .agents/skills/linear/scripts/linear.sh comments create [DOWNSTREAM_ISSUE_ID] --body "Handoff from [ISSUE_ID]:
    - [RELEVANT_CONTEXT]"
    ```
 

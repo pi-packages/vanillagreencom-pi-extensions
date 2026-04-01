@@ -1,6 +1,6 @@
 # Roadmap Creation Workflow
 
-> **Dependencies**: `$ISSUE_CLI`, `schemas/audit-issues-input.md`
+> **Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `schemas/audit-issues-input.md`
 
 Execute approved roadmap plan and create entities in issue tracker.
 
@@ -133,7 +133,7 @@ For each conflict:
 
 1. **List active initiatives**:
    ```bash
-   $ISSUE_CLI cache initiatives list --status Active
+   .agents/skills/linear/scripts/linear.sh cache initiatives list --status Active
    ```
 
 2. **Ask user**:
@@ -156,7 +156,7 @@ For each conflict:
 - Initiative description (multi-month objective)
 
 ```bash
-$ISSUE_CLI initiatives create \
+.agents/skills/linear/scripts/linear.sh initiatives create \
   --name "[INITIATIVE_NAME]" \
   --description "[DESCRIPTION]"
 ```
@@ -167,7 +167,7 @@ Store `INITIATIVE_ID`.
 
 1. **Create project**:
    ```bash
-   $ISSUE_CLI projects create \
+   .agents/skills/linear/scripts/linear.sh projects create \
      --name "[PROJECT_NAME]" \
      --description "[PROJECT_DESC]" \
      --state "planned"
@@ -180,7 +180,7 @@ Store `INITIATIVE_ID`.
 **Skip if** `INITIATIVE_ID` is null.
 
 ```bash
-$ISSUE_CLI initiatives add-project [INITIATIVE_ID] --project [PROJECT_ID]
+.agents/skills/linear/scripts/linear.sh initiatives add-project [INITIATIVE_ID] --project [PROJECT_ID]
 ```
 
 ---
@@ -195,8 +195,8 @@ For each relation in plan:
 
 | Relation | Command |
 |----------|---------|
-| blocked-by | `$ISSUE_CLI projects add-dependency [PROJECT_ID] --blocked-by [OTHER_PROJECT_ID]` |
-| blocks | `$ISSUE_CLI projects add-dependency [OTHER_PROJECT_ID] --blocked-by [PROJECT_ID]` |
+| blocked-by | `.agents/skills/linear/scripts/linear.sh projects add-dependency [PROJECT_ID] --blocked-by [OTHER_PROJECT_ID]` |
+| blocks | `.agents/skills/linear/scripts/linear.sh projects add-dependency [OTHER_PROJECT_ID] --blocked-by [PROJECT_ID]` |
 
 ---
 
@@ -214,8 +214,8 @@ Project ordering handled when `/audit-issues project-order` runs. That workflow 
    | Selection | Action |
    |-----------|--------|
    | Auto-place | → § 6 |
-   | Place after | `$ISSUE_CLI projects set-sort-order [PROJECT_ID] --after [REF_PROJECT_ID]` → § 6 |
-   | Place before | `$ISSUE_CLI projects set-sort-order [PROJECT_ID] --before [REF_PROJECT_ID]` → § 6 |
+   | Place after | `.agents/skills/linear/scripts/linear.sh projects set-sort-order [PROJECT_ID] --after [REF_PROJECT_ID]` → § 6 |
+   | Place before | `.agents/skills/linear/scripts/linear.sh projects set-sort-order [PROJECT_ID] --before [REF_PROJECT_ID]` → § 6 |
 
 ---
 
@@ -339,7 +339,7 @@ Source: `"roadmap-create"` | Parent issue: from `hierarchy_recommendation` in ma
 
 For dependencies referencing issues outside `PROJECT_NAME`:
 ```bash
-$ISSUE_CLI issues add-relation [ISSUE_ID] --related [EXTERNAL_ISSUE_ID]
+.agents/skills/linear/scripts/linear.sh issues add-relation [ISSUE_ID] --related [EXTERNAL_ISSUE_ID]
 ```
 `blocks`/`blocked_by` require same project. Use `related` for cross-project informational links.
 
@@ -350,9 +350,9 @@ $ISSUE_CLI issues add-relation [ISSUE_ID] --related [EXTERNAL_ISSUE_ID]
 ### 7.1 Query Created Entities
 
 ```bash
-$ISSUE_CLI cache projects get [PROJECT_ID]
-$ISSUE_CLI cache projects list-dependencies [PROJECT_ID]
-$ISSUE_CLI cache issues list --project "[PROJECT_NAME]" --max
+.agents/skills/linear/scripts/linear.sh cache projects get [PROJECT_ID]
+.agents/skills/linear/scripts/linear.sh cache projects list-dependencies [PROJECT_ID]
+.agents/skills/linear/scripts/linear.sh cache issues list --project "[PROJECT_NAME]" --max
 ```
 
 ### 7.2 Verify Structure

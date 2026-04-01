@@ -27,7 +27,7 @@ Project-level configuration:
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| `$DECISIONS_CMD` | Path to decisions CLI | `scripts/decisions` |
+| `.agents/skills/decider/scripts/decisions` | Path to decisions CLI | `scripts/decisions` |
 | `$DECISIONS_DIR` | Path to decision documents directory | — (required) |
 
 ---
@@ -36,12 +36,12 @@ Project-level configuration:
 
 | Command | Purpose | Output |
 |---------|---------|--------|
-| `$DECISIONS_CMD search --issue [ID]` | Find decisions linked to an issue | JSON `[{id, decision, path}]` |
-| `$DECISIONS_CMD search "[KEYWORDS]"` | Ranked keyword search (AND, scored) | JSON `[{id, decision, path, score}]` |
-| `$DECISIONS_CMD search "a\|b"` | Regex OR search | JSON `[{id, decision, path}]` |
-| `$DECISIONS_CMD list` | List all active decisions | JSON `[{id, decision, path}]` |
-| `$DECISIONS_CMD next-id` | Get next available DXXX | Single `DXXX` line |
-| `$DECISIONS_CMD get [DXXX]` | Get decision details | JSON `{id, decision, status, date, path}` |
+| `.agents/skills/decider/scripts/decisions search --issue [ID]` | Find decisions linked to an issue | JSON `[{id, decision, path}]` |
+| `.agents/skills/decider/scripts/decisions search "[KEYWORDS]"` | Ranked keyword search (AND, scored) | JSON `[{id, decision, path, score}]` |
+| `.agents/skills/decider/scripts/decisions search "a\|b"` | Regex OR search | JSON `[{id, decision, path}]` |
+| `.agents/skills/decider/scripts/decisions list` | List all active decisions | JSON `[{id, decision, path}]` |
+| `.agents/skills/decider/scripts/decisions next-id` | Get next available DXXX | Single `DXXX` line |
+| `.agents/skills/decider/scripts/decisions get [DXXX]` | Get decision details | JSON `{id, decision, status, date, path}` |
 
 Options: `--limit N` (default: 5) for search results.
 
@@ -257,15 +257,15 @@ Choose the smallest template that covers the decision's scope.
 
 ## Create Decision Workflow
 
-> **Dependencies**: `$DECISIONS_CMD` (optional for next-id), project decision documents directory
+> **Dependencies**: `.agents/skills/decider/scripts/decisions` (optional for next-id), project decision documents directory
 
 ### 1. Assign Decision ID
 
 ```bash
-$DECISIONS_CMD next-id
+.agents/skills/decider/scripts/decisions next-id
 ```
 
-If `$DECISIONS_CMD` not configured: Read INDEX.md, find last DXXX row, increment by 1.
+If `.agents/skills/decider/scripts/decisions` not configured: Read INDEX.md, find last DXXX row, increment by 1.
 
 Generate a 2-5 word kebab-case descriptor from the decision summary.
 
@@ -336,7 +336,7 @@ Path: [project decision documents]/[DECISION_ID]-[DESCRIPTOR].md
 ### Before implementing (feasibility check)
 
 ```bash
-$DECISIONS_CMD search "[RELEVANT_KEYWORDS]"
+.agents/skills/decider/scripts/decisions search "[RELEVANT_KEYWORDS]"
 ```
 
 Find governing decisions. If matches found, **read the full decision file** — index summaries are insufficient.
@@ -344,7 +344,7 @@ Find governing decisions. If matches found, **read the full decision file** — 
 ### Before applying review fixes
 
 ```bash
-$DECISIONS_CMD search "[RELEVANT_KEYWORDS]"
+.agents/skills/decider/scripts/decisions search "[RELEVANT_KEYWORDS]"
 ```
 
 If review item contradicts an active decision, skip with reference (e.g., "Skipped — contradicts D010").
@@ -352,7 +352,7 @@ If review item contradicts an active decision, skip with reference (e.g., "Skipp
 ### During PR context gathering
 
 ```bash
-$DECISIONS_CMD search --issue [ISSUE_ID]
+.agents/skills/decider/scripts/decisions search --issue [ISSUE_ID]
 ```
 
 Collect decision IDs and summaries for delegation prompts. Include in PR body:

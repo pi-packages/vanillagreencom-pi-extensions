@@ -26,8 +26,8 @@ Read input file with Read tool. Extract `FEATURE`, `RESEARCH_PATH`, `ORIGIN_ISSU
 
 1. **Fetch origin issue** details:
    ```bash
-   $ISSUE_CLI cache issues get [ORIGIN_ISSUE_ID]
-   $ISSUE_CLI cache issues children [ORIGIN_ISSUE_ID] --recursive --format=safe
+   .agents/skills/linear/scripts/linear.sh cache issues get [ORIGIN_ISSUE_ID]
+   .agents/skills/linear/scripts/linear.sh cache issues children [ORIGIN_ISSUE_ID] --recursive --format=safe
    ```
 
 2. **Assess scope relationship**: Do proposed issues decompose the origin issue's scope, or extend beyond it?
@@ -44,10 +44,10 @@ Read input file with Read tool. Extract `FEATURE`, `RESEARCH_PATH`, `ORIGIN_ISSU
 
 1. **Query ALL project states** for cross-project analysis:
    ```bash
-   $ISSUE_CLI cache projects list --state started
-   $ISSUE_CLI cache projects list --state planned
-   $ISSUE_CLI cache projects list --state backlog
-   $ISSUE_CLI cache projects list --state completed
+   .agents/skills/linear/scripts/linear.sh cache projects list --state started
+   .agents/skills/linear/scripts/linear.sh cache projects list --state planned
+   .agents/skills/linear/scripts/linear.sh cache projects list --state backlog
+   .agents/skills/linear/scripts/linear.sh cache projects list --state completed
    ```
 
 2. **Store** project metadata: `id`, `name`, `state`, `description`, `content`.
@@ -56,7 +56,7 @@ Read input file with Read tool. Extract `FEATURE`, `RESEARCH_PATH`, `ORIGIN_ISSU
 
 1. **Fetch issues** for each project:
    ```bash
-   $ISSUE_CLI cache issues list --project "[PROJECT_NAME]" --state "Backlog,Todo,In Progress,In Review,Done" --max
+   .agents/skills/linear/scripts/linear.sh cache issues list --project "[PROJECT_NAME]" --state "Backlog,Todo,In Progress,In Review,Done" --max
    ```
 
 2. **Store** for comparison: `id`, `title`, `description`, `project`, `state`, `agent`, `blocked_by[]`, `blocks[]`.
@@ -112,7 +112,7 @@ Determine best project placement for the roadmap:
 For new project, determine relations:
 
 ```bash
-$ISSUE_CLI cache projects list-dependencies [PROJECT_ID]
+.agents/skills/linear/scripts/linear.sh cache projects list-dependencies [PROJECT_ID]
 ```
 
 | Check | Relation |

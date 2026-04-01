@@ -10,7 +10,7 @@ Analyze backlog, compute architecture order, and generate cycle plan recommendat
 
 1. **Fetch state**:
    ```bash
-   $ISSUE_CLI session-status
+   .agents/skills/linear/scripts/linear.sh session-status
    ```
 
 2. **Extract** from response:
@@ -54,7 +54,7 @@ Uses cycle scope history (estimation points per day), not issue counts.
 
 3. **Fallback** (if `completedScopeHistory` arrays are empty/missing — first cycle or no data):
    ```bash
-   $ISSUE_CLI cache issues list --project "[ACTIVE_PROJECT]" --state "Done" --updated-since 14d --max
+   .agents/skills/linear/scripts/linear.sh cache issues list --project "[ACTIVE_PROJECT]" --state "Done" --updated-since 14d --max
    ```
    Sum `.estimate` fields: `jq '[.[].estimate // 0] | add'`
    Split by `updated_at` into current (7d) and previous (7-14d) windows.
@@ -73,7 +73,7 @@ Uses cycle scope history (estimation points per day), not issue counts.
 
 1. **Use `.issues.backlog`** from 1.1. If empty:
    ```bash
-   $ISSUE_CLI cache issues list --project "[ACTIVE_PROJECT]" --state "Backlog" --max
+   .agents/skills/linear/scripts/linear.sh cache issues list --project "[ACTIVE_PROJECT]" --state "Backlog" --max
    ```
 
    **Filter**: Exclude sub-issues (`parent_id` non-empty) — plan parents only; children follow via cycle-plan 4.2 bundle cascade. `.issues.backlog` already excludes sub-issues; apply the same filter to fallback cache queries.
@@ -184,8 +184,8 @@ Architecture order determines new priority for cycle assignment:
 
 2. **Fetch health metrics**:
    ```bash
-   $ISSUE_CLI cache issues list --project "[ACTIVE_PROJECT]" --state "In Progress" --max
-   $ISSUE_CLI cache issues list --project "[ACTIVE_PROJECT]" --label "blocked" --max
+   .agents/skills/linear/scripts/linear.sh cache issues list --project "[ACTIVE_PROJECT]" --state "In Progress" --max
+   .agents/skills/linear/scripts/linear.sh cache issues list --project "[ACTIVE_PROJECT]" --label "blocked" --max
    ```
 
 3. **Compute** for 1.7:

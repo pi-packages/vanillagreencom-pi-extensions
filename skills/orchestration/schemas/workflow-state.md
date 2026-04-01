@@ -82,12 +82,12 @@ Persistent state file for orchestration workflows. Initialized during session st
 
 ## CLI
 
-All operations use `scripts/workflow-state`. Run `scripts/workflow-state help` for full usage.
+All operations use `.agents/skills/orchestration/scripts/workflow-state`. Run `.agents/skills/orchestration/scripts/workflow-state help` for full usage.
 
 ```bash
-scripts/workflow-state init PROJ-123 --agent backend --worktree /tmp/wt
-scripts/workflow-state get PROJ-123 .cycles
-scripts/workflow-state increment PROJ-123 cycles
-scripts/workflow-state append PROJ-123 json_paths "review.json"
-scripts/workflow-state set PROJ-123 pr_review_baseline '{"last_ts":"2026-01-28","last_threads":2}'
+.agents/skills/orchestration/scripts/workflow-state init PROJ-123 --agent backend --worktree /tmp/wt
+.agents/skills/orchestration/scripts/workflow-state get PROJ-123 .cycles
+.agents/skills/orchestration/scripts/workflow-state increment PROJ-123 cycles
+.agents/skills/orchestration/scripts/workflow-state append PROJ-123 json_paths "review.json"
+.agents/skills/orchestration/scripts/workflow-state set PROJ-123 pr_review_baseline '{"last_ts":"2026-01-28","last_threads":2}'
 ```

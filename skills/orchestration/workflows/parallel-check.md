@@ -1,6 +1,6 @@
 # Parallel Work Check
 
-> **Dependencies**: `$ISSUE_CLI`, `$WORKTREE_CLI`, `scripts/parallel-groups`
+> **Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/worktree/scripts/worktree`, `.agents/skills/orchestration/scripts/parallel-groups`
 
 Verify issues have zero cross-dependencies before parallel execution.
 
@@ -21,7 +21,7 @@ If arguments match issue ID pattern → use directly as `[ISSUES]`. Set `source:
 If first argument does NOT match issue ID pattern, treat as project name:
 
 ```bash
-$ISSUE_CLI cache issues list --project "[ARG]" --state "Todo" --format=ids
+.agents/skills/linear/scripts/linear.sh cache issues list --project "[ARG]" --state "Todo" --format=ids
 ```
 
 Use output directly as `[ISSUES]` (one identifier per line). Fail if < 2 issues. Set `source: "project"`.
@@ -32,7 +32,7 @@ Use output directly as `[ISSUES]` (one identifier per line). Fail if < 2 issues.
 
 ```bash
 for ISSUE in [ISSUES]; do
-  $ISSUE_CLI cache issues get $ISSUE --with-bundle
+  .agents/skills/linear/scripts/linear.sh cache issues get $ISSUE --with-bundle
 done
 ```
 
@@ -85,7 +85,7 @@ For each issue, check if any `blockedBy` issue has the `research` label and stat
 
 ```bash
 for BLOCKER in [BLOCKED_BY]; do
-  $ISSUE_CLI cache issues get $BLOCKER --format=compact
+  .agents/skills/linear/scripts/linear.sh cache issues get $BLOCKER --format=compact
 done
 ```
 
@@ -181,7 +181,7 @@ Detect existing parallel work to inform merge order.
 ### 8.1 Existing Worktrees
 
 ```bash
-$WORKTREE_CLI list
+.agents/skills/worktree/scripts/worktree list
 ```
 
 Cross-reference with issue set:
@@ -254,7 +254,7 @@ Persist regardless of verdict (prevents re-analysis on next `/start`). Stale fin
 
 1. **Build fingerprints**: For each top-level issue, use its own `updated_at`. For bundle children, use `children_fingerprints`:
    ```bash
-   $ISSUE_CLI cache issues get [ISSUE_ID] | jq -r '.updated_at'
+   .agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID] | jq -r '.updated_at'
    ```
 
 2. **Identify groups to persist** (apply § 4.1 grouping constraints when forming groups):
@@ -282,9 +282,9 @@ Persist regardless of verdict (prevents re-analysis on next `/start`). Stale fin
 
    `children_fingerprints`: all children of any bundle in the group. Empty `{}` if no bundles.
 
-4. **Clear existing groups**: `scripts/parallel-groups clear`
+4. **Clear existing groups**: `.agents/skills/orchestration/scripts/parallel-groups clear`
 
-5. **Write each group**: `scripts/parallel-groups write '$GROUP_JSON'`
+5. **Write each group**: `.agents/skills/orchestration/scripts/parallel-groups write '$GROUP_JSON'`
 
 ---
 

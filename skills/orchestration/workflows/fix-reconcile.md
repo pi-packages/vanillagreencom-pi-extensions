@@ -1,6 +1,6 @@
 # Fix Reconciliation
 
-> **Dependencies**: `$ISSUE_CLI`, `scripts/workflow-state`
+> **Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/orchestration/scripts/workflow-state`
 
 Batch workflow to check if applied fixes address existing open issues. Processes **all fixes at once**.
 
@@ -21,8 +21,8 @@ Batch workflow to check if applied fixes address existing open issues. Processes
 
 1. **Read state**:
    ```bash
-   REVIEW_FIXES=$(scripts/workflow-state get [ISSUE_ID] '.fixed_items // []')
-   PR_FIXES=$(scripts/workflow-state get [ISSUE_ID] '.pr_comment_review.fixes // []')
+   REVIEW_FIXES=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] '.fixed_items // []')
+   PR_FIXES=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] '.pr_comment_review.fixes // []')
    ```
 
 2. **Merge** both arrays into `fixes`. Deduplicate by description.
@@ -48,7 +48,7 @@ Combine into single query pattern: `keyword1|keyword2|keyword3|...`
 ```bash
 KEYWORDS="inner exception|exception chain|fallback|stderr|race condition|producer"
 
-$ISSUE_CLI cache issues list --state "Backlog,Todo" --project "[CURRENT_PROJECT]" --max --search "$KEYWORDS"
+.agents/skills/linear/scripts/linear.sh cache issues list --state "Backlog,Todo" --project "[CURRENT_PROJECT]" --max --search "$KEYWORDS"
 ```
 
 **Store results** as `existing_issues`.
@@ -123,17 +123,17 @@ Execute **all** selected actions:
 ### close
 
 ```bash
-$ISSUE_CLI comments create [ISSUE_ID] --body "Addressed in PR #[PR_NUMBER] (commit [SHA]).
+.agents/skills/linear/scripts/linear.sh comments create [ISSUE_ID] --body "Addressed in PR #[PR_NUMBER] (commit [SHA]).
 
 Fix applied: [DESCRIPTION]"
-$ISSUE_CLI issues update [ISSUE_ID] --state "Done"
+.agents/skills/linear/scripts/linear.sh issues update [ISSUE_ID] --state "Done"
 ```
 
 ### descope
 
 ```bash
-$ISSUE_CLI issues update [ISSUE_ID] --description "[UPDATED_DESCRIPTION]"
-$ISSUE_CLI comments create [ISSUE_ID] --body "Partially addressed in PR #[PR_NUMBER].
+.agents/skills/linear/scripts/linear.sh issues update [ISSUE_ID] --description "[UPDATED_DESCRIPTION]"
+.agents/skills/linear/scripts/linear.sh comments create [ISSUE_ID] --body "Partially addressed in PR #[PR_NUMBER].
 
 **Done**: [what was fixed]
 **Remaining**: [what's left]"

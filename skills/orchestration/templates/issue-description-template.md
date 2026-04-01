@@ -40,12 +40,12 @@ Standard format for issue tracker descriptions created by workflows. Match the s
 2. **Use fields directly** — review agents write issue-quality `description` and `recommendation`; no expansion needed at assembly time
 3. **Omit empty lines** — drop Research, Decision, Context lines with no data
 4. **No escaped newlines in heredoc** — write actual newlines. JSON `\n` sequences become real newlines when the agent writes the heredoc content
-5. **Check decisions before creating** — `$DECISIONS_CMD search "[RELEVANT_KEYWORDS]"` to check if the proposed approach is governed by an active decision. Description must not contradict it. Reference the decision at the top of the description
+5. **Check decisions before creating** — `.agents/skills/decider/scripts/decisions search "[RELEVANT_KEYWORDS]"` to check if the proposed approach is governed by an active decision. Description must not contradict it. Reference the decision at the top of the description
 
 ## CLI Usage
 
 ```bash
-$ISSUE_CLI issues create \
+.agents/skills/linear/scripts/linear.sh issues create \
   --title "[TITLE]" \
   --project "[PROJECT]" \
   --labels "[LABELS]" \

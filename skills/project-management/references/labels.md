@@ -42,7 +42,7 @@ Agent labels are special — MUST have agent definition AND parent group.
 2. **Update** project label taxonomy
 3. **tpm** creates label:
    ```bash
-   $ISSUE_CLI labels create --name "agent:[NAME]" --color "#9C27B0" --parent "Agent"
+   .agents/skills/linear/scripts/linear.sh labels create --name "agent:[NAME]" --color "#9C27B0" --parent "Agent"
    ```
 
 **TPM should NOT create any labels unprompted** — even workflow or classification labels require explicit user authorization. `agent:*` labels additionally require the agent definition and taxonomy entry to exist first.
@@ -51,13 +51,13 @@ Agent labels are special — MUST have agent definition AND parent group.
 
 ```bash
 # Workflow labels (no parent - independent)
-$ISSUE_CLI labels create --name "needs-[ACTION]" --color "#757575"
+.agents/skills/linear/scripts/linear.sh labels create --name "needs-[ACTION]" --color "#757575"
 
 # Classification labels (no parent - independent)
-$ISSUE_CLI labels create --name "[TYPE]" --color "#E53935"
+.agents/skills/linear/scripts/linear.sh labels create --name "[TYPE]" --color "#E53935"
 
 # Stack labels (requires review)
-$ISSUE_CLI labels create --name "[STACK_NAME]" --color "#FF6B35"
+.agents/skills/linear/scripts/linear.sh labels create --name "[STACK_NAME]" --color "#FF6B35"
 ```
 
 After creating, update project label taxonomy.

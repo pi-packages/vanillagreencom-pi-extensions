@@ -1,6 +1,6 @@
 # Start New Issue Workflow
 
-> **Dependencies**: issue tracker CLI (`$ISSUE_CLI`), worktree CLI (`$WORKTREE_CLI`), open-terminal
+> **Dependencies**: issue tracker CLI (`.agents/skills/linear/scripts/linear.sh`), worktree CLI (`.agents/skills/worktree/scripts/worktree`), open-terminal
 >
 > **Requires**: issue tracker CLI (e.g., linear skill), worktree management CLI (e.g., worktree skill)
 
@@ -19,7 +19,7 @@ Create a new issue from scratch, set up worktree, and launch session.
 
 1. **Sync cache**:
    ```bash
-   $ISSUE_CLI sync --reconcile
+   .agents/skills/linear/scripts/linear.sh sync --reconcile
    ```
 
 2. **If title provided** as argument → set `TITLE`, skip to step 3.
@@ -40,7 +40,7 @@ Create a new issue from scratch, set up worktree, and launch session.
 
 1. **List active projects**:
    ```bash
-   $ISSUE_CLI cache projects list --state started --format=compact
+   .agents/skills/linear/scripts/linear.sh cache projects list --state started --format=compact
    ```
 
 2. **Suggest project** — infer from title/description keywords (project-configurable keyword-to-project mapping):
@@ -74,7 +74,7 @@ Always create as a parent + sub-issue pair. Parent coordinates, child implements
 
 2. **Create parent issue**:
    ```bash
-   $ISSUE_CLI issues create \
+   .agents/skills/linear/scripts/linear.sh issues create \
      --title "[PARENT_TITLE]" \
      --project "[PROJECT_ID]" \
      --description "## Sub-Issues\n\n- (pending creation)" \
@@ -85,7 +85,7 @@ Always create as a parent + sub-issue pair. Parent coordinates, child implements
 
 3. **Create sub-issue**:
    ```bash
-   $ISSUE_CLI issues create \
+   .agents/skills/linear/scripts/linear.sh issues create \
      --title "[CHILD_TITLE]" \
      --project "[PROJECT_ID]" \
      --parent "[PARENT_ID]" \
@@ -97,7 +97,7 @@ Always create as a parent + sub-issue pair. Parent coordinates, child implements
 
 4. **Update parent description** with actual child ID:
    ```bash
-   $ISSUE_CLI issues update [PARENT_ID] \
+   .agents/skills/linear/scripts/linear.sh issues update [PARENT_ID] \
      --description "## Sub-Issues\n\n- [CHILD_ID]: [CHILD_TITLE]"
    ```
 
@@ -118,7 +118,7 @@ Always create as a parent + sub-issue pair. Parent coordinates, child implements
 
 ## 3. Create Worktree & Launch
 
-1. **Run check**: `$WORKTREE_CLI check` — returns `{uncommitted, unpushed, unpushed_commits}`
+1. **Run check**: `.agents/skills/worktree/scripts/worktree check` — returns `{uncommitted, unpushed, unpushed_commits}`
 
 2. **If uncommitted** → Ask user: `Stash` | `Commit` | `Continue anyway`
 
@@ -129,19 +129,13 @@ Always create as a parent + sub-issue pair. Parent coordinates, child implements
    git push origin "$DEFAULT_BRANCH"
    ```
 
-4. **Create worktree**: `WT_PATH=$($WORKTREE_CLI create [ISSUE_ID])`
+4. **Create worktree**: `WT_PATH=$(.agents/skills/worktree/scripts/worktree create [ISSUE_ID])`
 
-5. **Build launch command** (harness-specific, e.g.):
-
-   ```
-   [HARNESS_CMD] --session [ISSUE_ID] '/start [ISSUE_ID]'
-   ```
-
-6. **Open terminal**:
-   - **tmux** (`$TMUX` set) → launch directly, no prompt: `scripts/open-terminal [WT_PATH] --tmux [ISSUE_ID] --title [ISSUE_ID] --cmd [LAUNCH_CMD]`
+5. **Open terminal**:
+   - **tmux** (`$TMUX` set) → launch directly, no prompt: `.agents/skills/orchestration/scripts/open-terminal [WT_PATH] --tmux [ISSUE_ID] --title [ISSUE_ID]`
    - **Otherwise** → Ask user: `Auto-open terminal` | `I'll open it myself`
-     - **Auto**: `scripts/open-terminal [WT_PATH] --title [ISSUE_ID] --cmd [LAUNCH_CMD]`
-     - **Manual**: Output "Worktree ready at `[WT_PATH]`." and the launch command for copy-paste.
+     - **Auto**: `.agents/skills/orchestration/scripts/open-terminal [WT_PATH] --title [ISSUE_ID]`
+     - **Manual**: Output "Worktree ready at `[WT_PATH]`."
 
    Output: "Opened [tmux window / terminal] for [ISSUE_ID]. This session is complete."
 

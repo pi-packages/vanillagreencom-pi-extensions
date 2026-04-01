@@ -1,6 +1,6 @@
 # Dev Implementation Workflow
 
-> **Dependencies**: `$ISSUE_CLI`, `$WORKTREE_CLI`, `scripts/workflow-state`, `scripts/workflow-sections`, issue-lifecycle skill workflows
+> **Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/worktree/scripts/worktree`, `.agents/skills/orchestration/scripts/workflow-state`, `.agents/skills/orchestration/scripts/workflow-sections`, issue-lifecycle skill workflows
 
 Delegate development work to specialist agent(s). Handles single issues and bundled multi-agent work with handoff.
 
@@ -21,18 +21,18 @@ Delegate development work to specialist agent(s). Handles single issues and bund
 ```bash
 # Use argument if provided, else extract from branch
 ISSUE_ID=${ARG:-$(git rev-parse --abbrev-ref HEAD | grep -oiP "$ISSUE_PATTERN")}
-WT_PATH=$($WORKTREE_CLI path $ISSUE_ID 2>/dev/null || pwd)
+WT_PATH=$(.agents/skills/worktree/scripts/worktree path $ISSUE_ID 2>/dev/null || pwd)
 
 # Init workflow state if not exists
-if ! scripts/workflow-state exists $ISSUE_ID; then
+if ! .agents/skills/orchestration/scripts/workflow-state exists $ISSUE_ID; then
   # Check for parent context (start-new flow: sub-issue in parent's worktree)
-  PARENT_ID=$($ISSUE_CLI cache issues get $ISSUE_ID --format=compact | jq -r '.parent.identifier // empty')
-  if [[ -n "$PARENT_ID" ]] && scripts/workflow-state exists $PARENT_ID; then
-    TEAM=$(scripts/workflow-state get $PARENT_ID '.team_name // empty')
-    WT_PATH=$(scripts/workflow-state get $PARENT_ID '.worktree // empty')
-    scripts/workflow-state init $ISSUE_ID --worktree "$WT_PATH" --branch "$(git rev-parse --abbrev-ref HEAD)" --team "$TEAM"
+  PARENT_ID=$(.agents/skills/linear/scripts/linear.sh cache issues get $ISSUE_ID --format=compact | jq -r '.parent.identifier // empty')
+  if [[ -n "$PARENT_ID" ]] && .agents/skills/orchestration/scripts/workflow-state exists $PARENT_ID; then
+    TEAM=$(.agents/skills/orchestration/scripts/workflow-state get $PARENT_ID '.team_name // empty')
+    WT_PATH=$(.agents/skills/orchestration/scripts/workflow-state get $PARENT_ID '.worktree // empty')
+    .agents/skills/orchestration/scripts/workflow-state init $ISSUE_ID --worktree "$WT_PATH" --branch "$(git rev-parse --abbrev-ref HEAD)" --team "$TEAM"
   else
-    scripts/workflow-state init $ISSUE_ID --worktree "$WT_PATH" --branch "$(git rev-parse --abbrev-ref HEAD)"
+    .agents/skills/orchestration/scripts/workflow-state init $ISSUE_ID --worktree "$WT_PATH" --branch "$(git rev-parse --abbrev-ref HEAD)"
   fi
 fi
 ```
@@ -44,7 +44,7 @@ fi
 `agent:X` label → X | No label → infer from component paths.
 
 ```bash
-$ISSUE_CLI cache issues get [ISSUE_ID] --format=compact | jq -r '.labels[]'
+.agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID] --format=compact | jq -r '.labels[]'
 ```
 
 ---
@@ -55,7 +55,7 @@ $ISSUE_CLI cache issues get [ISSUE_ID] --format=compact | jq -r '.labels[]'
 
 **Detect team context**:
 ```bash
-TEAM=$(scripts/workflow-state get [ISSUE_ID] '.team_name // empty')
+TEAM=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] '.team_name // empty')
 ```
 
 ### If Single Issue
@@ -64,7 +64,7 @@ TEAM=$(scripts/workflow-state get [ISSUE_ID] '.team_name // empty')
 
 1. **Create agent tasks**:
    ```bash
-   scripts/workflow-sections [path-to-issue-lifecycle-dev-implement-workflow] --agent "dev-implement" --emoji "🐲"
+   .agents/skills/orchestration/scripts/workflow-sections [path-to-issue-lifecycle-dev-implement-workflow] --agent "dev-implement" --emoji "🐲"
    ```
    Create task for each section (via harness task API).
 
@@ -112,7 +112,7 @@ Blocks: [BLOCKED_ISSUE_IDS or "none"]
 
 a. For each sub-issue completed by any prior agent group (cumulative, not just the latest):
    ```bash
-   $ISSUE_CLI cache comments list [COMPLETED_ISSUE_ID] | jq -r '.[] | select(.body | contains("Handoff Notes")) | .body'
+   .agents/skills/linear/scripts/linear.sh cache comments list [COMPLETED_ISSUE_ID] | jq -r '.[] | select(.body | contains("Handoff Notes")) | .body'
    ```
 b. Extract "Handoff Notes" sections. Combine into a single block.
 c. Include in next delegation as the `Handoff from prior agents:` field (see delegation format below).
@@ -212,7 +212,7 @@ Handoff from prior agents:
    git -C "[WORKTREE_PATH]" log -1 --oneline
 
    # Check state + summary (auto-includes pending children from bundle)
-   $ISSUE_CLI issues validate-completion [ISSUE_ID] --include-children-of [ISSUE_ID]
+   .agents/skills/linear/scripts/linear.sh issues validate-completion [ISSUE_ID] --include-children-of [ISSUE_ID]
    ```
 
 2. **Evaluate results**:
@@ -232,8 +232,8 @@ Handoff from prior agents:
 
 4. **Store QA state**:
    ```bash
-   scripts/workflow-state set [ISSUE_ID] qa_labels '[QA_LABELS_ARRAY]'
-   scripts/workflow-state set [ISSUE_ID] sub_issues '[SUB_ISSUE_IDS_ARRAY]'
+   .agents/skills/orchestration/scripts/workflow-state set [ISSUE_ID] qa_labels '[QA_LABELS_ARRAY]'
+   .agents/skills/orchestration/scripts/workflow-state set [ISSUE_ID] sub_issues '[SUB_ISSUE_IDS_ARRAY]'
    ```
 
 5. **If validate failures reported**: Investigate, suggest sub-issue (summary, steps, agent). Ask user before creating.

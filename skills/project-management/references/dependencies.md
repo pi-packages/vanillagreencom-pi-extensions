@@ -79,13 +79,13 @@ See issue tracker CLI skill for commands (`issues add-relation`, `issues list-re
 
 ```bash
 # This issue blocks another
-$ISSUE_CLI issues add-relation [ISSUE_ID] --blocks [OTHER_ISSUE_ID]
+.agents/skills/linear/scripts/linear.sh issues add-relation [ISSUE_ID] --blocks [OTHER_ISSUE_ID]
 
 # This issue is blocked by another
-$ISSUE_CLI issues add-relation [ISSUE_ID] --blocked-by [BLOCKER_ID]
+.agents/skills/linear/scripts/linear.sh issues add-relation [ISSUE_ID] --blocked-by [BLOCKER_ID]
 
 # View all relations
-$ISSUE_CLI cache issues list-relations [ISSUE_ID]
+.agents/skills/linear/scripts/linear.sh cache issues list-relations [ISSUE_ID]
 ```
 
 ## Project Dependencies
@@ -94,10 +94,10 @@ Use when one project must complete before another can start.
 
 ```bash
 # This project depends on another
-$ISSUE_CLI projects add-dependency [PROJECT_ID] --blocked-by [OTHER_PROJECT_ID]
+.agents/skills/linear/scripts/linear.sh projects add-dependency [PROJECT_ID] --blocked-by [OTHER_PROJECT_ID]
 
 # View dependencies
-$ISSUE_CLI cache projects list-dependencies [PROJECT_ID]
+.agents/skills/linear/scripts/linear.sh cache projects list-dependencies [PROJECT_ID]
 ```
 
 **Visualization**: In issue tracker timeline view:
@@ -109,13 +109,13 @@ $ISSUE_CLI cache projects list-dependencies [PROJECT_ID]
 ### Cycle Planning
 
 When pulling issues:
-1. Query blocked issues: `$ISSUE_CLI cache issues list --label "blocked" --max`
-2. Check issue relations: `$ISSUE_CLI cache issues list-relations [ISSUE_ID]`
+1. Query blocked issues: `.agents/skills/linear/scripts/linear.sh cache issues list --label "blocked" --max`
+2. Check issue relations: `.agents/skills/linear/scripts/linear.sh cache issues list-relations [ISSUE_ID]`
 3. Score higher on Dependencies factor for issues that block many others
 
 ### Roadmap Review
 
-1. Check project dependencies: `$ISSUE_CLI cache projects list-dependencies [PROJECT_ID]`
+1. Check project dependencies: `.agents/skills/linear/scripts/linear.sh cache projects list-dependencies [PROJECT_ID]`
 2. Look for violated dependencies (red lines in timeline)
 3. Adjust project dates or priorities accordingly
 
@@ -124,7 +124,7 @@ When pulling issues:
 ### Adding a Blocker
 
 1. Identify what's blocking
-2. **If tracked issue**: `$ISSUE_CLI issues add-relation [ISSUE_ID] --blocked-by [BLOCKER_ID]`
+2. **If tracked issue**: `.agents/skills/linear/scripts/linear.sh issues add-relation [ISSUE_ID] --blocked-by [BLOCKER_ID]`
 3. **If external**: Add `blocked` label + comment explaining blocker
 4. Update issue state if needed
 

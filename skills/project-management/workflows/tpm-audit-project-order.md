@@ -10,11 +10,11 @@ Analyze project architectural dependencies, verify/fix ordering, handle state tr
 
 1. **Fetch all projects and initiatives**:
    ```bash
-   $ISSUE_CLI cache initiatives list
-   $ISSUE_CLI cache projects list --state started
-   $ISSUE_CLI cache projects list --state planned
-   $ISSUE_CLI cache projects list --state backlog
-   $ISSUE_CLI cache projects list --state completed
+   .agents/skills/linear/scripts/linear.sh cache initiatives list
+   .agents/skills/linear/scripts/linear.sh cache projects list --state started
+   .agents/skills/linear/scripts/linear.sh cache projects list --state planned
+   .agents/skills/linear/scripts/linear.sh cache projects list --state backlog
+   .agents/skills/linear/scripts/linear.sh cache projects list --state completed
    ```
 
 2. **Record** for projects: `id`, `name`, `state`, `progress`, `sort_order`, `blocked_by[]`, `blocks[]`, `description`, `content`
@@ -53,7 +53,7 @@ From `name` + `description` + `content`:
 
 1. **Fetch issues**:
    ```bash
-   $ISSUE_CLI cache issues list --project "[PROJECT_NAME]" --state "Backlog,Todo,In Progress" --max
+   .agents/skills/linear/scripts/linear.sh cache issues list --project "[PROJECT_NAME]" --state "Backlog,Todo,In Progress" --max
    ```
 
 2. **Extract** from issue titles/descriptions:

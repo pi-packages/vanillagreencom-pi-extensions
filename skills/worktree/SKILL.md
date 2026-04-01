@@ -45,9 +45,8 @@ All optional. `.env.local` itself is always symlinked into worktrees.
 
 ## Skill Invocation
 
-When user runs `/worktree`, parse arguments and run `$WORKTREE_CLI`:
-- `/worktree create PROJ-123` → `$WORKTREE_CLI create PROJ-123`
-- `/worktree list` → `$WORKTREE_CLI list`
-- `/worktree remove PROJ-123` → `$WORKTREE_CLI remove PROJ-123`
+When user runs `/worktree`, parse arguments and run `.agents/skills/worktree/scripts/worktree`:
+- `/worktree create PROJ-123` → `.agents/skills/worktree/scripts/worktree create PROJ-123`
+- `/worktree list` → `.agents/skills/worktree/scripts/worktree list`
+- `/worktree remove PROJ-123` → `.agents/skills/worktree/scripts/worktree remove PROJ-123`
 
-> `$WORKTREE_CLI` is set in `.env.local` (defaults to `.agents/skills/worktree/scripts/worktree`).

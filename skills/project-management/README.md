@@ -31,18 +31,17 @@ skills/project-management/
 
 ## Skill Dependencies
 
-This skill requires an issue tracker CLI for all read/write operations. Configure the `$ISSUE_CLI` variable to point to your issue tracker's CLI tool.
+This skill requires an issue tracker CLI for all read/write operations. Configure the `.agents/skills/linear/scripts/linear.sh` variable to point to your issue tracker's CLI tool.
 
 | Dependency | Purpose | Variable |
 |------------|---------|----------|
-| Issue tracker CLI (e.g., `linear` skill) | Issue CRUD, cache, comments, labels, relations | `$ISSUE_CLI` |
+| Issue tracker CLI (e.g., `linear` skill) | Issue CRUD, cache, comments, labels, relations | `.agents/skills/linear/scripts/linear.sh` |
 
 ## Configuration Variables
 
 | Variable | Required | Purpose | Example |
 |----------|----------|---------|---------|
-| `$ISSUE_CLI` | Yes | Path or alias to issue tracker CLI | `issue-tracker-cli`, `gh issue`, custom script |
-| `$VALIDATE_CMD` | No | Build + test + lint command | `make validate`, `npm test` |
+| `.agents/skills/linear/scripts/linear.sh` | Yes | Path or alias to issue tracker CLI | `issue-tracker-cli`, `gh issue`, custom script |
 
 ### Example Setup
 

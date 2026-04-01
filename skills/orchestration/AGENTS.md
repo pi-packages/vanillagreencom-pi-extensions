@@ -361,10 +361,10 @@ Audit item requires: index, title, location (no line numbers), description (2-3 
 Parse `## N.` headers from workflow markdown → JSON array for task creation.
 
 ```bash
-scripts/workflow-sections workflow.md                                    # Top-level
-scripts/workflow-sections workflow.md --subflow "/ci-fix"                # Sub-workflow → ⤵ /ci-fix § N
-scripts/workflow-sections workflow.md --agent "dev-fix" --emoji "🐲"     # Agent → 🐲 dev-fix § N
-scripts/workflow-sections workflow.md --subflow "/cmd" --return "§ 5"    # With return point
+.agents/skills/orchestration/scripts/workflow-sections workflow.md                                    # Top-level
+.agents/skills/orchestration/scripts/workflow-sections workflow.md --subflow "/ci-fix"                # Sub-workflow → ⤵ /ci-fix § N
+.agents/skills/orchestration/scripts/workflow-sections workflow.md --agent "dev-fix" --emoji "🐲"     # Agent → 🐲 dev-fix § N
+.agents/skills/orchestration/scripts/workflow-sections workflow.md --subflow "/cmd" --return "§ 5"    # With return point
 ```
 
 Output JSON fields: `subject`, `description`, `activeForm`, `taskPrefix`, `metadata`.
@@ -374,12 +374,12 @@ Output JSON fields: `subject`, `description`, `activeForm`, `taskPrefix`, `metad
 Read/write persistent state files with atomic flock-based locking.
 
 ```bash
-scripts/workflow-state init PROJ-123 --agent backend --worktree /tmp/wt
-scripts/workflow-state get PROJ-123 .cycles
-scripts/workflow-state increment PROJ-123 cycles
-scripts/workflow-state append PROJ-123 json_paths "review.json"
-scripts/workflow-state append PROJ-123 fixed_items '{"description":"Fix","commit":"abc"}'
-scripts/workflow-state set PROJ-123 pr_review_baseline '{"last_ts":"2026-01-28","last_threads":2}'
+.agents/skills/orchestration/scripts/workflow-state init PROJ-123 --agent backend --worktree /tmp/wt
+.agents/skills/orchestration/scripts/workflow-state get PROJ-123 .cycles
+.agents/skills/orchestration/scripts/workflow-state increment PROJ-123 cycles
+.agents/skills/orchestration/scripts/workflow-state append PROJ-123 json_paths "review.json"
+.agents/skills/orchestration/scripts/workflow-state append PROJ-123 fixed_items '{"description":"Fix","commit":"abc"}'
+.agents/skills/orchestration/scripts/workflow-state set PROJ-123 pr_review_baseline '{"last_ts":"2026-01-28","last_threads":2}'
 ```
 
 Environment: `ORCH_STATE_DIR` overrides state directory (default: `tmp`).

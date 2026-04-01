@@ -1,6 +1,6 @@
 # CI Fix Workflow
 
-> **Dependencies**: `$GIT_HOST_CLI`, `$WORKTREE_CLI`, `$ISSUE_CLI`, `$VALIDATE_CMD`, `scripts/workflow-state`
+> **Dependencies**: `.agents/skills/github/scripts/github.sh`, `.agents/skills/worktree/scripts/worktree`, `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/orchestration/scripts/workflow-state`
 
 Fix CI failures by analyzing logs and routing to appropriate agents.
 
@@ -18,7 +18,7 @@ Fix CI failures by analyzing logs and routing to appropriate agents.
 
 ```bash
 # If PR number provided, use it; otherwise list user's failing PRs
-$GIT_HOST_CLI pr-list-failing
+.agents/skills/github/scripts/github.sh pr-list-failing
 ```
 
 If multiple failures and no argument, present:
@@ -40,7 +40,7 @@ If multiple failures and no argument, present:
 ### 1.2 Merge Queue Flow (if using GitHub merge queue)
 
 ```bash
-$GIT_HOST_CLI pr-list-failing --all
+.agents/skills/github/scripts/github.sh pr-list-failing --all
 ```
 
 **→ Jump to § 2**
@@ -48,7 +48,7 @@ $GIT_HOST_CLI pr-list-failing --all
 ## 2. Fetch Error Details
 
 ```bash
-$GIT_HOST_CLI ci-logs [PR_NUMBER]
+.agents/skills/github/scripts/github.sh ci-logs [PR_NUMBER]
 ```
 
 Returns:
@@ -76,8 +76,8 @@ Classify error and route to appropriate flow:
 
 1. **Get or create worktree**:
    ```bash
-   ISSUE=$($GIT_HOST_CLI pr-issue [PR_NUMBER] --format=text)
-   WT_PATH=$($WORKTREE_CLI path $ISSUE 2>/dev/null || $WORKTREE_CLI create $ISSUE --pr [PR_NUMBER])
+   ISSUE=$(.agents/skills/github/scripts/github.sh pr-issue [PR_NUMBER] --format=text)
+   WT_PATH=$(.agents/skills/worktree/scripts/worktree path $ISSUE 2>/dev/null || .agents/skills/worktree/scripts/worktree create $ISSUE --pr [PR_NUMBER])
    ```
 
 2. **Apply fix**.
@@ -102,7 +102,7 @@ Infer agent type from component paths or issue labels.
 
 **Flaky test detection**: If test failure involves concurrent/threading code and passes locally, check project testing conventions for common patterns (missing barriers, iteration-based waits, static mutable state).
 
-**Detect team context**: `scripts/workflow-state exists [ISSUE_ID] && TEAM=$(scripts/workflow-state get [ISSUE_ID] .team_name)`
+**Detect team context**: `.agents/skills/orchestration/scripts/workflow-state exists [ISSUE_ID] && TEAM=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] .team_name)`
 
 **Create tracking task**: Create task: "🐲 [AGENT]: Fix CI [ERROR_TYPE]", Update task status to in_progress.
 
@@ -129,7 +129,7 @@ Worktree: [WORKTREE_PATH]
 
 1. Analyze the error (if test failure in concurrent code, check for flaky test patterns)
 2. Fix the issue
-3. Run `$VALIDATE_CMD --fail-fast` (use `--recheck` on re-runs)
+3. Run the project's validation command
 4. If target issue fixed but OTHER failures exist: still commit, note in message
 5. Commit: "fix([ISSUE_ID]): [DESCRIPTION]" (append `[validate: FAILING_CHECK]` if other failures)
 6. Push to branch
@@ -163,7 +163,7 @@ For `queue` argument (merge queue failures). May need to dequeue PR while fixing
 
 4. **Create worktree from draft branch** (integration issues only):
    ```bash
-   WT_PATH=$($WORKTREE_CLI create [ISSUE_ID] "[DRAFT_BRANCH]" --pr [DRAFT_PR_NUMBER])
+   WT_PATH=$(.agents/skills/worktree/scripts/worktree create [ISSUE_ID] "[DRAFT_BRANCH]" --pr [DRAFT_PR_NUMBER])
    ```
 
 5. **Delegate to arch-review**: Follow exactly, fill placeholders, add nothing else. Omit lines/sections with empty placeholders.
@@ -191,13 +191,13 @@ Report findings for user decision.
 After fix is pushed:
 
 ```bash
-scripts/ci-wait [PR_NUMBER]
+.agents/skills/orchestration/scripts/ci-wait [PR_NUMBER]
 ```
 
 **Post to issue tracker** (if issue found in branch name):
 ```bash
-ISSUE=$($GIT_HOST_CLI pr-issue [PR_NUMBER] --format=text)
-[ -n "$ISSUE" ] && $ISSUE_CLI comments create "$ISSUE" --body "CI Fix: [ERROR_TYPE] → [FIX_DESCRIPTION]"
+ISSUE=$(.agents/skills/github/scripts/github.sh pr-issue [PR_NUMBER] --format=text)
+[ -n "$ISSUE" ] && .agents/skills/linear/scripts/linear.sh comments create "$ISSUE" --body "CI Fix: [ERROR_TYPE] → [FIX_DESCRIPTION]"
 ```
 
 ## 6. Present Results
