@@ -328,6 +328,25 @@ pub fn load_skills_section(skills: &[(String, String)]) -> String {
     section
 }
 
+/// Generate an "Available Skills — Load When Needed" markdown section.
+/// Each triple is `(name, description, when)`.
+pub fn optional_skills_section(skills: &[(String, String)]) -> String {
+    if skills.is_empty() {
+        return String::new();
+    }
+    let mut section = String::from(
+        "\n## Available Skills — Load When Needed\n\n\
+         Load these skills only when the task matches their domain.\n\n\
+         | Skill | When to Load |\n\
+         |-------|-------------|\n",
+    );
+    for (name, when) in skills {
+        let when = when.replace('|', "\\|");
+        section.push_str(&format!("| `{}` | {} |\n", name, when));
+    }
+    section
+}
+
 /// Insert a section after the first heading block in markdown body.
 /// Finds the first `## ` line and inserts before it.
 /// If no `## ` found, appends to the end.

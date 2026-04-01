@@ -1,7 +1,5 @@
 # Fix Reconciliation
 
-> **Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/orchestration/scripts/workflow-state`
-
 Batch workflow to check if applied fixes address existing open issues. Processes **all fixes at once**.
 
 **Entry points**: start-worktree § 5.1, submit-pr § 6, review-pr-comments § 7.2

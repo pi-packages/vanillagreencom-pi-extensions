@@ -1,8 +1,6 @@
 # QA Review Lifecycle
 
-> **Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/decider/scripts/decisions` (optional), `.agents/skills/github/scripts/git-diff-summary` (optional), `$BENCH_CLI` (optional), `$BENCH_PARSER` (optional), orchestration skill (review-finding schema)
-
-**The workflow for QA agents (safety, perf-qa, arch-review) invoked via `needs-*` labels.**
+**The workflow for QA agents — project-configured QA specialists invoked via `needs-*` labels.**
 
 QA agents are review-only. They are never assigned as issue owners.
 
@@ -46,19 +44,19 @@ Use domain grouping and risk flags to focus review on changed files relevant to 
 
 Run your agent-specific review. See your agent file for exact commands and Output section for blocker/suggestion mapping.
 
-### 2.4 Classify Regressions (perf-qa only)
+### 2.4 Classify Regressions (performance QA agent only)
 
-**Skip if** not `perf-qa` or no regressions detected (exit code 0).
+**Skip if** not the performance QA agent or no regressions detected (exit code 0).
 
-When `$BENCH_CLI regression` exits with code 1, classify every regressed operation using the project's benchmarking skill if available. Populate `blockers[]` and `qa_metadata.perf_qa.regressions[]` per your agent's Output section.
+When the benchmarking skill's regression check exits with code 1, classify every regressed operation using the project's benchmarking skill. Populate `blockers[]` and `qa_metadata.perf_qa.regressions[]` per your agent's Output section.
 
-### 2.5 Record Benchmark Results (perf-qa only)
+### 2.5 Record Benchmark Results (performance QA agent only)
 
-**Skip if** not `perf-qa`.
+**Skip if** not the performance QA agent.
 
-- **Backend changes**: Pipe benchmark output through `$BENCH_PARSER` for automatic recording
-- **Frontend/UI changes**: Run a project-specific perf capture tool and pipe results to `$BENCH_CLI record`
-- **Manual entry**: `$BENCH_CLI record <component> '<json>'`
+- **Backend changes**: Pipe benchmark output through the benchmarking skill's parser for automatic recording
+- **Frontend/UI changes**: Run a project-specific perf capture tool and pipe results to the benchmarking skill's record command
+- **Manual entry**: Run the benchmarking skill's record command with the component name and JSON data
 
 See the project's benchmarking skill for full recording details if available.
 
@@ -68,14 +66,14 @@ See the project's benchmarking skill for full recording details if available.
 
 1. **Build JSON** per the orchestration skill's review-finding schema, filename `[WORKTREE_PATH]/tmp/review-[AGENT]-YYYYMMDD-HHMMSS.json`.
    - Standard fields: `agent`, `timestamp`, `verdict`, `summary`, `blockers[]`, `suggestions[]`
-   - If `perf-qa`: include `benchmark_commit` from § 2.5
+   - If performance QA agent: include `benchmark_commit` from § 2.5
    - `qa_metadata.[agent_type]` populated per your agent (project-configurable):
 
    | Agent | qa_metadata key | Required fields |
    |-------|-----------------|-----------------|
-   | safety | `safety` | `tool_results`, `unsafe_block_count`, `violations[]` |
-   | perf-qa | `perf_qa` | `percentiles`, `regression_pct`, `regressions[]`, `platform`, `baseline_sha` |
-   | arch-review | `arch_review` | `dimension_scores`, `overall_score`, `pass` |
+   | safety audit (example) | `safety` | `tool_results`, `unsafe_block_count`, `violations[]` |
+   | performance QA (example) | `perf_qa` | `percentiles`, `regression_pct`, `regressions[]`, `platform`, `baseline_sha` |
+   | architecture review (example) | `arch_review` | `dimension_scores`, `overall_score`, `pass` |
 
    **Verdict rules:**
    - `action_required`: 1+ items in `blockers[]`

@@ -39,7 +39,6 @@ Project-level configuration:
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| `.agents/skills/decider/scripts/decisions` | Path to decisions CLI | `scripts/decisions` |
 | `$DECISIONS_DIR` | Path to decision documents directory | — (required) |
 
 ## Templates

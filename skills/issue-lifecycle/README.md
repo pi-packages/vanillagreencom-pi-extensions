@@ -31,11 +31,11 @@ The workflow for dev agents receiving review fix delegations. Each review item i
 
 ### pr-review.md
 
-The workflow for pre-submission review agents (security-review, test-review, doc-review, error-review, structure-review). Agents review the diff, classify findings using the orchestration skill's recommendation-bias patterns, and return a structured JSON report with a pass/action_required verdict.
+The workflow for pre-submission review agents (project-configured review specialists, e.g., security-review, test-review, doc-review). Agents review the diff, classify findings using the orchestration skill's recommendation-bias patterns, and return a structured JSON report with a pass/action_required verdict.
 
 ### qa-review.md
 
-The workflow for QA agents (safety, perf-qa, arch-review) triggered via `needs-*` labels. Includes decision context checking, agent-specific review execution, benchmark regression classification and recording (perf-qa), and structured JSON report output.
+The workflow for QA agents (project-configured QA specialists) triggered via `needs-*` labels. Includes decision context checking, agent-specific review execution, benchmark regression classification and recording (performance QA agent), and structured JSON report output.
 
 ## Skill Dependencies
 
@@ -44,34 +44,15 @@ The workflow for QA agents (safety, perf-qa, arch-review) triggered via `needs-*
 | Issue tracker CLI (e.g., `linear` skill) | Issue CRUD, cache, comments, labels | `.agents/skills/linear/scripts/linear.sh` |
 | Orchestration skill | Review-finding schema, recommendation-bias patterns | Referenced by name |
 | Decider skill | Decision templates, search CLI, creation workflows | `.agents/skills/decider/scripts/decisions` |
-| Benchmarking skill (optional, project-provided) | Baseline capture, regression classification, recording | `$BENCH_CLI`, `$BENCH_PARSER` |
+| Benchmarking | Run benchmarks if a benchmarking skill is installed | Optional |
 
 ## Configuration
-
-Set these in `.env.local` or export them in the shell that runs the workflow. `.env.local.example` in the repo root shows a minimal pattern.
-
-### Project-level variables
-
-| Variable | Purpose | Required |
-|----------|---------|----------|
-| `.agents/skills/linear/scripts/linear.sh` | Issue tracker CLI command | Yes |
-| `.agents/skills/decider/scripts/decisions` | Decision document lookup | Optional |
-| `.agents/skills/github/scripts/git-diff-summary` | Diff summary with domain grouping | Optional |
-| `$BENCH_CLI` | Benchmark CLI command | Optional |
-| `$BENCH_PARSER` | Benchmark output parser | Optional |
-| `$VISUAL_QA_CLI` | Visual QA CLI command | Optional |
-| `$SCREENSHOT_CLI` | Screenshot capture CLI command | Optional |
-| `$VISUAL_QA_TARGET_CMD` | Optional project helper to select a visual-QA target and companion validation commands | Optional |
-| `$VISUAL_QA_FIXTURE` | Representative layout fixture path for map-capable targets | Optional |
-| `$VISUAL_QA_SMOKE_CMD` | Runtime smoke-test command for screenshot/OCR-only targets | Optional |
-| `$VISUAL_QA_SWEEP_CMD` | Representative capture sweep command for screenshot/OCR-only targets | Optional |
-| `$VISUAL_QA_BATTERY_CMD` | Broad visual regression battery command | Optional |
 
 ### Agent types
 
 - **Dev agents**: `[AGENT_TYPE]` — specialist agents receiving implementation delegations
-- **Review agents**: `security-review`, `test-review`, `doc-review`, `error-review`, `structure-review`
-- **QA agents**: `safety`, `perf-qa`, `arch-review`
+- **Review agents**: `[REVIEW_AGENT]` — agents that review specific aspects (security, testing, docs, errors, structure)
+- **QA agents**: `[QA_AGENT]` — agents for safety, performance, and architecture review
 
 ### Commit format
 

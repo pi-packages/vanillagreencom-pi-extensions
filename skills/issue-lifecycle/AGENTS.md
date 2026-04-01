@@ -27,34 +27,12 @@ Agent workflows for issue implementation, review fix delegation, pre-submission 
 
 ## Dependencies
 
-Workflows reference these companion skills and tools. Install and configure per your project:
-
-| Dependency | Purpose | Variable |
-|------------|---------|----------|
-| Issue tracker CLI (e.g., `linear` skill) | Issue CRUD, cache, comments, labels | `.agents/skills/linear/scripts/linear.sh` |
-| Orchestration skill | Review-finding schema, recommendation-bias patterns | Referenced by name |
-| Benchmarking skill (optional, project-provided) | Baseline capture, regression classification, recording | `$BENCH_CLI`, `$BENCH_PARSER` |
-
-Project-level configuration:
-
-| Variable | Purpose |
-|----------|---------|
-| `.agents/skills/decider/scripts/decisions` | Decision document lookup (optional) |
-| `.agents/skills/github/scripts/git-diff-summary` | Diff summary with domain grouping (optional) |
-| `$VISUAL_QA_TARGET_CMD` | Optional project helper to select a visual-QA target and companion validation commands |
-| `$VISUAL_QA_FIXTURE` | Representative layout fixture path for map-capable targets |
-| `$VISUAL_QA_SMOKE_CMD` | Runtime smoke-test command for screenshot/OCR-only targets |
-| `$VISUAL_QA_SWEEP_CMD` | Representative capture sweep command for screenshot/OCR-only targets |
-| `$VISUAL_QA_BATTERY_CMD` | Broad visual regression battery command |
-
 ---
 
 ## Workflow: Dev Implement
 
 **File**: `workflows/dev-implement.md`
 **Agent type**: Dev agents receiving `Issue: [ISSUE_ID]` delegations
-**Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/decider/scripts/decisions` (optional), `$VISUAL_QA_CLI` (optional), `$SCREENSHOT_CLI` (optional), `$VISUAL_QA_TARGET_CMD` (optional), `$VISUAL_QA_FIXTURE` (optional), `$VISUAL_QA_SMOKE_CMD` (optional), `$VISUAL_QA_SWEEP_CMD` (optional), `$VISUAL_QA_BATTERY_CMD` (optional), `$BENCH_CLI` (optional), orchestration skill
-
 **The workflow for all dev/QA agents receiving `Issue: [ISSUE_ID]` delegations.**
 
 Skip issue tracker updates for ad-hoc requests (no issue reference).
@@ -163,9 +141,9 @@ Follow your agent definition for architecture docs, code paths, skills to load.
 **Check labels** from § 2.1. If `baseline` label present:
 
 1. **Identify affected domain** — determine which component (backend, frontend, etc.) is affected
-2. **If a benchmarking skill is available** (`$BENCH_CLI`), follow its baseline workflow to capture pre-implementation baselines
+2. **If a benchmarking skill is installed**, follow its baseline workflow to capture pre-implementation baselines
 
-The perf-qa agent uses the baseline file during QA review.
+The performance QA agent uses the baseline file during QA review.
 
 ### § 3. Block Issue (if dependency discovered)
 
@@ -436,8 +414,6 @@ Do NOT push or submit PR — orchestrator handles after review passes.
 
 **File**: `workflows/dev-fix.md`
 **Agent type**: Dev agents receiving review fix delegations
-**Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/decider/scripts/decisions` (optional), `$VISUAL_QA_CLI` (optional), `$SCREENSHOT_CLI` (optional), `$VISUAL_QA_TARGET_CMD` (optional), `$VISUAL_QA_FIXTURE` (optional), `$VISUAL_QA_SMOKE_CMD` (optional), `$VISUAL_QA_SWEEP_CMD` (optional), `$VISUAL_QA_BATTERY_CMD` (optional)
-
 **The workflow for dev agents receiving review fix delegations.**
 
 ### § 1. Environment Setup
@@ -547,9 +523,7 @@ Report decision and reasoning for each item. Include commit SHAs and validation 
 ## Workflow: PR Review
 
 **File**: `workflows/pr-review.md`
-**Agent type**: Review agents (security-review, test-review, doc-review, error-review, structure-review)
-**Dependencies**: orchestration skill (recommendation-bias patterns, review-finding schema)
-
+**Agent type**: Review agents — project-configured review specialists (e.g., security-review, test-review, doc-review)
 **The workflow for PR review agents.** PR review agents are pre-submission reviewers. They run in parallel, each reviewing the same diff from their specialist perspective.
 
 **Ownership**: You review ONE PR. Return verdict to orchestrator. No issue tracker state changes.
@@ -621,9 +595,7 @@ File: [WORKTREE_PATH]/tmp/review-[AGENT]-YYYYMMDD-HHMMSS.json
 ## Workflow: QA Review
 
 **File**: `workflows/qa-review.md`
-**Agent type**: QA agents (safety, perf-qa, arch-review) invoked via `needs-*` labels
-**Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/decider/scripts/decisions` (optional), `.agents/skills/github/scripts/git-diff-summary` (optional), `$BENCH_CLI` (optional), `$BENCH_PARSER` (optional), orchestration skill (review-finding schema)
-
+**Agent type**: QA agents — project-configured QA specialists invoked via `needs-*` labels
 **The workflow for QA agents.** QA agents are review-only. They are never assigned as issue owners.
 
 **Ownership**: You review ONE PR. Return verdict to orchestrator. No issue tracker state changes.
@@ -662,19 +634,19 @@ Use domain grouping and risk flags to focus review on changed files relevant to 
 
 Run your agent-specific review. See your agent file for exact commands and Output section for blocker/suggestion mapping.
 
-#### 2.4 Classify Regressions (perf-qa only)
+#### 2.4 Classify Regressions (performance QA agent only)
 
-**Skip if** not `perf-qa` or no regressions detected (exit code 0).
+**Skip if** not the performance QA agent or no regressions detected (exit code 0).
 
-When `$BENCH_CLI regression` exits with code 1, classify every regressed operation using the project's benchmarking skill if available. Populate `blockers[]` and `qa_metadata.perf_qa.regressions[]` per your agent's Output section.
+When the benchmarking skill's regression check exits with code 1, classify every regressed operation using the project's benchmarking skill. Populate `blockers[]` and `qa_metadata.perf_qa.regressions[]` per your agent's Output section.
 
-#### 2.5 Record Benchmark Results (perf-qa only)
+#### 2.5 Record Benchmark Results (performance QA agent only)
 
-**Skip if** not `perf-qa`.
+**Skip if** not the performance QA agent.
 
-- **Backend changes**: Pipe benchmark output through `$BENCH_PARSER` for automatic recording
-- **Frontend/UI changes**: Run a project-specific perf capture tool and pipe results to `$BENCH_CLI record`
-- **Manual entry**: `$BENCH_CLI record <component> '<json>'`
+- **Backend changes**: Pipe benchmark output through the benchmarking skill's parser for automatic recording
+- **Frontend/UI changes**: Run a project-specific perf capture tool and pipe results to the benchmarking skill's record command
+- **Manual entry**: Run the benchmarking skill's record command with the component name and JSON data
 
 See the project's benchmarking skill for full recording details if available.
 
@@ -684,14 +656,14 @@ See the project's benchmarking skill for full recording details if available.
 
 1. **Build JSON** per the orchestration skill's review-finding schema, filename `[WORKTREE_PATH]/tmp/review-[AGENT]-YYYYMMDD-HHMMSS.json`.
    - Standard fields: `agent`, `timestamp`, `verdict`, `summary`, `blockers[]`, `suggestions[]`
-   - If `perf-qa`: include `benchmark_commit` from § 2.5
+   - If performance QA agent: include `benchmark_commit` from § 2.5
    - `qa_metadata.[agent_type]` populated per your agent (project-configurable):
 
-   | Agent | qa_metadata key | Required fields |
-   |-------|-----------------|-----------------|
-   | safety | `safety` | `tool_results`, `unsafe_block_count`, `violations[]` |
-   | perf-qa | `perf_qa` | `percentiles`, `regression_pct`, `regressions[]`, `platform`, `baseline_sha` |
-   | arch-review | `arch_review` | `dimension_scores`, `overall_score`, `pass` |
+   | Agent type (example) | qa_metadata key | Required fields |
+   |----------------------|-----------------|-----------------|
+   | safety audit | `safety` | `tool_results`, `unsafe_block_count`, `violations[]` |
+   | performance QA | `perf_qa` | `percentiles`, `regression_pct`, `regressions[]`, `platform`, `baseline_sha` |
+   | architecture review | `arch_review` | `dimension_scores`, `overall_score`, `pass` |
 
    **Verdict rules:**
    - `action_required`: 1+ items in `blockers[]`

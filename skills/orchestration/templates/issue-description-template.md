@@ -53,7 +53,7 @@ Standard format for issue tracker descriptions created by workflows. Match the s
   --estimate [ESTIMATE] \
   --parent [PARENT_ID] \
   --description "$(cat <<'EOF'
-**Source**: PR review suggestion (test-review)
+**Source**: PR review suggestion (e.g., test-review)
 
 Connection pool capacity growth path is untested. A burst of concurrent
 requests exceeding the initial pool size would trigger reallocation,

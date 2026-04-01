@@ -1,7 +1,5 @@
 # PR Merge Workflow
 
-> **Dependencies**: `.agents/skills/github/scripts/github.sh`, `.agents/skills/worktree/scripts/worktree`, `.agents/skills/linear/scripts/linear.sh` (optional)
-
 Verify conditions and safely merge PR(s).
 
 ## Inputs

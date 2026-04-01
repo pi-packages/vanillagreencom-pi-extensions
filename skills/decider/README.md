@@ -81,10 +81,9 @@ EOF
 
 ### CLI Setup
 
-Set `.agents/skills/decider/scripts/decisions` to point to the decisions CLI script:
+Set the decisions directory in `.env.local`:
 
 ```bash
-export DECISIONS_CMD="/path/to/skills/decider/scripts/decisions"
 export DECISIONS_DIR="docs/decisions"
 ```
 

@@ -1,7 +1,5 @@
 # Update Decision Workflow
 
-> **Dependencies**: project decision documents directory
-
 Update the status or content of existing decision entries — supersession, partial supersession, or revisitation.
 
 ## Inputs

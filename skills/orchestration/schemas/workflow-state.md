@@ -19,7 +19,7 @@ Persistent state file for orchestration workflows. Initialized during session st
     "backend": { "status": "active", "agent_id": "agent_abc123", "spawned_at": "2026-03-19T10:00:00Z" },
     "frontend": { "status": "closed", "agent_id": "agent_def456", "spawned_at": "2026-03-19T09:00:00Z" }
   },
-  "review_agents": ["security-review", "test-review", "doc-review"],
+  "review_agents": ["security-review", "test-review", "doc-review"],  // example — actual agents are project-configured
   "pre_delegate_sha": "abc123f",
   "skip_qa": false,
   "cycles": 0,

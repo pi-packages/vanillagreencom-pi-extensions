@@ -12,6 +12,7 @@ pub fn generate_agent(
     agent: &Agent,
     dir: &Path,
     skills: &[(String, String)],
+    optional_skills: &[(String, String)],
     hooks: &[Hook],
     extras: &agent::AgentExtras,
 ) -> Result<PathBuf> {
@@ -50,7 +51,8 @@ pub fn generate_agent(
     // Insert guidance + skills after first heading's intro
     let guidance = agent::guidance_section(extras.guidance.as_deref());
     let skills_section = agent::load_skills_section(skills);
-    let combined = format!("{}{}", guidance, skills_section);
+    let optional_section = agent::optional_skills_section(optional_skills);
+    let combined = format!("{}{}{}", guidance, skills_section, optional_section);
     let body = agent::insert_after_intro(&agent.body, &combined);
 
     // Append custom hook descriptions + additional instructions at the bottom

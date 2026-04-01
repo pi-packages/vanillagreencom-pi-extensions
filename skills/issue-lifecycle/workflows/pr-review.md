@@ -1,8 +1,6 @@
 # PR Review Lifecycle
 
-> **Dependencies**: orchestration skill (recommendation-bias patterns, review-finding schema)
-
-**The workflow for PR review agents (security-review, test-review, doc-review, error-review, structure-review).**
+**The workflow for PR review agents — project-configured review specialists (e.g., security-review, test-review, doc-review).**
 
 PR review agents are pre-submission reviewers. They run in parallel, each reviewing the same diff from their specialist perspective.
 

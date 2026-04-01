@@ -1,7 +1,5 @@
 # Issue Lifecycle
 
-> **Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/decider/scripts/decisions` (optional), `$VISUAL_QA_CLI` (optional), `$SCREENSHOT_CLI` (optional), `$VISUAL_QA_TARGET_CMD` (optional), `$VISUAL_QA_FIXTURE` (optional), `$VISUAL_QA_SMOKE_CMD` (optional), `$VISUAL_QA_SWEEP_CMD` (optional), `$VISUAL_QA_BATTERY_CMD` (optional), `$BENCH_CLI` (optional), orchestration skill
-
 **The workflow for all dev/QA agents receiving `Issue: [ISSUE_ID]` delegations.**
 
 Skip issue tracker updates for ad-hoc requests (no issue reference).
@@ -114,9 +112,9 @@ Follow your agent definition for architecture docs, code paths, skills to load.
 **Check labels** from § 2.1. If `baseline` label present:
 
 1. **Identify affected domain** — determine which component (backend, frontend, etc.) is affected
-2. **If a benchmarking skill is available** (`$BENCH_CLI`), follow its baseline workflow to capture pre-implementation baselines
+2. **If a benchmarking skill is installed**, follow its baseline workflow to capture pre-implementation baselines
 
-The perf-qa agent uses the baseline file during QA review.
+The performance QA agent uses the baseline file during QA review.
 
 ---
 

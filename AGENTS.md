@@ -101,10 +101,17 @@ reviewer = ["issue-lifecycle", "linear"]
 The same `vstack.toml` (or a separate one in the target project) can include per-agent customization sections. These survive `vstack add` updates — they are re-applied from config on every install/reconciliation.
 
 ```toml
-# Skills attached to each agent's frontmatter — single source of truth.
+# Skills always loaded into each agent's context — single source of truth.
 # Populated at install time. Add your own skills or remove ones you don't want.
 [agent-skills]
-rust = ["rust-arch", "rust-async", "rust-cargo", "my-custom-skill"]
+rust = ["rust-arch", "rust-cargo", "rust-conventions", "rust-safety"]
+
+# Specialist skills loaded on demand — agent gets a "when to load" table.
+[agent-skills-optional]
+rust = [
+  { skill = "rust-async", when = "Async code, tokio, futures, channels" },
+  { skill = "rust-ffi", when = "FFI boundaries, C interop, bindgen" },
+]
 
 # "Execute on Launch" — what the agent should do when first invoked
 [agent-guidance]

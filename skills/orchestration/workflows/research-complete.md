@@ -1,7 +1,5 @@
 # Research Complete Workflow
 
-> **Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/decider/scripts/decisions` (decider skill), `.agents/skills/orchestration/scripts/workflow-state`, `.agents/skills/orchestration/scripts/parallel-groups`, `schemas/audit-issues-input.md`
-
 Link completed research to blocked issues, analyze impact, create follow-up work.
 
 ## Inputs
@@ -163,7 +161,7 @@ Execute ONE flow based on § 3 unless meets escalation criteria as defined.
    - Doc/config updates: | Path | Change |
    </delegation_format>
 
-2. **Delegate to arch-review** for cross-cutting synthesis. Follow exactly, fill placeholders, add nothing else. Omit lines/sections with empty placeholders.
+2. **Delegate to architecture review agent** for cross-cutting synthesis. Follow exactly, fill placeholders, add nothing else. Omit lines/sections with empty placeholders.
 
    <delegation_format>
    Synthesize domain agent reports into cross-cutting impact analysis.
@@ -184,7 +182,7 @@ Execute ONE flow based on § 3 unless meets escalation criteria as defined.
    </delegation_format>
 
 3. **Check for escalation to Strategic**
-   - If arch-review reports initiative-level scope (10+ issues, needs phasing):
+   - If architecture review agent reports initiative-level scope (10+ issues, needs phasing):
      - Ask user: "Research scope suggests a new initiative. Escalate to /roadmap create?"
      - If yes:
        - Update issue description -- append `## Creates Roadmap` section

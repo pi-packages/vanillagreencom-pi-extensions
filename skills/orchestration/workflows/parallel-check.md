@@ -1,7 +1,5 @@
 # Parallel Work Check
 
-> **Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/worktree/scripts/worktree`, `.agents/skills/orchestration/scripts/parallel-groups`
-
 Verify issues have zero cross-dependencies before parallel execution.
 
 ## Inputs

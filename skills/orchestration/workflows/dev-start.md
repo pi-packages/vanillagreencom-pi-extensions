@@ -1,7 +1,5 @@
 # Dev Implementation Workflow
 
-> **Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/worktree/scripts/worktree`, `.agents/skills/orchestration/scripts/workflow-state`, `.agents/skills/orchestration/scripts/workflow-sections`, issue-lifecycle skill workflows
-
 Delegate development work to specialist agent(s). Handles single issues and bundled multi-agent work with handoff.
 
 ## Inputs

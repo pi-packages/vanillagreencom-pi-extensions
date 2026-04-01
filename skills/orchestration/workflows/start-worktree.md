@@ -1,9 +1,5 @@
 # Start Session Workflow (Worktree)
 
-> **Dependencies**: workflow-state, workflow-sections, session-init, issue tracker CLI (`.agents/skills/linear/scripts/linear.sh`), git host CLI (`.agents/skills/github/scripts/github.sh`)
->
-> **Requires**: issue tracker CLI (e.g., linear skill), git host CLI (e.g., github skill)
-
 Expedited session start for worktree contexts. Skips issue selection, preparation, research, and worktree creation — those completed in the prior main-repo session.
 
 ## Inputs

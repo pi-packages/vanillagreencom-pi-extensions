@@ -1,9 +1,5 @@
 # Start New Issue Workflow
 
-> **Dependencies**: issue tracker CLI (`.agents/skills/linear/scripts/linear.sh`), worktree CLI (`.agents/skills/worktree/scripts/worktree`), open-terminal
->
-> **Requires**: issue tracker CLI (e.g., linear skill), worktree management CLI (e.g., worktree skill)
-
 Create a new issue from scratch, set up worktree, and launch session.
 
 ## Inputs

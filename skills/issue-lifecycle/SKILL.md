@@ -4,8 +4,7 @@ description: "Agent workflows for issue implementation, review fix delegation, p
 license: MIT
 user-invocable: true
 dependencies:
-  required: [orchestration, github]
-  optional: [linear, decider]
+  required: [orchestration, github, decider, linear]
 metadata:
   author: vanillagreen
   version: "1.2.0"
@@ -36,14 +35,7 @@ Workflows reference these companion skills and tools. Install and configure per 
 | Issue tracker CLI (e.g., `linear` skill) | Issue CRUD, cache, comments, labels | `.agents/skills/linear/scripts/linear.sh` |
 | Orchestration skill | Review-finding schema, recommendation-bias patterns | Referenced by name |
 | Decider skill | Decision templates, search CLI, creation workflows | `.agents/skills/decider/scripts/decisions` |
-| Benchmarking skill (optional, project-provided) | Baseline capture, regression classification, recording | `$BENCH_CLI`, `$BENCH_PARSER` |
-
-Project-level configuration:
-
-| Variable | Purpose |
-|----------|---------|
-| `.agents/skills/decider/scripts/decisions` | Decision document lookup (optional) |
-| `.agents/skills/github/scripts/git-diff-summary` | Diff summary with domain grouping (optional) |
+| Benchmarking | Run benchmarks if a benchmarking skill is installed | Optional |
 
 ## Workflows
 
@@ -61,17 +53,17 @@ Project-level configuration:
 | Review finding schema | Orchestration skill (`schemas/review-finding.md`) |
 | Recommendation bias | Orchestration skill (`workflows/recommendation-bias.md`) |
 | Label application | Project label application guide |
-| Benchmark baselines | Project benchmarking skill if available (`$BENCH_CLI`) |
+| Benchmark baselines | Project benchmarking skill if installed |
 | Regression classification | Project benchmarking skill if available |
 
 ## Configuration
 
 This skill is workflow-based (no `rules/` directory). All behavior is defined in the workflow files.
 
-Agent types referenced in workflows:
+Agent types referenced in workflows (names are project-configurable):
 - **Dev agents**: `[AGENT_TYPE]` — specialist agents receiving implementation delegations
-- **Review agents**: `security-review`, `test-review`, `doc-review`, `error-review`, `structure-review`
-- **QA agents**: `safety`, `perf-qa`, `arch-review`
+- **Review agents**: `[REVIEW_AGENT]` — agents that review specific aspects (security, testing, docs, errors, structure)
+- **QA agents**: `[QA_AGENT]` — agents for safety, performance, and architecture review
 
 Commit format: `[PREFIX]([ISSUE_ID]): [DESCRIPTION]` — configurable per project conventions.
 

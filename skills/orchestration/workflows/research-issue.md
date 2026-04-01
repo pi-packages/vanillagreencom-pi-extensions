@@ -1,7 +1,5 @@
 # Research Issue Workflow
 
-> **Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/decider/scripts/decisions` (decider skill, optional), `.agents/skills/orchestration/scripts/workflow-state`
-
 Create research issue in issue tracker and prepare assets for human execution.
 
 ## Inputs

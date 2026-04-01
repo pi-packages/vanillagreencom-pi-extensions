@@ -1,7 +1,5 @@
 # PR Review Workflow
 
-> **Dependencies**: `.agents/skills/github/scripts/github.sh`, `.agents/skills/worktree/scripts/worktree`, `.agents/skills/linear/scripts/linear.sh` (optional), `.agents/skills/decider/scripts/decisions` (optional), `.agents/skills/github/scripts/git-diff-summary`, `.agents/skills/orchestration/scripts/workflow-state`, `.agents/skills/orchestration/scripts/workflow-sections`
-
 Pre-submission code review with fix handling, QA checks, and issue audit.
 
 ## Inputs
@@ -80,7 +78,7 @@ If `CYCLES > 0`: This is a re-review. Include the "Previous review cycle context
 TEAM=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] '.team_name // empty')
 ```
 
-**Determine agent list**: If `agents` context provided, use only those. Otherwise default to all 5: security-review, test-review, doc-review, error-review, structure-review (configurable per project).
+**Determine agent list**: If `agents` context provided, use only those. Otherwise default to all configured review agents.
 
 **If in team session** (`$TEAM` set):
 
@@ -292,7 +290,7 @@ If >4 suggestion items: show first 3 + `All N fixes`. Refine via "Other".
 
 1. **Check labels**. See issue tracker label configuration (project-level).
 
-2. **Determine sequence**: QA agent types are configurable per project. Example mappings: `needs-safety-audit` → safety, `needs-perf-test` → perf-qa, `needs-review` → arch-review, `design` → visual QA (use visual QA skills as necessary to validate UI changes).
+2. **Determine sequence**: QA agent types are configurable per project. Example label-to-agent mappings: `needs-safety-audit` → safety audit agent, `needs-perf-test` → performance QA agent, `needs-review` → architecture review agent, `design` → visual QA agent (use visual QA skills as necessary to validate UI changes).
 
 **For each QA agent, execute steps 3–8:**
 
@@ -350,14 +348,14 @@ If >4 suggestion items: show first 3 + `All N fixes`. Refine via "Other".
 
    **If standalone**: Agent task already returned.
 
-8. **Process agent return.** Agent returns `verdict`, `json_path`, and (for perf-qa) `benchmark_commit`.
+8. **Process agent return.** Agent returns `verdict`, `json_path`, and (for performance QA agent) `benchmark_commit`.
    - **Update state**: `.agents/skills/orchestration/scripts/workflow-state append [ISSUE_ID] json_paths "[json_path]"`
    - If `benchmark_commit` is not "none", verify: `git -C [WORKTREE_PATH] log -1 --oneline [SHA]`.
-   - **If perf-qa**: post benchmark report to issue tracker as issue comment:
+   - **If performance QA agent**: post benchmark report to issue tracker as issue comment:
      ```bash
      .agents/skills/linear/scripts/linear.sh comments create [ISSUE_ID] --body "[PERF_REPORT]"
      ```
-     Build PERF_REPORT from perf-qa JSON `qa_metadata.perf_qa`:
+     Build PERF_REPORT from performance QA agent's JSON `qa_metadata.perf_qa`:
      ```markdown
      ## Benchmark Results — [BRANCH] ([benchmark_commit])
 
@@ -404,7 +402,7 @@ Follow § 4 pattern (collect → present → ask user → delegate via `/dev-fix
 - **Items**: from QA agent JSONs. Exclude items already in `fixed_items` or `escalated_items`.
 - **Table header**: `QA Agent` instead of `Agent`. Title: `QA Review Items — [ISSUE_ID]`.
 - **Source**: `qa-review` in `/dev-fix` context.
-- **`qa_agent`**: pass QA agent name (configurable, e.g. `safety|perf-qa|arch-review`) to `/dev-fix` context.
+- **`qa_agent`**: pass QA agent name (project-configurable, e.g. safety audit, performance QA, architecture review) to `/dev-fix` context.
 - **Route after fix**:
 
    | `files_changed` | `risk_flags` | `scope` | Route |
@@ -455,7 +453,7 @@ Follow § 4 pattern (collect → present → ask user → delegate via `/dev-fix
 
 **[QA_AGENT_TYPE]**: [metric_1] [status] | [metric_2] [status] | ...
 
-**Perf** (from `qa_metadata.perf_qa`, if perf-qa agent ran):
+**Perf** (from `qa_metadata.perf_qa`, if performance QA agent ran):
 
 | Metric | Value |
 |--------|-------|

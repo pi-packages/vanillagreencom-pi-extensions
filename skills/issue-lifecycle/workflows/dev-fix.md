@@ -1,7 +1,5 @@
 # Fix Lifecycle
 
-> **Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/decider/scripts/decisions` (optional), `$VISUAL_QA_CLI` (optional), `$SCREENSHOT_CLI` (optional), `$VISUAL_QA_TARGET_CMD` (optional), `$VISUAL_QA_FIXTURE` (optional), `$VISUAL_QA_SMOKE_CMD` (optional), `$VISUAL_QA_SWEEP_CMD` (optional), `$VISUAL_QA_BATTERY_CMD` (optional)
-
 **The workflow for dev agents receiving review fix delegations.**
 
 ---

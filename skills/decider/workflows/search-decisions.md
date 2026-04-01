@@ -1,7 +1,5 @@
 # Search Decisions Workflow
 
-> **Dependencies**: `.agents/skills/decider/scripts/decisions`, `$DECISIONS_DIR`
-
 Search and retrieve decision documents by issue reference, keywords, or ID.
 
 ## Commands

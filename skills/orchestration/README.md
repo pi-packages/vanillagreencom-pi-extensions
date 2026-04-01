@@ -66,37 +66,22 @@ Multi-agent session coordination — front-to-back issue workflows, delegation p
 
 ## Configuration
 
-Set these in `.env.local` or export them in the shell that runs the workflow. `.env.local.example` in the repo root includes optional Visual QA helpers plus launcher/review settings. The orchestration helper scripts source `.env.local` automatically when present.
+Set these in `.env.local` or export them in the shell that runs the workflow. The orchestration helper scripts source `.env.local` automatically when present.
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `ORCH_STATE_DIR` | Override state file directory | `tmp` |
-| `.agents/skills/linear/scripts/linear.sh` | Issue tracker CLI path | — |
-| `.agents/skills/github/scripts/github.sh` | Git host CLI path | — |
-| `.agents/skills/worktree/scripts/worktree` | Worktree CLI path | — |
-| `$VISUAL_QA_BASELINE_CMD` | Optional helper to route baseline capture to a baseline-capable target | — |
-| `$ISSUE_PATTERN` | Issue ID regex for branch names | — |
-| `$BOT_REVIEWERS` | Comma-separated review bot usernames | — |
-| `$BOT_CHECK_NAME` | Optional CI check name for early review detection | — |
+| `ISSUE_PATTERN` | Issue ID regex for branch names | `[A-Z]+-[0-9]+` |
+| `BOT_REVIEWERS` | Comma-separated review bot usernames | auto-detect |
+| `BOT_CHECK_NAME` | Optional CI check name for early review detection | — |
 
 ## Minimum Setup
 
 To make orchestration workflows usable in a project:
 
-1. Configure the core command aliases in `.env.local`:
-   - `.agents/skills/linear/scripts/linear.sh`
-   - `.agents/skills/github/scripts/github.sh`
-   - `.agents/skills/worktree/scripts/worktree`
-2. Install the companion skills those commands point at.
-3. Verify each command works from the project root before invoking a workflow.
-
-Typical first checks:
-
-```bash
-.agents/skills/linear/scripts/linear.sh --help
-.agents/skills/github/scripts/github.sh --help
-.agents/skills/worktree/scripts/worktree list
-```
+1. Install the required dependency skills: `linear`, `github`, `worktree`, `decider`.
+2. Set runtime config in `.env.local` (only actual env vars like `LINEAR_API_KEY`, `ORCH_STATE_DIR`, etc.).
+3. Verify each dependency skill works from the project root before invoking a workflow.
 
 ## Creating a New Rule
 

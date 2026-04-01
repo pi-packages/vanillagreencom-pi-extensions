@@ -1,7 +1,5 @@
 # Roadmap Planning Workflow
 
-> **Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/orchestration/scripts/workflow-sections`, project-management skill workflows, `schemas/roadmap-plan-input.md`
-
 Plan a new roadmap with research gate, specialist consultation, cross-project analysis, and architecture review.
 
 ## Inputs
@@ -152,9 +150,9 @@ Arguments: --input [INPUT_FILE_PATH]
 
 ## 5. Analyze Impact
 
-### 5.1 Delegate to Arch-Review
+### 5.1 Delegate to Architecture Review Agent
 
-**Delegate to arch-review**: Follow exactly, fill placeholders, add nothing else. Omit lines/sections with empty placeholders.
+**Delegate to architecture review agent**: Follow exactly, fill placeholders, add nothing else. Omit lines/sections with empty placeholders.
 
 <delegation_format>
 Review proposed roadmap for: [FEATURE]

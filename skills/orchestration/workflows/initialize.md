@@ -1,9 +1,5 @@
 # Initialize Session
 
-> **Dependencies**: workflow-state, workflow-sections, session-init, issue tracker CLI (`.agents/skills/linear/scripts/linear.sh`), worktree CLI (`.agents/skills/worktree/scripts/worktree`)
->
-> **Requires**: issue tracker CLI (e.g., linear skill), worktree management CLI (e.g., worktree skill)
-
 Set up team, auth, cache, and workflow state for a worktree session.
 
 ## Inputs

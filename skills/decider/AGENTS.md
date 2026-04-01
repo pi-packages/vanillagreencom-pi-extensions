@@ -27,7 +27,6 @@ Project-level configuration:
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| `.agents/skills/decider/scripts/decisions` | Path to decisions CLI | `scripts/decisions` |
 | `$DECISIONS_DIR` | Path to decision documents directory | — (required) |
 
 ---
@@ -256,8 +255,6 @@ Choose the smallest template that covers the decision's scope.
 ---
 
 ## Create Decision Workflow
-
-> **Dependencies**: `.agents/skills/decider/scripts/decisions` (optional for next-id), project decision documents directory
 
 ### 1. Assign Decision ID
 

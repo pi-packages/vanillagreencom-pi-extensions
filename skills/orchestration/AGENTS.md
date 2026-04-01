@@ -87,7 +87,7 @@ The spawn prompt template must be copied verbatim (fill placeholders only). Para
 | Nested sub-workflow (⤵) | `⤵` | `⏤⤵ /skill § 1: Identify Failures` | `⏤⤵ /skill` |
 | Dev delegation | `🐲` | `⏤⏤🐲 dev-implement § 4: Implement` | `⏤⏤🐲 dev-implement` |
 | TPM delegation | `🤹‍♂️` | `⏤⏤🤹‍♂️ tpm-roadmap § 1: Analyze` | `⏤⏤🤹‍♂️ tpm-roadmap` |
-| Review delegation | `🐞` | `⏤⏤🐞 security-review § 1: Review` | `⏤⏤🐞 security-review` |
+| Review delegation | `🐞` | `⏤⏤🐞 [review-agent] § 1: Review` | `⏤⏤🐞 [review-agent]` |
 | QA delegation | `🪲` | `⏤⏤🪲 qa-review § 1: Set Up` | `⏤⏤🪲 qa-review` |
 | Tracking (inline) | `🐲` | `⏤⏤🐲 backend: Fix CI lint` | `⏤⏤🐲 backend` |
 

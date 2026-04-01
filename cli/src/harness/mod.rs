@@ -212,6 +212,7 @@ impl Harness {
         agent: &Agent,
         global: bool,
         skills: &[(String, String)],
+        optional_skills: &[(String, String)],
         hooks: &[crate::hook::Hook],
         extras: &crate::agent::AgentExtras,
     ) -> Result<PathBuf> {
@@ -224,10 +225,18 @@ impl Harness {
         }
         let dir = self.agents_dir(global);
         match self {
-            Harness::ClaudeCode => claude::generate_agent(agent, &dir, skills, hooks, extras),
-            Harness::Cursor => cursor::generate_agent(agent, &dir, skills, hooks, extras),
-            Harness::OpenCode => opencode::generate_agent(agent, &dir, skills, hooks, extras),
-            Harness::Codex => codex::generate_agent(agent, &dir, skills, hooks, extras),
+            Harness::ClaudeCode => {
+                claude::generate_agent(agent, &dir, skills, optional_skills, hooks, extras)
+            }
+            Harness::Cursor => {
+                cursor::generate_agent(agent, &dir, skills, optional_skills, hooks, extras)
+            }
+            Harness::OpenCode => {
+                opencode::generate_agent(agent, &dir, skills, optional_skills, hooks, extras)
+            }
+            Harness::Codex => {
+                codex::generate_agent(agent, &dir, skills, optional_skills, hooks, extras)
+            }
         }
     }
 

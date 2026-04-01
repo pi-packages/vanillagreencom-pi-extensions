@@ -345,6 +345,10 @@ pub fn run(
             let skill_pairs =
                 crate::resolve::resolve_skill_pairs(&skill_names, &selected_skills);
 
+            let optional_entries =
+                mapping.optional_skills_for_agent(&a.name, &available_skill_names);
+            let optional_pairs = crate::resolve::resolve_optional_skill_pairs(&optional_entries);
+
             agent_skill_map
                 .entry(a.name.clone())
                 .or_insert_with(|| skill_names.clone());
@@ -373,6 +377,7 @@ pub fn run(
                 *harness,
                 global,
                 &skill_pairs,
+                &optional_pairs,
                 &matched_hooks,
                 &extras,
             )?;
@@ -711,6 +716,10 @@ fn reconcile_agents(
         let skill_pairs =
             crate::resolve::resolve_skill_pairs(&skill_names, &source_skills);
 
+        let optional_entries =
+            mapping.optional_skills_for_agent(&agent.name, &installed_skills);
+        let optional_pairs = crate::resolve::resolve_optional_skill_pairs(&optional_entries);
+
         let matched_hooks: Vec<crate::hook::Hook> = mapping
             .hooks_for_agent(&agent.role, &source_hooks)
             .into_iter()
@@ -746,6 +755,7 @@ fn reconcile_agents(
                         agent,
                         global,
                         &skill_pairs,
+                        &optional_pairs,
                         &matched_hooks,
                         &extras,
                     );

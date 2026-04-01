@@ -1,7 +1,5 @@
 # PR Comment Triage Workflow
 
-> **Dependencies**: `.agents/skills/github/scripts/github.sh`, `.agents/skills/worktree/scripts/worktree`, `.agents/skills/linear/scripts/linear.sh` (optional), `.agents/skills/decider/scripts/decisions` (optional), `.agents/skills/orchestration/scripts/workflow-state`, `.agents/skills/orchestration/scripts/workflow-sections`
-
 Route PR review comments to domain agents for analysis, auto-fix valid items, loop until stable.
 
 ## Inputs
@@ -139,19 +137,19 @@ Output contains: `threads` (inline) + `comments` (PR-level).
 
 ## 2. Detect Domains
 
-Map each comment to a domain based on source and file path. Domain-to-agent mapping is configurable per project. Example:
+Map each comment to a domain based on source and file path. Domain-to-agent routing is project-configurable — the table below shows example defaults:
 
-| Source / Path Pattern | Domain Agent |
-|-----------------------|--------------|
-| `pr-level:architectural` | arch-review |
-| `pr-level:documentation` | doc-review |
-| `pr-level:security` | security-review |
-| `pr-level:testing` | test-review |
-| `pr-level:performance` | perf-qa |
-| `pr-level:suggestion` | infer from keywords, default arch-review |
+| Source / Path Pattern | Domain Agent (example) |
+|-----------------------|------------------------|
+| `pr-level:architectural` | architecture review agent |
+| `pr-level:documentation` | documentation review agent |
+| `pr-level:security` | security review agent |
+| `pr-level:testing` | test review agent |
+| `pr-level:performance` | performance QA agent |
+| `pr-level:suggestion` | infer from keywords, default architecture review agent |
 | Path inference | infer from component paths (project-configurable) |
-| `docs/**` | doc-review |
-| No file path (general comment) | arch-review |
+| `docs/**` | documentation review agent |
+| No file path (general comment) | architecture review agent |
 
 ---
 
@@ -211,7 +209,7 @@ URL: [URL]
 
 **Skip if** comments from single domain only.
 
-1. **Delegate to arch-review** for cross-cutting analysis:
+1. **Delegate to architecture review agent** for cross-cutting analysis:
 
    <delegation_format>
    Synthesize domain agent analyses of PR comments.

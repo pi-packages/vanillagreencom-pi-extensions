@@ -1,7 +1,5 @@
 # Roadmap Creation Workflow
 
-> **Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `schemas/audit-issues-input.md`
-
 Execute approved roadmap plan and create entities in issue tracker.
 
 ## Inputs

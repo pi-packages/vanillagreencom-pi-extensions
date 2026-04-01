@@ -1,7 +1,5 @@
 # Create Decision Workflow
 
-> **Dependencies**: `.agents/skills/decider/scripts/decisions` (optional for next-id), project decision documents directory
-
 Create a new decision entry: assign ID, write decision file, add INDEX.md row, update code references.
 
 ## Inputs

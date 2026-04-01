@@ -1,7 +1,5 @@
 # Dev Fix Workflow
 
-> **Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/worktree/scripts/worktree`, `.agents/skills/orchestration/scripts/workflow-state`, `.agents/skills/orchestration/scripts/workflow-sections`, issue-lifecycle skill workflows
-
 Delegate fix items to specialist dev agent. Works standalone (user-initiated) or managed (from review-pr).
 
 ## Inputs

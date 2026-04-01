@@ -129,24 +129,22 @@ Workflows reference these companion skills. Install and configure per your proje
 
 | Dependency | Purpose | Variable |
 |------------|---------|----------|
-| Issue tracker CLI (e.g., `linear` skill) | Issue CRUD, cache, comments, labels | `.agents/skills/linear/scripts/linear.sh` |
-| Git host CLI (e.g., `github` skill) | PR operations, CI status, comments | `.agents/skills/github/scripts/github.sh` |
-| Worktree CLI (e.g., `worktree` skill) | Create/remove git worktrees | `.agents/skills/worktree/scripts/worktree` |
+| Issue tracker CLI (e.g., `linear` skill) | Issue CRUD, cache, comments, labels | Resolved automatically |
+| Git host CLI (e.g., `github` skill) | PR operations, CI status, comments | Resolved automatically |
+| Worktree CLI (e.g., `worktree` skill) | Create/remove git worktrees | Resolved automatically |
 | Issue lifecycle skill | Dev implement/fix/review workflows | Referenced in delegation |
 | Project management skill | TPM audit/cycle/roadmap workflows | Referenced in delegation |
-| Decider skill | Decision templates, creation workflows, search CLI | `.agents/skills/decider/scripts/decisions` |
+| Decider skill | Decision templates, creation workflows, search CLI | Resolved automatically |
 | Visual QA skill (optional) | Screenshot baselines, optional target-specific baseline routing | Referenced in submit-pr |
 
-Project-level configuration:
+Project-level configuration (set in `.env.local`):
 
 | Variable | Purpose |
 |----------|---------|
-| `.agents/skills/github/scripts/git-diff-summary` | Diff summary with domain grouping (optional) |
-| `.agents/skills/decider/scripts/decisions` | Decision document lookup (optional) |
-| `$VISUAL_QA_BASELINE_CMD` | Optional project helper for baseline-capable target routing | Optional |
-| `$ISSUE_PATTERN` | Regex for issue IDs in branch names |
-| `$BOT_REVIEWERS` | Comma-separated bot usernames to wait for (e.g., `review-bot-a[bot],review-bot-b[bot]`). Auto-detects if unset. |
-| `$BOT_CHECK_NAME` | Optional CI check name to treat as an early review signal | Optional |
+| `ORCH_STATE_DIR` | Override state file directory (default: `tmp`) |
+| `ISSUE_PATTERN` | Regex for issue IDs in branch names |
+| `BOT_REVIEWERS` | Comma-separated bot usernames to wait for. Auto-detects if unset. |
+| `BOT_CHECK_NAME` | Optional CI check name to treat as an early review signal |
 
 ## Workflows
 
@@ -244,7 +242,7 @@ Project-level configuration:
 | Nested sub-workflow (⤵) | `⤵` | `⏤⤵ /skill § 1: Identify Failures` |
 | Dev delegation | `🐲` | `⏤⏤🐲 dev-implement § 4: Implement` |
 | TPM delegation | `🤹‍♂️` | `⏤⏤🤹‍♂️ tpm-roadmap § 1: Analyze` |
-| Review delegation | `🐞` | `⏤⏤🐞 security-review § 1: Review` |
+| Review delegation | `🐞` | `⏤⏤🐞 [review-agent] § 1: Review` |
 | QA delegation | `🪲` | `⏤⏤🪲 qa-review § 1: Set Up` |
 
 ## Rule Categories by Priority

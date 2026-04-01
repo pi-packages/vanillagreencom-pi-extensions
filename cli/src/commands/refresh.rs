@@ -104,6 +104,10 @@ pub fn run(global: bool) -> Result<()> {
         let skill_pairs =
             crate::resolve::resolve_skill_pairs(&skill_names, &all_source_skills);
 
+        let optional_entries =
+            mapping.optional_skills_for_agent(&agent.name, &installed_skills);
+        let optional_pairs = crate::resolve::resolve_optional_skill_pairs(&optional_entries);
+
         let matched_hooks: Vec<crate::hook::Hook> = mapping
             .hooks_for_agent(&agent.role, &installed_hooks)
             .into_iter()
@@ -130,8 +134,14 @@ pub fn run(global: bool) -> Result<()> {
 
         for harness_id in &entry.harnesses {
             if let Some(harness) = Harness::from_id(harness_id) {
-                let _ =
-                    harness.generate_agent(agent, global, &skill_pairs, &matched_hooks, &extras);
+                let _ = harness.generate_agent(
+                    agent,
+                    global,
+                    &skill_pairs,
+                    &optional_pairs,
+                    &matched_hooks,
+                    &extras,
+                );
             }
         }
         agents_refreshed += 1;

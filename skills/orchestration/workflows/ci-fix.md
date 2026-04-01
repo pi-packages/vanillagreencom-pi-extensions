@@ -1,7 +1,5 @@
 # CI Fix Workflow
 
-> **Dependencies**: `.agents/skills/github/scripts/github.sh`, `.agents/skills/worktree/scripts/worktree`, `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/orchestration/scripts/workflow-state`
-
 Fix CI failures by analyzing logs and routing to appropriate agents.
 
 ## Inputs
@@ -158,7 +156,7 @@ For `queue` argument (merge queue failures). May need to dequeue PR while fixing
    | Scenario | Action |
    |----------|--------|
    | Single PR identifiable | Route to that PR's agent |
-   | Integration issue (cross-PR) | Route to arch-review for analysis |
+   | Integration issue (cross-PR) | Route to architecture review agent for analysis |
    | Unclear source | Present to user for decision |
 
 4. **Create worktree from draft branch** (integration issues only):
@@ -166,7 +164,7 @@ For `queue` argument (merge queue failures). May need to dequeue PR while fixing
    WT_PATH=$(.agents/skills/worktree/scripts/worktree create [ISSUE_ID] "[DRAFT_BRANCH]" --pr [DRAFT_PR_NUMBER])
    ```
 
-5. **Delegate to arch-review**: Follow exactly, fill placeholders, add nothing else. Omit lines/sections with empty placeholders.
+5. **Delegate to architecture review agent**: Follow exactly, fill placeholders, add nothing else. Omit lines/sections with empty placeholders.
 
 <delegation_format>
 Merge queue CI failure - integration issue across stacked PRs.

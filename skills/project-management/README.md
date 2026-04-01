@@ -37,20 +37,6 @@ This skill requires an issue tracker CLI for all read/write operations. Configur
 |------------|---------|----------|
 | Issue tracker CLI (e.g., `linear` skill) | Issue CRUD, cache, comments, labels, relations | `.agents/skills/linear/scripts/linear.sh` |
 
-## Configuration Variables
-
-| Variable | Required | Purpose | Example |
-|----------|----------|---------|---------|
-| `.agents/skills/linear/scripts/linear.sh` | Yes | Path or alias to issue tracker CLI | `issue-tracker-cli`, `gh issue`, custom script |
-
-### Example Setup
-
-```bash
-# In your project's .env.local or shell config
-export ISSUE_CLI="./scripts/issue-tracker"
-export VALIDATE_CMD="make validate"
-```
-
 ## Key Concepts
 
 - **Hierarchy**: Initiative → Project → Milestone → Issue → Sub-Issue

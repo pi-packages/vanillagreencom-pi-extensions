@@ -1,7 +1,5 @@
 # Research Spike Workflow
 
-> **Dependencies**: `.agents/skills/linear/scripts/linear.sh`
-
 Human-initiated research with full agent consultation and asset preparation.
 
 ## Inputs

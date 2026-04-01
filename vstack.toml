@@ -9,15 +9,38 @@
 #
 # Agents without an entry here still use automatic prefix matching (agent "foo" → skills "foo-*").
 
-# Skill mappings per agent
+# Skill mappings per agent — always loaded into context
 [agent-skills]
-rust = ["rust-arch", "rust-async", "rust-cargo", "rust-conventions", "rust-cross", "rust-debugging", "rust-ffi", "rust-no-std", "rust-safety"]
-iced = ["iced-rs", "iced-shadcn", "trading-design", "price-handling"]
+rust = ["rust-arch", "rust-cargo", "rust-conventions", "rust-safety"]
+iced = ["iced-rs"]
 reviewer-arch = ["rust-arch"]
-reviewer-perf = ["perf-cache", "perf-ebpf", "perf-latency", "perf-lock-free", "perf-profiling", "perf-simd", "perf-threading", "perf-zero-alloc"]
+reviewer-perf = ["perf-profiling", "perf-latency"]
 reviewer-safety = ["rust-safety"]
 reviewer-structure = ["rust-arch"]
 reviewer-test = ["rust-conventions"]
+
+# Specialist skills — loaded on demand when the task matches
+[agent-skills-optional]
+rust = [
+  { skill = "rust-async", when = "Async code, tokio, futures, channels, or cancellation" },
+  { skill = "rust-cross", when = "Cross-compilation or non-native target architectures" },
+  { skill = "rust-debugging", when = "Debugging crashes, memory issues, or using GDB/LLDB" },
+  { skill = "rust-ffi", when = "FFI boundaries, C interop, bindgen, or repr(C)" },
+  { skill = "rust-no-std", when = "Embedded targets, no_std, or custom allocators" },
+]
+iced = [
+  { skill = "price-handling", when = "Price display, order entry, tick sizes, or feed parsing" },
+  { skill = "trading-design", when = "UI layout design, typography, color, or visual density" },
+  { skill = "iced-shadcn", when = "Implementing or auditing shadcn-inspired component families" },
+]
+reviewer-perf = [
+  { skill = "perf-cache", when = "Cache optimization, CPU cache behavior, or coherency" },
+  { skill = "perf-ebpf", when = "eBPF profiling, bpftrace, or kernel-level observation" },
+  { skill = "perf-lock-free", when = "Atomic operations, lock-free data structures, or hazard pointers" },
+  { skill = "perf-simd", when = "SIMD intrinsics, auto-vectorization, or target features" },
+  { skill = "perf-threading", when = "Thread pools, work-stealing, or thread-local storage" },
+  { skill = "perf-zero-alloc", when = "Object pools, arena allocators, or allocation-sensitive paths" },
+]
 
 # Skills given to all agents of a role
 [role-skills]

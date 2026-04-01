@@ -1,7 +1,5 @@
 # Cycle Planning Workflow
 
-> **Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/orchestration/scripts/workflow-sections`, project-management skill workflows
-
 Generate cycle plan via TPM agent with user approval.
 
 ## 1. Generate Plan

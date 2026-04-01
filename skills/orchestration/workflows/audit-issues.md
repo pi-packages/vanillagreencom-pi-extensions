@@ -1,7 +1,5 @@
 # Issue Audit Workflow
 
-> **Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/orchestration/scripts/workflow-sections`, project-management skill workflows, `schemas/audit-issues-input.md`
-
 Audit tracked issues and projects for relations, hierarchy, project placement, duplicates, and obsolete items. Delegate analysis to TPM, present findings, confirm changes, execute approved actions.
 
 ## Inputs

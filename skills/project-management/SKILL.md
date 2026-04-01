@@ -4,7 +4,8 @@ description: "TPM analysis workflows: roadmap planning, cycle planning, prioriti
 license: MIT
 user-invocable: true
 dependencies:
-  optional: [linear, decider]
+  required: [linear]
+  optional: [decider]
 metadata:
   author: vanillagreen
   version: "1.1.0"
@@ -36,12 +37,6 @@ Workflows reference these companion skills. Install and configure per your proje
 |------------|---------|----------|
 | Issue tracker CLI (e.g., `linear` skill) | Issue CRUD, cache, comments, labels, relations | `.agents/skills/linear/scripts/linear.sh` |
 | Decider skill (optional) | Decision search for audit/roadmap contradiction checks | `.agents/skills/decider/scripts/decisions` |
-
-Project-level configuration:
-
-| Variable | Purpose |
-|----------|---------|
-| `.agents/skills/decider/scripts/decisions` | Decision document lookup (optional) |
 
 ## Hierarchy
 

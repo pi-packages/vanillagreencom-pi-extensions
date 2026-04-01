@@ -1,9 +1,5 @@
 # Start Session Workflow
 
-> **Dependencies**: issue tracker CLI (`.agents/skills/linear/scripts/linear.sh`), git host CLI (`.agents/skills/github/scripts/github.sh`), worktree CLI (`.agents/skills/worktree/scripts/worktree`), workflow-state, workflow-sections, session-init, open-terminal, parallel-launch, parallel-groups, `.agents/skills/decider/scripts/decisions`
->
-> **Requires**: issue tracker CLI (e.g., linear skill), git host CLI (e.g., github skill), worktree management CLI (e.g., worktree skill)
-
 Initialize development session, display status, select work, evaluate research, create worktree, and hand off to worktree session.
 
 ## 1. Initialize Session

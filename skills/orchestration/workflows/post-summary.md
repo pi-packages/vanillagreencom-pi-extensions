@@ -1,7 +1,5 @@
 # Post Summary Workflow
 
-> **Dependencies**: `.agents/skills/linear/scripts/linear.sh`, `.agents/skills/github/scripts/github.sh`, `.agents/skills/worktree/scripts/worktree`, `.agents/skills/orchestration/scripts/workflow-state`
-
 Post summary comments to git host and issue tracker, and selective handoff comments to downstream issues.
 
 ## Inputs

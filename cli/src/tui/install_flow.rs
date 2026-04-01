@@ -1344,6 +1344,10 @@ fn perform_inline_update(
                     };
                     let skill_pairs =
                         crate::resolve::resolve_skill_pairs(&skill_names, &items.skills);
+                    let optional_entries =
+                        mapping.optional_skills_for_agent(&agent.name, &installed_skills);
+                    let optional_pairs =
+                        crate::resolve::resolve_optional_skill_pairs(&optional_entries);
                     let installed_hooks: Vec<crate::hook::Hook> = items
                         .hooks
                         .iter()
@@ -1370,6 +1374,7 @@ fn perform_inline_update(
                             agent,
                             scope_global,
                             &skill_pairs,
+                            &optional_pairs,
                             &matched_hooks,
                             &extras,
                         );

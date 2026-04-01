@@ -1,7 +1,5 @@
 # Submit PR Workflow
 
-> **Dependencies**: `.agents/skills/github/scripts/github.sh`, `.agents/skills/worktree/scripts/worktree`, `.agents/skills/linear/scripts/linear.sh` (optional), `.agents/skills/decider/scripts/decisions` (optional), `$VISUAL_QA_BASELINE_CMD` (optional), `.agents/skills/orchestration/scripts/workflow-state`, `.agents/skills/orchestration/scripts/workflow-sections`, `.agents/skills/orchestration/scripts/bot-review-wait`, `.agents/skills/orchestration/scripts/ci-wait`
-
 Push changes, create/update PR, handle bot review, triage PR comments, and trigger CI.
 
 ## Inputs
