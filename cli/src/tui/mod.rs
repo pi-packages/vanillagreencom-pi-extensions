@@ -118,6 +118,15 @@ pub fn run_install_flow(
             }
             SelectResult::JumpToStep(1) => continue 'steps,
             SelectResult::JumpToStep(_) | SelectResult::Confirmed => {}
+            SelectResult::UpdateInPlace(names) => {
+                let n = names.len();
+                perform_inline_update(&names, &items, &installed);
+                // Clear outdated flags and remove from Updates tab
+                clear_updated_items(&mut step1_select, &names);
+                step1_select.flash_message =
+                    Some(format!("Updated {n} item(s)"));
+                continue 'steps;
+            }
         }
 
         let update_cli = step1_select
@@ -248,7 +257,7 @@ pub fn run_install_flow(
                 SelectResult::JumpToStep(2) => continue 'scope_step,
                 SelectResult::JumpToStep(3) | SelectResult::JumpToStep(4) => {}
                 SelectResult::JumpToStep(_) => continue 'scope_step,
-                SelectResult::Confirmed => {}
+                SelectResult::Confirmed | SelectResult::UpdateInPlace(_) => {}
             }
 
             let global = scope_select
@@ -327,7 +336,7 @@ pub fn run_install_flow(
                     SelectResult::JumpToStep(3) => continue 'harness_step,
                     SelectResult::JumpToStep(4) => {}
                     SelectResult::JumpToStep(_) => continue 'harness_step,
-                    SelectResult::Confirmed => {}
+                    SelectResult::Confirmed | SelectResult::UpdateInPlace(_) => {}
                 }
 
                 let harness_selected = harness_select.all_selected();
@@ -449,6 +458,7 @@ pub fn run_install_flow(
                 SelectResult::JumpToStep(3) => continue 'harness_step,
                 SelectResult::JumpToStep(4) => continue,
                 SelectResult::JumpToStep(_) => continue 'harness_step,
+                SelectResult::UpdateInPlace(_) => continue 'harness_step,
                 SelectResult::Confirmed => {
                     let method_selected = select.all_selected();
                     let method = if method_selected.iter().any(|(_, l)| *l == "Copy") {
@@ -1082,6 +1092,8 @@ enum SelectResult {
     Back,
     JumpToStep(usize),
     SwitchSource(String),
+    /// Run an inline update for the named items without leaving the TUI.
+    UpdateInPlace(Vec<String>),
 }
 
 fn current_step(select: &TabbedSelect) -> Option<usize> {
@@ -1412,8 +1424,7 @@ fn run_tabbed_select(
                                     break SelectResult::Confirmed;
                                 }
                                 multiselect::ConfirmAction::UpdateAll => {
-                                    // Collect update names
-                                    let names: HashSet<String> = select
+                                    let names: Vec<String> = select
                                         .tabs
                                         .iter()
                                         .find(|t| t.name.starts_with("Updates"))
@@ -1440,19 +1451,7 @@ fn run_tabbed_select(
                                         std::process::exit(0);
                                     }
 
-                                    // Select items in Updates tab + source tabs
-                                    for tab in &mut select.tabs {
-                                        for group in &mut tab.groups {
-                                            for item in &mut group.items {
-                                                if names.contains(item.label.as_str()) {
-                                                    item.selected = true;
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    // Proceed directly to install
-                                    break SelectResult::Confirmed;
+                                    break SelectResult::UpdateInPlace(names);
                                 }
                                 multiselect::ConfirmAction::UninstallAll => {
                                     let names: Vec<String> = select
@@ -1602,19 +1601,33 @@ fn run_tabbed_select(
                             break result;
                         }
                     }
-                    KeyCode::Char('u') | KeyCode::Char('U')
+                    KeyCode::Char('u')
                         if select.tabs[select.active_tab].name.starts_with("Updates") =>
                     {
-                        let count = select.tabs[select.active_tab]
+                        // Update single item under cursor immediately
+                        if let Some(item) = get_cursor_item(select) {
+                            if item.outdated {
+                                let name = item.label.clone();
+                                break SelectResult::UpdateInPlace(vec![name]);
+                            }
+                        }
+                    }
+                    KeyCode::Char('U')
+                        if select.tabs[select.active_tab].name.starts_with("Updates") =>
+                    {
+                        // Update all outdated items
+                        let names: Vec<String> = select.tabs[select.active_tab]
                             .groups
                             .iter()
                             .flat_map(|g| &g.items)
-                            .count();
-                        if count == 0 {
+                            .map(|i| i.label.clone())
+                            .collect();
+                        if names.is_empty() {
                             continue;
                         }
+                        // For bulk update, confirm first
                         select.confirm_dialog = Some((
-                            format!("Update all {count} item(s) to latest?"),
+                            format!("Update all {} item(s) to latest?", names.len()),
                             multiselect::ConfirmAction::UpdateAll,
                         ));
                         select.confirm_dialog_scroll = 0;
@@ -1847,6 +1860,219 @@ fn remove_installed_items(select: &mut TabbedSelect, names: &[String]) {
         }
         select.scroll = 0;
     }
+}
+
+/// Run an inline update for the named items without leaving the TUI.
+/// Re-installs agents, skills, and hooks from the discovered source.
+fn perform_inline_update(
+    names: &[String],
+    items: &DiscoveredItems,
+    _installed: &InstalledState,
+) {
+
+    for scope_global in [false, true] {
+        let lock_path = crate::config::lock_file_path(scope_global);
+        let Ok(lock) = crate::config::LockFile::load(&lock_path) else {
+            continue;
+        };
+
+        let project_root = crate::config::project_root();
+        let project_config = crate::mapping::ProjectConfig::load(&project_root);
+
+        // Determine source mapping (from first discovered agent/skill path)
+        let source_dir = items
+            .agents
+            .first()
+            .map(|a| a.source_path.parent().and_then(|p| p.parent()))
+            .flatten()
+            .or_else(|| {
+                items
+                    .skills
+                    .first()
+                    .map(|s| s.source_dir.parent())
+                    .flatten()
+            });
+        let mapping = source_dir
+            .map(|d| crate::mapping::MappingConfig::load(d))
+            .unwrap_or_default();
+
+        let installed_skills: Vec<String> = lock
+            .entries
+            .iter()
+            .filter(|(_, e)| e.kind == crate::config::ItemKind::Skill)
+            .map(|(n, _)| n.clone())
+            .collect();
+
+        for name in names {
+            let Some(entry) = lock.entries.get(name) else {
+                continue;
+            };
+            let harnesses: Vec<Harness> = entry
+                .harnesses
+                .iter()
+                .filter_map(|h| Harness::from_id(h))
+                .collect();
+
+            match entry.kind {
+                crate::config::ItemKind::Agent => {
+                    let Some(agent) = items.agents.iter().find(|a| a.name == *name) else {
+                        continue;
+                    };
+                    let skill_names: Vec<String> = if let Some(project_list) =
+                        project_config.agent_skills_for(&agent.name)
+                    {
+                        project_list.clone()
+                    } else {
+                        mapping.skills_for_agent(&agent.name, &agent.role, &installed_skills)
+                    };
+                    let skill_pairs: Vec<(String, String)> = skill_names
+                        .iter()
+                        .map(|sname| {
+                            let desc = items
+                                .skills
+                                .iter()
+                                .find(|s| &s.name == sname)
+                                .map(|s| s.description.clone())
+                                .unwrap_or_else(|| sname.clone());
+                            (sname.clone(), desc)
+                        })
+                        .collect();
+                    let installed_hooks: Vec<crate::hook::Hook> = items
+                        .hooks
+                        .iter()
+                        .filter(|h| {
+                            lock.entries
+                                .get(&h.name)
+                                .is_some_and(|e| e.kind == crate::config::ItemKind::Hook)
+                        })
+                        .cloned()
+                        .collect();
+                    let matched_hooks: Vec<crate::hook::Hook> = mapping
+                        .hooks_for_agent(&agent.role, &installed_hooks)
+                        .into_iter()
+                        .cloned()
+                        .collect();
+                    let extras = crate::agent::AgentExtras {
+                        guidance: project_config.guidance_for(&agent.name).map(String::from),
+                        instructions: project_config
+                            .instructions_for(&agent.name)
+                            .map(String::from),
+                        custom_hooks: project_config
+                            .custom_hooks_for(&agent.name, &agent.role),
+                    };
+                    for harness in &harnesses {
+                        let _ = harness.generate_agent(
+                            agent,
+                            scope_global,
+                            &skill_pairs,
+                            &matched_hooks,
+                            &extras,
+                        );
+                    }
+                }
+                crate::config::ItemKind::Skill => {
+                    let Some(skill) = items.skills.iter().find(|s| s.name == *name) else {
+                        continue;
+                    };
+                    let instr = project_config.skill_instructions_for(&skill.name);
+                    for harness in &harnesses {
+                        let _ = crate::installer::install_skill(
+                            skill,
+                            *harness,
+                            scope_global,
+                            entry.method,
+                            instr,
+                        );
+                    }
+                }
+                crate::config::ItemKind::Hook => {
+                    let Some(hook) = items.hooks.iter().find(|h| h.name == *name) else {
+                        continue;
+                    };
+                    let agents_for_hook: Vec<crate::agent::Agent> = items
+                        .agents
+                        .iter()
+                        .filter(|a| {
+                            lock.entries
+                                .get(&a.name)
+                                .is_some_and(|e| e.kind == crate::config::ItemKind::Agent)
+                        })
+                        .cloned()
+                        .collect();
+                    for harness in &harnesses {
+                        let _ = crate::installer::install_hook(
+                            hook,
+                            *harness,
+                            scope_global,
+                            &agents_for_hook,
+                        );
+                    }
+                }
+            }
+        }
+
+        // Update lock file timestamps
+        let mut lock = crate::config::LockFile::load(&lock_path).unwrap_or_default();
+        let now = crate::config::now_iso();
+        for name in names {
+            if let Some(entry) = lock.entries.get_mut(name) {
+                entry.installed_at = now.clone();
+            }
+        }
+        let _ = lock.save(&lock_path);
+    }
+}
+
+/// Clear outdated flags and remove items from the Updates tab after inline update.
+fn clear_updated_items(select: &mut TabbedSelect, names: &[String]) {
+    let names_set: HashSet<&str> = names.iter().map(|n| n.as_str()).collect();
+
+    // Clear outdated flags in source tabs
+    for tab in &mut select.tabs {
+        if tab.name == "Installed" || tab.name.starts_with("Updates") {
+            continue;
+        }
+        for group in &mut tab.groups {
+            for item in &mut group.items {
+                if names_set.contains(item.label.as_str()) {
+                    item.outdated = false;
+                }
+            }
+        }
+    }
+
+    // Remove from Updates tab
+    if let Some(tab_idx) = select.tabs.iter().position(|t| t.name.starts_with("Updates")) {
+        for group in &mut select.tabs[tab_idx].groups {
+            group
+                .items
+                .retain(|i| !names_set.contains(i.label.as_str()));
+        }
+        select.tabs[tab_idx].groups.retain(|g| !g.items.is_empty());
+
+        if select.tabs[tab_idx].groups.is_empty() {
+            select.tabs.remove(tab_idx);
+            if select.active_tab >= select.tabs.len() {
+                select.active_tab = 0;
+            }
+        } else {
+            let count: usize = select.tabs[tab_idx]
+                .groups
+                .iter()
+                .map(|g| g.items.len())
+                .sum();
+            select.tabs[tab_idx].name = format!("Updates ({count})");
+        }
+    }
+
+    // Fix cursor
+    let count = select.item_count();
+    if count == 0 {
+        select.cursor = 0;
+    } else if select.cursor >= count {
+        select.cursor = count - 1;
+    }
+    select.scroll = 0;
 }
 
 /// Get all package names installed from a given source.
