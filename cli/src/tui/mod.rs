@@ -4,7 +4,7 @@ mod render;
 mod state;
 mod summary;
 
-pub use multiselect::{ItemGroup, RepoOption, SelectItem, Tab};
+pub use multiselect::RepoOption;
 
 pub use install_flow::run_install_flow;
 pub use summary::run_summary_screen;

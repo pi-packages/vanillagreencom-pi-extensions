@@ -119,14 +119,16 @@ dependencies:
 
 `vstack` builds a dependency graph from installed skills and auto-adds only `required` dependencies. `optional` dependencies are preserved as metadata/documentation, but are not auto-installed.
 
-`vstack.toml` is the source repo's mapping layer. The CLI reads it at install time to decide which agents should receive extra skills beyond prefix matching, which skills should be attached to all agents of a role, and which hook event/matcher combinations should apply to which roles.
+`vstack.toml` in the source repo is the mapping layer. `[agent-skills]` is the single source of truth for which skills appear in each agent's frontmatter — when an agent has an explicit entry, prefix matching is skipped. `[role-skills]` adds skills to all agents of a role. `[hook-events]` assigns hooks by event/matcher to roles.
 
 ```toml
 [agent-skills]
-iced = ["iced-rs"]
+rust = ["rust-arch", "rust-async", "rust-cargo", "rust-conventions", "rust-cross", "rust-debugging", "rust-ffi", "rust-no-std", "rust-safety"]
+iced = ["iced-rs", "iced-shadcn", "trading-design", "price-handling"]
 
 [role-skills]
-engineer = ["issue-lifecycle", "github", "worktree"]
+engineer = ["issue-lifecycle", "github", "worktree", "decider", "linear"]
+reviewer = ["issue-lifecycle", "linear"]
 
 [hook-events]
 "PreToolUse:Bash" = "all"
@@ -149,12 +151,12 @@ generalist = ""    # empty = no section generated
 [agent-instructions]
 rust = "Always run clippy before committing."
 
-# Attach local skills to agents (beyond automatic prefix matching)
-[custom-skills]
-rust = [
-  { name = "my-testing", description = "Custom integration testing patterns" },
-]
-generalist = []    # empty = no extra skills
+# Skills attached to each agent's frontmatter — single source of truth.
+# Populated automatically at install time. Add your own skills to any
+# agent's list; remove skills you don't want. Run `vstack refresh` to apply.
+[agent-skills]
+rust = ["rust-arch", "rust-async", "rust-cargo", "rust-conventions", "rust-cross", "rust-debugging", "rust-ffi", "rust-no-std", "rust-safety", "decider", "github", "issue-lifecycle", "linear", "worktree"]
+iced = ["iced-rs", "iced-shadcn", "trading-design", "price-handling", "decider", "github", "issue-lifecycle", "linear", "worktree"]
 
 # Project instructions appended at the bottom of each skill's SKILL.md (won't overwrite the skill author's own)
 [skill-instructions]
