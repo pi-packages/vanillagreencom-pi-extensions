@@ -642,6 +642,24 @@ fn build_item_tabs(
 ) -> Vec<Tab> {
     let mut tabs = Vec::new();
 
+    // Derive source repo vstack.toml and project vstack.toml paths.
+    // Changes to either affect agent generation (skill/hook assignments,
+    // guidance, instructions), so agents should be flagged as outdated.
+    let source_config = items
+        .agents
+        .first()
+        .map(|a| a.source_path.parent().and_then(|p| p.parent()))
+        .flatten()
+        .or_else(|| {
+            items
+                .skills
+                .first()
+                .map(|s| s.source_dir.parent().and_then(|p| p.parent()))
+                .flatten()
+        })
+        .map(|root| root.join("vstack.toml"));
+    let project_config_path = crate::config::project_root().join("vstack.toml");
+
     // ── Agents tab ───────────────────────────────────────────────────
     if !items.agents.is_empty() {
         let mut engineers = Vec::new();
@@ -651,6 +669,20 @@ fn build_item_tabs(
         for a in &items.agents {
             let installed_info = installed.get(&a.name);
             let is_installed = installed_info.is_some();
+            let agent_outdated = installed_info.is_some_and(|info| {
+                if is_agent_outdated(&a.source_path, info) {
+                    return true;
+                }
+                let Some(installed_at) = parse_installed_at(&info.installed_at) else {
+                    return false;
+                };
+                if let Some(ref cfg) = source_config {
+                    if file_modified_after(cfg, installed_at) {
+                        return true;
+                    }
+                }
+                file_modified_after(&project_config_path, installed_at)
+            });
             let item = SelectItem {
                 label: a.name.clone(),
                 description: a.description.clone(),
@@ -660,7 +692,7 @@ fn build_item_tabs(
                 locked: false,
                 installed: is_installed,
                 installed_scope: installed_info.map(|info| installed_scope_label(&info.scope)),
-                outdated: installed_info.is_some_and(|info| is_agent_outdated(&a.source_path, info)),
+                outdated: agent_outdated,
             };
             match a.role {
                 crate::agent::AgentRole::Engineer => engineers.push(item),
@@ -714,7 +746,16 @@ fn build_item_tabs(
                 locked: false,
                 installed: is_installed,
                 installed_scope: installed_info.map(|info| installed_scope_label(&info.scope)),
-                outdated: installed_info.is_some_and(|info| is_skill_outdated(&s.source_dir, info)),
+                outdated: installed_info.is_some_and(|info| {
+                    if is_skill_outdated(&s.source_dir, info) {
+                        return true;
+                    }
+                    // Project vstack.toml can inject skill-instructions into SKILL.md
+                    let Some(installed_at) = parse_installed_at(&info.installed_at) else {
+                        return false;
+                    };
+                    file_modified_after(&project_config_path, installed_at)
+                }),
             };
 
             if s.name.starts_with("rust-") {

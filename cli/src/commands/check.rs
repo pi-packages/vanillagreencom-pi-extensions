@@ -76,6 +76,11 @@ fn check_staleness(entry: &LockEntry) -> &'static str {
             if source_dir.exists() && crate::tui::dir_modified_after(&source_dir, installed_at) {
                 return "outdated";
             }
+            // Skill files depend on project vstack.toml (skill-instructions)
+            let project_config = config::project_root().join("vstack.toml");
+            if crate::tui::file_modified_after(&project_config, installed_at) {
+                return "outdated";
+            }
             "ok"
         }
         config::ItemKind::Hook => {
@@ -92,6 +97,15 @@ fn check_staleness(entry: &LockEntry) -> &'static str {
             if source_path.exists()
                 && crate::tui::file_modified_after(&source_path, installed_at)
             {
+                return "outdated";
+            }
+            // Agent files depend on vstack.toml (skill/hook mappings)
+            let source_config = root.join("vstack.toml");
+            if crate::tui::file_modified_after(&source_config, installed_at) {
+                return "outdated";
+            }
+            let project_config = config::project_root().join("vstack.toml");
+            if crate::tui::file_modified_after(&project_config, installed_at) {
                 return "outdated";
             }
             "ok"
