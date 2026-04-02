@@ -13,7 +13,7 @@
 [agent-skills]
 rust = ["rust-arch", "rust-cargo", "rust-conventions", "rust-safety"]
 iced = ["iced-rs"]
-reviewer-arch = ["rust-arch"]
+reviewer-arch = ["rust-arch", "decider"]
 reviewer-perf = ["perf-profiling", "perf-latency"]
 reviewer-safety = ["rust-safety"]
 reviewer-structure = ["rust-arch"]
@@ -28,6 +28,7 @@ generalist = [
 reviewer-doc = [
     "issue-lifecycle",
     "linear",
+    "decider",
 ]
 reviewer-error = [
     "issue-lifecycle",
