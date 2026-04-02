@@ -222,15 +222,12 @@ If >4 suggestion items: show first 3 + `All N fixes`. Refine via "Other".
 
    **Selective shutdown** (row 3):
    a. Read review JSONs. Reporting agents = agents whose JSON contained items.
-   b. **Team session**: Shutdown non-reporters: Send message type="shutdown_request" to [AGENT]
-   c. **Standalone**: Remove non-reporter IDs from `review_agent_ids` (reporters kept for resume).
+   b. Shutdown non-reporting agents. Keep reporting agents alive for potential fix cycles.
    d. Update state: `.agents/skills/orchestration/scripts/workflow-state set [ISSUE_ID] review_agents '[REPORTERS_ONLY]'`
 
 ## 5. Verdict Pass
 
-1. **Shutdown review agents**:
-   - **Team session**: Send shutdown_request to each agent in state `review_agents`.
-   - **Standalone**: Agents already returned — clear stored IDs.
+1. **Shutdown review agents** — terminate all agents in state `review_agents`.
    ```bash
    .agents/skills/orchestration/scripts/workflow-state set [ISSUE_ID] review_agents '[]'
    .agents/skills/orchestration/scripts/workflow-state set [ISSUE_ID] review_agent_ids '{}'

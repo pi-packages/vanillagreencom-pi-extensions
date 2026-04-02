@@ -278,7 +278,7 @@ Project-level configuration (set in `.env.local`):
 
 ### 3. Agent Lifecycle (HIGH)
 
-- `life-lifecycle-stages` - Seven-stage agent lifecycle: SPAWN → DELEGATE → WORK → RETURN → IDLE/REDEL → SHUTDOWN
+- `life-lifecycle-stages` - Agent lifecycle: LAUNCH → WORK → RETURN → IDLE/REDEL → SHUTDOWN
 - `life-dev-agent-persistence` - Dev agents persist entire session; re-delegate for fix cycles
 - `life-review-agent-lifecycle` - Review agents persist across fix/re-review; QA agents are one-shot
 - `life-wait-for-return` - Never intervene while tasks in-progress; quiet ≠ stalled; confirm stall via session-level evidence before shutdown

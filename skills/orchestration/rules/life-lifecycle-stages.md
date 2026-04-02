@@ -10,10 +10,9 @@ tags: life
 **Impact: HIGH (Agent lifecycle confusion causes missed or duplicated work)**
 
 ```
-1. SPAWN        Spawn agent with behavioral prompt → agent goes idle
-2. DELEGATE     Send delegation message
-3. WORK         Agent wakes, finds PENDING tasks, sets in-progress, processes in order
-4. RETURN       Last workflow section sends completion message to orchestrator
-5. IDLE/REDEL   Agent goes idle — may receive new tasks + message for fix cycles
-6. SHUTDOWN     Orchestrator sends shutdown request when all work complete
+1. LAUNCH       Create agent with delegation prompt
+2. WORK         Agent executes workflow, processes assigned work
+3. RETURN       Agent sends completion results to orchestrator
+4. IDLE/REDEL   Agent available for re-delegation (fix cycles, pending children)
+5. SHUTDOWN     Orchestrator terminates agent when all work complete
 ```

@@ -58,8 +58,8 @@ Guidelines for `#![no_std]` Rust development covering environment tiers, runtime
 
 ## How to Use
 
-1. **Claude Code / SKILL.md-aware harnesses:** This file is auto-detected. Rules are applied based on context.
-2. **Codex, Copilot, Gemini CLI, and other harnesses:** Use `AGENTS.md` which contains all rules expanded inline.
+1. **SKILL.md-aware harnesses:** This file is auto-detected. Rules are applied based on context.
+2. **Other harnesses:** Use `AGENTS.md` which contains all rules expanded inline.
 3. **Individual rules:** Browse `rules/` for specific patterns with examples.
 
 ## Resources

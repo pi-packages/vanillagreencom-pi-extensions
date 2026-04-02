@@ -132,13 +132,7 @@ Post-review cleanup: reconcile fixes, post summaries, handoff to downstream issu
 
 ### 5.4 Shutdown Team
 
-1. **Shutdown all teammates**: Read `child_sessions` from `.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] .child_sessions` (or the harness-local agent registry if the harness keeps teammate state elsewhere). For each still-active teammate:
-   ```
-   Send shutdown request to [AGENT]
-   ```
-   Wait for shutdown approved. If teammate already exited, the request fails silently — proceed to next.
-
-2. **Delete agent team**
+1. **Shutdown all agents** from `child_sessions` in workflow state. Terminate each still-active agent.
 
 ### 5.5 Offer Merge
 
