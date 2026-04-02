@@ -30,7 +30,7 @@ If you cannot load a skill, stop and tell the user. Do not proceed without them.
 
 > **MODE SWITCH**: Loading this skill puts you in **orchestrator mode**. You are a coordinator — do not write code yourself. Delegate all implementation, review, and QA work to specialist sub-agents using the workflows in this skill. Your job is to plan, delegate, track state, and present results.
 
-> **Claude Code**: Always create a team before launching agents. Spawn and delegate to agents within the team context so they share state and can be messaged for re-delegation.
+> **Claude Code**: Always create a team before launching agents. Spawn and delegate to agents within the team context so they share state and can be messaged for re-delegation. When asking the user a question or presenting options, always use the `AskUserQuestion` tool.
 
 > **Codex**: Spawn workers with `fork_context: false`. Two-step pattern: (1) spawn with a bootstrap message identifying the worker role, (2) `send_input` a `DELEGATION:` prefixed message containing exactly the filled `<delegation_format>` content — nothing more.
 
