@@ -61,10 +61,10 @@ while [[ $# -gt 0 ]]; do
       echo "  --cmd \"command\"     Command to run in each worktree ({issue} is replaced)"
       echo "  (default)           Auto-detect: tmux if \$TMUX set, else GUI terminal"
       echo ""
-      echo "If --cmd is omitted, auto-detects harness from install path:"
-      echo "  .claude/skills/  → claude"
-      echo "  .opencode/skills/ → opencode"
-      echo "  .agents/skills/  → codex"
+      echo "If --cmd is omitted, auto-detects harness by CLI availability:"
+      echo "  claude   → claude -n ISSUE '/orchestration start ISSUE'"
+      echo "  opencode → opencode '/orchestration start ISSUE'"
+      echo "  codex    → codex '\$orchestration start ISSUE'"
       echo ""
       echo "Environment:"
       echo "  ISSUE_PATTERN  Regex for issue IDs (default: [A-Z]+-[0-9]+)"
@@ -164,7 +164,8 @@ open_tmux() {
   tmux new-window -a -t ":${last_idx}" -n "$name" -c "$dir"
   tmux send-keys "clear" Enter
   if [[ -n "$cmd" ]]; then
-    tmux send-keys "$cmd" Enter
+    tmux send-keys -l "$cmd"
+    tmux send-keys Enter
   fi
   echo "  Opened tmux window '$name' in $dir"
 }
@@ -183,7 +184,7 @@ open_gui() {
       local args=(--working-directory="$dir")
       [[ -n "$title" ]] && args+=(--title="$title")
       if [[ -n "$cmd" ]]; then
-        open -na "Ghostty.app" --args "${args[@]}" --command="bash -c '$cmd'"
+        open -na "Ghostty.app" --args "${args[@]}" --command="$cmd"
       else
         open -na "Ghostty.app" --args "${args[@]}"
       fi
@@ -235,15 +236,22 @@ LAUNCHED=0
 FAILED=()
 
 for ISSUE in "${ISSUES[@]}"; do
-  # Create worktree (reuses existing)
-  if ! WT_PATH=$("$WORKTREE_CLI" create "$ISSUE" 2>&1); then
-    echo "  Failed to create worktree: $WT_PATH" >&2
+  # Create worktree (reuses existing) — capture stderr separately
+  _wt_err=$(mktemp)
+  if ! WT_PATH=$("$WORKTREE_CLI" create "$ISSUE" 2>"$_wt_err"); then
+    echo "  Failed to create worktree: $(cat "$_wt_err")" >&2
+    rm -f "$_wt_err"
     FAILED+=("$ISSUE")
     continue
   fi
+  rm -f "$_wt_err"
 
   START_CMD=$(detect_start_cmd "$ISSUE")
-  pretrust_claude_dir "$WT_PATH"
+
+  # Only pretrust for Claude harness
+  if command -v claude &>/dev/null; then
+    pretrust_claude_dir "$WT_PATH"
+  fi
 
   if [[ "$TERMINAL_MODE" == "tmux" ]]; then
     open_tmux "$WT_PATH" "$ISSUE" "$START_CMD"
