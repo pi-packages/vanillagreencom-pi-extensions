@@ -245,5 +245,3 @@ Legend: ✅ merged  ⏭️ skipped (user)  ❌ skipped (error)  🗑️ cleaned
 **If managed**: Return to the parent workflow's next section.
 
 **If standalone**: Session complete — merge results presented in § 7.
-</content>
-</invoke>

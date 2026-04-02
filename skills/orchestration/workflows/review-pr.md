@@ -473,5 +473,3 @@ Issue suggestions: [N] items → § 9 audit
 **If managed**: Return to the parent workflow's next section.
 
 **If standalone**: Session complete — review cycle complete. Summary presented in § 8.
-</content>
-</invoke>

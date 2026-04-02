@@ -441,5 +441,3 @@ All bot review comments resolved (or max iterations). Verify no late-arriving th
 **If managed**: Return to the parent workflow's next section.
 
 **If standalone**: Session complete — PR submitted. Summary presented in § 6.
-</content>
-</invoke>

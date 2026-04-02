@@ -32,6 +32,8 @@ If you cannot load a skill, stop and tell the user. Do not proceed without them.
 
 > **Claude Code**: Always create a team before launching agents. Spawn and delegate to agents within the team context so they share state and can be messaged for re-delegation.
 
+> **Codex**: Spawn workers with `fork_context: false`. Two-step pattern: (1) spawn with a bootstrap message identifying the worker role, (2) `send_input` a `DELEGATION:` prefixed message containing exactly the filled `<delegation_format>` content — nothing more.
+
 > **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
 
 Multi-agent session coordination with front-to-back issue workflows, delegation patterns, workflow state management, and review pipelines. Designed to survive context compaction and coordinate persistent agent sessions.
