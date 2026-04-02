@@ -18,6 +18,33 @@ reviewer-perf = ["perf-profiling", "perf-latency"]
 reviewer-safety = ["rust-safety"]
 reviewer-structure = ["rust-arch"]
 reviewer-test = ["rust-conventions"]
+generalist = [
+    "decider",
+    "github",
+    "issue-lifecycle",
+    "linear",
+    "worktree",
+]
+reviewer-doc = [
+    "issue-lifecycle",
+    "linear",
+]
+reviewer-error = [
+    "issue-lifecycle",
+    "linear",
+]
+reviewer-security = [
+    "issue-lifecycle",
+    "linear",
+]
+tpm = [
+    "decider",
+    "github",
+    "issue-lifecycle",
+    "linear",
+    "project-management",
+    "worktree",
+]
 
 # Specialist skills — loaded on demand when the task matches
 [agent-skills-optional]
@@ -56,3 +83,77 @@ reviewer = ["issue-lifecycle", "linear"]
 "PostToolUse:Bash" = "all"
 "PostCompact:" = "all"
 "TaskCompleted:" = ["engineer"]
+
+[agent-guidance]
+generalist = ""
+reviewer-doc = ""
+reviewer-error = ""
+reviewer-security = ""
+tpm = ""
+
+[agent-instructions]
+generalist = ""
+reviewer-doc = ""
+reviewer-error = ""
+reviewer-security = ""
+tpm = ""
+
+[skill-instructions]
+decider = ""
+github = ""
+iced-rs = ""
+iced-shadcn = ""
+issue-lifecycle = ""
+linear = ""
+orchestration = ""
+perf-cache = ""
+perf-ebpf = ""
+perf-latency = ""
+perf-lock-free = ""
+perf-profiling = ""
+perf-simd = ""
+perf-threading = ""
+perf-zero-alloc = ""
+price-handling = ""
+project-management = ""
+rust-arch = ""
+rust-async = ""
+rust-cargo = ""
+rust-conventions = ""
+rust-cross = ""
+rust-debugging = ""
+rust-ffi = ""
+rust-no-std = ""
+rust-safety = ""
+trading-design = ""
+worktree = ""
+
+# ── Installed skills (reference) ─────────────────────
+#   decider
+#   github
+#   iced-rs
+#   iced-shadcn
+#   issue-lifecycle
+#   linear
+#   orchestration
+#   perf-cache
+#   perf-ebpf
+#   perf-latency
+#   perf-lock-free
+#   perf-profiling
+#   perf-simd
+#   perf-threading
+#   perf-zero-alloc
+#   price-handling
+#   project-management
+#   rust-arch
+#   rust-async
+#   rust-cargo
+#   rust-conventions
+#   rust-cross
+#   rust-debugging
+#   rust-ffi
+#   rust-no-std
+#   rust-safety
+#   trading-design
+#   worktree

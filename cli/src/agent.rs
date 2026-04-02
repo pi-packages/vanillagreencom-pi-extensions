@@ -300,17 +300,21 @@ pub fn custom_hooks_section(hooks: &[CustomHookEntry]) -> String {
     section
 }
 
-/// Generate a "Required Skills" markdown section with imperative loading instructions.
-pub fn load_skills_section(skills: &[(String, String)]) -> String {
-    if skills.is_empty() {
+/// Generate a "Required Skills" markdown section listing required and optional skills
+/// in a single table.
+pub fn load_skills_section(
+    skills: &[(String, String)],
+    optional_skills: &[(String, String)],
+) -> String {
+    if skills.is_empty() && optional_skills.is_empty() {
         return String::new();
     }
     let mut section = String::from(
-        "## Required Skills — Load Before Proceeding\n\n\
+        "## Required Skills\n\n\
          You MUST load the relevant skill before attempting ANY operation in its domain.\n\
          Do not guess commands or improvise — load the skill first.\n\n\
-         | Domain | Skill |\n\
-         |--------|-------|\n",
+         | Skill | Always load when working on: |\n\
+         |-------|-----------------------------|\n",
     );
     for (name, desc) in skills {
         // Use the topic portion before ": " or ". " as the domain label
@@ -323,24 +327,9 @@ pub fn load_skills_section(skills: &[(String, String)]) -> String {
         };
         // Escape pipe chars that would break the markdown table
         let domain = domain.replace('|', "\\|");
-        section.push_str(&format!("| {} | `{}` |\n", domain, name));
+        section.push_str(&format!("| `{}` | {} |\n", name, domain));
     }
-    section
-}
-
-/// Generate an "Available Skills — Load When Needed" markdown section.
-/// Each triple is `(name, description, when)`.
-pub fn optional_skills_section(skills: &[(String, String)]) -> String {
-    if skills.is_empty() {
-        return String::new();
-    }
-    let mut section = String::from(
-        "\n## Available Skills — Load When Needed\n\n\
-         Load these skills only when the task matches their domain.\n\n\
-         | Skill | When to Load |\n\
-         |-------|-------------|\n",
-    );
-    for (name, when) in skills {
+    for (name, when) in optional_skills {
         let when = when.replace('|', "\\|");
         section.push_str(&format!("| `{}` | {} |\n", name, when));
     }
@@ -497,7 +486,7 @@ Does testing things.
 
     #[test]
     fn load_skills_section_empty() {
-        assert_eq!(load_skills_section(&[]), String::new());
+        assert_eq!(load_skills_section(&[], &[]), String::new());
     }
 
     #[test]
@@ -509,12 +498,18 @@ Does testing things.
             ),
             ("github".into(), "GitHub CLI integration".into()),
         ];
-        let section = load_skills_section(&skills);
+        let optional = vec![(
+            "trading-design".into(),
+            "UI layout design, typography, color".into(),
+        )];
+        let section = load_skills_section(&skills, &optional);
         assert!(section.contains("## Required Skills"));
         assert!(section.contains("Do not guess commands"));
-        // Table rows: domain is text before first ": " or ". "
-        assert!(section.contains("| Architecture patterns for Rust | `rust-arch` |"));
-        assert!(section.contains("| GitHub CLI integration | `github` |"));
+        // Table rows: skill name first, then domain
+        assert!(section.contains("| `rust-arch` | Architecture patterns for Rust |"));
+        assert!(section.contains("| `github` | GitHub CLI integration |"));
+        // Optional skills appended to same table
+        assert!(section.contains("| `trading-design` | UI layout design, typography, color |"));
     }
 
     #[test]
