@@ -299,11 +299,13 @@ Worktree creation is idempotent: existing worktrees are reused (rebased onto lat
 
 5. **Create worktree**: `WT_PATH=$(.agents/skills/worktree/scripts/worktree create [ISSUE_ID])`
 
-6. **Open terminal**: Detect environment:
-   - **If `$TMUX` is set** → launch directly (no ask user): Run `.agents/skills/orchestration/scripts/open-terminal "$WT_PATH" --tmux [ISSUE_ID] --title [ISSUE_ID] --cmd "[LAUNCH_CMD]"`. Output: "Opened tmux window [ISSUE_ID] for worktree. This session is complete."
-   - **Otherwise** → Ask user with: `Auto-open terminal` | `I'll open it myself`
-     - **Auto**: Run `.agents/skills/orchestration/scripts/open-terminal "$WT_PATH" --title [ISSUE_ID] --cmd "[LAUNCH_CMD]"`. Output: "Opened worktree terminal for [ISSUE_ID]. This session is complete."
-     - **Manual**: Output: "Worktree ready at `$WT_PATH`. Run the launch command in your new terminal. This session is complete."
+6. **Launch**: Ask user: `Launch terminal` | `I'll launch it myself`
+   - **Launch terminal**: `.agents/skills/orchestration/scripts/open-terminal [ISSUE_ID]`
+   - **Manual**: Show the command and worktree path so the user can run it themselves:
+     ```
+     Worktree ready at [WT_PATH].
+     Launch: .agents/skills/orchestration/scripts/open-terminal [ISSUE_ID]
+     ```
    - **→ § 1** (restart dashboard in current session).
 
 ### 4.4 Launch Parallel Group
@@ -312,11 +314,10 @@ Worktree creation is idempotent: existing worktrees are reused (rebased onto lat
 
 1. **If 0 issues in `[ISSUE_IDS]`** → § 1
 
-2. **Detect terminal**: If `$TMUX` set → `FLAG=--tmux`. Otherwise → Ask user: `Auto-open terminal` | `I'll open them myself` → `FLAG=--auto` or skip launch.
-
-4. **Ask user**: `Launch [N] issues` | `Select subset` | `Cancel`
-   - **Launch**: `.agents/skills/orchestration/scripts/parallel-launch [ISSUE_IDS] $FLAG`
-   - **Select subset**: Ask user with individual issues as options (multiSelect) → `.agents/skills/orchestration/scripts/parallel-launch [SELECTED_ISSUES] $FLAG`
+2. **Ask user**: `Launch [N] issues` | `Select subset` | `I'll launch them myself` | `Cancel`
+   - **Launch**: `.agents/skills/orchestration/scripts/open-terminal [ISSUE_IDS]`
+   - **Select subset**: Ask user with individual issues as options (multiSelect) → `.agents/skills/orchestration/scripts/open-terminal [SELECTED_ISSUES]`
+   - **Manual**: Show the command so the user can run it themselves.
    - **Cancel** → § 1
 
-5. **→ § 1** (restart dashboard in current session).
+3. **→ § 1** (restart dashboard in current session).

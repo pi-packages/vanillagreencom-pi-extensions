@@ -127,12 +127,8 @@ Always create as a parent + sub-issue pair. Parent coordinates, child implements
 
 4. **Create worktree**: `WT_PATH=$(.agents/skills/worktree/scripts/worktree create [ISSUE_ID])`
 
-5. **Open terminal**:
-   - **tmux** (`$TMUX` set) → launch directly, no prompt: `.agents/skills/orchestration/scripts/open-terminal [WT_PATH] --tmux [ISSUE_ID] --title [ISSUE_ID]`
-   - **Otherwise** → Ask user: `Auto-open terminal` | `I'll open it myself`
-     - **Auto**: `.agents/skills/orchestration/scripts/open-terminal [WT_PATH] --title [ISSUE_ID]`
-     - **Manual**: Output "Worktree ready at `[WT_PATH]`."
-
-   Output: "Opened [tmux window / terminal] for [ISSUE_ID]. This session is complete."
+5. **Launch**: Ask user: `Launch terminal` | `I'll launch it myself`
+   - **Launch terminal**: `.agents/skills/orchestration/scripts/open-terminal [ISSUE_ID]`
+   - **Manual**: Show the command and worktree path so the user can run it themselves.
 
 → end

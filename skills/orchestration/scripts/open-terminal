@@ -1,136 +1,265 @@
 #!/usr/bin/env bash
-# Open a new terminal in a directory, optionally running a command.
-# Supports: tmux (--tmux), Ghostty (default on supported platforms)
+# Launch worktree(s) for one or more issues with auto-detected harness and terminal.
 #
-# Usage: open-terminal <directory> [--cmd <command>] [--title <title>] [--tmux [window-name]]
+# Usage:
+#   open-terminal ISSUE-1 [--tmux | --ghostty] [--cmd "command {issue}"]
+#   open-terminal ISSUE-1 ISSUE-2 ... [--tmux | --ghostty] [--cmd "command {issue}"]
+#   open-terminal <group_id> [--tmux | --ghostty] [--cmd "command {issue}"]
 #
-# Examples:
-#   open-terminal /path/to/worktree
-#   open-terminal /path/to/worktree --title ISSUE-123 --cmd "some-command"
-#   open-terminal /path/to/worktree --tmux ISSUE-123 --title ISSUE-123 --cmd "some-command"
+# Options:
+#   --cmd "..."    Command to run in each worktree. Use {issue} as placeholder
+#                  for the issue ID. If omitted, auto-detects harness (claude/codex/opencode).
+#   --tmux         Open tmux windows (requires active tmux session)
+#   --ghostty      Open Ghostty terminals
+#   (default)      Auto-detect: tmux if $TMUX set, else ghostty/GUI terminal
+#
+# Environment:
+#   ISSUE_PATTERN  - Regex pattern matching issue IDs (default: "[A-Z]+-[0-9]+")
 
 set -euo pipefail
 
-DIR=""
-CMD=""
-TMUX_MODE=false
-TMUX_NAME=""
-TITLE=""
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Resolve project root, handling worktree paths
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+_git_common_dir=$(git -C "$PROJECT_ROOT" rev-parse --git-common-dir 2>/dev/null || echo "")
+if [[ "$_git_common_dir" != ".git" && -n "$_git_common_dir" ]]; then
+  PROJECT_ROOT="$(dirname "$_git_common_dir")"
+fi
+SKILLS_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+ENV_FILE="$PROJECT_ROOT/.env.local"
+if [[ -f "$ENV_FILE" ]]; then
+  # shellcheck source=/dev/null
+  source "$ENV_FILE"
+elif [[ -f "$PROJECT_ROOT/.env" ]]; then
+  # shellcheck source=/dev/null
+  source "$PROJECT_ROOT/.env"
+fi
+
+# Resolve WORKTREE_CLI from sibling skill
+WORKTREE_CLI="${WORKTREE_CLI:-$SKILLS_DIR/worktree/scripts/worktree}"
+
+# Configurable issue pattern (default: JIRA-style ABC-123)
+ISSUE_PATTERN="${ISSUE_PATTERN:-[A-Z]+-[0-9]+}"
+
+TERMINAL_MODE=""
+ISSUES=()
+GROUP_ID=""
+CMD_TEMPLATE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --cmd) CMD="$2"; shift 2 ;;
-    --title) TITLE="$2"; shift 2 ;;
-    --tmux)
-      TMUX_MODE=true
-      # Next arg is window name if it doesn't start with --
-      if [[ $# -gt 1 && "$2" != --* ]]; then
-        TMUX_NAME="$2"; shift
-      fi
-      shift
-      ;;
+    --tmux) TERMINAL_MODE="tmux"; shift ;;
+    --ghostty) TERMINAL_MODE="ghostty"; shift ;;
+    --cmd) CMD_TEMPLATE="$2"; shift 2 ;;
     --help|-h)
-      echo "Usage: open-terminal <directory> [--cmd <command>] [--title <title>] [--tmux [window-name]]"
+      echo "Usage: open-terminal ISSUE-1 [ISSUE-2 ...] [--tmux | --ghostty] [--cmd \"command\"]"
+      echo ""
+      echo "Options:"
+      echo "  --tmux              Open tmux windows (requires active tmux session)"
+      echo "  --ghostty           Open Ghostty terminals"
+      echo "  --cmd \"command\"     Command to run in each worktree ({issue} is replaced)"
+      echo "  (default)           Auto-detect: tmux if \$TMUX set, else GUI terminal"
+      echo ""
+      echo "If --cmd is omitted, auto-detects harness from install path:"
+      echo "  .claude/skills/  → claude"
+      echo "  .opencode/skills/ → opencode"
+      echo "  .agents/skills/  → codex"
+      echo ""
+      echo "Environment:"
+      echo "  ISSUE_PATTERN  Regex for issue IDs (default: [A-Z]+-[0-9]+)"
       exit 0
       ;;
-    *) DIR="$1"; shift ;;
+    [0-9]*) GROUP_ID="$1"; shift ;;
+    *)
+      # Match against configurable issue pattern
+      if echo "$1" | grep -qE "^${ISSUE_PATTERN}$"; then
+        ISSUES+=("$(echo "$1" | tr '[:lower:]' '[:upper:]')"); shift
+      else
+        echo "Error: unexpected argument: $1" >&2; exit 1
+      fi
+      ;;
   esac
 done
 
-if [[ -z "$DIR" ]]; then
-  echo "Error: directory required" >&2
+# Auto-detect terminal mode
+if [[ -z "$TERMINAL_MODE" ]]; then
+  if [[ -n "${TMUX:-}" ]]; then
+    TERMINAL_MODE="tmux"
+  else
+    TERMINAL_MODE="gui"
+  fi
+fi
+
+# Resolve issues from group_id if no explicit issues
+if [[ ${#ISSUES[@]} -eq 0 && -n "$GROUP_ID" ]]; then
+  GROUPS_JSON=$("$SCRIPT_DIR/parallel-groups" read 2>/dev/null || echo "[]")
+  GROUP_ISSUES=$(echo "$GROUPS_JSON" | jq -r --argjson gid "$GROUP_ID" '.[] | select(.group_id == $gid) | .issues[]' 2>/dev/null)
+  if [[ -z "$GROUP_ISSUES" ]]; then
+    echo "Error: no active group with id $GROUP_ID (may be stale)" >&2
+    exit 1
+  fi
+  while IFS= read -r issue; do
+    ISSUES+=("$issue")
+  done <<< "$GROUP_ISSUES"
+fi
+
+# Require worktree CLI
+if [[ ! -x "$WORKTREE_CLI" ]]; then
+  echo "Error: WORKTREE_CLI not found at '$WORKTREE_CLI'. Is the worktree skill installed?" >&2
   exit 1
 fi
 
-if [[ ! -d "$DIR" ]]; then
-  echo "Error: directory does not exist: $DIR" >&2
+if [[ ${#ISSUES[@]} -eq 0 ]]; then
+  echo "Error: no issues specified" >&2
   exit 1
 fi
+
+# --- Harness detection --------------------------------------------------------
+
+detect_start_cmd() {
+  local issue="$1"
+  if [[ -n "$CMD_TEMPLATE" ]]; then
+    echo "${CMD_TEMPLATE//\{issue\}/$issue}"
+    return
+  fi
+  case "$SCRIPT_DIR" in
+    */.claude/*)
+      echo "claude -n \"$issue\" '/orchestration start $issue'"
+      ;;
+    */.opencode/*)
+      echo "opencode '/orchestration start $issue'"
+      ;;
+    */.agents/*)
+      echo "codex '\$orchestration start $issue'"
+      ;;
+    *)
+      echo ""
+      ;;
+  esac
+}
+
+# --- Terminal launchers -------------------------------------------------------
 
 # Pre-trust directory in Claude Code config so the trust dialog is skipped
-CLAUDE_JSON="${CLAUDE_CONFIG_DIR:+$CLAUDE_CONFIG_DIR/claude.json}"
-CLAUDE_JSON="${CLAUDE_JSON:-$HOME/.claude.json}"
-if [[ -f "$CLAUDE_JSON" ]]; then
-  ABS_DIR="$(cd "$DIR" && pwd)"
-  if ! jq -e --arg p "$ABS_DIR" '.projects[$p].hasTrustDialogAccepted' "$CLAUDE_JSON" >/dev/null 2>&1; then
-    TMP_JSON=$(mktemp)
-    jq --arg p "$ABS_DIR" '.projects[$p] = (.projects[$p] // {}) + {hasTrustDialogAccepted: true}' "$CLAUDE_JSON" > "$TMP_JSON" && mv "$TMP_JSON" "$CLAUDE_JSON"
+pretrust_claude_dir() {
+  local dir="$1"
+  local claude_json="${CLAUDE_CONFIG_DIR:+$CLAUDE_CONFIG_DIR/claude.json}"
+  claude_json="${claude_json:-$HOME/.claude.json}"
+  if [[ -f "$claude_json" ]]; then
+    local abs_dir
+    abs_dir="$(cd "$dir" && pwd)"
+    if ! jq -e --arg p "$abs_dir" '.projects[$p].hasTrustDialogAccepted' "$claude_json" >/dev/null 2>&1; then
+      local tmp_json
+      tmp_json=$(mktemp)
+      jq --arg p "$abs_dir" '.projects[$p] = (.projects[$p] // {}) + {hasTrustDialogAccepted: true}' "$claude_json" > "$tmp_json" && mv "$tmp_json" "$claude_json"
+    fi
   fi
-fi
+}
 
-# Build the shell command to execute in the new terminal
-if [[ -n "$CMD" ]]; then
-  SHELL_CMD="cd '$DIR' && $CMD"
-else
-  SHELL_CMD="cd '$DIR'; exec \$SHELL"
-fi
-
-# Tmux mode
-if [[ "$TMUX_MODE" == true ]]; then
+open_tmux() {
+  local dir="$1" name="$2" cmd="$3"
   if [[ -z "${TMUX:-}" ]]; then
     echo "Error: not inside a tmux session" >&2
-    exit 1
+    return 1
   fi
-  NAME_ARGS=()
-  if [[ -n "$TMUX_NAME" ]]; then
-    NAME_ARGS=(-n "$TMUX_NAME")
-  fi
-  # Append after the last window so we don't shuffle existing indices
-  LAST_IDX=$(tmux list-windows -F '#{window_index}' | tail -1)
-  tmux new-window -a -t ":${LAST_IDX}" "${NAME_ARGS[@]}" -c "$DIR"
+  local last_idx
+  last_idx=$(tmux list-windows -F '#{window_index}' | tail -1)
+  tmux new-window -a -t ":${last_idx}" -n "$name" -c "$dir"
   tmux send-keys "clear" Enter
-  if [[ -n "$CMD" ]]; then
-    tmux send-keys "$CMD" Enter
+  if [[ -n "$cmd" ]]; then
+    tmux send-keys "$cmd" Enter
   fi
-  echo "Opened tmux window${TMUX_NAME:+ '$TMUX_NAME'} in $DIR"
-  exit 0
+  echo "  Opened tmux window '$name' in $dir"
+}
+
+open_gui() {
+  local dir="$1" title="$2" cmd="$3"
+  local shell_cmd
+  if [[ -n "$cmd" ]]; then
+    shell_cmd="cd '$dir' && $cmd"
+  else
+    shell_cmd="cd '$dir'; exec \$SHELL"
+  fi
+
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    if [[ -d "/Applications/Ghostty.app" ]]; then
+      local args=(--working-directory="$dir")
+      [[ -n "$title" ]] && args+=(--title="$title")
+      if [[ -n "$cmd" ]]; then
+        open -na "Ghostty.app" --args "${args[@]}" --command="bash -c '$cmd'"
+      else
+        open -na "Ghostty.app" --args "${args[@]}"
+      fi
+    elif command -v open &>/dev/null; then
+      if [[ -n "$cmd" ]]; then
+        osascript -e "tell application \"Terminal\" to do script \"cd '$dir' && $cmd\""
+      else
+        open -a Terminal "$dir"
+      fi
+    else
+      echo "Error: no supported terminal emulator found on macOS" >&2
+      return 1
+    fi
+  elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    if command -v ghostty &>/dev/null; then
+      local args=(--working-directory="$dir")
+      [[ -n "$title" ]] && args+=(--title="$title")
+      if [[ -n "$cmd" ]]; then
+        setsid env -u CLAUDECODE ghostty "${args[@]}" -e bash -c "$shell_cmd" </dev/null &>/dev/null &
+      else
+        setsid env -u CLAUDECODE ghostty "${args[@]}" </dev/null &>/dev/null &
+      fi
+    elif command -v xdg-terminal-exec &>/dev/null; then
+      setsid env -u CLAUDECODE xdg-terminal-exec bash -c "$shell_cmd" </dev/null &>/dev/null &
+    elif command -v xterm &>/dev/null; then
+      local xargs=()
+      [[ -n "$title" ]] && xargs+=(-T "$title")
+      setsid env -u CLAUDECODE xterm "${xargs[@]}" -e bash -c "$shell_cmd" </dev/null &>/dev/null &
+    else
+      echo "Error: no supported terminal emulator found" >&2
+      return 1
+    fi
+  else
+    echo "Error: unsupported platform: $OSTYPE" >&2
+    return 1
+  fi
+  echo "  Opened terminal for $title in $dir"
+}
+
+# --- Main loop ----------------------------------------------------------------
+
+if [[ ${#ISSUES[@]} -eq 1 ]]; then
+  echo "Launching worktree (${TERMINAL_MODE})..."
+else
+  echo "Launching ${#ISSUES[@]} worktrees (${TERMINAL_MODE})..."
 fi
 
-# GUI terminal mode — auto-detect available terminal emulator
-if [[ "$OSTYPE" == "darwin"* ]]; then
-  if [[ -d "/Applications/Ghostty.app" ]]; then
-    GHOSTTY_MAC_ARGS=(--working-directory="$DIR")
-    [[ -n "$TITLE" ]] && GHOSTTY_MAC_ARGS+=(--title="$TITLE")
-    if [[ -n "$CMD" ]]; then
-      open -na "Ghostty.app" --args "${GHOSTTY_MAC_ARGS[@]}" --command="bash -c '$CMD'"
-    else
-      open -na "Ghostty.app" --args "${GHOSTTY_MAC_ARGS[@]}"
-    fi
-  elif command -v open &>/dev/null; then
-    # Fallback: default Terminal.app
-    if [[ -n "$CMD" ]]; then
-      osascript -e "tell application \"Terminal\" to do script \"cd '$DIR' && $CMD\""
-    else
-      open -a Terminal "$DIR"
-    fi
-  else
-    echo "Error: no supported terminal emulator found on macOS" >&2
-    exit 1
+LAUNCHED=0
+FAILED=()
+
+for ISSUE in "${ISSUES[@]}"; do
+  # Create worktree (reuses existing)
+  if ! WT_PATH=$("$WORKTREE_CLI" create "$ISSUE" 2>&1); then
+    echo "  Failed to create worktree: $WT_PATH" >&2
+    FAILED+=("$ISSUE")
+    continue
   fi
-elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-  if command -v ghostty &>/dev/null; then
-    # Unset CLAUDECODE to avoid nested-session guard in the new terminal
-    GHOSTTY_ARGS=(--working-directory="$DIR")
-    [[ -n "$TITLE" ]] && GHOSTTY_ARGS+=(--title="$TITLE")
-    if [[ -n "$CMD" ]]; then
-      setsid env -u CLAUDECODE ghostty "${GHOSTTY_ARGS[@]}" -e bash -c "$SHELL_CMD" </dev/null &>/dev/null &
-    else
-      setsid env -u CLAUDECODE ghostty "${GHOSTTY_ARGS[@]}" </dev/null &>/dev/null &
-    fi
-  elif command -v xdg-terminal-exec &>/dev/null; then
-    # freedesktop default terminal
-    setsid env -u CLAUDECODE xdg-terminal-exec bash -c "$SHELL_CMD" </dev/null &>/dev/null &
-  elif command -v xterm &>/dev/null; then
-    XTERM_ARGS=()
-    [[ -n "$TITLE" ]] && XTERM_ARGS+=(-T "$TITLE")
-    setsid env -u CLAUDECODE xterm "${XTERM_ARGS[@]}" -e bash -c "$SHELL_CMD" </dev/null &>/dev/null &
+
+  START_CMD=$(detect_start_cmd "$ISSUE")
+  pretrust_claude_dir "$WT_PATH"
+
+  if [[ "$TERMINAL_MODE" == "tmux" ]]; then
+    open_tmux "$WT_PATH" "$ISSUE" "$START_CMD"
   else
-    echo "Error: no supported terminal emulator found (tried: ghostty, xdg-terminal-exec, xterm)" >&2
-    exit 1
+    open_gui "$WT_PATH" "$ISSUE" "$START_CMD"
   fi
-else
-  echo "Error: unsupported platform: $OSTYPE" >&2
+  LAUNCHED=$((LAUNCHED + 1))
+done
+
+if [[ ${#FAILED[@]} -gt 0 ]]; then
+  echo "Launched $LAUNCHED, failed ${#FAILED[@]}: ${FAILED[*]}" >&2
   exit 1
 fi
 
-echo "Opened terminal in $DIR"
+echo "Done — $LAUNCHED worktree(s) launched."
