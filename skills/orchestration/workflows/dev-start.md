@@ -51,11 +51,6 @@ fi
 
 **Dev agents persist for the entire session.** Never shutdown dev agents — they stay alive for re-delegation (fix cycles, pending children, PR review fixes). Only the caller's finalization step shuts them down.
 
-**Detect team context**:
-```bash
-TEAM=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] '.team_name // empty')
-```
-
 ### If Single Issue
 
 Delegate to a `[AGENT_TYPE]` agent with the prompt below.

@@ -199,7 +199,7 @@ After all issues processed → § 3.
    - `Research: [QUESTIONS]` — architectural gaps, multiple approaches, performance trade-offs, unclear requirements
    </delegation_format>
 
-4. **Capture for resume**: If single agent, store teammate name `consult-[AGENT_TYPE]` as `[CONSULTATION_AGENT_NAME]` for resume in § 3.5. If multi-agent, skip (research-issue uses fresh delegation for multi-domain).
+3. **Capture for resume**: If single agent, store agent reference as `[CONSULTATION_AGENT_NAME]` for resume in § 3.5. If multi-agent, skip (research-issue uses fresh delegation for multi-domain).
 
 ### 3.4 Present Result and Confirm
 
@@ -247,12 +247,11 @@ Research issues block their `blocked_issue`. After `workflows/research-issue.md`
 
 After `workflows/research-issue.md` returns → § 3.6.
 
-### 3.6 Clean Up Consultation Team
+### 3.6 Clean Up Consultation
 
-**Skip if** no consultation team (multi-agent path or no team created in § 3.3 step 2)
+**Skip if** no consultation agent was created in § 3.3.
 
-1. Send shutdown request to "consult-[AGENT_TYPE]"
-2. Delete agent team: `consult-[ISSUE_ID]`
+Terminate the consultation agent if it's still running.
 
 ---
 

@@ -256,7 +256,7 @@ If >4 suggestion items: show first 3 + `All N fixes`. Refine via "Other".
 
 2. **Determine sequence**: QA agent types are configurable per project. Example label-to-agent mappings: `needs-safety-audit` → safety audit agent, `needs-perf-test` → performance QA agent, `needs-review` → architecture review agent, `design` → visual QA agent (use visual QA skills as necessary to validate UI changes).
 
-**For each QA agent, execute steps 3–7:**
+**For each QA agent, execute steps 3–5:**
 
 3. **Delegate to QA agent** (`[QA_AGENT]`) with the prompt below:
 
@@ -280,7 +280,7 @@ If >4 suggestion items: show first 3 + `All N fixes`. Refine via "Other".
 
 4. **Wait for completion.**
 
-7. **Process agent return.** Agent returns `verdict`, `json_path`, and (for performance QA agent) `benchmark_commit`.
+5. **Process agent return.** Agent returns `verdict`, `json_path`, and (for performance QA agent) `benchmark_commit`.
    - **Update state**: `.agents/skills/orchestration/scripts/workflow-state append [ISSUE_ID] json_paths "[json_path]"`
    - If `benchmark_commit` is not "none", verify: `git -C [WORKTREE_PATH] log -1 --oneline [SHA]`.
    - **If performance QA agent**: post benchmark report to issue tracker as issue comment:
@@ -317,7 +317,7 @@ If >4 suggestion items: show first 3 + `All N fixes`. Refine via "Other".
      | `pass` | Continue to next QA agent |
      | `action_required` | → § 7 |
 
-8. **After all QA agents complete** — check for accumulated fix suggestions:
+6. **After all QA agents complete** — check for accumulated fix suggestions:
    - Read all QA agent JSONs from state `json_paths`, filter items where `category == "fix"`
    - Exclude items already in `fixed_items` or `escalated_items`
    - Fix suggestions remain → § 7
