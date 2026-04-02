@@ -67,7 +67,3 @@ Agent types referenced in workflows (names are project-configurable):
 - **QA agents**: `[QA_AGENT]` — agents for safety, performance, and architecture review
 
 Commit format: `[PREFIX]([ISSUE_ID]): [DESCRIPTION]` — configurable per project conventions.
-
-## Full Compiled Document
-
-For the complete guide with all workflows expanded inline: `AGENTS.md`

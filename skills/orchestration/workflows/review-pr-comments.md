@@ -319,13 +319,7 @@ Issue suggestions: [N] items → § 6.2 audit
 
 2. **Group items** by `agent` field.
 
-3. **Detect team context**: `.agents/skills/orchestration/scripts/workflow-state exists [ISSUE_ID] && TEAM=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] .team_name)`
-
-4. **Delegate fixes** per agent group:
-
-   **If in team** (`$TEAM` set): create tasks from issue-lifecycle dev-fix workflow, message existing dev teammate with delegation.
-
-   **If standalone**: launch sub-agent with delegation.
+3. **Delegate fixes** per agent group (reuse existing dev agent if available):
 
    <delegation_format>
    Workflow: issue-lifecycle skill dev-fix workflow

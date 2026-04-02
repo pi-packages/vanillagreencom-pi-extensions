@@ -113,7 +113,7 @@ Map domain labels to agent types -- infer from component paths (project-configur
 
 #### If `consultation_agent_name` set (from start § 3.3)
 
-Send message to existing agent: [CONSULTATION_AGENT_NAME]. Agent's full context is preserved from the initial consultation. Follow exactly, fill placeholders, add nothing else. Omit lines/sections with empty placeholders.
+Re-delegate to the existing consultation agent `[CONSULTATION_AGENT_NAME]` — it retains full context from the initial consultation. Follow exactly, fill placeholders, add nothing else. Omit lines/sections with empty placeholders.
 
 <delegation_format>
 Research issue created: [RESEARCH_ISSUE_ID] - [TOPIC]

@@ -107,16 +107,9 @@ Re-review cycle [N]. Already resolved — do NOT re-report:
 
 ## 3. Collect & Present Results
 
-**Agents mark their own tasks completed.** Monitor via task list.
+Wait for all review agents to complete. Do NOT shutdown — agents needed for potential re-review in § 4.
 
-**If in team session**: Wait for completion messages from all [AGENTS]. Do NOT shutdown — agents needed for potential re-review in § 4.
-
-**If standalone**: Wait for all [AGENTS] returns. Store each agent's returned `agent_id` in state for re-review resume:
-```bash
-.agents/skills/orchestration/scripts/workflow-state set [ISSUE_ID] review_agent_ids '{"[AGENT_NAME]":"[AGENT_ID]",...}'
-```
-
-Extract `Report` path and `Verdict` from each. If any agent fails to return expected format, halt and report error.
+Extract `Report` path and `Verdict` from each agent's return. If any agent fails to return expected format, halt and report error.
 
 Overall verdict: `action_required` if any agent has blockers, `pass` otherwise.
 

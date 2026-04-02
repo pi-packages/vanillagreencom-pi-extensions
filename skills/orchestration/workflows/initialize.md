@@ -24,24 +24,18 @@ Set up team, auth, cache, and workflow state for a worktree session.
    - From argument if provided
    - Otherwise from branch: `git rev-parse --abbrev-ref HEAD` → parse `$ISSUE_PATTERN` (case-insensitive, project-configurable)
 
-2. **Create team** (delete existing first if already leading one):
-   ```
-   Delete agent team (ignore error if no team exists)
-   Create agent team: [ISSUE_ID_LOWERCASE]
-   ```
+2. **Run**: `.agents/skills/orchestration/scripts/session-init`
 
-3. **Run**: `.agents/skills/orchestration/scripts/session-init`
+3. **If `gh_auth` is false or issue tracker auth is false** → report error and fix before proceeding.
 
-4. **If `gh_auth` is false or issue tracker auth is false** → report error and fix before proceeding.
+4. **Set `WORKTREE_PATH`** to current working directory.
 
-5. **Set `WORKTREE_PATH`** to current working directory.
-
-6. **Sync cache**:
+5. **Sync cache**:
    ```bash
    .agents/skills/linear/scripts/linear.sh sync --reconcile
    ```
 
-7. **Init workflow state**:
+6. **Init workflow state**:
    ```bash
    .agents/skills/orchestration/scripts/workflow-state init [ISSUE_ID] --team "[ISSUE_ID_LOWERCASE]" \
      --agent "[AGENT]" --worktree "[WORKTREE_PATH]" --branch "[BRANCH]"
