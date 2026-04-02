@@ -305,16 +305,33 @@ fn resolve_single_source(source: &str) -> Option<PathBuf> {
         return None;
     }
 
-    // Remote shorthand (owner/repo) — check cached clone
+    // Remote shorthand (owner/repo) — update and use cached clone
     let cache_dir = config::global_base_dir()
         .join(".vstack")
         .join("cache");
     let key = source.replace('/', "_");
     let cached = cache_dir.join(&key);
-    if cached.is_dir() {
+    if cached.join(".git").exists() {
+        update_cached_repo(&cached);
         return Some(cached);
     }
 
     None
+}
+
+/// Pull latest changes for a cached remote repo.
+fn update_cached_repo(repo_dir: &std::path::Path) {
+    eprintln!("Updating cached repo...");
+    let fetch = std::process::Command::new("git")
+        .args(["fetch", "origin", "--quiet"])
+        .current_dir(repo_dir)
+        .status();
+    if fetch.is_ok_and(|s| s.success()) {
+        let _ = std::process::Command::new("git")
+            .args(["reset", "--hard", "origin/HEAD"])
+            .current_dir(repo_dir)
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
 }
 
