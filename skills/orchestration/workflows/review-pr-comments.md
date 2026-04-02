@@ -322,7 +322,7 @@ Issue suggestions: [N] items → § 6.2 audit
 3. **Delegate fixes** per agent group (reuse existing dev agent if available):
 
    <delegation_format>
-   Workflow: issue-lifecycle skill dev-fix workflow
+   Follow workflow: .agents/skills/issue-lifecycle/workflows/dev-fix.md
 
    Source: pr-comments
    Issue: [ISSUE_ID]

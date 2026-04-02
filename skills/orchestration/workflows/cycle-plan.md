@@ -7,7 +7,7 @@ Generate cycle plan via TPM agent with user approval.
 1. **Delegate to `[AGENT_TYPE]`**: Follow exactly, fill placeholders, add nothing else. Omit lines/sections with empty placeholders.
 
    <delegation_format>
-   Workflow: [project-management skill workflows]/tpm-cycle-plan.md
+   Follow workflow: .agents/skills/project-management/workflows/tpm-cycle-plan.md
    </delegation_format>
 
 2. **After agent returns**: Collect JSON path. Agent returns `.JSON` file. If missing, halt.

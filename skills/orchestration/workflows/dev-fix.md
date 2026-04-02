@@ -87,7 +87,7 @@ WT_PATH=$(.agents/skills/worktree/scripts/worktree path $ISSUE_ID 2>/dev/null ||
    <delegation_format>
    Ultrathink.
 
-   Workflow: issue-lifecycle skill — dev-fix workflow
+   Follow workflow: .agents/skills/issue-lifecycle/workflows/dev-fix.md
 
    Source: [SOURCE]
    Issue: [ISSUE_ID]

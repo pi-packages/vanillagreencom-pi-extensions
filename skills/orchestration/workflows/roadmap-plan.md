@@ -118,7 +118,7 @@ Write input per [roadmap-plan-input.md](../schemas/roadmap-plan-input.md) to `tm
 **Delegation prompt:** Follow exactly, fill placeholders, add nothing else. Omit lines/sections with empty placeholders.
 
 <delegation_format>
-Workflow: [project-management skill workflows]/tpm-roadmap-plan.md
+Follow workflow: .agents/skills/project-management/workflows/tpm-roadmap-plan.md
 
 Arguments: --input [INPUT_FILE_PATH]
 </delegation_format>

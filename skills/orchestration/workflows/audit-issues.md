@@ -73,7 +73,7 @@ Extract `project` field for fallback resolution.
 Spawn sub-agent: type=[TPM] (NOT teammate -- one-shot analysis, no re-delegation):
 
 <delegation_format>
-Workflow: [project-management skill workflows]/tpm-audit-project-order.md
+Follow workflow: .agents/skills/project-management/workflows/tpm-audit-project-order.md
 
 Arguments: (none)
 </delegation_format>
@@ -219,7 +219,7 @@ Spawn sub-agent: type=[TPM] (NOT teammate -- one-shot analysis, no re-delegation
 **PROJECT mode**:
 
 <delegation_format>
-Workflow: [project-management skill workflows]/tpm-audit.md
+Follow workflow: .agents/skills/project-management/workflows/tpm-audit.md
 
 Arguments: --project "[PROJECT_NAME]"
 Worktree: [WORKTREE_PATH] (empty if main repo)
@@ -228,7 +228,7 @@ Worktree: [WORKTREE_PATH] (empty if main repo)
 **ISSUE mode** (from file):
 
 <delegation_format>
-Workflow: [project-management skill workflows]/tpm-audit.md
+Follow workflow: .agents/skills/project-management/workflows/tpm-audit.md
 
 Arguments: --issues [FILE_PATH]
 </delegation_format>
