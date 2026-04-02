@@ -43,6 +43,7 @@ WORKTREE_CLI="${WORKTREE_CLI:-$SKILLS_DIR/worktree/scripts/worktree}"
 ISSUE_PATTERN="${ISSUE_PATTERN:-[A-Z]+-[0-9]+}"
 
 TERMINAL_MODE=""
+HARNESS=""
 ISSUES=()
 GROUP_ID=""
 CMD_TEMPLATE=""
@@ -51,20 +52,23 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --tmux) TERMINAL_MODE="tmux"; shift ;;
     --ghostty) TERMINAL_MODE="ghostty"; shift ;;
+    --harness) HARNESS="$2"; shift 2 ;;
+    --harness=*) HARNESS="${1#--harness=}"; shift ;;
     --cmd) CMD_TEMPLATE="$2"; shift 2 ;;
     --help|-h)
-      echo "Usage: open-terminal ISSUE-1 [ISSUE-2 ...] [--tmux | --ghostty] [--cmd \"command\"]"
+      echo "Usage: open-terminal ISSUE-1 [ISSUE-2 ...] [options]"
       echo ""
       echo "Options:"
+      echo "  --harness <name>    Harness to launch: claude, codex, opencode"
       echo "  --tmux              Open tmux windows (requires active tmux session)"
       echo "  --ghostty           Open Ghostty terminals"
-      echo "  --cmd \"command\"     Command to run in each worktree ({issue} is replaced)"
-      echo "  (default)           Auto-detect: tmux if \$TMUX set, else GUI terminal"
+      echo "  --cmd \"command\"     Custom command ({issue} is replaced). Overrides --harness."
+      echo "  (default terminal)  Auto-detect: tmux if \$TMUX set, else GUI terminal"
       echo ""
-      echo "If --cmd is omitted, auto-detects harness by CLI availability:"
+      echo "Harness launch commands:"
       echo "  claude   → claude -n ISSUE '/orchestration start ISSUE'"
-      echo "  opencode → opencode '/orchestration start ISSUE'"
       echo "  codex    → codex '\$orchestration start ISSUE'"
+      echo "  opencode → opencode '/orchestration start ISSUE'"
       echo ""
       echo "Environment:"
       echo "  ISSUE_PATTERN  Regex for issue IDs (default: [A-Z]+-[0-9]+)"
@@ -115,6 +119,11 @@ if [[ ${#ISSUES[@]} -eq 0 ]]; then
   exit 1
 fi
 
+if [[ -z "$HARNESS" && -z "$CMD_TEMPLATE" ]]; then
+  echo "Error: --harness <claude|codex|opencode> is required (or use --cmd)" >&2
+  exit 1
+fi
+
 # --- Harness detection --------------------------------------------------------
 
 detect_start_cmd() {
@@ -123,16 +132,12 @@ detect_start_cmd() {
     echo "${CMD_TEMPLATE//\{issue\}/$issue}"
     return
   fi
-  # Detect harness by which CLI is available
-  if command -v claude &>/dev/null; then
-    echo "claude -n \"$issue\" '/orchestration start $issue'"
-  elif command -v opencode &>/dev/null; then
-    echo "opencode '/orchestration start $issue'"
-  elif command -v codex &>/dev/null; then
-    echo "codex '\$orchestration start $issue'"
-  else
-    echo ""
-  fi
+  case "$HARNESS" in
+    claude)   echo "claude -n \"$issue\" '/orchestration start $issue'" ;;
+    codex)    echo "codex '\$orchestration start $issue'" ;;
+    opencode) echo "opencode '/orchestration start $issue'" ;;
+    *)        echo "" ;;
+  esac
 }
 
 # --- Terminal launchers -------------------------------------------------------

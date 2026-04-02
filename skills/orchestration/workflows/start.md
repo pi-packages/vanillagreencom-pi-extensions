@@ -299,13 +299,9 @@ Worktree creation is idempotent: existing worktrees are reused (rebased onto lat
 
 5. **Create worktree**: `WT_PATH=$(.agents/skills/worktree/scripts/worktree create [ISSUE_ID])`
 
-6. **Launch**: Ask user: `Launch terminal` | `I'll launch it myself`
-   - **Launch terminal**: `.agents/skills/orchestration/scripts/open-terminal [ISSUE_ID]`
-   - **Manual**: Show the command and worktree path so the user can run it themselves:
-     ```
-     Worktree ready at [WT_PATH].
-     Launch: .agents/skills/orchestration/scripts/open-terminal [ISSUE_ID]
-     ```
+6. **Launch**: Ask user which harness to launch: `claude` | `codex` | `opencode` | `I'll launch it myself`
+   - **Harness selected**: `.agents/skills/orchestration/scripts/open-terminal [ISSUE_ID] --harness [HARNESS]`
+   - **Manual**: Show the command and worktree path so the user can run it themselves.
    - **→ § 1** (restart dashboard in current session).
 
 ### 4.4 Launch Parallel Group
@@ -314,9 +310,9 @@ Worktree creation is idempotent: existing worktrees are reused (rebased onto lat
 
 1. **If 0 issues in `[ISSUE_IDS]`** → § 1
 
-2. **Ask user**: `Launch [N] issues` | `Select subset` | `I'll launch them myself` | `Cancel`
-   - **Launch**: `.agents/skills/orchestration/scripts/open-terminal [ISSUE_IDS]`
-   - **Select subset**: Ask user with individual issues as options (multiSelect) → `.agents/skills/orchestration/scripts/open-terminal [SELECTED_ISSUES]`
+2. **Ask user** which harness and: `Launch [N] issues` | `Select subset` | `I'll launch them myself` | `Cancel`
+   - **Launch**: `.agents/skills/orchestration/scripts/open-terminal [ISSUE_IDS] --harness [HARNESS]`
+   - **Select subset**: Ask user with individual issues as options (multiSelect) → `.agents/skills/orchestration/scripts/open-terminal [SELECTED_ISSUES] --harness [HARNESS]`
    - **Manual**: Show the command so the user can run it themselves.
    - **Cancel** → § 1
 
