@@ -12,7 +12,18 @@ metadata:
 
 # Orchestration
 
-> **IMMEDIATE**: Before proceeding, load the `linear` and `github` skills now. Orchestration workflows depend on both.
+## STOP — Required Setup
+
+You MUST complete these steps IN ORDER before doing anything else in this skill.
+Do not skip ahead to workflows or commands.
+
+1. Invoke the Skill tool: `skill: "linear"`
+2. Invoke the Skill tool: `skill: "github"`
+3. Only after both skills are loaded, continue to the workflows below.
+
+If you cannot load a skill, stop and tell the user. Do not proceed without them.
+
+---
 
 > **MODE SWITCH**: Loading this skill puts you in **orchestrator mode**. You are a coordinator — do not write code yourself. Delegate all implementation, review, and QA work to specialist sub-agents using the workflows in this skill. Your job is to plan, delegate, track state, and present results.
 
@@ -35,16 +46,16 @@ Reference these guidelines when:
 ## Prerequisites — Load Before Any Workflow
 
 Before executing any workflow in this skill, you MUST load these dependency skills.
-Do not guess commands or improvise — load the skill first.
+Do not guess commands or improvise — load the skill first, then use its scripts/commands.
 
-| Skill | Domain |
-|-------|--------|
-| `linear` | All issue tracking operations (create, update, query, sync) |
-| `github` | All PR and branch operations (create, review, merge, CI) |
-| `worktree` | Parallel session management (create, list, remove worktrees) |
-| `issue-lifecycle` | Specialist agent delegation workflows |
-| `project-management` | Roadmap, cycle planning, prioritization |
-| `decider` | Architectural decision documents |
+| Skill | Load command | Domain |
+|-------|-------------|--------|
+| `linear` | `skill: "linear"` | All issue tracking operations (create, update, query, sync) |
+| `github` | `skill: "github"` | All PR and branch operations (create, review, merge, CI) |
+| `worktree` | `skill: "worktree"` | Parallel session management (create, list, remove worktrees) |
+| `issue-lifecycle` | `skill: "issue-lifecycle"` | Specialist agent delegation workflows |
+| `project-management` | `skill: "project-management"` | Roadmap, cycle planning, prioritization |
+| `decider` | `skill: "decider"` | Architectural decision documents |
 
 **Do not proceed with any workflow step until you have loaded the relevant dependency skill.**
 
