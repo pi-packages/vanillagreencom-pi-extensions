@@ -10,6 +10,19 @@ metadata:
 
 # Safety Audit Patterns
 
+Audit patterns for unsafe Rust: SAFETY comments, pointer invariants, memory safety, lock-free correctness, sanitizers, fuzzing, and supply chain hygiene.
+
+## Resources
+
+Documentation lookup order: local skill files -> ctx7 CLI -> web fallback.
+
+### ctx7 CLI
+
+| Library | ctx7 ID | Use For |
+|---------|---------|---------|
+| Rust std | `/websites/doc_rust-lang_stable_std` | unsafe semantics, ptr, mem, MaybeUninit, UnsafeCell |
+| crossbeam | `/crossbeam-rs/crossbeam` | Epoch-based reclamation, atomic utilities |
+
 ## Severity Classification
 
 Classify every audit finding using these severity levels:
@@ -22,17 +35,6 @@ Classify every audit finding using these severity levels:
 | LOW | Style issues, missing docs, non-blocking | Create follow-up issue |
 
 CRITICAL and HIGH findings must block merge. MEDIUM findings may proceed with a tracked follow-up. LOW findings are advisory.
-
-## Resources
-
-Documentation lookup order: local skill files -> ctx7 CLI -> web fallback.
-
-### ctx7 CLI
-
-| Library | ctx7 ID | Use For |
-|---------|---------|---------|
-| Rust std | `/websites/doc_rust-lang_stable_std` | unsafe semantics, ptr, mem, MaybeUninit, UnsafeCell |
-| crossbeam | `/crossbeam-rs/crossbeam` | Epoch-based reclamation, atomic utilities |
 
 ## Skill Rules
 

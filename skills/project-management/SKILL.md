@@ -13,21 +13,38 @@ metadata:
 
 # Project Management
 
-> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
-
 TPM methodology for roadmap planning, cycle planning, issue auditing, and progress tracking. Workflows analyze state and return structured JSON recommendations — the orchestrator or user handles execution.
 
-## When to Apply
+## Workflows
 
-Reference these guidelines when:
-- Planning development cycles (sprint/iteration planning)
-- Analyzing roadmap priorities and project ordering
-- Auditing issues for relations, hierarchy, duplicates, or misconfigurations
-- Creating or breaking down initiatives, projects, and issues
-- Managing dependencies between issues and projects
-- Prioritizing work using structured scoring
-- Tracking project health indicators
-- Managing label taxonomy and application
+TPM workflows return JSON recommendations only. Orchestrator or user handles interaction and execution.
+
+| Workflow | Purpose |
+|----------|---------|
+| [tpm-cycle-plan](workflows/tpm-cycle-plan.md) | Analyze backlog, compute architecture order |
+| [tpm-roadmap-plan](workflows/tpm-roadmap-plan.md) | Cross-project analysis, architecture gaps |
+| [tpm-audit](workflows/tpm-audit.md) | Audit issues/projects for relations, hierarchy |
+| [tpm-audit-project-order](workflows/tpm-audit-project-order.md) | Analyze project dependencies and ordering |
+
+## References
+
+| Topic | Location |
+|-------|----------|
+| Issue creation | [references/issues.md](references/issues.md) |
+| Initiatives & Projects | [references/initiatives-projects.md](references/initiatives-projects.md) |
+| Dependencies | [references/dependencies.md](references/dependencies.md) |
+| Prioritization factors | [references/prioritization.md](references/prioritization.md) |
+| Label management | [references/labels.md](references/labels.md) |
+| Issue tracker CLI | Companion issue tracker skill (`.agents/skills/linear/scripts/linear.sh`) |
+
+## Output Schemas
+
+| Workflow | Schema |
+|----------|--------|
+| Cycle planning | [cycle-plan-output.md](schemas/cycle-plan-output.md) |
+| Roadmap analysis | [roadmap-plan-output.md](schemas/roadmap-plan-output.md) |
+| Issue/project audit | [audit-output.md](schemas/audit-output.md) |
+| Project order audit | [audit-project-order-output.md](schemas/audit-project-order-output.md) |
 
 ## Skill Dependencies
 
@@ -67,37 +84,6 @@ Score = (Critical Path x 3) + (Dependencies x 2) + (Risk x 2) + (Value x 1) - (E
 | Blocked issues | 0 | 1-2 | 3+ |
 | In Progress age | <3 days | 3-7 days | >7 days |
 | Completion ratio (7d) | >0.8 | 0.5-0.8 | <0.5 |
-
-## Workflows
-
-TPM workflows return JSON recommendations only. Orchestrator or user handles interaction and execution.
-
-| Workflow | Purpose |
-|----------|---------|
-| [tpm-cycle-plan](workflows/tpm-cycle-plan.md) | Analyze backlog, compute architecture order |
-| [tpm-roadmap-plan](workflows/tpm-roadmap-plan.md) | Cross-project analysis, architecture gaps |
-| [tpm-audit](workflows/tpm-audit.md) | Audit issues/projects for relations, hierarchy |
-| [tpm-audit-project-order](workflows/tpm-audit-project-order.md) | Analyze project dependencies and ordering |
-
-## Output Schemas
-
-| Workflow | Schema |
-|----------|--------|
-| Cycle planning | [cycle-plan-output.md](schemas/cycle-plan-output.md) |
-| Roadmap analysis | [roadmap-plan-output.md](schemas/roadmap-plan-output.md) |
-| Issue/project audit | [audit-output.md](schemas/audit-output.md) |
-| Project order audit | [audit-project-order-output.md](schemas/audit-project-order-output.md) |
-
-## References
-
-| Topic | Location |
-|-------|----------|
-| Issue creation | [references/issues.md](references/issues.md) |
-| Initiatives & Projects | [references/initiatives-projects.md](references/initiatives-projects.md) |
-| Dependencies | [references/dependencies.md](references/dependencies.md) |
-| Prioritization factors | [references/prioritization.md](references/prioritization.md) |
-| Label management | [references/labels.md](references/labels.md) |
-| Issue tracker CLI | Companion issue tracker skill (`.agents/skills/linear/scripts/linear.sh`) |
 
 ## Dependencies
 

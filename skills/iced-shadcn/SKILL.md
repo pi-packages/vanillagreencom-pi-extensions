@@ -11,8 +11,6 @@ metadata:
 
 # iced-shadcn
 
-> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
-
 Component design skill for building shadcn Base UI-inspired components in Iced. Covers architecture decisions, family decomposition, implementation methodology, and parity audits.
 
 ## Resources
@@ -30,21 +28,20 @@ Component design skill for building shadcn Base UI-inspired components in Iced. 
 | shadcn Base UI | `https://ui.shadcn.com/docs/components/base/` | Component behavior truth |
 | iced-shadcn crate | `https://github.com/FerrisMind/shadcn-rs/tree/master/crates/iced-shadcn` | Architecture patterns |
 
-## When to Apply
-
-Reference these guidelines when:
-- Planning new Iced components based on shadcn Base UI
-- Decomposing component families into foundations and leaves
-- Implementing overlay, menu, selection, or display components
-- Auditing implemented components against Base UI reference for parity
-- Deciding foundation-first vs leaf-first implementation strategy
-
 ## Workflows
 
 | Workflow | When to use |
 |----------|-------------|
 | [component-plan](workflows/component-plan.md) | Planning new components, family decomposition, architecture decisions, implementation |
 | [parity-audit](workflows/parity-audit.md) | Post-implementation audit of leaf components against Base UI reference before closure |
+
+## References
+
+- Component families: `references/families.md`
+- Foundation issue shape: `references/issue-structure.md`
+- Parity checklist: `references/checklist.md`
+- Viewer page template: `references/page-template.md`
+- Issue guidance: `references/issue-guidance.md`
 
 ## Source Authority (ordered)
 
@@ -79,12 +76,4 @@ From [iced-shadcn](https://github.com/FerrisMind/shadcn-rs/tree/master/crates/ic
 - Do not scope installation instructions, CLI snippets, or docs-site chrome into parity work
 - Update architecture docs when work changes overlay/menu/widget patterns
 - Consult the iced-rs skill's widget catalog before implementing custom `Widget`/`overlay::Overlay` — prefer Iced built-ins per the Built-in First principle
-
-## References
-
-- Component families: `references/families.md`
-- Foundation issue shape: `references/issue-structure.md`
-- Parity checklist: `references/checklist.md`
-- Viewer page template: `references/page-template.md`
-- Issue guidance: `references/issue-guidance.md`
 

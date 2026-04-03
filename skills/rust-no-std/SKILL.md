@@ -10,6 +10,8 @@ metadata:
 
 # Rust no_std Development
 
+Patterns for `#![no_std]` libraries, embedded targets, and dual-mode crates — core/alloc/std tiers, panic handlers, OOM handling, and feature-gated portability.
+
 ## Resources
 
 Documentation lookup order: local skill files -> ctx7 CLI -> web fallback.

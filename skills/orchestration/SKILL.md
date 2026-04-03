@@ -187,22 +187,19 @@ When executing a command's workflow, follow ALL [Workflow Execution](#workflow-e
 
 ## Scripts
 
-| Script | Purpose |
-|--------|---------|
-| `.agents/skills/orchestration/scripts/workflow-state` | Read/write/append persistent state (init, get, set, append, increment) |
-
-### workflow-state Usage
-
 ```bash
-.agents/skills/orchestration/scripts/workflow-state init PROJ-123 --agent backend --worktree /tmp/wt
-.agents/skills/orchestration/scripts/workflow-state get PROJ-123 .cycles
-.agents/skills/orchestration/scripts/workflow-state increment PROJ-123 cycles
-.agents/skills/orchestration/scripts/workflow-state append PROJ-123 json_paths "review.json"
-.agents/skills/orchestration/scripts/workflow-state append PROJ-123 fixed_items '{"description":"Fix","commit":"abc"}'
-.agents/skills/orchestration/scripts/workflow-state set PROJ-123 pr_review_baseline '{"last_ts":"2026-01-28","last_threads":2}'
+.agents/skills/orchestration/scripts/workflow-state <action> <ISSUE_ID> [args]
 ```
 
-Environment: `ORCH_STATE_DIR` overrides state directory (default: `tmp`).
+Read/write/append persistent state (survives compaction). `ORCH_STATE_DIR` overrides state directory (default: `tmp`).
+
+| Action | Purpose |
+|--------|---------|
+| `init <ID> --agent <name> --worktree <path>` | Initialize state file |
+| `get <ID> <.field>` | Read state field |
+| `set <ID> <field> <value>` | Write state field |
+| `append <ID> <field> <value>` | Append to array field |
+| `increment <ID> <field>` | Increment counter |
 
 ## Schemas
 

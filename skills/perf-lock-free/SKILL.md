@@ -12,28 +12,6 @@ metadata:
 
 Verification patterns and correctness rules for lock-free data structures, atomic orderings, and epoch-based memory reclamation.
 
-## Nomenclature
-
-- **SPSC** - Single-Producer, Single-Consumer queue
-- **UB** - Undefined Behavior
-- **MIRI** - Mid-level IR Interpreter (detects UB in unsafe Rust)
-- **Loom** - Concurrency permutation testing framework
-- **TSAN** - ThreadSanitizer (detects data races in mutex-based code)
-- **ASAN** - AddressSanitizer (detects memory errors)
-- **Epoch reclamation** - Deferred memory deallocation via crossbeam-epoch
-
-## Quality Gates
-
-Checklist for lock-free code before merge:
-
-- [ ] Uses `UnsafeCell<MaybeUninit<T>>` for SPSC buffers (not raw pointer casts)
-- [ ] Loom tests pass (`LOOM_MAX_PREEMPTIONS=2` for CI)
-- [ ] Tests pass on ARM64 — catches weak-memory bugs
-- [ ] Crossbeam epoch Guard lifetimes verified
-- [ ] No `atomic::fence` without loom coverage
-- [ ] Ordering justification in comments (why not SeqCst?)
-- [ ] MIRI passes on unsafe code paths
-
 ## Resources
 
 Documentation lookup order: local skill files -> ctx7 CLI -> web fallback.
@@ -55,6 +33,28 @@ Documentation lookup order: local skill files -> ctx7 CLI -> web fallback.
 | crossbeam-utils | `https://docs.rs/crossbeam-utils/latest/crossbeam_utils/` | CachePadded, Backoff, scoped threads |
 | loom | `https://docs.rs/loom/latest/loom/` | Concurrency permutation testing |
 | Rust Atomics and Locks | `https://marabos.nl/atomics/` | Mara Bos book — authoritative reference |
+
+## Nomenclature
+
+- **SPSC** - Single-Producer, Single-Consumer queue
+- **UB** - Undefined Behavior
+- **MIRI** - Mid-level IR Interpreter (detects UB in unsafe Rust)
+- **Loom** - Concurrency permutation testing framework
+- **TSAN** - ThreadSanitizer (detects data races in mutex-based code)
+- **ASAN** - AddressSanitizer (detects memory errors)
+- **Epoch reclamation** - Deferred memory deallocation via crossbeam-epoch
+
+## Quality Gates
+
+Checklist for lock-free code before merge:
+
+- [ ] Uses `UnsafeCell<MaybeUninit<T>>` for SPSC buffers (not raw pointer casts)
+- [ ] Loom tests pass (`LOOM_MAX_PREEMPTIONS=2` for CI)
+- [ ] Tests pass on ARM64 — catches weak-memory bugs
+- [ ] Crossbeam epoch Guard lifetimes verified
+- [ ] No `atomic::fence` without loom coverage
+- [ ] Ordering justification in comments (why not SeqCst?)
+- [ ] MIRI passes on unsafe code paths
 
 ## Skill Rules
 

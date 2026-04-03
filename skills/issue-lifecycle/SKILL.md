@@ -12,31 +12,7 @@ metadata:
 
 # Issue Lifecycle
 
-> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
-
 Agent workflows for issue implementation, review fix delegation, pre-submission PR review, and QA review. Designed for specialist agents receiving delegations from an orchestrator.
-
-## When to Apply
-
-Reference these workflows when:
-- A dev agent receives an `Issue: [ISSUE_ID]` delegation (single or bundled)
-- A dev agent receives review fix items to address
-- A PR review agent is delegated a pre-submission review
-- A QA agent is triggered via `needs-*` labels
-- An agent needs to block/unblock issues due to cross-domain dependencies
-- An agent completes implementation and must post structured completion summaries
-
-## Skill Dependencies
-
-Workflows reference these companion skills and tools. Install and configure per your project:
-
-| Dependency | Purpose | Entry Point |
-|------------|---------|-------------|
-| Issue tracker CLI (e.g., `linear` skill) | Issue CRUD, cache, comments, labels | `.agents/skills/linear/scripts/linear.sh` |
-| Orchestration skill | Review-finding schema, recommendation-bias patterns | Referenced by name |
-| GitHub skill | Git diff analysis for QA review context | `.agents/skills/github/scripts/git-diff-summary` |
-| Decider skill | Decision templates, search CLI, creation workflows | `.agents/skills/decider/scripts/decisions` |
-| Benchmarking | Run benchmarks if a benchmarking skill is installed | Optional |
 
 ## Workflows
 
@@ -56,6 +32,18 @@ Workflows reference these companion skills and tools. Install and configure per 
 | Label application | Project label application guide |
 | Benchmark baselines | Project benchmarking skill if installed |
 | Regression classification | Project benchmarking skill if available |
+
+## Skill Dependencies
+
+Workflows reference these companion skills and tools. Install and configure per your project:
+
+| Dependency | Purpose | Entry Point |
+|------------|---------|-------------|
+| Issue tracker CLI (e.g., `linear` skill) | Issue CRUD, cache, comments, labels | `.agents/skills/linear/scripts/linear.sh` |
+| Orchestration skill | Review-finding schema, recommendation-bias patterns | Referenced by name |
+| GitHub skill | Git diff analysis for QA review context | `.agents/skills/github/scripts/git-diff-summary` |
+| Decider skill | Decision templates, search CLI, creation workflows | `.agents/skills/decider/scripts/decisions` |
+| Benchmarking | Run benchmarks if a benchmarking skill is installed | Optional |
 
 ## Configuration
 

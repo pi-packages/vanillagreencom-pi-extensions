@@ -10,49 +10,45 @@ metadata:
 
 # GitHub Queries
 
-> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
-
-CLI wrapper for GitHub API operations used in PR workflows.
-
-## When to Apply
-
-Reference these guidelines when:
-- Querying PR data, threads, or review status
-- Posting or editing PR comments and thread replies
-- Automating PR creation, merging, or CI log retrieval
-- Building multi-PR analysis workflows
-- Integrating bot account operations
-
-## Entry Point
+CLI wrapper for GitHub API operations used in PR workflows. Provides structured JSON output, bot account support, and configurable issue ID extraction.
 
 ```bash
 .agents/skills/github/scripts/github.sh <command> [options]
+.agents/skills/github/scripts/github.sh -C <path> <command> [options]  # Run in different directory
 ```
 
 ## Commands
 
 | Command | Purpose |
 |---------|---------|
-| `pr-data <N>` | Get PR with threads, comments, files |
+| `pr-data <N> [--actionable]` | Get PR with threads, comments, files. `--actionable`: unresolved non-outdated only. |
 | `pr-view [N] [--json FIELDS]` | View PR details (wraps gh pr view) |
 | `pr-threads <N> [--unresolved]` | Get thread list/count |
-| `pr-review-status <N> [--baseline-ts TS]` | Check state, determine if action needed |
+| `pr-review-status <N> [--baseline-ts TS --baseline-threads N]` | Check review state, determine if action needed |
 | `pr-list-ready [--all] [--format=safe\|table]` | List PRs ready for merge |
 | `pr-list-failing [--all] [--format=safe\|table]` | List PRs with CI failures |
-| `pr-create [--title T] [--body B] [--draft]` | Create PR as bot (checks: not main, has commits) |
-| `pr-merge <N> [--check\|--force]` | Merge PR as bot (--check: JSON output for workflow) |
-| `pr-cross-check [N...] [--quick\|--verify]` | Analyze PRs: --quick (heuristic) or --verify (full build+test) |
-| `pr-issue <N> [--format=safe\|text]` | Extract issue ID from PR branch |
+| `pr-create [--title T] [--body B] [--draft] [--dry-run] [--force]` | Create PR as bot. Safety checks: not main, has commits, pushed. `--force` skips checks. |
+| `pr-merge <N> [--check\|--force]` | Merge PR. `--check`: JSON readiness output without merging. |
+| `pr-cross-check [N...] [--quick\|--verify]` | Cross-PR analysis. `--verify`: full build+test (auto-detects build system). |
+| `pr-issue <N> [--format=safe\|text]` | Extract issue ID from PR branch (configurable via `GH_ISSUE_PATTERN`) |
 | `ci-logs <N> [--lines N] [--format=safe\|text]` | Get CI failure logs for PR |
 | `bot-token [--format=safe\|text]` | Check if bot token is configured |
-| `dismiss-review <PR> [--bot\|--user NAME]` | Dismiss blocking review |
+| `dismiss-review <PR> [--bot\|--user NAME] [--message M]` | Dismiss blocking review |
 | `resolve-thread <PRRT_...>` | Mark thread(s) resolved |
 | `unresolve-thread <PRRT_...>` | Reopen thread(s) |
 | `post-reply <id> <body>` | Reply to review comment |
 | `post-comment <PR> <body>` | Post PR-level comment |
 | `find-comment <PR> --pattern <regex>` | Find comment by pattern/author |
 | `edit-comment <id> <body>` | Edit existing comment |
-| `sticky-comment <PR> [--verdict\|--analysis]` | Get bot sticky comment |
+| `sticky-comment <PR> [--verdict\|--analysis\|--body]` | Get bot sticky comment. `--verdict`: quick pass/fail. `--analysis`: deep recommendation. |
+
+Most commands accept no PR number to auto-detect from the current branch.
+
+### PR Merge Check Output
+
+```json
+{"can_merge": true, "issues": [], "warnings": [], "mergeable": "MERGEABLE", "review": "APPROVED"}
+```
 
 ## Output Formats
 
@@ -63,6 +59,8 @@ Reference these guidelines when:
 | `text` | Plain text extraction | pr-issue, ci-logs, bot-token |
 | `table` | Human-readable table | pr-list-ready, pr-list-failing |
 
+`--json` is accepted as alias for `--format=safe`.
+
 ## Configuration
 
 | Variable | Purpose | Default |
@@ -71,18 +69,20 @@ Reference these guidelines when:
 | `GH_BOT_USERNAME` | Bot username for review/comment filtering | `review-bot[bot]` |
 | `GH_ISSUE_PATTERN` | Regex for issue ID extraction from branches | `[A-Z]+-[0-9]+` |
 
+Bot token supports direct tokens (`ghp_*`, `gho_*`, `ghs_*`, `ghr_*`, `github_pat_*`) and 1Password references (`op://vault/item/field`).
+
 ## Error Handling
 
 - Returns `{"error": "message"}` on stderr with exit code 1
 - Automatic retry on rate limiting (3 attempts with backoff)
 - NOT_FOUND errors return clean `{"error": "Not found"}`
 
+## Troubleshooting
+
+**`Expected VAR_SIGN, actual: UNKNOWN_CHAR`**: Use multi-line GraphQL + `-F` for variables (shell escaping issue with `$` in single-line queries).
+
 ## Dependencies
 
 - `gh` CLI authenticated (`gh auth login`)
 - `jq` for JSON processing
 - `op` CLI (optional, for 1Password token references)
-
-## Full Compiled Document
-
-For the complete guide with all examples: `AGENTS.md`

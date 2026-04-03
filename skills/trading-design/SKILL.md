@@ -12,13 +12,7 @@ metadata:
 
 Stack-agnostic. Does not define specific tokens, colors, or pixel values — those belong in your design system.
 
-## Resources
-
-| Source | URL | Use For |
-|--------|-----|---------|
-| WCAG contrast | `https://www.w3.org/WAI/WCAG21/Understanding/contrast-minimum.html` | Accessibility contrast ratios |
-
-## Skill Rules
+## Skill Guidelines
 
 ### Design Philosophy
 

@@ -1,6 +1,6 @@
 ---
 name: skill-name
-description: One-line trigger description. Be specific — agents use this to decide whether to load the skill. Include example trigger phrases.
+description: "One-line trigger description. Be specific — agents use this to decide whether to load the skill."
 license: MIT
 user-invocable: true
 # dependencies:
@@ -13,51 +13,17 @@ metadata:
 
 # Skill Title
 
-Brief description of what this skill covers, prioritized by impact.
+Brief description of what this skill covers (1-2 sentences).
 
-> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
-
-## When to Apply
-
-Reference these guidelines when:
-- Situation where this skill is relevant
-- Another trigger condition
-- Task type that benefits from this skill
-
-## Rule Categories by Priority
-
-| Priority | Category | Impact | Prefix |
-|----------|----------|--------|--------|
-| 1 | Category Name | CRITICAL | `prefix-` |
-| 2 | Category Name | HIGH | `prefix-` |
-
-## Quick Reference
-
-### 1. Category Name (CRITICAL)
-
-- `prefix-rule-name` - One-line description of the rule
-- `prefix-another-rule` - One-line description of the rule
-
-### 2. Category Name (HIGH)
-
-- `prefix-rule-name` - One-line description of the rule
-
-## How to Use
-
-Read individual rule files for detailed explanations and code examples:
-
+<!-- CLI skills: add entry point here
+```bash
+.agents/skills/skill-name/scripts/entry-point <command> [options]
 ```
-rules/prefix-rule-name.md
-```
-
-Each rule file contains:
-- Brief explanation of why it matters
-- Incorrect code example with explanation
-- Correct code example with explanation
+-->
 
 ## Resources
 
-Documentation lookup order: local skill files → ctx7 CLI → web fallback → ask user.
+Documentation lookup order: local skill files → ctx7 CLI → web fallback.
 
 ### ctx7 CLI
 
@@ -71,10 +37,54 @@ Documentation lookup order: local skill files → ctx7 CLI → web fallback → 
 |--------|-----|---------|
 | Official docs | `https://example.com/docs` | API reference |
 
-## Deep Reference
+<!-- CLI skills: ## Commands goes here (before Workflows) -->
+<!-- Workflow skills: omit Commands -->
 
-| What Do You Need? | File |
-|--------------------|------|
-| Pattern description | [patterns/example-pattern.md](patterns/example-pattern.md) |
-| Reference description | [references/example-reference.md](references/example-reference.md) |
-| Workflow description | [workflows/example-workflow.md](workflows/example-workflow.md) |
+## Workflows
+
+<!-- Omit if no workflow files -->
+
+| Workflow | Purpose |
+|----------|---------|
+| [workflow-name](workflows/workflow-name.md) | When and what it does |
+
+## References
+
+<!-- Omit if no reference files -->
+
+| Topic | Location |
+|-------|----------|
+| Reference name | [references/name.md](references/name.md) |
+
+<!-- Other internal file sections: ## Templates, ## Schemas, ## Scripts -->
+<!-- Place after Workflows/References, before content sections -->
+
+## Dev Tools
+
+<!-- Omit if no dev tools -->
+
+| Tool | Purpose | Install |
+|------|---------|---------|
+| `tool-name` | What it does | `cargo install tool-name` |
+
+<!-- Content sections go here (Nomenclature, Patterns, etc.) -->
+
+## Rules
+
+<!-- Inline rules — no separate rules/ directory.
+     Group by category with ### headers, individual rules as #### headers.
+     Each rule: what the constraint is, why it matters, correct/incorrect example. -->
+
+### Category Name
+
+#### Rule Name
+
+Description of the constraint and what breaks if violated.
+
+```rust
+// WRONG: why this fails
+bad_example();
+
+// RIGHT: why this works
+good_example();
+```

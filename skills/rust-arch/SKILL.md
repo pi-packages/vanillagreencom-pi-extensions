@@ -10,6 +10,8 @@ metadata:
 
 # Architecture Patterns
 
+Architecture anti-patterns, design review workflow, and quality gates for Rust codebases.
+
 ## Resources
 
 Documentation lookup order: local skill files, ctx7 CLI, web fallback.

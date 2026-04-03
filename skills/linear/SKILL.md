@@ -10,9 +10,11 @@ metadata:
 
 # Linear CLI
 
-> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
-
 CLI wrapper for Linear's GraphQL API with local cache, bulk operations, and structured output.
+
+```bash
+.agents/skills/linear/scripts/linear.sh <resource> <action> [options]
+```
 
 ## Resources
 
@@ -24,31 +26,11 @@ CLI wrapper for Linear's GraphQL API with local cache, bulk operations, and stru
 | Linear SDK | `/linear/linear` | SDK docs with examples |
 | Linear Guides | `/websites/linear_app_developers` | Developer guides |
 
-## When to Apply
+## Workflow Patterns
 
-Reference these guidelines when:
-- Querying or modifying Linear issues, projects, or cycles
-- Planning sprints or managing milestones
-- Applying labels or updating issue states
-- Building automated workflows around Linear data
-- Linking GitHub PRs to Linear issues
-
-## Entry Point
-
-```bash
-.agents/skills/linear/scripts/linear.sh <resource> <action> [options]
-```
-
-## Hierarchy
-
-```
-INITIATIVE (Strategic goal — months)
-  └── PROJECT (2-6 week deliverable)
-        ├── MILESTONE (stage: Alpha, Beta, Release)
-        │     └── ISSUE (1-5 day work item)
-        └── ISSUE (work item without milestone)
-              └── SUB-ISSUE (breakdown for parallel work)
-```
+| Pattern | Use For |
+|---------|---------|
+| [patterns/workflow-actions.md](patterns/workflow-actions.md) | Multi-step issue/project state changes used by orchestration and TPM workflows |
 
 ## Commands
 
@@ -69,6 +51,17 @@ INITIATIVE (Strategic goal — months)
 | `sync` | Sync Linear data to local cache |
 | `cache` | Query local cache (issues, projects, cycles, initiatives, comments, labels, attachments) |
 | `auth-check` | Validate API key |
+
+## Hierarchy
+
+```
+INITIATIVE (Strategic goal — months)
+  └── PROJECT (2-6 week deliverable)
+        ├── MILESTONE (stage: Alpha, Beta, Release)
+        │     └── ISSUE (1-5 day work item)
+        └── ISSUE (work item without milestone)
+              └── SUB-ISSUE (breakdown for parallel work)
+```
 
 ## Cache Pattern
 
@@ -142,12 +135,6 @@ sortOrder → sort_order  # Manual sort position
 - **"labelIds not exclusive child labels" error**: Using multiple labels from the same exclusive group. Only one `agent:*` label and one `platform:*` label per issue.
 - **Need raw GraphQL output?**: Use `--format=raw`
 - **Script help**: `linear.sh <resource> --help`
-
-## Workflow Patterns
-
-| Pattern | Use For |
-|---------|---------|
-| [patterns/workflow-actions.md](patterns/workflow-actions.md) | Multi-step issue/project state changes used by orchestration and TPM workflows |
 
 ## Dependencies
 

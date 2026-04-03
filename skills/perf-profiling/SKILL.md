@@ -32,6 +32,39 @@ Documentation lookup order: local skill files, then ctx7 CLI, then web fallback.
 | BCC Tools | `https://github.com/iovisor/bcc` | eBPF profiling toolkit |
 | HRT Blog | `https://blog.hrt.tech/` | TLB optimization, huge pages research |
 
+## Dev Tools
+
+| Tool | Purpose | Install |
+|------|---------|---------|
+| `flamegraph` | Rust flamegraph generation from perf data | `cargo install flamegraph` |
+| `samply` | Firefox Profiler UI for Rust/C++ | `cargo install samply` |
+| `heaptrack` | Lightweight heap profiler | `sudo apt install heaptrack` / `sudo pacman -S heaptrack` |
+| `bcc-tools` | eBPF-based profiling (production-safe) | `sudo apt install bpfcc-tools` / `sudo pacman -S bcc-tools` |
+| `valgrind` | Heavyweight memory/heap profiler | `sudo apt install valgrind` / `sudo pacman -S valgrind` |
+| `toplev.py` | TMA drill-down (pmu-tools) | `git clone https://github.com/andikleen/pmu-tools` |
+| `AMDuProfCLI` | AMD uProf CLI for Zen profiling + IBS | [AMD uProf download](https://developer.amd.com/amd-uprof/) |
+| `inferno` | Rust-native flamegraph + diff tooling | `cargo install inferno` |
+| `strace` | Syscall tracing and audit | `sudo apt install strace` / `sudo pacman -S strace` |
+
+## Platform Notes
+
+- **Linux only**: All commands assume Linux with perf_events support
+- **Root required**: eBPF tools, some perf events, IRQ affinity changes
+- **Kernel version**: eBPF profiling requires kernel 4.6+ with BPF stack trace support
+- **Hardware counters**: Some perf events require specific CPU support
+
+## Diagnostic Decision Tree
+
+| Symptom | Likely Cause | Profile With | Solution |
+|---------|--------------|--------------|----------|
+| High P99.9, low P50 | System jitter | `perf sched latency` | Isolate cores, RT scheduling |
+| Consistent high latency | Hot path inefficiency | flamegraph | Optimize wide functions |
+| Latency under load | Cache thrashing | `perf stat` named events | Improve data locality |
+| Cross-chiplet gap | Thread topology | vendor profiler | Pin threads to same chiplet |
+| Memory growth | Memory leak | heaptrack | Fix allocations |
+| Cross-socket latency | NUMA misconfig | `numastat` | Pin to correct node |
+| Random spikes | TLB misses | `perf stat -e dTLB-*` | Enable huge pages |
+
 ## Skill Rules
 
 ### Hardware Event Accuracy

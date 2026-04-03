@@ -4,36 +4,34 @@ Git worktree lifecycle management with env/config symlinks.
 
 ## Structure
 
-- **`SKILL.md`** - Skill definition for AI agents and skill-aware harnesses
-- `scripts/` - Worktree management scripts
+```
+skills/worktree/
+├── SKILL.md          # Agent-facing skill definition
+└── scripts/
+    └── worktree      # Entry point
+```
 
-## Quick Start
+## Setup
 
-1. Run from the main checkout of a git repo that has an `origin` remote.
-2. Optionally copy the repo-root [`.env.local.example`](../../.env.local.example) to `.env.local` and set any `WORKTREE_*` or `BOT_*` values you want.
-3. Use the script:
+Run from the main checkout of a git repo with an `origin` remote. Optionally add `.env.local` settings.
 
 ```bash
 ./scripts/worktree create PROJ-123
 ./scripts/worktree list
-./scripts/worktree path PROJ-123
 ./scripts/worktree remove PROJ-123
 ```
 
-By default the tool:
-- detects the default branch from `origin/HEAD` (fallback: `main`)
-- creates worktrees under a sibling `trees/` directory
-- symlinks `.env.local` into each worktree automatically
+Defaults: detects branch from `origin/HEAD` (fallback: `main`), creates worktrees under sibling `trees/`, symlinks `.env.local` automatically.
 
-## Optional `.env.local` Settings
+## Configuration
 
-Set these only if your project needs them:
+Set in `.env.local` — all optional:
 
 | Variable | Purpose |
 |----------|---------|
 | `WORKTREE_DEFAULT_BRANCH` | Override default branch detection |
-| `WORKTREE_SYMLINKS` | Space-separated project-relative paths to symlink into worktrees |
-| `WORKTREE_COPIES` | Space-separated project-relative files to copy into worktrees |
-| `BOT_NAME` / `BOT_EMAIL` | Git identity to use inside worktrees |
-| `BOT_SIGNING_KEY` | Optional SSH signing key for commits |
-| `BOT_REMOTE_NAME` / `BOT_REMOTE_URL` | Optional remote used for bot pushes |
+| `WORKTREE_SYMLINKS` | Space-separated paths to symlink into worktrees |
+| `WORKTREE_COPIES` | Space-separated files to copy into worktrees |
+| `BOT_NAME` / `BOT_EMAIL` | Git identity for worktree commits |
+| `BOT_SIGNING_KEY` | SSH signing key for commits |
+| `BOT_REMOTE_NAME` / `BOT_REMOTE_URL` | Remote for bot pushes |

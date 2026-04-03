@@ -4,18 +4,33 @@ CLI wrapper for Linear's GraphQL API with local cache, bulk operations, and stru
 
 ## Structure
 
-- `scripts/linear.sh` - Main entry point (resource router)
-- `scripts/commands/` - Individual resource scripts (one per resource)
-- `scripts/lib/common.sh` - Shared library (auth, GraphQL, formatting)
-- `scripts/lib/cache.sh` - Cache management
-- `scripts/lib/formatters.sh` - Output formatters (safe, table, ids, raw)
-- `scripts/lib/attachments.sh` - Attachment download and caching
-- `scripts/lib/issue-validation.sh` - Issue state validation
-- **`SKILL.md`** - Skill definition for AI agents and skill-aware harnesses
+```
+skills/linear/
+├── SKILL.md                    # Agent-facing skill definition
+├── scripts/
+│   ├── linear.sh               # Entry point (resource router)
+│   ├── commands/               # Individual resource scripts
+│   └── lib/
+│       ├── common.sh           # Auth, GraphQL, formatting
+│       ├── cache.sh            # Cache management
+│       ├── formatters.sh       # Output formatters (safe, table, ids, raw)
+│       ├── attachments.sh      # Attachment download and caching
+│       └── issue-validation.sh # Issue state validation
+└── patterns/
+    └── workflow-actions.md     # Multi-step issue/project state transitions
+```
+
+## Setup
+
+1. Add `LINEAR_API_KEY` to `.env.local`
+2. Optionally set `LINEAR_TEAM` and `LINEAR_TEAM_PREFIX` if defaults don't match
+
+```bash
+./scripts/linear.sh auth-check
+./scripts/linear.sh sync --reconcile
+```
 
 ## Configuration
-
-Set in `.env.local` or as environment variables:
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
@@ -24,34 +39,15 @@ Set in `.env.local` or as environment variables:
 | `LINEAR_FORMAT` | Default output format | `safe` |
 | `LINEAR_TEAM_PREFIX` | Issue identifier prefix | `CC` |
 
-## Minimum Setup
-
-To make this skill work:
-
-1. Add `LINEAR_API_KEY` to `.env.local` or export it in your shell.
-2. Optionally set `LINEAR_TEAM` and `LINEAR_TEAM_PREFIX` if the defaults do not match your project.
-3. Verify auth:
-
-```bash
-./scripts/linear.sh auth-check
-./scripts/linear.sh sync --reconcile
-```
-
-## Adding a New Resource
+## Adding a Resource
 
 1. Create `scripts/commands/<resource>.sh`
-2. Source `../lib/common.sh` for shared functions
-3. Add a `show_help()` function
-4. Add the resource to the case statement in `scripts/linear.sh`
-5. Update SKILL.md command table
+2. Source `../lib/common.sh`
+3. Add `show_help()` function
+4. Add to case statement in `scripts/linear.sh`
+5. Update Commands table in `SKILL.md`
 
 ## Dependencies
 
-- `curl` for API calls
-- `jq` for JSON processing
-
-## Workflow Patterns
-
-For higher-level issue/project transitions used by orchestration and TPM workflows, see:
-
-- [patterns/workflow-actions.md](./patterns/workflow-actions.md)
+- `curl`
+- `jq`
