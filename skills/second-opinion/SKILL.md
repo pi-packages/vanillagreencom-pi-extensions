@@ -3,7 +3,7 @@ name: second-opinion
 description: "Cross-model second opinion: review, challenge, audit, and consult via an external AI CLI (Claude ↔ Codex)."
 license: MIT
 user-invocable: true
-argument-hint: "review [--range <base..head>] | challenge <description> | audit <path> | quick <question>"
+argument-hint: "review [scope] | challenge [description] | audit [path] | quick [question]"
 metadata:
   author: vanillagreen
   version: "1.0.0"
@@ -70,11 +70,21 @@ Review pending changes against the base branch. The script auto-generates the re
 
 ### Workflow
 
-1. If user says `/second-opinion review` with no extra context → run the script with `--cwd` set to the project root.
-2. If user specifies a commit range → pass `--range`.
-3. If user specifies a PR number → resolve the worktree path first, then pass `--cwd`.
-4. Present the JSON result: verdict, blockers table, suggestions table.
-5. If `action_required` → ask user which items to address.
+1. Interpret the user's request into a `--range` value. The script passes `--range` directly to `git diff`, so any valid git diff range works:
+
+   | User says | `--range` value | What it reviews |
+   |-----------|-----------------|-----------------|
+   | `review` (no qualifier) | (omit — default) | Full branch diff vs base (`origin/main...HEAD`) |
+   | "review this branch" / "review the PR" | (omit — default) | Same — all commits on this branch |
+   | "review uncommitted work" / "review staged changes" | `HEAD` | Uncommitted changes only |
+   | "review last commit" | `HEAD~1..HEAD` | Most recent commit |
+   | "review last 3 commits" | `HEAD~3..HEAD` | Last N commits |
+   | "review since yesterday" | `@{yesterday}..HEAD` | Commits since a time |
+   | "review abc123..def456" | `abc123..def456` | Explicit range (pass through) |
+
+2. If user specifies a PR number → resolve the worktree path first, then pass `--cwd`.
+3. Present the JSON result: verdict, blockers table, suggestions table.
+4. If `action_required` → ask user which items to address.
 
 ### Output
 
@@ -103,7 +113,14 @@ Adversarial analysis of a proposed approach before implementation.
 
 ### Workflow
 
-1. Gather the user's description of their approach.
+1. Gather the user's description. The user may be brief — expand from conversation context:
+
+   | User says | What to include in prompt |
+   |-----------|--------------------------|
+   | "challenge my refactor approach" | Summarize the approach from recent conversation, include relevant code |
+   | "challenge using async here" | Describe the async pattern being considered, include the code in question |
+   | "challenge this design" + file paths | Read the files, describe the design |
+
 2. Read relevant code files for context.
 3. Write a prompt file to `tmp/second-opinion-prompt.md`:
 
