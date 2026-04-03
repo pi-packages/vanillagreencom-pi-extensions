@@ -15,7 +15,7 @@ skills/issue-lifecycle/
     └── qa-review.md       # QA label-triggered review workflow (§ 1-3 + Constraints)
 ```
 
-This skill is workflow-based — there is no `rules/` directory. All behavior is defined in the workflow files.
+This skill is workflow-based. All behavior is defined in the workflow files.
 
 ## Workflows
 

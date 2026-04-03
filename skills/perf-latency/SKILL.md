@@ -1,6 +1,6 @@
 ---
 name: perf-latency
-description: "Microsecond-precision latency measurement: P99 benchmarking, Criterion/Divan, regression tracking, and latency budgets."
+description: "Microsecond-precision latency measurement and regression detection. Load when benchmarking hot paths, measuring P50/P99/P99.9 percentiles, using Criterion/Divan/iai-callgrind, tracking latency budgets with HdrHistogram, or profiling with flamegraphs."
 license: MIT
 user-invocable: true
 metadata:
@@ -10,19 +10,7 @@ metadata:
 
 # Latency Measurement
 
-> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
-
 Patterns for accurate latency measurement, percentile tracking, and regression detection in sub-millisecond systems.
-
-## When to Apply
-
-Reference these guidelines when:
-- Benchmarking hot paths with Criterion, Divan, or iai-callgrind
-- Measuring P50/P99/P99.9 latency for performance budgets
-- Implementing runtime latency tracking with HdrHistogram
-- Detecting performance regressions in CI
-- Profiling CPU hot spots with samply or flamegraphs
-- Validating zero-allocation constraints in measured paths
 
 ## Nomenclature
 
@@ -38,56 +26,6 @@ Reference these guidelines when:
 |------|---------|---------|
 | `samply` | CPU profiler with Firefox Profiler UI | `cargo install samply` |
 | `cargo-flamegraph` | Flamegraph generation from perf data | `cargo install flamegraph` |
-
-## Rule Categories by Priority
-
-| Priority | Category | Impact | Prefix |
-|----------|----------|--------|--------|
-| 1 | Measurement Fundamentals | CRITICAL | `mf-` |
-| 2 | Benchmarking | HIGH | `bench-` |
-| 3 | Runtime Monitoring | HIGH | `mon-` |
-| 4 | Profiling | MEDIUM | `prof-` |
-
-## Quick Reference
-
-### 1. Measurement Fundamentals (CRITICAL)
-
-- `mf-percentiles-not-averages` - Report P50/P95/P99/P99.9, never averages alone
-- `mf-coordinated-omission` - Use HdrHistogram CO correction for throughput benchmarks
-- `mf-warmup-before-measuring` - Exclude cold-cache iterations from measurement data
-- `mf-sufficient-samples` - 10,000+ measurements for reliable P99.9 estimates
-- `mf-subtract-timer-overhead` - Measure and subtract timer cost from each sample
-- `mf-hardware-timestamps` - Use quanta/TSC for nanosecond-precision timing
-
-### 2. Benchmarking (HIGH)
-
-- `bench-criterion-setup` - Configure sample size, measurement time, and noise thresholds
-- `bench-divan-allocation-tracking` - Use Divan AllocProfiler to verify zero-alloc hot paths
-- `bench-iai-callgrind-ci` - Use instruction counting for deterministic CI regression gates
-
-### 3. Runtime Monitoring (HIGH)
-
-- `mon-hdrhistogram-tracking` - Use HdrHistogram + quanta for continuous latency tracking
-- `mon-percentile-validation` - Automate budget checks against percentile targets
-- `mon-regression-detection` - Compare results against baselines with threshold alerts
-
-### 4. Profiling (MEDIUM)
-
-- `prof-profile-before-optimizing` - Always profile before optimizing; use flamegraphs
-
-## How to Use
-
-Read individual rule files for detailed explanations and code examples:
-
-```
-rules/mf-percentiles-not-averages.md
-rules/bench-criterion-setup.md
-```
-
-Each rule file contains:
-- Brief explanation of why it matters
-- Incorrect code example with explanation (where applicable)
-- Correct code example with explanation
 
 ## Resources
 
@@ -110,6 +48,416 @@ Documentation lookup order: local skill files -> ctx7 CLI -> web fallback.
 | iai-callgrind | `https://docs.rs/iai-callgrind/0.16.1/iai_callgrind/` | Deterministic CI regression gates |
 | Flamegraphs | `https://www.brendangregg.com/flamegraphs.html` | CPU profiling visualization |
 
-## Full Compiled Document
+## Skill Rules
 
-For the complete guide with all rules expanded, plus monitoring patterns, benchmark storage, and profiling methodology: `AGENTS.md`
+### Measurement Fundamentals
+
+Core principles for accurate latency measurement. Violations produce misleading data that leads to wrong optimization decisions.
+
+#### Measure Percentiles, Not Averages
+
+Averages mask tail latency spikes. A system averaging 100us can have P99.9 at 50ms. Always report P50, P95, P99, and P99.9. Use HdrHistogram for correct percentile calculation.
+
+**Incorrect (average hides tail latency):**
+
+```rust
+let avg = measurements.iter().sum::<u64>() / measurements.len() as u64;
+println!("Average latency: {}ns", avg);
+```
+
+**Correct (report percentiles):**
+
+```rust
+use hdrhistogram::Histogram;
+
+let mut histogram: Histogram<u64> = Histogram::new(3).unwrap();
+for &m in &measurements {
+    histogram.record(m).unwrap();
+}
+println!("P50:   {}ns", histogram.value_at_percentile(50.0));
+println!("P99:   {}ns", histogram.value_at_percentile(99.0));
+println!("P99.9: {}ns", histogram.value_at_percentile(99.9));
+```
+
+#### Account for Coordinated Omission
+
+When a benchmark waits for each response before sending the next request, it "coordinates" with system slowdowns and hides true latency spikes. Example: target throughput 10,000 ops/sec (100us interval). One request takes 50ms -- without CO correction this shows 1 outlier at 50ms; with correction it shows 500 missed measurements (50ms / 100us).
+
+**When to apply:**
+- Throughput benchmarks (X requests/sec)
+- Continuous stream processing
+
+**When NOT to apply:**
+- Single request-response microbenchmarks (Criterion and Divan handle this)
+
+**Incorrect (closed-loop benchmark hides stalls):**
+
+```rust
+for _ in 0..10_000 {
+    let start = clock.raw();
+    let _result = process_message(&msg);
+    let end = clock.raw();
+    histogram.record(clock.delta(start, end)).unwrap();
+}
+```
+
+**Correct (use HdrHistogram CO correction for throughput tests):**
+
+```rust
+for _ in 0..10_000 {
+    let start = clock.raw();
+    let _result = process_message(&msg);
+    let end = clock.raw();
+    histogram.record_correct(
+        clock.delta(start, end),
+        expected_interval_ns  // e.g., 100_000 for 10k ops/sec
+    ).unwrap();
+}
+```
+
+**Reference**: Gil Tene's "How NOT to Measure Latency" talk.
+
+#### Warm Up Before Measuring
+
+The first iterations of any benchmark are always slower due to cold CPU caches, branch predictor training, and memory page faults. Include a warmup phase that is excluded from measurement.
+
+**Incorrect (first measurement includes cold cache penalty):**
+
+```rust
+let start = Instant::now();
+let result = operation();
+let duration = start.elapsed();
+```
+
+**Correct (warm up before measuring):**
+
+```rust
+// Warm up (excluded from measurement)
+for _ in 0..1_000 {
+    black_box(operation());
+}
+
+// Measure
+let mut histogram: Histogram<u64> = Histogram::new(3).unwrap();
+for _ in 0..10_000 {
+    let start = clock.raw();
+    black_box(operation());
+    let end = clock.raw();
+    histogram.record(clock.delta(start, end)).unwrap();
+}
+```
+
+#### Collect Sufficient Samples
+
+To estimate P99.9 you need at least 10,000 measurements (1 in 1,000 events). For P99, at least 1,000. Fewer samples produce unreliable tail estimates.
+
+**Incorrect (100 samples cannot estimate P99.9):**
+
+```rust
+for _ in 0..100 {
+    measure();
+}
+let p999 = histogram.value_at_percentile(99.9); // Statistically meaningless
+```
+
+**Correct (10,000+ samples for P99.9):**
+
+```rust
+for _ in 0..10_000 {
+    measure();
+}
+let p999 = histogram.value_at_percentile(99.9); // Reliable estimate
+```
+
+#### Subtract Timer Overhead
+
+Every timing call has overhead (~20ns for `Instant::now()`, ~0ns for quanta with upkeep thread). For sub-microsecond operations, this overhead is significant. Measure and subtract it.
+
+**Correct (measure and subtract overhead):**
+
+```rust
+// Measure timer overhead
+let empty_start = clock.raw();
+let empty_end = clock.raw();
+let overhead = clock.delta(empty_start, empty_end);
+
+// Subtract from each measurement
+let actual_duration = measured_duration.saturating_sub(overhead);
+```
+
+#### Use Hardware Timestamps
+
+Use TSC/RDTSC via the `quanta` crate for nanosecond precision. `std::time::Instant` uses OS syscalls with higher overhead (~20ns vs ~0ns with quanta upkeep thread).
+
+**Platform behavior:**
+
+| Platform | Best Timer |
+|----------|------------|
+| Linux | `CLOCK_MONOTONIC_RAW` (via quanta TSC) |
+| Windows | `QueryPerformanceCounter` (via quanta) |
+| macOS | `mach_absolute_time` (via quanta) |
+
+**Notes:**
+- TSC is x86/x86_64 only; quanta falls back to stdlib on ARM
+- First `Clock::new()` blocks ~10ms for TSC calibration -- create once at startup
+- Use `Clock::recent()` with upkeep thread for ultra-low overhead reads
+
+```rust
+use quanta::Clock;
+
+let clock = Clock::new(); // Create once, reuse
+let start = clock.raw();
+operation();
+let end = clock.raw();
+let duration_ns = clock.delta(start, end);
+```
+
+### Benchmarking
+
+Patterns for Criterion, Divan, and iai-callgrind benchmarks in Rust. Incorrect setup produces noisy or non-representative results.
+
+#### Configure Criterion for Reliable Results
+
+Override Criterion defaults for latency-sensitive benchmarks: increase sample size to 10,000, extend measurement time, tighten significance and noise thresholds.
+
+**Criterion reports confidence intervals around the estimated mean -- not true percentiles.** Do not label Criterion CI bounds as P99 or P50. For true latency percentiles, use HdrHistogram.
+
+```rust
+use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+
+fn bench_hot_path(c: &mut Criterion) {
+    let mut group = c.benchmark_group("hot-path");
+    group.sample_size(10_000)
+         .measurement_time(std::time::Duration::from_secs(10))
+         .significance_level(0.01)
+         .noise_threshold(0.02);
+
+    let engine = setup_engine();
+
+    group.bench_function("process", |b| {
+        b.iter(|| black_box(engine.process(black_box(&input))))
+    });
+
+    // Parameterized benchmarks
+    for count in [10, 100, 1000] {
+        group.bench_with_input(
+            BenchmarkId::new("batch", count),
+            &count,
+            |b, &n| b.iter(|| { /* ... */ }),
+        );
+    }
+
+    group.finish();
+}
+
+criterion_group!(benches, bench_hot_path);
+criterion_main!(benches);
+```
+
+**Cargo.toml entry:**
+
+```toml
+[[bench]]
+name = "hot_path"
+harness = false
+```
+
+#### Use Divan for Allocation Tracking
+
+Divan's `AllocProfiler` tracks heap allocations per benchmark iteration, making it ideal for verifying zero-allocation hot paths. It also supports built-in multi-threaded contention benchmarks.
+
+```rust
+use divan::{Bencher, AllocProfiler};
+
+#[global_allocator]
+static ALLOC: AllocProfiler = AllocProfiler::system();
+
+#[divan::bench]
+fn process_message(bencher: Bencher) {
+    bencher
+        .with_inputs(|| create_test_message())
+        .bench_values(|msg| engine.process(&msg));
+}
+
+// Multi-threaded contention benchmark
+#[divan::bench(threads = [1, 2, 4, 8])]
+fn concurrent_submit(bencher: Bencher) {
+    bencher.bench(|| queue.submit(create_item()));
+}
+
+fn main() {
+    divan::main();
+}
+```
+
+**When to use Divan vs Criterion:**
+
+| Use Divan | Use Criterion |
+|-----------|---------------|
+| Zero-allocation verification | Baseline comparisons |
+| Thread contention testing | Historical regression detection |
+| New projects | Existing Criterion setup |
+
+#### Use iai-callgrind for Deterministic CI
+
+iai-callgrind counts CPU instructions instead of wall-clock time, making it immune to CI environment noise (shared runners, CPU throttling, load spikes). Use it for automated regression gates.
+
+```bash
+# In CI (Linux runners only -- requires valgrind)
+cargo bench --bench iai_benchmarks --features iai -- --regress ir::count=0%
+```
+
+Time-based benchmarks (Criterion) should run nightly on dedicated hardware as advisory, non-blocking checks. iai-callgrind gates block the merge.
+
+### Runtime Monitoring
+
+Continuous latency tracking with HdrHistogram and percentile validation. Ensures production systems stay within performance budgets.
+
+#### Use HdrHistogram for Runtime Tracking
+
+Use HdrHistogram with quanta for runtime latency tracking. HdrHistogram handles percentile calculation correctly, supports coordinated omission correction, and has constant memory usage regardless of sample count.
+
+```rust
+use quanta::Clock;
+use hdrhistogram::Histogram;
+
+pub struct LatencyTracker {
+    clock: Clock,
+    histogram: Histogram<u64>,
+}
+
+impl LatencyTracker {
+    pub fn new() -> Self {
+        Self {
+            clock: Clock::new(),
+            histogram: Histogram::new(5).unwrap(), // 5 significant digits
+        }
+    }
+
+    pub fn measure<F, R>(&mut self, operation: F) -> R
+    where F: FnOnce() -> R
+    {
+        let start = self.clock.raw();
+        let result = operation();
+        let end = self.clock.raw();
+        let duration_ns = self.clock.delta(start, end);
+        self.histogram.record(duration_ns).unwrap();
+        result
+    }
+
+    pub fn report(&self) {
+        println!("=== Latency Report ===");
+        println!("P50:   {:>8.2}us", self.histogram.value_at_percentile(50.0) as f64 / 1000.0);
+        println!("P95:   {:>8.2}us", self.histogram.value_at_percentile(95.0) as f64 / 1000.0);
+        println!("P99:   {:>8.2}us", self.histogram.value_at_percentile(99.0) as f64 / 1000.0);
+        println!("P99.9: {:>8.2}us", self.histogram.value_at_percentile(99.9) as f64 / 1000.0);
+        println!("Max:   {:>8.2}us", self.histogram.max() as f64 / 1000.0);
+    }
+
+    pub fn check_budget(&self, budget_us: f64) -> bool {
+        let p999_us = self.histogram.value_at_percentile(99.9) as f64 / 1000.0;
+        p999_us <= budget_us
+    }
+}
+```
+
+#### Validate Latency Against Budgets
+
+Every performance budget should have an automated check that fails when the budget is exceeded. Use HdrHistogram percentile queries against defined targets.
+
+```rust
+use hdrhistogram::Histogram;
+
+pub struct LatencyTargets {
+    pub p50_ns: u64,
+    pub p999_ns: u64,
+}
+
+pub fn validate_latency(
+    measurements: &[std::time::Duration],
+    targets: &LatencyTargets,
+) -> Result<(), String> {
+    let mut histogram: Histogram<u64> = Histogram::new(3).unwrap();
+    for d in measurements {
+        histogram.record(d.as_nanos() as u64).unwrap();
+    }
+
+    let p50 = histogram.value_at_percentile(50.0);
+    let p999 = histogram.value_at_percentile(99.9);
+
+    if p50 > targets.p50_ns {
+        return Err(format!("P50 {}ns exceeds budget {}ns", p50, targets.p50_ns));
+    }
+    if p999 > targets.p999_ns {
+        return Err(format!("P99.9 {}ns exceeds budget {}ns", p999, targets.p999_ns));
+    }
+
+    Ok(())
+}
+```
+
+#### Automate Regression Detection
+
+Compare current benchmark results against stored baselines automatically. Flag regressions that exceed a threshold percentage on P99.9 latency. Store results as structured data (JSON) for historical tracking.
+
+```rust
+pub struct BenchmarkResult {
+    pub component: String,
+    pub operation: String,
+    pub timestamp: u64,
+    pub commit_hash: String,
+    pub p50_ns: u64,
+    pub p99_ns: u64,
+    pub p999_ns: u64,
+    pub sample_count: usize,
+}
+
+pub fn detect_regression(
+    current: &BenchmarkResult,
+    baseline: &BenchmarkResult,
+    threshold_pct: f64,
+) -> Option<String> {
+    let regression_pct = ((current.p999_ns as f64 - baseline.p999_ns as f64)
+        / baseline.p999_ns as f64) * 100.0;
+
+    if regression_pct > threshold_pct {
+        Some(format!(
+            "{}/{}: P99.9 regressed {:.1}% ({} -> {} ns)",
+            current.component, current.operation,
+            regression_pct, baseline.p999_ns, current.p999_ns
+        ))
+    } else {
+        None
+    }
+}
+```
+
+### Profiling
+
+CPU profiling and flamegraph analysis for identifying hot spots. Guides optimization effort to the right locations.
+
+#### Profile Before Optimizing
+
+Never optimize based on assumptions. Profile first with a sampling profiler to identify actual hot spots. Use flamegraphs for visualization.
+
+**Recommended profilers:**
+
+| Tool | Platform | Use For |
+|------|----------|---------|
+| `samply` | Linux, macOS | CPU profiling with Firefox Profiler UI, multi-thread timeline |
+| `perf` | Linux | Low-overhead sampling, hardware counters |
+| `cargo-flamegraph` | Cross-platform | Quick flamegraph generation |
+
+```bash
+# Install samply
+cargo install samply
+
+# Profile a benchmark
+samply record cargo bench --bench hot_path -- --profile-time=5
+
+# Generate flamegraph from perf data
+cargo install flamegraph
+cargo flamegraph --bench hot_path -- --profile-time=5
+```
+
+**Reference**: Brendan Gregg's flamegraph methodology -- [brendangregg.com/flamegraphs.html](https://www.brendangregg.com/flamegraphs.html)

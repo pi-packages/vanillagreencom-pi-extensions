@@ -2,7 +2,7 @@
 
 TPM methodology for roadmap planning, cycle planning, issue auditing, prioritization, and progress tracking. Workflows analyze issue tracker state and return structured JSON recommendations — the orchestrator or user handles execution.
 
-This skill is methodology-based (no `rules/` directory). All guidance lives in reference documents, workflows, and schemas.
+This skill is methodology-based. All guidance lives in reference documents, workflows, and schemas.
 
 ## Structure
 

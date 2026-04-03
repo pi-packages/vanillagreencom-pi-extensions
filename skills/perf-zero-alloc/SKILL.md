@@ -1,6 +1,6 @@
 ---
 name: perf-zero-alloc
-description: "Zero-allocation patterns for Rust hot paths: object pools, lock-free queues, and allocation-free verification."
+description: "Zero-allocation Rust patterns for hot paths. Object pools, arenas, lock-free queues, preallocated buffers, static dispatch, string interning. Load when optimizing latency, eliminating heap allocs, or profiling allocation sources."
 license: MIT
 user-invocable: true
 metadata:
@@ -10,23 +10,11 @@ metadata:
 
 # Zero-Allocation Rust Patterns
 
-> **Note**: `README.md` in this directory is for human setup/configuration only — not for AI agents. Follow this file (`SKILL.md`) as the authoritative skill definition.
-
 Patterns for eliminating heap allocations in performance-critical Rust hot paths, achieving sub-500us latency.
-
-## When to Apply
-
-Reference these guidelines when:
-- Implementing or optimizing hot-path code that must not allocate
-- Choosing between object pools, arenas, bounded collections, or preallocated buffers
-- Selecting SPSC, MPSC, or MPMC queue implementations
-- Replacing dynamic dispatch or boxed closures with static alternatives
-- Adding allocation verification tests or profiling allocations
-- Reviewing code for hidden allocations (format!, collect, to_string)
 
 ## Core Principle
 
-**Never allocate after startup in hot paths.** Pre-allocate all memory during initialization.
+**Never allocate after startup in hot paths.** Pre-allocate all memory during initialization. Every heap allocation in a hot path is a latency spike waiting to happen.
 
 ## Dev Tools
 
@@ -35,60 +23,6 @@ Reference these guidelines when:
 | `heaptrack` | Full-program heap profiling with GUI | System package manager |
 | `dhat` | Rust-native allocation attribution | `cargo add --dev dhat` |
 | `assert_no_alloc` | CI-gate allocation assertions | `cargo add --dev assert_no_alloc` |
-
-## Rule Categories by Priority
-
-| Priority | Category | Impact | Prefix |
-|----------|----------|--------|--------|
-| 1 | Allocation Elimination | CRITICAL | `alloc-` |
-| 2 | Data Structures | HIGH | `ds-` |
-| 3 | Verification | HIGH | `verify-` |
-| 4 | Pitfalls | MEDIUM | `pit-` |
-
-## Quick Reference
-
-### 1. Allocation Elimination (CRITICAL)
-
-- `alloc-object-pools` - Pre-allocate reusable objects via slab, free-list, or SPSC pool
-- `alloc-preallocated-buffers` - Allocate buffers at startup, reuse via .clear()
-- `alloc-static-dispatch` - Use generics over dyn/Box for zero-overhead dispatch in hot paths
-- `alloc-string-interning` - Intern strings once, compare as integers thereafter
-- `alloc-arena-allocator` - Arena allocators are conditional — profile first, confine lifetimes
-
-### 2. Data Structures (HIGH)
-
-- `ds-bounded-collections` - Use ArrayVec for stack-allocated fixed-capacity collections
-- `ds-arena-allocators` - Use bumpalo for temporary allocations freed in bulk
-- `ds-queue-selection` - SPSC/MPSC/MPMC queue crate selection with performance baselines
-- `ds-cache-line-padding` - 128-byte padding for cross-thread atomics; power-of-two capacity
-
-### 3. Verification (HIGH)
-
-- `verify-assert-no-alloc` - CI-gate hot paths with assert_no_alloc global allocator
-- `verify-profiling` - Profile with dhat/heaptrack to attribute allocation sources
-
-### 4. Pitfalls (MEDIUM)
-
-- `pit-hidden-format` - format! silently allocates a String on every call
-- `pit-iterator-collect` - .collect() allocates a new collection on every call
-- `pit-recursive-box` - Box in recursive structures allocates per node; use arenas
-- `pit-string-operations` - to_uppercase/to_string create new String allocations
-- `pit-arena-viral-lifetimes` - Arena lifetimes spread through all consumers; confine to single phase
-- `pit-vec-push-growth` - Vec::push may reallocate when capacity is exhausted
-
-## How to Use
-
-Read individual rule files for detailed explanations and code examples:
-
-```
-rules/alloc-object-pools.md
-rules/ds-queue-selection.md
-rules/verify-assert-no-alloc.md
-```
-
-Each rule file contains:
-- Brief explanation of why it matters
-- Code examples (incorrect vs. correct where applicable)
 
 ## Resources
 
@@ -114,6 +48,638 @@ Documentation lookup order: local skill files -> ctx7 CLI -> web fallback.
 | The Rust Performance Book | `https://nnethercote.github.io/perf-book/` | General Rust perf guidance |
 | LMAX Disruptor | `https://lmax-exchange.github.io/disruptor/` | Original disruptor pattern |
 
-## Full Compiled Document
+## Skill Rules
 
-For the complete guide with all rules expanded, queue selection tables, and full code examples: `AGENTS.md`
+### Allocation Elimination
+
+Core patterns for eliminating heap allocations in hot paths. Violations cause latency spikes from allocator contention and unpredictable GC-like pauses.
+
+#### Object Pools
+
+Pre-allocate pools of reusable objects at startup. Acquire/release in the hot path without heap allocation.
+
+##### Slab Pool (recommended for lifecycle-managed objects)
+
+`slab` provides pre-allocated arena storage with stable keys:
+
+```rust
+use slab::Slab;
+
+pub struct Pool<T: Default> {
+    pool: Slab<T>,
+    max_capacity: usize,
+}
+
+impl<T: Default> Pool<T> {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            pool: Slab::with_capacity(capacity),
+            max_capacity: capacity,
+        }
+    }
+
+    #[inline]
+    pub fn create(&mut self) -> Option<usize> {
+        if self.pool.len() < self.max_capacity {
+            Some(self.pool.insert(T::default()))
+        } else {
+            None // Pool exhausted
+        }
+    }
+
+    #[inline]
+    pub fn get(&self, key: usize) -> Option<&T> {
+        self.pool.get(key)
+    }
+
+    #[inline]
+    pub fn release(&mut self, key: usize) {
+        self.pool.remove(key);
+    }
+}
+```
+
+Slab keys (usize) are opaque handles, not raw pointers.
+
+##### Free-List Pool (simpler, no lifecycle management)
+
+```rust
+pub struct ObjectPool<T> {
+    objects: Vec<T>,
+    free_indices: Vec<usize>,
+}
+
+impl<T: Default + Clone> ObjectPool<T> {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            objects: (0..capacity).map(|_| T::default()).collect(),
+            free_indices: (0..capacity).rev().collect(),
+        }
+    }
+
+    #[inline]
+    pub fn acquire(&mut self) -> Option<(usize, &mut T)> {
+        self.free_indices.pop().map(|idx| (idx, &mut self.objects[idx]))
+    }
+
+    #[inline]
+    pub fn release(&mut self, idx: usize) {
+        self.free_indices.push(idx);
+    }
+}
+```
+
+##### Thread-Safe Pool (SPSC ring buffer)
+
+```rust
+use ringbuf::{HeapRb, Producer, Consumer};
+use std::sync::Arc;
+
+pub struct ThreadSafePool<T> {
+    producer: Producer<T, Arc<HeapRb<T>>>,
+    consumer: Consumer<T, Arc<HeapRb<T>>>,
+}
+
+impl<T: Default> ThreadSafePool<T> {
+    pub fn new(capacity: usize) -> Self {
+        let rb = HeapRb::new(capacity);
+        let (mut producer, consumer) = rb.split();
+        for _ in 0..capacity {
+            producer.try_push(T::default()).expect("Pool init failed");
+        }
+        Self { producer, consumer }
+    }
+
+    #[inline]
+    pub fn acquire(&mut self) -> Option<T> {
+        self.consumer.try_pop()
+    }
+
+    #[inline]
+    pub fn release(&mut self, obj: T) {
+        let _ = self.producer.try_push(obj);
+    }
+}
+```
+
+#### Preallocated Buffers
+
+Allocate buffers with known maximum capacity at startup. Reuse via `.clear()` which retains capacity.
+
+```rust
+pub struct DataProcessor {
+    parse_buffer: Vec<u8>,
+    level_buffer: Vec<PriceLevel>,
+    output_buffer: Vec<Update>,
+}
+
+impl DataProcessor {
+    pub fn new(max_message_size: usize, max_levels: usize) -> Self {
+        Self {
+            parse_buffer: Vec::with_capacity(max_message_size),
+            level_buffer: Vec::with_capacity(max_levels),
+            output_buffer: Vec::with_capacity(100),
+        }
+    }
+
+    pub fn process(&mut self, raw_data: &[u8]) -> &[Update] {
+        self.parse_buffer.clear();
+        self.level_buffer.clear();
+        self.output_buffer.clear();
+        // Work with preallocated buffers...
+        &self.output_buffer
+    }
+}
+```
+
+`.clear()` keeps capacity; `.truncate(0)` has the same effect. Never rely on `push()` without verifying remaining capacity.
+
+#### Static Dispatch Over Dynamic
+
+Use generics for static dispatch in hot paths. Reserve `dyn` and `Box<dyn ...>` for cold paths.
+
+**Incorrect (dynamic dispatch with vtable overhead):**
+
+```rust
+pub fn process_feed(handler: &dyn FeedHandler, data: &[u8]) {
+    handler.parse(data); // Runtime dispatch via vtable
+}
+
+pub fn map_transform(data: &mut [f64], f: Box<dyn Fn(f64) -> f64>) {
+    for x in data { *x = f(*x); } // Heap-allocated closure
+}
+```
+
+**Correct (static dispatch, zero overhead):**
+
+```rust
+pub fn process_feed<F: FeedHandler>(handler: &F, data: &[u8]) {
+    handler.parse(data); // Compile-time dispatch, inlinable
+}
+
+pub fn map_transform<F: Fn(f64) -> f64>(data: &mut [f64], f: F) {
+    for x in data { *x = f(*x); } // Stack-allocated closure
+}
+```
+
+**When dynamic dispatch is acceptable:**
+- Cold paths (configuration, setup)
+- Plugin systems where extensibility matters
+- Trait objects stored long-term (one allocation, many uses)
+
+#### String Interning
+
+Intern strings during initialization. After interning, comparisons are integer comparisons and no further allocations occur.
+
+```rust
+use string_cache::DefaultAtom as Atom;
+
+pub struct SymbolTable {
+    symbols: DashMap<Atom, u32>,
+    next_id: AtomicU32,
+}
+
+impl SymbolTable {
+    pub fn get_or_intern(&self, symbol: &str) -> u32 {
+        // Fast path: already interned
+        if let Some(id) = self.symbols.get(&Atom::from(symbol)) {
+            return *id;
+        }
+        // Slow path: intern new symbol (happens once per unique symbol)
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        self.symbols.insert(Atom::from(symbol), id);
+        id
+    }
+}
+```
+
+**Benefits:**
+- Symbol comparison becomes integer comparison
+- No string allocations after initial interning
+- Ideal for finite symbol sets (e.g., market tickers)
+
+#### Arena Allocator Guidance
+
+Arena allocators (e.g., bumpalo) are conditional -- use only where profiling confirms allocator cost is a meaningful contributor to tail latency.
+
+**When to consider**:
+- Parsing or deserialization phases with many short-lived allocations
+- Temporary scratch space in request-processing pipelines
+- Phases where `dhat`/`heaptrack` shows allocation overhead in P99.9
+
+**When NOT to use**:
+- Hot paths already designed for zero allocation -- arenas add no value
+- Startup or configuration code -- not latency-sensitive
+- Anywhere the "viral lifetimes" cost (see [Arena Viral Lifetimes](#arena-viral-lifetimes)) exceeds the allocation savings
+
+**If justified**: Use per-thread `Bump` arenas with phase-oriented reset -- allocate, use, then `arena.reset()` at phase boundaries. Confine arena references to a single processing phase and copy out owned data before crossing module boundaries.
+
+**Before adopting**: Profile with `dhat` or `heaptrack` to confirm allocator cost. Arena integration adds lifetime complexity that is expensive to remove later.
+
+### Data Structures
+
+Choosing and configuring bounded collections, queues, and arenas for predictable memory behavior. Wrong choices cause cache misses, false sharing, or silent capacity overflows.
+
+#### Bounded Collections
+
+Use `ArrayVec` for stack-allocated, fixed-capacity collections when the maximum size is known at compile time.
+
+```rust
+use arrayvec::ArrayVec;
+
+pub struct BoundedBuffer<T, const N: usize> {
+    items: ArrayVec<T, N>,
+}
+
+impl<T, const N: usize> BoundedBuffer<T, N> {
+    pub fn new() -> Self {
+        Self { items: ArrayVec::new() }
+    }
+
+    pub fn push(&mut self, item: T) -> Result<(), CapacityError> {
+        self.items.try_push(item).map_err(|_| CapacityError)
+    }
+
+    pub fn drain(&mut self) -> impl Iterator<Item = T> + '_ {
+        self.items.drain(..)
+    }
+}
+```
+
+**When to use ArrayVec:**
+- Known maximum size at compile time
+- Total size < 10KB (stack limit consideration)
+- Frequent creation/destruction where heap allocation is unacceptable
+
+**When to use preallocated Vec instead:**
+- Maximum size known only at runtime
+- Size may exceed stack limits
+
+#### Arena Allocators
+
+Use arena allocators for groups of temporary allocations that share a lifetime. Allocate from the arena, then reset in bulk.
+
+```rust
+use bumpalo::Bump;
+
+pub struct ScratchArena {
+    arena: Bump,
+}
+
+impl ScratchArena {
+    pub fn new() -> Self {
+        Self {
+            arena: Bump::with_capacity(64 * 1024), // 64KB arena
+        }
+    }
+
+    pub fn alloc_slice<T: Default + Copy>(&self, len: usize) -> &mut [T] {
+        self.arena.alloc_slice_fill_default(len)
+    }
+
+    /// Clear arena for reuse (cheap pointer reset, no per-object drop)
+    pub fn reset(&mut self) {
+        self.arena.reset();
+    }
+}
+```
+
+**Usage pattern:**
+```rust
+let mut scratch = ScratchArena::new(); // Startup
+
+// Hot path
+let temp = scratch.alloc_slice::<f64>(1000);
+// Use temp...
+scratch.reset(); // Reuse for next operation
+```
+
+Arenas are ideal when many small allocations are created and freed together (e.g., per-tick scratch data).
+
+#### Queue Selection
+
+##### SPSC Queues
+
+| Crate | Use Case | Latency | Notes |
+|-------|----------|---------|-------|
+| `rtrb` | Realtime paths | ~50ns | Wait-free, no_std compatible |
+| `ringbuf` | General SPSC | ~100ns | Mature, production-ready |
+| `heapless::spsc` | Embedded/no_std | ~80ns | Stack-allocated, fixed size |
+
+**Avoid for SPSC:**
+- `crossbeam::ArrayQueue` -- MPMC overhead unnecessary for single producer/consumer
+- `std::sync::mpsc` -- not designed for low-latency
+
+##### MPSC Queues
+
+| Crate | Use Case | Notes |
+|-------|----------|-------|
+| `crossbeam::channel` | General MPSC | Bounded/unbounded, good performance |
+| `flume` | Drop-in replacement | Slightly faster than crossbeam in some cases |
+
+##### MPMC Queues
+
+| Crate | Use Case | Notes |
+|-------|----------|-------|
+| `crossbeam::ArrayQueue` | Bounded MPMC | Lock-free, good for work stealing |
+| `disruptor-rs` | LMAX pattern | Batch processing, multi-consumer |
+
+##### Decision Tree
+
+```
+Single producer, single consumer?
++-- YES -> SPSC
+|   +-- Need no_std? -> rtrb or heapless::spsc
+|   +-- Need max perf? -> rtrb or custom
+|   +-- General use -> ringbuf
++-- NO
+    +-- Multiple producers, single consumer? -> crossbeam::channel or flume
+    +-- Multiple producers, multiple consumers? -> crossbeam::ArrayQueue
+```
+
+##### Performance Baselines
+
+| Queue Type | Target ops/ms | Latency |
+|------------|---------------|---------|
+| SPSC Ring Buffer | 60,000+ | <160ns |
+| MPSC Channel | 20,000+ | <500ns |
+| Disruptor Pattern | 40M+ ops/sec | <52ns |
+
+**Industry comparisons** (for context):
+- boost::lockfree::spsc_queue: 11,345 ops/ms
+- folly::ProducerConsumerQueue: 14,614 ops/ms
+- moodycamel::ReaderWriterQueue: 21,815 ops/ms
+
+If below these baselines, investigate: cache line alignment, false sharing, atomic ordering.
+
+#### Cache Line Padding
+
+Use 128-byte cache padding for atomics shared across threads. Intel prefetcher pulls 64-byte pairs, so 128 bytes prevents false sharing even with adjacent prefetch.
+
+```rust
+use crossbeam::utils::CachePadded;
+use std::sync::atomic::AtomicUsize;
+
+pub struct SPSCQueue<T> {
+    buffer: Box<[Option<T>]>,
+    capacity: usize,
+    head: CachePadded<AtomicUsize>,  // Writer only
+    tail: CachePadded<AtomicUsize>,  // Reader only
+}
+```
+
+**Why 128 bytes:** Head and tail are accessed by different threads. Without padding, they share a cache line, causing constant invalidation. Intel's spatial prefetcher fetches pairs of 64-byte lines, so 64-byte padding is insufficient.
+
+##### Power-of-Two Capacity
+
+Always use power-of-two capacity for fast modulo via bitmask:
+
+```rust
+impl<T> SPSCQueue<T> {
+    pub fn new(capacity: usize) -> Self {
+        let capacity = capacity.next_power_of_two();
+        // ...
+    }
+
+    #[inline]
+    fn index(&self, pos: usize) -> usize {
+        pos & (self.capacity - 1) // Fast modulo via bitmask
+    }
+}
+```
+
+Size ring buffers to fit within L2 cache (256-512KB typical) for optimal latency. Exceeding L2 causes measurable performance degradation.
+
+### Verification
+
+Techniques for detecting, asserting, and profiling allocations to enforce zero-alloc invariants. Without verification, hidden allocations go undetected until production.
+
+#### Allocation Assertions
+
+Use `assert_no_alloc` as a global allocator in test binaries to enforce zero allocations in hot paths. This is the CI gate -- profiling tools like dhat are for local attribution only.
+
+```toml
+[dev-dependencies]
+assert_no_alloc = "1.1"
+```
+
+```rust
+use assert_no_alloc::*;
+
+#[test]
+fn hot_path_must_not_allocate() {
+    let mut processor = DataProcessor::new(4096, 20);
+    let data = create_test_data();
+
+    assert_no_alloc(|| {
+        processor.process(&data); // Aborts if any allocation occurs
+    });
+}
+```
+
+No feature flags required -- `assert_no_alloc` uses a global allocator override in each test binary.
+
+Structure allocation tests as dedicated test binaries (one per hot path) for clear CI output.
+
+#### Allocation Profiling
+
+Use profiling tools to identify where allocations occur before optimizing.
+
+##### dhat (Rust-native, source-level attribution)
+
+```toml
+[dev-dependencies]
+dhat = "0.3"
+
+[features]
+dhat-heap = []
+
+[profile.test]
+opt-level = 1  # Required for accurate dhat results
+```
+
+```rust
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
+#[test]
+fn profile_allocations() {
+    #[cfg(feature = "dhat-heap")]
+    let _profiler = dhat::Profiler::builder().testing().build();
+
+    let mut processor = DataProcessor::new(4096, 20);
+
+    #[cfg(feature = "dhat-heap")]
+    let stats_before = dhat::HeapStats::get();
+
+    processor.process(&create_test_data());
+
+    #[cfg(feature = "dhat-heap")]
+    {
+        let stats_after = dhat::HeapStats::get();
+        assert_eq!(
+            stats_after.total_blocks - stats_before.total_blocks,
+            0,
+            "Hot path must not allocate"
+        );
+    }
+}
+// Run with: cargo test --features dhat-heap
+```
+
+##### External Tools
+
+```bash
+# heaptrack (recommended for full-program profiling)
+heaptrack ./target/release/my_binary
+heaptrack_gui heaptrack.my_binary.*.gz
+
+# Valgrind massif
+valgrind --tool=massif --massif-out-file=massif.out ./target/release/my_binary
+ms_print massif.out > heap_report.txt
+```
+
+##### Verification Checklist
+
+1. **Profile first**: heaptrack, dhat, or Divan's AllocProfiler
+2. **Add allocation tests**: assert zero allocations in hot path
+3. **Check hidden allocations**: `format!`, `collect()`, `to_string()`
+4. **Verify capacity**: ensure Vecs do not grow in hot path
+
+### Pitfalls
+
+Common Rust idioms that silently allocate. Awareness prevents accidental allocations in code that appears allocation-free.
+
+#### Hidden format! Allocations
+
+`format!` creates a new `String` each invocation. In hot paths, write to a preallocated buffer instead.
+
+**Incorrect (allocates on every call):**
+
+```rust
+let msg = format!("Price: {}", price);
+```
+
+**Correct (write to preallocated buffer):**
+
+```rust
+use std::fmt::Write;
+let mut buf = String::with_capacity(100); // Preallocate once
+write!(&mut buf, "Price: {}", price).unwrap();
+```
+
+#### Iterator Collect Allocations
+
+`.collect()` creates a new collection. In hot paths, write filtered results to a preallocated buffer.
+
+**Incorrect (allocates on every call):**
+
+```rust
+let evens: Vec<_> = data.iter().filter(|x| *x % 2 == 0).collect();
+```
+
+**Correct (write to preallocated buffer):**
+
+```rust
+let mut evens = Vec::with_capacity(data.len() / 2);
+for x in data.iter().filter(|x| *x % 2 == 0) {
+    evens.push(*x);
+}
+```
+
+Alternatively, reuse the buffer across calls with `.clear()` before refilling.
+
+#### Recursive Box Allocations
+
+`Box<T>` in recursive data structures (trees, linked lists) allocates on every node creation. Use arena allocators instead.
+
+**Incorrect (heap allocation per node):**
+
+```rust
+enum Tree<T> {
+    Leaf,
+    Node {
+        value: T,
+        left: Box<Tree<T>>,   // Allocates!
+        right: Box<Tree<T>>,  // Allocates!
+    }
+}
+```
+
+**Correct (arena-allocated nodes):**
+
+```rust
+struct ArenaTree<'a, T> {
+    nodes: &'a Bump,
+}
+```
+
+Arena allocation amortizes the cost across all nodes and frees them in a single `reset()`.
+
+#### String Operation Allocations
+
+Methods like `to_uppercase()`, `to_lowercase()`, and `to_string()` create new `String` allocations. Use in-place alternatives when possible.
+
+**Incorrect (creates new String):**
+
+```rust
+let upper = s.to_uppercase();
+```
+
+**Correct (modify in place):**
+
+```rust
+s.make_ascii_uppercase();
+```
+
+Note: `make_ascii_uppercase()` only works for ASCII. For Unicode, the allocation from `to_uppercase()` is unavoidable -- keep it off the hot path.
+
+#### Vec Push Beyond Capacity
+
+`Vec::push()` will reallocate if `len == capacity`. In hot paths, always verify remaining capacity or use bounded alternatives.
+
+**Incorrect (may reallocate):**
+
+```rust
+vec.push(item);
+```
+
+**Correct (verify capacity first):**
+
+```rust
+assert!(vec.len() < vec.capacity());
+vec.push(item);
+```
+
+For production hot paths, prefer `ArrayVec::try_push()` which returns an error instead of reallocating, or pre-size the Vec and guard against overflow.
+
+#### Arena Viral Lifetimes
+
+Arena-allocated types propagate lifetime parameters through all consumers:
+
+```rust
+// BAD: Arena lifetime infects all downstream types
+struct ParsedMessage<'arena> {
+    symbol: &'arena str,
+    levels: Vec<&'arena PriceLevel>,
+}
+
+fn process(msg: ParsedMessage<'_>) { ... } // Lifetime everywhere
+```
+
+Once one field borrows from an arena, the lifetime spreads to the containing struct, all methods, trait impls, and callers. Refactoring back to owned types later is expensive.
+
+**Mitigation**:
+- Confine arena references to a single processing phase -- copy out owned data before crossing module boundaries
+- Prefer `arena.reset()` between phases over long-lived arena borrows
+- Only adopt arena lifetimes where profiling confirms the allocation overhead justifies the complexity
+
+```rust
+// GOOD: Arena confined to parse phase, owned data crosses boundaries
+fn parse_phase<'a>(arena: &'a Bump, input: &[u8]) -> OwnedMessage {
+    let temp: ParsedMessage<'a> = parse_into_arena(arena, input);
+    temp.to_owned() // Copy out before arena reference escapes
+}
+// arena.reset() here — all borrows are dead
+```
