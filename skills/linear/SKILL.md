@@ -14,6 +14,16 @@ metadata:
 
 CLI wrapper for Linear's GraphQL API with local cache, bulk operations, and structured output.
 
+## Resources
+
+### ctx7 CLI
+
+| Library | ctx7 ID | Use For |
+|---------|---------|---------|
+| Linear API | `/websites/studio_apollographql_public_linear-api_variant_current` | GraphQL schema reference |
+| Linear SDK | `/linear/linear` | SDK docs with examples |
+| Linear Guides | `/websites/linear_app_developers` | Developer guides |
+
 ## When to Apply
 
 Reference these guidelines when:
@@ -138,16 +148,6 @@ sortOrder → sort_order  # Manual sort position
 | Pattern | Use For |
 |---------|---------|
 | [patterns/workflow-actions.md](patterns/workflow-actions.md) | Multi-step issue/project state changes used by orchestration and TPM workflows |
-
-## Resources
-
-### ctx7 CLI
-
-| Library | ctx7 ID | Use For |
-|---------|---------|---------|
-| Linear API | `/websites/studio_apollographql_public_linear-api_variant_current` | GraphQL schema reference |
-| Linear SDK | `/linear/linear` | SDK docs with examples |
-| Linear Guides | `/websites/linear_app_developers` | Developer guides |
 
 ## Dependencies
 

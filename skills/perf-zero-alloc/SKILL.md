@@ -12,18 +12,6 @@ metadata:
 
 Patterns for eliminating heap allocations in performance-critical Rust hot paths, achieving sub-500us latency.
 
-## Core Principle
-
-**Never allocate after startup in hot paths.** Pre-allocate all memory during initialization. Every heap allocation in a hot path is a latency spike waiting to happen.
-
-## Dev Tools
-
-| Tool | Purpose | Install |
-|------|---------|---------|
-| `heaptrack` | Full-program heap profiling with GUI | System package manager |
-| `dhat` | Rust-native allocation attribution | `cargo add --dev dhat` |
-| `assert_no_alloc` | CI-gate allocation assertions | `cargo add --dev assert_no_alloc` |
-
 ## Resources
 
 Documentation lookup order: local skill files -> ctx7 CLI -> web fallback.
@@ -47,6 +35,18 @@ Documentation lookup order: local skill files -> ctx7 CLI -> web fallback.
 | bumpalo | `https://docs.rs/bumpalo` | Arena allocator |
 | The Rust Performance Book | `https://nnethercote.github.io/perf-book/` | General Rust perf guidance |
 | LMAX Disruptor | `https://lmax-exchange.github.io/disruptor/` | Original disruptor pattern |
+
+## Dev Tools
+
+| Tool | Purpose | Install |
+|------|---------|---------|
+| `heaptrack` | Full-program heap profiling with GUI | System package manager |
+| `dhat` | Rust-native allocation attribution | `cargo add --dev dhat` |
+| `assert_no_alloc` | CI-gate allocation assertions | `cargo add --dev assert_no_alloc` |
+
+## Core Principle
+
+**Never allocate after startup in hot paths.** Pre-allocate all memory during initialization. Every heap allocation in a hot path is a latency spike waiting to happen.
 
 ## Skill Rules
 

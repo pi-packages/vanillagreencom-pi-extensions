@@ -15,6 +15,21 @@ metadata:
 
 Component design skill for building shadcn Base UI-inspired components in Iced. Covers architecture decisions, family decomposition, implementation methodology, and parity audits.
 
+## Resources
+
+### ctx7 CLI
+
+| Library | ctx7 ID | Use For |
+|---------|---------|---------|
+| Iced | `/websites/rs_iced_iced` | Widget API, overlay system, advanced traits |
+
+### Web
+
+| Source | URL | Use For |
+|--------|-----|---------|
+| shadcn Base UI | `https://ui.shadcn.com/docs/components/base/` | Component behavior truth |
+| iced-shadcn crate | `https://github.com/FerrisMind/shadcn-rs/tree/master/crates/iced-shadcn` | Architecture patterns |
+
 ## When to Apply
 
 Reference these guidelines when:
@@ -73,17 +88,3 @@ From [iced-shadcn](https://github.com/FerrisMind/shadcn-rs/tree/master/crates/ic
 - Viewer page template: `references/page-template.md`
 - Issue guidance: `references/issue-guidance.md`
 
-## Resources
-
-### ctx7 CLI
-
-| Library | ctx7 ID | Use For |
-|---------|---------|---------|
-| Iced | `/websites/rs_iced_iced` | Widget API, overlay system, advanced traits |
-
-### Web
-
-| Source | URL | Use For |
-|--------|-----|---------|
-| shadcn Base UI | `https://ui.shadcn.com/docs/components/base/` | Component behavior truth |
-| iced-shadcn crate | `https://github.com/FerrisMind/shadcn-rs/tree/master/crates/iced-shadcn` | Architecture patterns |

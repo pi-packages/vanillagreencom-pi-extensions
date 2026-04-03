@@ -12,21 +12,6 @@ metadata:
 
 Patterns for accurate latency measurement, percentile tracking, and regression detection in sub-millisecond systems.
 
-## Nomenclature
-
-- **P50/P95/P99/P99.9** - Percentile latencies (50th, 95th, 99th, 99.9th)
-- **Coordinated omission (CO)** - Measurement bias where closed-loop benchmarks hide latency spikes
-- **TSC** - Time Stamp Counter; hardware clock on x86 for nanosecond-precision timing
-- **HdrHistogram** - High Dynamic Range Histogram; constant-memory percentile tracking with CO correction
-- **iai-callgrind** - Deterministic instruction-counting benchmarks via Valgrind (CI-stable)
-
-## Dev Tools
-
-| Tool | Purpose | Install |
-|------|---------|---------|
-| `samply` | CPU profiler with Firefox Profiler UI | `cargo install samply` |
-| `cargo-flamegraph` | Flamegraph generation from perf data | `cargo install flamegraph` |
-
 ## Resources
 
 Documentation lookup order: local skill files -> ctx7 CLI -> web fallback.
@@ -47,6 +32,21 @@ Documentation lookup order: local skill files -> ctx7 CLI -> web fallback.
 | Divan | `https://github.com/nvzqz/divan` | Modern Rust benchmarking with allocation tracking |
 | iai-callgrind | `https://docs.rs/iai-callgrind/0.16.1/iai_callgrind/` | Deterministic CI regression gates |
 | Flamegraphs | `https://www.brendangregg.com/flamegraphs.html` | CPU profiling visualization |
+
+## Dev Tools
+
+| Tool | Purpose | Install |
+|------|---------|---------|
+| `samply` | CPU profiler with Firefox Profiler UI | `cargo install samply` |
+| `cargo-flamegraph` | Flamegraph generation from perf data | `cargo install flamegraph` |
+
+## Nomenclature
+
+- **P50/P95/P99/P99.9** - Percentile latencies (50th, 95th, 99th, 99.9th)
+- **Coordinated omission (CO)** - Measurement bias where closed-loop benchmarks hide latency spikes
+- **TSC** - Time Stamp Counter; hardware clock on x86 for nanosecond-precision timing
+- **HdrHistogram** - High Dynamic Range Histogram; constant-memory percentile tracking with CO correction
+- **iai-callgrind** - Deterministic instruction-counting benchmarks via Valgrind (CI-stable)
 
 ## Skill Rules
 

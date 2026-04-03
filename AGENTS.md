@@ -113,18 +113,18 @@ rust = [
   { skill = "rust-ffi", when = "FFI boundaries, C interop, bindgen" },
 ]
 
-# "Execute on Launch" — what the agent should do when first invoked
-[agent-guidance]
+# "Launch Instructions" — what the agent should do when first invoked
+[agent-launch-instructions]
 rust = "Read open issues and begin working on the highest-priority backend task."
 
 # Additional instructions appended at the bottom of the agent file
-[agent-instructions]
+[agent-additional-instructions]
 rust = """
 Always run clippy before committing.
 Prefer zero-copy APIs in hot paths.
 """
 
-# Project instructions appended at the bottom of each skill's SKILL.md
+# Project instructions added at the top of each skill's SKILL.md
 [skill-instructions]
 trading-design = "Focus on dark theme with green/red accent colors for this project."
 ```

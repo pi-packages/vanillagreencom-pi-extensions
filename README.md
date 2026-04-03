@@ -143,12 +143,12 @@ All sections survive upstream updates — they're re-applied from the config on 
 
 ```toml
 # What the agent should do when first invoked
-[agent-guidance]
+[agent-launch-instructions]
 rust = "Read open issues and begin working on the highest-priority backend task."
 generalist = ""    # empty = no section generated
 
 # Project-specific rules appended to the bottom of agent files
-[agent-instructions]
+[agent-additional-instructions]
 rust = "Always run clippy before committing."
 
 # Skills attached to each agent's frontmatter — single source of truth.

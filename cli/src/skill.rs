@@ -60,9 +60,8 @@ impl Skill {
 
 const SKILL_INSTRUCTIONS_HEADER: &str = "## Project Instructions";
 
-/// Inject a "## Project Instructions" section at the bottom of a SKILL.md file.
-/// Uses a distinct heading from "## Additional Instructions" to avoid clobbering
-/// any instructions the skill author included in the original source.
+/// Inject a "## Project Instructions" section at the top of a SKILL.md file,
+/// immediately after the YAML frontmatter closing `---`.
 pub fn inject_skill_instructions(skill_md_path: &Path, instructions: &str) {
     let Ok(content) = std::fs::read_to_string(skill_md_path) else {
         return;
@@ -71,13 +70,42 @@ pub fn inject_skill_instructions(skill_md_path: &Path, instructions: &str) {
     // Strip any existing vstack-injected section
     let clean = strip_project_instructions(&content);
     let section = format!(
-        "\n\n{}\n\n{}\n",
+        "\n{}\n\n{}\n",
         SKILL_INSTRUCTIONS_HEADER,
         instructions.trim()
     );
-    let new_content = format!("{}{}", clean.trim_end(), section);
+
+    // Insert after frontmatter closing `---`
+    let new_content = if let Some(pos) = find_frontmatter_end(&clean) {
+        format!("{}{}\n{}", &clean[..pos], section, clean[pos..].trim_start_matches('\n'))
+    } else {
+        // No frontmatter — prepend
+        format!("{}\n{}", section.trim(), clean)
+    };
 
     let _ = std::fs::write(skill_md_path, new_content);
+}
+
+/// Find the byte offset just after the closing `---` of YAML frontmatter.
+/// Returns None if no frontmatter is found.
+fn find_frontmatter_end(content: &str) -> Option<usize> {
+    if !content.starts_with("---") {
+        return None;
+    }
+    // Find the second `---` (closing delimiter)
+    let after_first = &content[3..];
+    if let Some(close) = after_first.find("\n---") {
+        // Position after the closing `---\n`
+        let end = 3 + close + 4; // "---" (3) + offset to "\n---" + "\n---".len() (4)
+        // Skip the trailing newline after `---` if present
+        if content[end..].starts_with('\n') {
+            Some(end + 1)
+        } else {
+            Some(end)
+        }
+    } else {
+        None
+    }
 }
 
 const DEP_REFERENCE_HEADER: &str = "## Dependency Quick Reference";
@@ -89,8 +117,7 @@ pub struct DepRefEntry {
     pub entry_point: Option<String>,
 }
 
-/// Inject a "## Dependency Quick Reference" section into an installed SKILL.md.
-/// Placed before "## Project Instructions" if present, otherwise at the bottom.
+/// Inject a "## Dependency Quick Reference" section at the bottom of an installed SKILL.md.
 pub fn inject_dependency_reference(skill_md_path: &Path, deps: &[DepRefEntry]) {
     if deps.is_empty() {
         return;
@@ -125,18 +152,7 @@ pub fn inject_dependency_reference(skill_md_path: &Path, deps: &[DepRefEntry]) {
         section.push_str(&format!("| `{}` | {} | `{}` |\n", dep.name, desc, ep));
     }
 
-    // Insert before "## Project Instructions" if present, otherwise append
-    let marker = format!("\n{}", SKILL_INSTRUCTIONS_HEADER);
-    let new_content = if let Some(pos) = clean.find(&marker) {
-        format!(
-            "{}{}{}",
-            clean[..pos].trim_end(),
-            section,
-            &clean[pos..]
-        )
-    } else {
-        format!("{}{}", clean.trim_end(), section)
-    };
+    let new_content = format!("{}{}", clean.trim_end(), section);
 
     let _ = std::fs::write(skill_md_path, new_content);
 }

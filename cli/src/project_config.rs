@@ -20,9 +20,9 @@ pub struct ProjectConfig {
     pub agent_skills: HashMap<String, Vec<String>>,
     #[serde(rename = "agent-skills-optional")]
     pub agent_skills_optional: HashMap<String, Vec<crate::mapping::OptionalSkill>>,
-    #[serde(rename = "agent-guidance")]
+    #[serde(rename = "agent-launch-instructions", alias = "agent-guidance")]
     pub agent_guidance: HashMap<String, String>,
-    #[serde(rename = "agent-instructions")]
+    #[serde(rename = "agent-additional-instructions", alias = "agent-instructions")]
     pub agent_instructions: HashMap<String, String>,
     #[serde(rename = "skill-instructions")]
     pub skill_instructions: HashMap<String, String>,
@@ -165,7 +165,7 @@ impl ProjectConfig {
                     out = out.replace(&entry, &value);
                 } else {
                     let new_entry = format!("{} = \"{}\"\n", agent_name, text.replace('"', "\\\""));
-                    out = insert_entries_into_section(&out, "[agent-guidance]", &new_entry);
+                    out = insert_entries_into_section(&out, "[agent-launch-instructions]", &new_entry);
                 }
             }
         }
@@ -179,7 +179,7 @@ impl ProjectConfig {
                 } else {
                     let new_entry =
                         format!("{} = \"{}\"\n", agent_name, text.replace('"', "\\\""));
-                    out = insert_entries_into_section(&out, "[agent-instructions]", &new_entry);
+                    out = insert_entries_into_section(&out, "[agent-additional-instructions]", &new_entry);
                 }
             }
         }
@@ -416,9 +416,33 @@ pub fn ensure_project_config(project_root: &Path, agents: &[String], skills: &[S
     let path = project_root.join("vstack.toml");
 
     if path.exists() {
+        migrate_section_names(&path);
         update_project_config(&path, agents, skills);
     } else {
         create_project_config(&path, agents, skills);
+    }
+}
+
+/// Migrate old TOML section names to new ones (one-time, idempotent).
+fn migrate_section_names(path: &Path) {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return;
+    };
+    let mut out = content.clone();
+    let migrations = [
+        ("[agent-guidance]", "[agent-launch-instructions]"),
+        ("[agent-instructions]", "[agent-additional-instructions]"),
+    ];
+    let mut changed = false;
+    for (old, new) in &migrations {
+        // Only rename if the old name exists and the new name does NOT
+        if out.contains(old) && !out.contains(new) {
+            out = out.replace(old, new);
+            changed = true;
+        }
+    }
+    if changed {
+        let _ = std::fs::write(path, out);
     }
 }
 
@@ -436,9 +460,9 @@ fn create_project_config(path: &Path, agents: &[String], skills: &[String]) {
     out.push_str("# ─────────────────────────────────────────────────────\n");
     out.push('\n');
 
-    // ── agent-guidance ──
-    out.push_str("\n# ── Execute on Launch ─────────────────────────────────\n");
-    out.push_str("# Adds a \"## Execute on Launch\" section near the top\n");
+    // ── agent-launch-instructions ──
+    out.push_str("\n# ── Launch Instructions ───────────────────────────────\n");
+    out.push_str("# Adds a \"## Launch Instructions\" section near the top\n");
     out.push_str("# of each agent file. Defines what the agent should\n");
     out.push_str("# do when it is first invoked in your project.\n");
     out.push_str("#\n");
@@ -448,7 +472,7 @@ fn create_project_config(path: &Path, agents: &[String], skills: &[String]) {
     out.push_str("#   Second line.\n");
     out.push_str("#   \"\"\"\n");
     out.push_str("#\n");
-    out.push_str("[agent-guidance]\n\n");
+    out.push_str("[agent-launch-instructions]\n\n");
     for (i, name) in agents.iter().enumerate() {
         out.push_str(&format!("{} = \"\"\n", name));
         if i + 1 < agents.len() {
@@ -456,13 +480,13 @@ fn create_project_config(path: &Path, agents: &[String], skills: &[String]) {
         }
     }
 
-    // ── agent-instructions ──
+    // ── agent-additional-instructions ──
     out.push_str("\n\n# ── Additional Instructions ──────────────────────────\n");
     out.push_str("# Adds a \"## Additional Instructions\" section at the\n");
     out.push_str("# bottom of each agent file. Project-specific rules,\n");
     out.push_str("# conventions, or reminders for this agent.\n");
     out.push_str("#\n");
-    out.push_str("[agent-instructions]\n\n");
+    out.push_str("[agent-additional-instructions]\n\n");
     for (i, name) in agents.iter().enumerate() {
         out.push_str(&format!("{} = \"\"\n", name));
         if i + 1 < agents.len() {
@@ -473,7 +497,7 @@ fn create_project_config(path: &Path, agents: &[String], skills: &[String]) {
     // ── skill-instructions ──
     out.push_str("\n\n# ── Skill Instructions ────────────────────────────────\n");
     out.push_str("# Adds a \"## Project Instructions\" section at the\n");
-    out.push_str("# bottom of each skill's SKILL.md. Project-specific\n");
+    out.push_str("# top of each skill's SKILL.md. Project-specific\n");
     out.push_str("# context for how this skill applies to your codebase.\n");
     out.push_str("# Won't overwrite the skill author's own instructions.\n");
     out.push_str("#\n");
@@ -549,8 +573,8 @@ fn update_project_config(path: &Path, agents: &[String], skills: &[String]) {
 
     let mut all_new_keys: Vec<(&str, Vec<&String>)> = Vec::new();
     if !new_agents.is_empty() {
-        all_new_keys.push(("[agent-guidance]", new_agents.clone()));
-        all_new_keys.push(("[agent-instructions]", new_agents));
+        all_new_keys.push(("[agent-launch-instructions]", new_agents.clone()));
+        all_new_keys.push(("[agent-additional-instructions]", new_agents));
     }
     if !new_skills.is_empty() {
         all_new_keys.push(("[skill-instructions]", new_skills));
@@ -727,10 +751,10 @@ mod tests {
 [agent-skills]
 rust = ["rust-arch", "rust-async", "my-custom-skill"]
 
-[agent-guidance]
+[agent-launch-instructions]
 rust = "Use when working on backend Rust services."
 
-[agent-instructions]
+[agent-additional-instructions]
 rust = "Always run clippy before committing."
 "#;
         let config: ProjectConfig = toml::from_str(toml).unwrap();
@@ -769,7 +793,7 @@ rust = "Always run clippy before committing."
 [agent-skills]
 iced = ["iced-rs", "trading-design", "my-custom"]
 
-[agent-guidance]
+[agent-launch-instructions]
 rust = "Use for Rust work."
 "#;
         let config: ProjectConfig = toml::from_str(toml).unwrap();
@@ -825,10 +849,10 @@ rust = "Use for Rust work."
         let path = dir.join("vstack.toml");
 
         // Simulate user-edited file with active (uncommented) config
-        let user_content = r#"[agent-guidance]
+        let user_content = r#"[agent-launch-instructions]
 rust = "Use for my backend services."
 
-[agent-instructions]
+[agent-additional-instructions]
 rust = "Always use thiserror for errors."
 "#;
         std::fs::write(&path, user_content).unwrap();

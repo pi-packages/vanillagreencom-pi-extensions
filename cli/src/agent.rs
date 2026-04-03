@@ -212,10 +212,10 @@ pub struct CustomHookEntry {
     pub description: Option<String>,
 }
 
-/// Generate an "Execute on Launch" markdown section
+/// Generate a "Launch Instructions" markdown section
 pub fn guidance_section(text: Option<&str>) -> String {
     match text {
-        Some(t) if !t.is_empty() => format!("## Execute on Launch\n\n{}\n\n", t.trim()),
+        Some(t) if !t.is_empty() => format!("## Launch Instructions\n\n{}\n\n", t.trim()),
         _ => String::new(),
     }
 }
@@ -241,7 +241,7 @@ pub fn append_section(body: &str, section: &str) -> String {
 /// from an existing generated agent file so they can be preserved across regeneration.
 pub fn extract_user_sections(content: &str) -> AgentExtras {
     AgentExtras {
-        guidance: extract_section(content, "## Execute on Launch")
+        guidance: extract_section(content, "## Launch Instructions")
             .or_else(|| extract_section(content, "## When to Use")),
         instructions: extract_section(content, "## Additional Instructions"),
         ..Default::default()
@@ -515,7 +515,7 @@ Does testing things.
     #[test]
     fn guidance_section_renders() {
         let section = guidance_section(Some("Read the open issues and start working."));
-        assert!(section.contains("## Execute on Launch"));
+        assert!(section.contains("## Launch Instructions"));
         assert!(section.contains("Read the open issues and start working."));
     }
 
