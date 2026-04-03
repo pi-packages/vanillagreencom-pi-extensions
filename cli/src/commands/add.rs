@@ -279,11 +279,41 @@ pub fn run(
     let source_dir = resolved_source.dir.clone();
     let mapping = crate::mapping::MappingConfig::load(&source_dir);
 
-    // Ensure project-level vstack.toml exists for customization
+    // Ensure project-level vstack.toml exists for customization.
+    // Merge already-installed items with newly selected ones so the
+    // config template and skills reference block reflect the FULL set,
+    // not just what was picked in this session.
     if !global {
-        let agent_names: Vec<String> = selected_agents.iter().map(|a| a.name.clone()).collect();
-        let skill_names: Vec<String> = selected_skills.iter().map(|s| s.name.clone()).collect();
-        crate::project_config::ensure_project_config(&config::project_root(), &agent_names, &skill_names);
+        let lock = config::LockFile::load(&config::lock_file_path(false)).unwrap_or_default();
+        let mut agent_names: Vec<String> = lock
+            .entries
+            .iter()
+            .filter(|(_, e)| e.kind == config::ItemKind::Agent)
+            .map(|(n, _)| n.clone())
+            .collect();
+        let mut skill_names: Vec<String> = lock
+            .entries
+            .iter()
+            .filter(|(_, e)| e.kind == config::ItemKind::Skill)
+            .map(|(n, _)| n.clone())
+            .collect();
+        for a in &selected_agents {
+            if !agent_names.contains(&a.name) {
+                agent_names.push(a.name.clone());
+            }
+        }
+        for s in &selected_skills {
+            if !skill_names.contains(&s.name) {
+                skill_names.push(s.name.clone());
+            }
+        }
+        agent_names.sort();
+        skill_names.sort();
+        crate::project_config::ensure_project_config(
+            &config::project_root(),
+            &agent_names,
+            &skill_names,
+        );
     }
 
     let mut project_config = crate::project_config::ProjectConfig::load(&config::project_root());

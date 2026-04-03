@@ -648,8 +648,14 @@ fn insert_keys_into_section(content: &str, section_header: &str, new_keys: &[&St
                 i += 1;
             }
 
-            for name in new_keys {
-                result.push(format!("{} = \"\"", name));
+            if !new_keys.is_empty() {
+                // Blank line before new entries if section already had content
+                if result.last().map_or(false, |l| !l.trim().is_empty() && l.trim() != section_header) {
+                    result.push(String::new());
+                }
+                for name in new_keys {
+                    result.push(format!("{} = \"\"", name));
+                }
             }
             continue;
         }
@@ -899,6 +905,65 @@ rust = "Always use thiserror for errors."
         assert!(!after.contains("── New agents"));
         // Content should be essentially the same (skills ref regenerated but identical)
         assert_eq!(before.trim(), after.trim());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn update_project_config_preserves_full_skills_reference() {
+        let dir = std::env::temp_dir().join(format!(
+            "vstack_test_skills_ref_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("vstack.toml");
+
+        // Initial install with multiple skills
+        create_project_config(
+            &path,
+            &["rust".into()],
+            &["rust-arch".into(), "rust-ffi".into(), "worktree".into()],
+        );
+        let initial = std::fs::read_to_string(&path).unwrap();
+        assert!(initial.contains("#   rust-arch"));
+        assert!(initial.contains("#   rust-ffi"));
+        assert!(initial.contains("#   worktree"));
+
+        // Incremental install adds one new skill but passes ALL installed skills
+        // (simulating the fixed behavior in add.rs)
+        update_project_config(
+            &path,
+            &["rust".into()],
+            &[
+                "rust-arch".into(),
+                "rust-ffi".into(),
+                "second-opinion".into(),
+                "worktree".into(),
+            ],
+        );
+        let updated = std::fs::read_to_string(&path).unwrap();
+
+        // ALL skills present in reference — not just the new one
+        assert!(updated.contains("#   rust-arch"), "rust-arch missing from reference");
+        assert!(updated.contains("#   rust-ffi"), "rust-ffi missing from reference");
+        assert!(updated.contains("#   worktree"), "worktree missing from reference");
+        assert!(
+            updated.contains("#   second-opinion"),
+            "second-opinion missing from reference"
+        );
+
+        // New skill got a [skill-instructions] placeholder
+        assert!(
+            updated.contains("second-opinion = \"\""),
+            "second-opinion placeholder missing"
+        );
+        // Existing skills NOT re-added as placeholders
+        let rust_ffi_count = updated.matches("rust-ffi = \"\"").count();
+        assert_eq!(
+            rust_ffi_count, 1,
+            "rust-ffi placeholder duplicated (count={})",
+            rust_ffi_count
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
