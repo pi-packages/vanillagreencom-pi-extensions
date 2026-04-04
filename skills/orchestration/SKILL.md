@@ -282,7 +282,7 @@ The delegation message (containing the `<delegation_format>` content) follows as
 
 #### Format Tags Are Literal
 
-`<delegation_format>` and `<output_format>` tags in workflows define exact content. When sending or presenting content from these tags:
+`<bootstrap_format>`, `<delegation_format>`, and `<output_format>` tags define exact content. When sending or presenting content from these tags:
 
 1. **Fill `[PLACEHOLDERS]`** with actual values
 2. **Omit lines/sections** where the placeholder value is empty or not applicable
