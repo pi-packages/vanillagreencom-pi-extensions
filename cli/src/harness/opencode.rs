@@ -21,7 +21,7 @@ pub fn generate_agent(
 
     // Determine mode based on role
     let mode = match agent.role {
-        AgentRole::Engineer => "primary",
+        AgentRole::Engineer => "all",
         AgentRole::Reviewer => "subagent",
         AgentRole::Manager => "subagent",
     };
