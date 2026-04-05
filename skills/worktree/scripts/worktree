@@ -1,6 +1,6 @@
 #!/bin/bash
 # Portable git worktree manager
-# Usage: worktree create|list|remove|cleanup|path|exists|check|push [ID] [options]
+# Usage: worktree create|list|remove|cleanup|path|exists|check|push|fix-links [ID] [options]
 #
 # Layout: project/main (repo) + project/trees/{id} (worktrees)
 # Config: reads .env.local for optional settings (see below)
@@ -69,21 +69,22 @@ symlink_into_worktree() {
     ln -sf "$src" "$dst"
   elif [[ -d "$src" ]]; then
     # Directory symlink — if tracked by git, needs assume-unchanged to prevent staging issues
-    local git_dir="$PROJECT_ROOT/.git"
-    [[ -f "$git_dir" ]] && git_dir="$(cat "$git_dir" | sed 's/gitdir: //')"
-
     if git -C "$2" ls-files "$1/" 2>/dev/null | grep -q .; then
-      # Tracked directory: exclude from index, replace with symlink
-      local info_exclude="$git_dir/info/exclude"
+      # Tracked directory: exclude from worktree index, mark files assume-unchanged
+      local wt_git_dir
+      wt_git_dir="$(git -C "$2" rev-parse --git-dir 2>/dev/null)"
+      local info_exclude="$wt_git_dir/info/exclude"
+      mkdir -p "$(dirname "$info_exclude")"
       grep -qxF "$1" "$info_exclude" 2>/dev/null || echo "$1" >> "$info_exclude"
       git -C "$2" ls-files "$1/" 2>/dev/null | \
         xargs -r git -C "$2" update-index --assume-unchanged 2>/dev/null
-      rm -rf "$dst" 2>/dev/null
     fi
 
+    # Always remove existing dir/file before symlinking — rebase can replace
+    # symlinks with real directories when tracked files exist underneath
+    rm -rf "$dst" 2>/dev/null
     mkdir -p "$(dirname "$dst")"
-    ln -sf "$src" "$dst"
-    git -C "$2" update-index --assume-unchanged "$1" 2>/dev/null || true
+    ln -sfn "$src" "$dst"
   fi
 }
 
@@ -374,6 +375,8 @@ case "${1:-}" in
           echo "Error: Rebase onto origin/$DEFAULT_BRANCH failed (conflicts). Push with --no-rebase or resolve manually." >&2
           exit 1
         fi
+        # Rebase can replace symlinks with tracked content — restore them
+        setup_worktree_links "$WT_PATH"
       fi
     fi
 
@@ -390,8 +393,26 @@ case "${1:-}" in
     fi
     ;;
 
+  fix-links)
+    # Restore symlinks in a worktree (run after manual rebase/merge that clobbers them)
+    ARG="${2:-}"
+    if [[ -z "$ARG" ]]; then
+      WT_PATH="$PWD"
+    elif [[ "$ARG" == */* ]]; then
+      WT_PATH="$ARG"
+    else
+      WT_PATH="$(worktree_path "$ARG")"
+    fi
+    if [[ ! -f "$WT_PATH/.git" ]]; then
+      echo "Error: Not a git worktree: $WT_PATH" >&2
+      exit 1
+    fi
+    setup_worktree_links "$WT_PATH"
+    echo "Restored symlinks in $WT_PATH"
+    ;;
+
   *)
-    echo "Usage: $0 create|list|remove|cleanup|path|exists|check|push [ID|/path] [options]" >&2
+    echo "Usage: $0 create|list|remove|cleanup|path|exists|check|push|fix-links [ID|/path] [options]" >&2
     exit 1
     ;;
 esac
