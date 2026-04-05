@@ -51,15 +51,6 @@ TPM workflows return JSON recommendations only. Orchestrator or user handles int
 | Issue/project audit | [audit-output.md](schemas/audit-output.md) |
 | Project order audit | [audit-project-order-output.md](schemas/audit-project-order-output.md) |
 
-## Skill Dependencies
-
-Workflows reference these companion skills. Install and configure per your project:
-
-| Dependency | Purpose | Variable |
-|------------|---------|----------|
-| Issue tracker CLI (e.g., `linear` skill) | Issue CRUD, cache, comments, labels, relations | `.agents/skills/linear/scripts/linear.sh` |
-| Decider skill (optional) | Decision search for audit/roadmap contradiction checks | `.agents/skills/decider/scripts/decisions` |
-
 ## Hierarchy
 
 ```

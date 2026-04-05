@@ -50,16 +50,6 @@ Options: `--limit N` (default: 5) for search results.
 |--------|---------|
 | `schemas/decision-format.md` | Canonical format constraints for decision documents and INDEX |
 
-## Skill Dependencies
-
-This skill is self-contained. Other skills depend on it:
-
-| Dependent Skill | Purpose |
-|-----------------|---------|
-| Orchestration | Decision creation in research-complete, search in review/submit workflows |
-| Issue Lifecycle | Decision search in dev-implement/dev-fix/qa-review, creation in dev-implement |
-| Project Management | Decision search in audit/roadmap workflows |
-
 Project-level configuration:
 
 | Variable | Purpose | Default |

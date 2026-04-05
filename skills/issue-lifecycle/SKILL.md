@@ -33,18 +33,6 @@ Agent workflows for issue implementation, review fix delegation, pre-submission 
 | Benchmark baselines | Project benchmarking skill if installed |
 | Regression classification | Project benchmarking skill if available |
 
-## Skill Dependencies
-
-Workflows reference these companion skills and tools. Install and configure per your project:
-
-| Dependency | Purpose | Entry Point |
-|------------|---------|-------------|
-| Issue tracker CLI (e.g., `linear` skill) | Issue CRUD, cache, comments, labels | `.agents/skills/linear/scripts/linear.sh` |
-| Orchestration skill | Review-finding schema, recommendation-bias patterns | Referenced by name |
-| GitHub skill | Git diff analysis for QA review context | `.agents/skills/github/scripts/git-diff-summary` |
-| Decider skill | Decision templates, search CLI, creation workflows | `.agents/skills/decider/scripts/decisions` |
-| Benchmarking | Run benchmarks if a benchmarking skill is installed | Optional |
-
 ## Execution Rules
 
 - Execute all workflow sections in order. The workflow decides what to skip via "**Skip if**" conditions — never skip based on your own scope assessment.

@@ -466,8 +466,7 @@ pub fn run(
         }
     }
 
-    // Inject dependency quick-reference sections into skills that have deps
-    installer::inject_dependency_references(&selected_skills, global);
+
 
     // Write computed agent→skill mappings to project vstack.toml.
     // Must happen BEFORE lock timestamps are captured so that the
