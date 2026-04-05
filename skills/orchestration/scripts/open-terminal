@@ -68,7 +68,7 @@ while [[ $# -gt 0 ]]; do
       echo "Harness launch commands:"
       echo "  claude   → claude -n ISSUE --model 'opus[1m]' --effort max '/orchestration start ISSUE'"
       echo "  codex    → codex '\$orchestration start ISSUE'"
-      echo "  opencode → opencode '/orchestration start ISSUE'"
+      echo "  opencode → opencode run '/orchestration start ISSUE'"
       echo ""
       echo "Environment:"
       echo "  ISSUE_PATTERN  Regex for issue IDs (default: [A-Z]+-[0-9]+)"
@@ -135,7 +135,7 @@ detect_start_cmd() {
   case "$HARNESS" in
     claude)   echo "claude -n \"$issue\" --model 'opus[1m]' --effort max '/orchestration start $issue'" ;;
     codex)    echo "codex '\$orchestration start $issue'" ;;
-    opencode) echo "opencode '/orchestration start $issue'" ;;
+    opencode) echo "opencode run '/orchestration start $issue'" ;;
     *)        echo "" ;;
   esac
 }
