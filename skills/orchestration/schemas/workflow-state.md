@@ -20,6 +20,11 @@ Persistent state file for orchestration workflows. Initialized during session st
     "frontend": { "status": "closed", "agent_id": "agent_def456", "spawned_at": "2026-03-19T09:00:00Z" }
   },
   "review_agents": ["security-review", "test-review", "doc-review"],  // example — actual agents are project-configured
+  "review_agent_ids": {
+    "security-review": "agent_rev123",
+    "test-review": "agent_rev456",
+    "doc-review": "agent_rev789"
+  },
   "pre_delegate_sha": "abc123f",
   "skip_qa": false,
   "cycles": 0,
@@ -68,8 +73,8 @@ Persistent state file for orchestration workflows. Initialized during session st
 | `team_name` | string | Agent team name (optional, for recovery) |
 | `qa_labels` | string[] | QA trigger labels from dev return |
 | `child_sessions` | object | Per-agent lifecycle: `{agent: {status, agent_id, spawned_at}}` |
-| `review_agents` | string[] | Currently alive review agent names |
-| `review_agent_ids` | object | Agent IDs for resume `{"name":"id",...}` |
+| `review_agents` | string[] | Reviewer names currently expected to stay alive across fix/re-review cycles |
+| `review_agent_ids` | object | Reviewer session IDs keyed by reviewer name. Reuse these before spawning `{"name":"id",...}` |
 | `pre_delegate_sha` | string | HEAD before delegation — scopes re-review diffs |
 | `skip_qa` | boolean | Skip QA for re-cycle (cleared after routing) |
 | `cycles` | number | Review/fix cycle count |

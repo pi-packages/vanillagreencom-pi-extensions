@@ -80,12 +80,26 @@ TEAM=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] '.team
 
 **Determine agent list**: If `agents` context provided, use only those. Otherwise default to all configured review agents.
 
-Delegate to each review agent in `[AGENTS]` in parallel with the prompt below.
-- **If re-review** (`CYCLES > 0`): reuse existing agents if possible — they retain prior review context.
-- Store agents in state:
+Before any spawn, read existing reviewer state:
+```bash
+EXISTING_REVIEW_AGENTS=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] '.review_agents // []')
+EXISTING_REVIEW_AGENT_IDS=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] '.review_agent_ids // {}')
+```
+
+For each reviewer in `[AGENTS]`:
+- Reuse by exact reviewer name when `review_agent_ids` points to a live/recoverable session
+- If only `review_agents` exists, attempt one recovery/resume path, then treat as missing if still unavailable
+- Spawn only the missing, closed, or confirmed-stuck reviewer
+
+Do not respawn already-live reviewers during re-review. Idle reviewers remain the active reviewer for that role.
+
+After reconciliation, store only the active reviewer set in state:
   ```bash
   .agents/skills/orchestration/scripts/workflow-state set [ISSUE_ID] review_agents '[AGENT_LIST_JSON]'
+  .agents/skills/orchestration/scripts/workflow-state set [ISSUE_ID] review_agent_ids '[AGENT_ID_MAP_JSON]'
   ```
+
+Delegate to each active review agent in `[AGENTS]` in parallel with the prompt below.
 
 **Delegation prompt:** Follow exactly, fill placeholders, add nothing else. Omit lines/sections with empty placeholders.
 

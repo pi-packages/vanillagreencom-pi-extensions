@@ -295,7 +295,9 @@ Work is organized in visually distinct layers: orchestrator workflow steps, nest
 
 #### No Duplicate Agent Spawns
 
-Never spawn a fresh agent when an existing one of the same type is alive — message it instead. Before delegating, verify no existing agent of that type has outstanding work. If an agent appears stuck: confirm the stall using session-level evidence per [Wait for Agent Return](#wait-for-agent-return-before-acting) (quiet ≠ stalled). Only after confirmed: shut down → respawn → re-delegate.
+Never spawn a fresh agent when the same role/name is already alive. Read workflow state first, reuse by stored agent/session ID when possible, and only respawn after one recovery attempt or confirmed stuck/closed status.
+
+Idle agents are reusable. A prior completion message does not justify a duplicate reviewer or dev agent.
 
 #### Single Return Message
 
@@ -326,7 +328,9 @@ Re-delegate for review fix items, QA fix items, comment fixes, or CI failure fix
 #### Review Agent Lifecycle Management
 
 Review agents persist across fix → re-review cycles within the review workflow:
-- Spawn if review agents state is empty, skip if already alive
+- Read `review_agents` and `review_agent_ids` before spawning anything
+- Reuse the same reviewer instance by exact reviewer name whenever it is still alive or recoverable
+- Spawn only the missing/stuck subset; do not restart the full review pool for a new cycle
 - After fixes, selectively shut down non-reporting agents for low-risk changes; keep all alive if risk flags present
 - Full shutdown when review passes, clear review agents state
 
@@ -375,7 +379,8 @@ After context compaction, conversation history is discarded but external state p
 1. Check the task list — find last completed task, resume from next
 2. Read workflow state file for persistent data (team name, cycles, agent IDs)
 3. If team-based: re-read team config from disk to restore member list
-4. Re-send delegation to existing agents. If no response after one idle cycle, only then respawn.
+4. Re-send delegation to existing agents using stored agent/session IDs.
+5. If no response after one idle cycle, respawn only the missing/stuck agent.
 
 Never repeat completed actions.
 
