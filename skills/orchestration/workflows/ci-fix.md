@@ -220,7 +220,7 @@ ISSUE=$(.agents/skills/github/scripts/github.sh pr-issue [PR_NUMBER] --format=te
 |-------|-------|
 | Original | [ERROR_TYPE] ✅ (fixed) |
 | New failure | [NEW_ERROR_TYPE] |
-| Next | Run /ci-fix [PR_NUMBER] again |
+| Next | Run `orchestration ci-fix [PR_NUMBER]` again |
 </output_format>
 
 ## 7. Return State

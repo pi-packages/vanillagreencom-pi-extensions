@@ -226,7 +226,7 @@ After all issues processed → § 3.
 
 ### 3.5 Create Research Issue(s) (if requested)
 
-Invoke workflow: `⤵ /research-issue § 1-5 → § 1` with context:
+Invoke workflow: `⤵ workflows/research-issue.md § 1-5 → § 1` with context:
 
 **If single issue**:
 - `topic`: from § 3.3 agent "Research:" response
@@ -268,7 +268,7 @@ Terminate the consultation agent if it's still running.
 
 1. **Check assets**: research prompt file exists for [ISSUE_ID]
 
-2. **If missing** → Invoke workflow: `⤵ /research-issue § 2 → § 4.2` (Prepare Assets only)
+2. **If missing** → Invoke workflow: `⤵ workflows/research-issue.md § 2 → § 4.2` (Prepare Assets only)
 
 3. **If complete** → Present: `Research Ready: [ISSUE_ID] | Assets: ✓ | Run research-complete after execution`
 
@@ -295,7 +295,7 @@ Worktree creation is idempotent: existing worktrees are reused (rebased onto lat
    ```
    For each active worktree issue: `.agents/skills/linear/scripts/linear.sh cache issues get [WT_ISSUE] --format=compact` → compare `agent` with current issue.
    - **No overlap** → continue
-   - **Same agent** → `.agents/skills/orchestration/scripts/parallel-groups needs-refresh [ISSUE_ID] [WT_ISSUE]`. If exit 1 (fresh, cached safe) → continue. Otherwise ask user: `Run /parallel-check [ISSUE_ID] [WT_ISSUE]` | `Continue anyway`. If check → `⤵ /parallel-check [ISSUE_ID] [WT_ISSUE] § 1-11 → § 4.3`. If conflicts verdict → warn with details, do not block.
+   - **Same agent** → `.agents/skills/orchestration/scripts/parallel-groups needs-refresh [ISSUE_ID] [WT_ISSUE]`. If exit 1 (fresh, cached safe) → continue. Otherwise ask user: `orchestration parallel-check [ISSUE_ID] [WT_ISSUE]` | `Continue anyway`. If check → `⤵ workflows/parallel-check.md [ISSUE_ID] [WT_ISSUE] § 1-11 → § 4.3`. If conflicts verdict → warn with details, do not block.
 
 5. **Create worktree**: `WT_PATH=$(.agents/skills/worktree/scripts/worktree create [ISSUE_ID])`
 

@@ -93,7 +93,7 @@ User can override if scope warrants Strategic (initiative-level, 10+ issues).
 
 ### 3.3 Run Research-Issue Workflow
 
-Run Skill: `⤵ /research-issue § 1-5 → § 4` with context:
+Run Workflow: `⤵ workflows/research-issue.md § 1-5 → § 4` with context:
 - `topic`: from § 1.1
 - `questions`: merged from § 1.2-1.3
 - `domains`: confirmed labels from § 2.1

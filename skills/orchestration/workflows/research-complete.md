@@ -204,13 +204,13 @@ Execute ONE flow based on § 3 unless meets escalation criteria as defined.
 
 2. **Run roadmap planning**
 
-   Run Skill: `⤵ /roadmap plan $FEATURE_NAME @[RESEARCH_DOCS_PATH]/[ISSUE_ID]/findings.md --origin-issue $ORIGIN_ISSUE § 1-8 → § 5.3`
+   Run Workflow: `⤵ workflows/roadmap-plan.md $FEATURE_NAME @[RESEARCH_DOCS_PATH]/[ISSUE_ID]/findings.md --origin-issue $ORIGIN_ISSUE § 1-8 → § 5.3`
 
    The `--origin-issue` flag passes blocked issue context so the TPM can determine whether created issues should be children of the origin issue or standalone. Creates plan file at project roadmap docs path. User approves plan.
 
 3. **Run roadmap creation**
 
-   Run Skill: `⤵ /roadmap create @[PLAN_PATH] § 1-9 → § 6`
+   Run Workflow: `⤵ workflows/roadmap-create.md @[PLAN_PATH] § 1-9 → § 6`
 
    Creates initiative/project/issues in issue tracker. Uses TPM's `hierarchy_recommendation` to set parent/child structure.
 
@@ -318,7 +318,7 @@ Count distinct domains across merged requirements from § 6.4. If 2+ domains, de
    - `decision_ref`: `[DECISION_ID]`
 7. **Include refactors**: Add agent-reported refactors as additional items with `origin: "discovered"`, no `blocks_items`/`blocked_by_items`. TPM routes to appropriate project (typically Tech Debt) via § 6.3.
 8. **Write file**: `tmp/audit-research-YYYYMMDD-HHMMSS.json`
-9. **Run Skill**: `⤵ /audit-issues --issues [FILE_PATH] § 1-9 → § 6.6`
+9. **Run Workflow**: `⤵ workflows/audit-issues.md --issues [FILE_PATH] § 1-9 → § 6.6`
 
 ### 6.6 Update Blocked Issues
 

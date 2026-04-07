@@ -356,7 +356,7 @@ Issue suggestions: [N] items → § 6.2 audit
 
 1. **Build audit-input file** from issue suggestions + blocked items
 2. **Write file**: `[WORKTREE_PATH]/tmp/audit-pr-comments-YYYYMMDD-HHMMSS.json` per `schemas/audit-issues-input.md`
-3. **Invoke workflow**: `⤵ /audit-issues --issues [FILE_PATH] § 1-9 → § 6.3`
+3. **Invoke workflow**: `⤵ workflows/audit-issues.md --issues [FILE_PATH] § 1-9 → § 6.3`
 
 ### 6.3 Wait for New Comments & Re-Triage
 
@@ -477,7 +477,7 @@ If user requests fixes for skipped items → delegate via § 6.1 (single item), 
 **If standalone**:
 
 1. **Reconcile fixes** — skip if no fixes applied:
-   Invoke: `⤵ /fix-reconcile § 1-9 → § 7.3 step 2`
+   Invoke: `⤵ workflows/fix-reconcile.md § 1-9 → § 7.3 step 2`
 
 2. **Post summary** — skip if no fixes AND no issues created:
    ```bash

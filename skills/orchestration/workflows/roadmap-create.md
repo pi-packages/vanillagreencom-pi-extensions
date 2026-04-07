@@ -295,7 +295,7 @@ For bundle parents: use parent-issue-template format (`is_bundle_parent: true`, 
 
 1. **Write** to `tmp/audit-roadmap-YYYYMMDD-HHMMSS.json`.
 
-2. **Run Skill**: `⤵ /audit-issues --analyzed tmp/audit-roadmap-YYYYMMDD-HHMMSS.json § 5-9 → § 6.2`
+2. **Run Workflow**: `⤵ workflows/audit-issues.md --analyzed tmp/audit-roadmap-YYYYMMDD-HHMMSS.json § 5-9 → § 6.2`
 
 #### If TPM_OUTPUT absent (legacy fallback)
 
@@ -329,7 +329,7 @@ Source: `"roadmap-create"` | Parent issue: from `hierarchy_recommendation` in ma
 
 1. **Write file** to `tmp/audit-roadmap-YYYYMMDD-HHMMSS.json`.
 
-2. **Run Skill**: `⤵ /audit-issues --issues [FILE_PATH] § 1-9 → § 6.2`
+2. **Run Workflow**: `⤵ workflows/audit-issues.md --issues [FILE_PATH] § 1-9 → § 6.2`
 
 ### 6.2 Set Cross-Project Relations
 

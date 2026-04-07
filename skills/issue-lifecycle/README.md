@@ -11,7 +11,7 @@ skills/issue-lifecycle/
 └── workflows/
     ├── dev-implement.md   # Main implementation lifecycle (§ 1-11)
     ├── dev-fix.md         # Review fix delegation workflow (§ 1-6)
-    ├── pr-review.md       # Pre-submission PR review workflow (§ 1 + Constraints)
+    ├── review.md          # Code review workflow (§ 1 + Constraints)
     └── qa-review.md       # QA label-triggered review workflow (§ 1-3 + Constraints)
 ```
 
@@ -27,9 +27,9 @@ The main workflow for dev agents receiving `Issue: [ISSUE_ID]` delegations. Supp
 
 The workflow for dev agents receiving review fix delegations. Each review item is evaluated independently against project decisions and conventions, then applied or skipped with reasoning. Includes validation, visual QA for UI fixes, and structured return with per-item decisions.
 
-### pr-review.md
+### review.md
 
-The workflow for pre-submission review agents (project-configured review specialists, e.g., security-review, test-review, doc-review). Agents review the diff, classify findings using the orchestration skill's recommendation-bias patterns, and return a structured JSON report with a pass/action_required verdict.
+The workflow for review agents (project-configured review specialists, e.g., security-review, test-review, doc-review). Agents review the diff, classify findings using the orchestration skill's recommendation-bias patterns, and return a structured JSON report with a pass/action_required verdict. Supports both full-branch diffs (pre-submission) and scoped diffs (on-demand review of specific commits) via an optional `Diff-range` delegation parameter.
 
 ### qa-review.md
 

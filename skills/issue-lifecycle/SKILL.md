@@ -20,7 +20,7 @@ Agent workflows for issue implementation, review fix delegation, pre-submission 
 |----------|------------|---------|
 | `workflows/dev-implement.md` | Dev agents | Full implementation lifecycle: activate → plan → implement → validate → commit → QA labels → summary → finalize (§ 1-11) |
 | `workflows/dev-fix.md` | Dev agents | Process review fix items: evaluate → apply/skip → validate → commit → return |
-| `workflows/pr-review.md` | Review agents | Pre-submission PR review: diff → classify findings → JSON report → verdict |
+| `workflows/review.md` | Review agents | Code review: diff → classify findings → JSON report → verdict |
 | `workflows/qa-review.md` | QA agents | QA label-triggered review: context → agent review → benchmark recording → JSON report → verdict |
 
 ## References

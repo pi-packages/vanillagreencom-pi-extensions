@@ -76,6 +76,7 @@ When invoked with `<command> [args]`, route to the corresponding workflow.
 
 | Command | Arguments | Workflow | Notes |
 |---------|-----------|----------|-------|
+| `review` | `[last N]` \| `[HASH]` | `workflows/review.md` | On-demand review (standalone) |
 | `review-pr` | `[PR_NUMBER]` | `workflows/review-pr.md` | Pre-submission review |
 | `review-pr-comments` | `PR_NUMBER` \| `BRANCH` | `workflows/review-pr-comments.md` | Triage PR comments |
 | `submit-pr` | `[PR_NUMBER]` | `workflows/submit-pr.md` | Push, create PR, bot review, CI |
@@ -146,6 +147,7 @@ When executing a command's workflow, follow ALL [Workflow Execution](#workflow-e
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
+| `workflows/review.md` | `review` | On-demand review with fix handling |
 | `workflows/review-pr.md` | `review-pr` | Pre-submission review with fix handling and QA |
 | `workflows/review-pr-comments.md` | `review-pr-comments` | Triage PR review comments via domain agents |
 | `workflows/submit-pr.md` | `submit-pr` | Push, create PR, bot review, comment triage, CI |

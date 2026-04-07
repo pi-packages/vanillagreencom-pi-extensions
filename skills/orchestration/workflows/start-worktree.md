@@ -13,7 +13,7 @@ Expedited session start for worktree contexts. Skips issue selection, preparatio
 
 ## 1. Initialize Worktree Session
 
-**Invoke workflow**: `⤵ /initialize § 1-2 → § 2` with context:
+**Invoke workflow**: `⤵ workflows/initialize.md § 1-2 → § 2` with context:
 - `lifecycle`: `"managed"`
 - `issue_id`: from argument or branch
 
@@ -21,7 +21,7 @@ Expedited session start for worktree contexts. Skips issue selection, preparatio
 
 ## 2. Delegate to Specialist Agent(s)
 
-1. **Invoke workflow**: `⤵ /dev-start § 1-4 → § 2 step 2` with context:
+1. **Invoke workflow**: `⤵ workflows/dev-start.md § 1-4 → § 2 step 2` with context:
    - `worktree`: [WORKTREE_PATH]
    - `lifecycle`: `"managed"`
    - `issue_id`: [ISSUE_ID]
@@ -36,7 +36,7 @@ Expedited session start for worktree contexts. Skips issue selection, preparatio
 
 ## 3. Run Review Cycle
 
-**Invoke workflow**: `⤵ /review-pr § 1-11 → § 4` with context:
+**Invoke workflow**: `⤵ workflows/review-pr.md § 1-11 → § 4` with context:
 - `worktree`: [WORKTREE_PATH]
 - `lifecycle`: `"managed"`
 - `dev_agent`: `[DOMAIN_AGENT]` from § 2
@@ -46,7 +46,7 @@ Expedited session start for worktree contexts. Skips issue selection, preparatio
 
 ## 4. Submit PR
 
-1. **Invoke workflow**: `⤵ /submit-pr § 1-7 → § 5` with context:
+1. **Invoke workflow**: `⤵ workflows/submit-pr.md § 1-7 → § 5` with context:
    - `worktree`: [WORKTREE_PATH]
    - `lifecycle`: `"managed"`
    - `issue_id`: `[ISSUE_ID]`
@@ -59,13 +59,13 @@ Post-review cleanup: reconcile fixes, post summaries, handoff to downstream issu
 
 ### 5.1 Reconcile Fixes Against Existing Issues
 
-**Invoke workflow**: `⤵ /fix-reconcile § 1-9 → § 5.2` with context:
+**Invoke workflow**: `⤵ workflows/fix-reconcile.md § 1-9 → § 5.2` with context:
 - `issue_id`: [ISSUE_ID]
 - `pr_number`: from § 4
 
 ### 5.2 Post Summary & Handoff Comments
 
-**Invoke workflow**: `⤵ /post-summary § 1-3 → § 5.3` with context:
+**Invoke workflow**: `⤵ workflows/post-summary.md § 1-3 → § 5.3` with context:
 - `worktree`: [WORKTREE_PATH]
 - `lifecycle`: `"managed"`
 - `issue_id`: [ISSUE_ID]
@@ -138,11 +138,11 @@ Post-review cleanup: reconcile fixes, post summaries, handoff to downstream issu
 
 **Skip if** no PR created (§ 4) or CI not passing.
 
-→ Ask user: `Run /merge-pr [PR_NUMBER]` | `Skip`
+→ Ask user: `orchestration merge-pr [PR_NUMBER]` | `Skip`
 
 | Choice | Action |
 |--------|--------|
-| Merge | `⤵ /merge-pr [PR_NUMBER] § 1-7 → end` |
+| Merge | `⤵ workflows/merge-pr.md [PR_NUMBER] § 1-7 → end` |
 | Skip | → end |
 
 → end

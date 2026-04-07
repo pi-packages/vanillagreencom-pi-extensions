@@ -176,7 +176,7 @@ done
    # Proceed regardless — terminal or timed out
    ```
 
-2. **Run Skill**: `⤵ /review-pr-comments [PR_NUMBER] § 1-8 → § 3.1` with context:
+2. **Run Workflow**: `⤵ workflows/review-pr-comments.md [PR_NUMBER] § 1-8 → § 3.1` with context:
    - `lifecycle`: `"managed"`
    - `issue_id`: `[ISSUE_ID]`
    - `worktree`: `[WORKTREE_PATH]`
@@ -237,8 +237,8 @@ After fixes pushed, wait for bot re-review (CI still deferred). Re-run `workflow
    | `false` | `no_sticky` | Ask user: `Wait` \| `Skip` |
    | `false` | `no_change` | → § 4 (nothing new) |
    | `false` | `approved_clean` | → § 4 (success) |
-   | `true` | `has_threads` | `⤵ /review-pr-comments [PR_NUMBER] § 1-8 → § 3.2` with managed context, then update state, repeat |
-   | `true` | `verdict_not_approved` | `⤵ /review-pr-comments [PR_NUMBER] § 1-8 → § 3.2` with managed context, then update state, repeat |
+   | `true` | `has_threads` | `⤵ workflows/review-pr-comments.md [PR_NUMBER] § 1-8 → § 3.2` with managed context, then update state, repeat |
+   | `true` | `verdict_not_approved` | `⤵ workflows/review-pr-comments.md [PR_NUMBER] § 1-8 → § 3.2` with managed context, then update state, repeat |
 
 4. **Update state** after `workflows/review-pr-comments.md` — if no fixes applied → § 4. Otherwise:
    ```bash
@@ -270,12 +270,12 @@ Sub-issues created during comment triage need implementation before CI.
    .agents/skills/orchestration/scripts/workflow-state increment [ISSUE_ID] submit_cycles
    ```
 
-3. **Implement**: `⤵ /dev-start § 1-4 → § 3.3 step 4` with context:
+3. **Implement**: `⤵ workflows/dev-start.md § 1-4 → § 3.3 step 4` with context:
    - `worktree`: [WORKTREE_PATH]
    - `lifecycle`: `"managed"`
    - `issue_id`: [ISSUE_ID]
 
-4. **Review**: `⤵ /review-pr § 1-11 → § 3.3 step 5` with context:
+4. **Review**: `⤵ workflows/review-pr.md § 1-11 → § 3.3 step 5` with context:
    - `worktree`: [WORKTREE_PATH]
    - `lifecycle`: `"managed"`
    - `dev_agent`: from dev-start return
@@ -363,7 +363,7 @@ All bot review comments resolved (or max iterations). Verify no late-arriving th
 
 ## 5. CI Failure Recovery
 
-1. **Run Skill**: `⤵ /ci-fix [PR_NUMBER] § 1-7 → § 5`
+1. **Run Workflow**: `⤵ workflows/ci-fix.md [PR_NUMBER] § 1-7 → § 5`
 
 2. **After ci-fix returns**:
    - If fix applied → add `defer-ci` label, push, wait for bot re-review (§ 3.2 with iteration check)
@@ -383,7 +383,7 @@ All bot review comments resolved (or max iterations). Verify no late-arriving th
 
 1. **Reconcile fixes**:
 
-   Run Skill: `⤵ /fix-reconcile § 1-9 → § 6 step 2` with context:
+   Run Workflow: `⤵ workflows/fix-reconcile.md § 1-9 → § 6 step 2` with context:
    - `issue_id`: [ISSUE_ID]
    - `pr_number`: [PR_NUMBER]
 
@@ -427,11 +427,11 @@ All bot review comments resolved (or max iterations). Verify no late-arriving th
 
 4. **Offer merge** — skip if CI not passing:
 
-   → Ask user: `Run /merge-pr [PR_NUMBER]` | `Skip`
+   → Ask user: `orchestration merge-pr [PR_NUMBER]` | `Skip`
 
    | Choice | Action |
    |--------|--------|
-   | Merge | `⤵ /merge-pr [PR_NUMBER] § 1-7 → end` |
+   | Merge | `⤵ workflows/merge-pr.md [PR_NUMBER] § 1-7 → end` |
    | Skip | → end |
 
 ---

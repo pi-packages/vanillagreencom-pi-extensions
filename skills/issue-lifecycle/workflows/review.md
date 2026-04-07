@@ -1,10 +1,10 @@
-# PR Review Lifecycle
+# Code Review Lifecycle
 
-**The workflow for PR review agents — project-configured review specialists (e.g., security-review, test-review, doc-review).**
+**The workflow for review agents — project-configured review specialists (e.g., security-review, test-review, doc-review).**
 
-PR review agents are pre-submission reviewers. They run in parallel, each reviewing the same diff from their specialist perspective.
+Review agents are code reviewers. They run in parallel, each reviewing the same changes from their specialist perspective.
 
-**Ownership**: You review ONE PR. Return verdict to orchestrator. No issue tracker state changes.
+**Ownership**: You review the specified changes. Return verdict to orchestrator. No issue tracker state changes.
 
 ---
 
@@ -13,15 +13,21 @@ PR review agents are pre-submission reviewers. They run in parallel, each review
 Extract from delegation message:
 - `Worktree` path
 - `Branch` name
+- `Diff-range` (optional) for computing diff
 - `Decisions` to respect
 - Re-review context (if any)
 
 ### 1.1 Diff
 
 ```bash
-BASE_BRANCH=${WORKTREE_DEFAULT_BRANCH:-$(git -C [WORKTREE_PATH] symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')}
-[ -n "$BASE_BRANCH" ] || BASE_BRANCH=main
-git -C [WORKTREE_PATH] diff "origin/$BASE_BRANCH"...HEAD
+# Use Diff-range from delegation if provided, otherwise diff full branch
+if [[ -n "$DIFF_RANGE" ]]; then
+  git -C [WORKTREE_PATH] diff $DIFF_RANGE
+else
+  BASE_BRANCH=${WORKTREE_DEFAULT_BRANCH:-$(git -C [WORKTREE_PATH] symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')}
+  [ -n "$BASE_BRANCH" ] || BASE_BRANCH=main
+  git -C [WORKTREE_PATH] diff "origin/$BASE_BRANCH"...HEAD
+fi
 ```
 
 Review for noteworthy findings only — skip minor style issues. Exclude research documents.
@@ -35,9 +41,9 @@ Read decision files listed in delegation. Do NOT suggest changes that contradict
 
 Read the orchestration skill's recommendation-bias patterns. Apply its decision flow to ALL findings — a finding must pass actionability and relatedness checks before entering `blockers[]` or `suggestions[]`. Then use size to categorize suggestions as `fix` or `issue`.
 
-### 1.4 Handle Re-Review (if applicable)
+### 1.4 Handle Re-Review
 
-**Skip if** not a re-review cycle (no "re-review" section in delegation).
+**Skip if** no "Re-review" section in delegation message.
 
 Items listed as fixed or escalated are already resolved — do NOT re-report them. Only report NEW issues or regressions introduced by the fixes.
 
@@ -70,4 +76,4 @@ File: [WORKTREE_PATH]/tmp/review-[AGENT]-YYYYMMDD-HHMMSS.json
 - Create commits or push changes
 - Call other subagents
 
-**Orchestrator handles**: All issue tracker updates, routing blockers back to dev agent, merging JSONs, presentation.
+**Orchestrator handles**: All issue tracker updates, routing items back to dev agent, merging JSONs, presentation.

@@ -104,7 +104,7 @@ Delegate to each active review agent in `[AGENTS]` in parallel with the prompt b
 **Delegation prompt:** Follow exactly, fill placeholders, add nothing else. Omit lines/sections with empty placeholders.
 
 <delegation_format>
-Follow workflow: .agents/skills/issue-lifecycle/workflows/pr-review.md
+Follow workflow: .agents/skills/issue-lifecycle/workflows/review.md
 
 Worktree: [WORKTREE_PATH]
 Branch: [BRANCH]
@@ -249,7 +249,7 @@ If >4 suggestion items: show first 3 + `All N fixes`. Refine via "Other".
    .agents/skills/orchestration/scripts/workflow-state set [ISSUE_ID] pre_delegate_sha "$(git -C [WORKTREE_PATH] rev-parse HEAD)"
    ```
 
-2. **Run Skill**: `⤵ /dev-fix § 1-3 → § 4 step 3` with context:
+2. **Run Workflow**: `⤵ workflows/dev-fix.md § 1-3 → § 4 step 3` with context:
    - `worktree`: [WORKTREE_PATH]
    - `lifecycle`: `"managed"`
    - `dev_agent`: [DEV_AGENT] (if provided)
@@ -485,7 +485,7 @@ Issue suggestions: [N] items → § 9 audit
 5. **Write file**: `[WORKTREE_PATH]/tmp/audit-start-YYYYMMDD-HHMMSS.json`
    - Schema: `schemas/audit-issues-input.md`
 
-6. **Run Skill**: `⤵ /audit-issues --issues [FILE_PATH] § 1-9 → § 9 step 7`
+6. **Run Workflow**: `⤵ workflows/audit-issues.md --issues [FILE_PATH] § 1-9 → § 9 step 7`
 
 7. **Update state** — for each created issue from audit output:
    ```bash
@@ -508,7 +508,7 @@ Issue suggestions: [N] items → § 9 audit
 
 4. **Delegate immediately** — no exceptions, no asking user, no deferral. Delegate regardless of how sub-issues were created or their perceived scope.
 
-   **Run Skill**: `⤵ /dev-start § 1-4 → § 10 step 5` with context:
+   **Run Workflow**: `⤵ workflows/dev-start.md § 1-4 → § 10 step 5` with context:
    - `worktree`: [WORKTREE_PATH]
    - `lifecycle`: inherit current
    - `issue_id`: [ISSUE_ID]
