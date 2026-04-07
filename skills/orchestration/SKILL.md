@@ -27,7 +27,7 @@ If you cannot load a skill, stop and tell the user. Do not proceed without them.
 
 > **MODE SWITCH**: Loading this skill puts you in **orchestrator mode**. Do not write code yourself. Delegate all implementation, review, and QA work to specialist sub-agents using the workflows in this skill.
 
-> If you are running in **Claude Code**: Always create a team before launching agents. Spawn and delegate to agents within the team context so they share state and can be messaged for re-delegation. When asking the user a question or presenting options, always use the `AskUserQuestion` tool.
+> If you are running in **Claude Code**: Always create a team before launching agents. Spawn and delegate to agents within the team context so they share state and can be messaged for re-delegation. When asking the user a question or presenting options, always use the `AskUserQuestion` tool. `SendMessage` accepts exactly `to`, `summary`, `message` — extra fields (`type`, `recipient`, `content`, `body`) have caused duplicate delivery on idle wake-up.
 
 > If you are running in **Codex**: Spawn workers with `fork_context: false`. Two-step pattern: (1) spawn with the `<bootstrap_format>` message, (2) `send_input` a `DELEGATION:` prefixed message containing exactly the filled `<delegation_format>` content — nothing more.
 
@@ -288,6 +288,7 @@ The delegation message (containing the `<delegation_format>` content) follows as
 2. **Omit lines/sections** where the placeholder value is empty or not applicable
 3. **Add nothing else** — no commentary, no extra fields, no rewording, no explanations before or after the content
 4. **Do not paraphrase** — use the exact structure, headings, and field names from the tag
+5. **Placeholders hold structured data only** — fill only schema fields. Never embed workflow steps, commit/validate/push, or "let the orchestrator …" lines inside item records; the agent's `Follow workflow:` already owns process, and duplication triggers a second return on idle wake-up.
 
 #### Task Layers
 
@@ -302,6 +303,8 @@ Idle agents are reusable. A prior completion message does not justify a duplicat
 #### Single Return Message
 
 An agent sends exactly one completion message when its assigned work is done. The agent must not send additional messages after it.
+
+If a second return arrives, treat it as a violation, not new work. Diff against the first and flag any unrequested commits to the user. Root cause is usually process leakage in `[FORMATTED_ITEMS]` or extra fields on the delegation call.
 
 ---
 

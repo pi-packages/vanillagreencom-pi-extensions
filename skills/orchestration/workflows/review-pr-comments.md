@@ -319,7 +319,9 @@ Issue suggestions: [N] items → § 6.2 audit
 
 2. **Group items** by `agent` field.
 
-3. **Delegate fixes** per agent group (reuse existing dev agent if available):
+3. **Delegate fixes** per agent group (reuse existing dev agent if available).
+
+   ⚠ Fill placeholders only ([Format Tags Are Literal](../SKILL.md#format-tags-are-literal)). `Recommendation:` = technical fix only; the agent owns process per `issue-lifecycle/workflows/dev-fix.md`.
 
    <delegation_format>
    Follow workflow: .agents/skills/issue-lifecycle/workflows/dev-fix.md

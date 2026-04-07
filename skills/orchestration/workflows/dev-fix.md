@@ -82,7 +82,11 @@ WT_PATH=$(.agents/skills/worktree/scripts/worktree path $ISSUE_ID 2>/dev/null ||
    TEAM=$(.agents/skills/orchestration/scripts/workflow-state get $ISSUE_ID '.team_name // empty')
    ```
 
-4. **Delegate** to `[AGENT_TYPE]` agent (reuse existing dev agent if available):
+4. **Delegate** to `[AGENT_TYPE]` agent (reuse existing dev agent if available).
+
+   ⚠ Fill placeholders only ([Format Tags Are Literal](../SKILL.md#format-tags-are-literal)). `Recommendation:` = technical fix, not procedure. The agent already owns validate/commit/return per `issue-lifecycle/workflows/dev-fix.md`.
+   - ✅ `"Read X from parent state and forward to child — fix in parent so descendants inherit."`
+   - ❌ `"1. Apply fix. 2. Run validate. 3. Commit. 4. Let orchestrator handle linkage."`
 
    <delegation_format>
    Ultrathink.
