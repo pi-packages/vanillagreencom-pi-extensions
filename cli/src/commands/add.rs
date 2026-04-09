@@ -71,9 +71,7 @@ fn resolve_source_for_app(
                 source: dir.display().to_string(),
                 label: source_label(path),
                 dir,
-                // Don't persist local paths — they clutter the source dropdown.
-                // Only remote sources (owner/repo) get remembered.
-                persist: false,
+                persist: true,
             })
         }
         Some(source) => Ok(ResolvedSource {
