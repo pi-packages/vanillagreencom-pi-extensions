@@ -64,8 +64,6 @@ When invoked with `<command> [args]`, route to the corresponding workflow.
 3. Current directory is a worktree (git common dir differs from `.git`) → `workflows/start-worktree.md`
 4. Otherwise → `workflows/start.md`
 
-> **Existing worktree guardrail**: If you are already working within a worktree, never automatically create a new branch or worktree to work on an issue. Always explicitly ask the user first.
-
 ### Development
 
 | Command | Arguments | Workflow | Notes |
@@ -253,6 +251,10 @@ When a section starts with "Skip if [condition]", evaluate the condition literal
 #### Nested Workflow Invocation
 
 Nested workflows (marked with `⤵`) must be invoked through the harness's workflow invocation mechanism — never inlined or substituted with ad-hoc commands. If the marker includes a return point (`→ § X`), record it before invoking.
+
+#### Worktree Scope
+
+If the current directory is a worktree, never automatically create, switch to, or act on a different worktree or branch. When a command's resolved `ISSUE_ID` differs from the current worktree's branch, stop and ask the user: reuse the current worktree, abort, or switch explicitly. Applies to all workflows — `start`, `dev-start`, `dev-fix`, `review-pr`, `submit-pr`, etc.
 
 ---
 

@@ -22,8 +22,12 @@ Delegate fix items to specialist dev agent. Works standalone (user-initiated) or
 **Standalone init** (`lifecycle: "self"` only):
 ```bash
 ISSUE_ID=${ARG:-$(git rev-parse --abbrev-ref HEAD | grep -oiP "$GH_ISSUE_PATTERN")}
-WT_PATH=$(.agents/skills/worktree/scripts/worktree path $ISSUE_ID 2>/dev/null || pwd)
 ```
+
+Apply [Worktree Scope](../SKILL.md#worktree-scope): if current dir is a worktree and `ISSUE_ID` ≠ the current branch's issue, ask the user before proceeding. Then resolve `WT_PATH`:
+- Inside a worktree → `WT_PATH=$(pwd)`
+- Main repo, worktree exists → `WT_PATH=$(.agents/skills/worktree/scripts/worktree path $ISSUE_ID)`
+- Main repo, worktree missing → ask the user before creating
 
 ---
 

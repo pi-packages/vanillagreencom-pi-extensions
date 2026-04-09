@@ -20,8 +20,9 @@ Pre-submission code review with fix handling, QA checks, and issue audit.
 **If PR# provided:**
 ```bash
 ISSUE=$(.agents/skills/github/scripts/github.sh pr-issue [PR_NUMBER] --format=text)
-WT_PATH=$(.agents/skills/worktree/scripts/worktree path $ISSUE 2>/dev/null || .agents/skills/worktree/scripts/worktree create $ISSUE --pr [PR_NUMBER])
 ```
+
+Apply [Worktree Scope](../SKILL.md#worktree-scope). If no worktree exists for `$ISSUE`, ask the user before running `worktree create $ISSUE --pr [PR_NUMBER]`.
 
 **If no argument:** Set `WT_PATH` to current directory.
 

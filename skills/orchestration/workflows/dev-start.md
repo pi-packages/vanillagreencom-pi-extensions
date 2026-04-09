@@ -17,10 +17,15 @@ Delegate development work to specialist agent(s). Handles single issues and bund
 
 **Standalone init** (`lifecycle: "self"` only):
 ```bash
-# Use argument if provided, else extract from branch
 ISSUE_ID=${ARG:-$(git rev-parse --abbrev-ref HEAD | grep -oiP "$GH_ISSUE_PATTERN")}
-WT_PATH=$(.agents/skills/worktree/scripts/worktree path $ISSUE_ID 2>/dev/null || pwd)
+```
 
+Apply [Worktree Scope](../SKILL.md#worktree-scope): if current dir is a worktree and `ISSUE_ID` ≠ the current branch's issue, ask the user before proceeding. Then resolve `WT_PATH`:
+- Inside a worktree → `WT_PATH=$(pwd)`
+- Main repo, worktree exists (`worktree exists $ISSUE_ID` → `true`) → `WT_PATH=$(.agents/skills/worktree/scripts/worktree path $ISSUE_ID)`
+- Main repo, worktree missing → ask the user before creating
+
+```bash
 # Init workflow state if not exists
 if ! .agents/skills/orchestration/scripts/workflow-state exists $ISSUE_ID; then
   # Check for parent context (start-new flow: sub-issue in parent's worktree)
