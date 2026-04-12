@@ -163,14 +163,17 @@ detect_current_harness() {
     echo "codex"
     return
   fi
-  # Process-tree fallback: check if parent is a known harness
-  local parent_cmd
-  parent_cmd=$(ps -o comm= -p "$PPID" 2>/dev/null || echo "")
-  case "$parent_cmd" in
-    claude*) echo "claude"; return ;;
-    codex*)  echo "codex"; return ;;
-    opencode*) echo "codex"; return ;;
-  esac
+  # Process-tree fallback: walk ancestors (Bash tool PPID is the shell, not the harness)
+  local pid=$$
+  local ancestor_cmd
+  while pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ') && [[ -n "$pid" && "$pid" != "0" && "$pid" != "1" ]]; do
+    ancestor_cmd=$(ps -o comm= -p "$pid" 2>/dev/null || echo "")
+    case "$ancestor_cmd" in
+      claude*) echo "claude"; return ;;
+      codex*)  echo "codex"; return ;;
+      opencode*) echo "codex"; return ;;
+    esac
+  done
   echo "unknown"
 }
 
