@@ -73,7 +73,7 @@ while [[ $# -gt 0 ]]; do
     [0-9]*) GROUP_ID="$1"; shift ;;
     *)
       # Match against configurable issue pattern
-      if echo "$1" | grep -qE "^${GH_ISSUE_PATTERN}$"; then
+      if echo "$1" | grep -qiE "^${GH_ISSUE_PATTERN}$"; then
         ISSUES+=("$(echo "$1" | tr '[:lower:]' '[:upper:]')"); shift
       else
         echo "Error: unexpected argument: $1" >&2; exit 1
