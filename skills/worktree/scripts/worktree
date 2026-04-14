@@ -189,6 +189,12 @@ case "${1:-}" in
         exit 1
       fi
       git -C "$PROJECT_ROOT" worktree add --no-track -b "$BRANCH" "$WT_PATH" "$START_POINT" >/dev/null 2>&1
+      # Set upstream tracking if a remote branch matches the new branch name
+      _REMOTE="${BOT_REMOTE_NAME:-origin}"
+      if git -C "$WT_PATH" rev-parse --verify "$_REMOTE/$BRANCH" &>/dev/null; then
+        git -C "$WT_PATH" branch --set-upstream-to="$_REMOTE/$BRANCH" "$BRANCH" >/dev/null 2>&1 || true
+        git -C "$WT_PATH" merge --ff-only "$_REMOTE/$BRANCH" >/dev/null 2>&1 || true
+      fi
       setup_worktree_links "$WT_PATH"
       echo "$WT_PATH"
       exit 0
