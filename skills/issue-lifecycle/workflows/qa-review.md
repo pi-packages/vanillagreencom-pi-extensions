@@ -60,6 +60,16 @@ When the benchmarking skill's regression check exits with code 1, classify every
 
 See the project's benchmarking skill for full recording details if available.
 
+If the project has feature-gated benchmark targets, performance QA must include
+them in any claimed "full benchmark" run. A successful bare `cargo bench` is
+not enough if active lanes require explicit features such as `live-feeds` or
+`ui-bridge`.
+
+If the parser records zero results, stop and report the harness gap instead of
+counting the run as benchmark coverage. Common causes are missing required
+features, parser prefix drift after bench refactors, or tool output format
+changes.
+
 **Note**: Benchmark results may be symlinked to the main repo in worktrees. Results are written directly to main's directory — no commit needed. Record the latest commit SHA from your worktree branch as the benchmark commit in your return output (§ 3).
 
 ### 2.6 Return JSON Report
