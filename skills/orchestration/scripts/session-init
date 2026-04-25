@@ -9,12 +9,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 SKILLS_DIR="$PROJECT_ROOT/.agents/skills"
 
-# Source .env.local for project config (GH_ISSUE_PATTERN, GH_BOT_TOKEN, etc.)
-ENV_FILE="$PROJECT_ROOT/.env.local"
-if [[ -f "$ENV_FILE" ]]; then
-  # shellcheck source=/dev/null
-  source "$ENV_FILE"
-fi
+# Source project config/secrets. .env.local overrides .env when both exist.
+for ENV_FILE in "$PROJECT_ROOT/.env" "$PROJECT_ROOT/.env.local"; do
+  if [[ -f "$ENV_FILE" ]]; then
+    # shellcheck source=/dev/null
+    source "$ENV_FILE"
+  fi
+done
+unset ENV_FILE
 
 # Sibling skill scripts (resolved from install location)
 LINEAR="$SKILLS_DIR/linear/scripts/linear.sh"
@@ -58,9 +60,55 @@ json_or_default() {
   printf '%s' "$output"
 }
 
-curl_config_quote() {
-  printf '%s' "$1" | jq -Rs .
+is_github_token() {
+  [[ "$1" =~ ^gh[pors]_ ]] || [[ "$1" =~ ^github_pat_ ]]
 }
+
+resolve_secret_ref() {
+  local value="$1"
+
+  if [[ "$value" == op://* ]]; then
+    command -v op &>/dev/null || return 1
+    op read "$value" 2>/dev/null || return 1
+  else
+    printf '%s' "$value"
+  fi
+}
+
+resolve_github_token_var() {
+  local var_name="$1"
+  local value="${!var_name:-}"
+  local token=""
+
+  [[ -n "$value" ]] || return 1
+  token=$(resolve_secret_ref "$value") || return 1
+  is_github_token "$token" || return 1
+
+  printf '%s' "$token"
+}
+
+gh_with_token() {
+  local token="$1"
+  shift
+
+  if [[ -n "$token" ]]; then
+    GH_TOKEN="$token" gh "$@"
+  else
+    gh "$@"
+  fi
+}
+
+json_is_type() {
+  local expected_type="$1"
+  local json="$2"
+
+  jq -e --arg type "$expected_type" 'type == $type' >/dev/null 2>&1 <<<"$json"
+}
+
+# Main sessions should use the user's repo token; worktree sessions prefer the bot token.
+GH_MAIN_TOKEN=$(resolve_github_token_var GH_TOKEN 2>/dev/null || true)
+GH_BOT_TOKEN_RESOLVED=$(resolve_github_token_var GH_BOT_TOKEN 2>/dev/null || true)
+GH_DASHBOARD_TOKEN="${GH_MAIN_TOKEN:-$GH_BOT_TOKEN_RESOLVED}"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Data Collection (silent)
@@ -119,7 +167,8 @@ if [[ -n "$GIT_COMMON_DIR" && "$GIT_COMMON_DIR" != ".git" && "$GIT_COMMON_DIR" !
   WORKTREE_NAME=$(basename "$(pwd)")
   # Fast path: worktree sessions skip full dashboard, check only auth + LSP
   WT_GH_OK="false"
-  gh api user &>/dev/null && WT_GH_OK="true"
+  WT_GH_TOKEN="${GH_BOT_TOKEN_RESOLVED:-$GH_MAIN_TOKEN}"
+  gh_with_token "$WT_GH_TOKEN" api user &>/dev/null && WT_GH_OK="true"
   if ! WT_LINEAR=$(json_or_default '{"ok":false,"error":"auth-check failed"}' object "$LINEAR" auth-check 2>/dev/null); then
     WT_LINEAR='{"ok":false,"error":"not installed"}'
   fi
@@ -239,11 +288,14 @@ trap 'rm -rf "$_tmp"' EXIT
   _gh_user=""
 
   if command -v gh &>/dev/null; then
-    gh auth status --json hosts 2>/dev/null >"$_tmp/gh_auth_raw" &
-    gh api user --jq '.login' 2>/dev/null >"$_tmp/gh_user_raw" &
+    { gh_with_token "$GH_DASHBOARD_TOKEN" auth status --json hosts >"$_tmp/gh_auth_raw" 2>/dev/null || true; } &
+    { gh_with_token "$GH_DASHBOARD_TOKEN" api user --jq '.login' >"$_tmp/gh_user_raw" 2>/dev/null || true; } &
     wait
     _auth_json=$(cat "$_tmp/gh_auth_raw" 2>/dev/null || echo '{"hosts":{}}')
     [[ -z "$_auth_json" ]] && _auth_json='{"hosts":{}}'
+    if ! json_is_type object "$_auth_json"; then
+      _auth_json='{"hosts":{}}'
+    fi
     _gh_user=$(cat "$_tmp/gh_user_raw" 2>/dev/null || echo "")
 
     _accounts=$(echo "$_auth_json" | jq '
@@ -253,29 +305,35 @@ trap 'rm -rf "$_tmp"' EXIT
     method: .gitProtocol,
     active: .active
    }]')
+    if ! json_is_type array "$_accounts"; then
+      _accounts="[]"
+    fi
     _active=$(echo "$_accounts" | jq -r '[.[] | select(.active)] | .[0].name // ""')
 
     if [[ -n "$_gh_user" ]]; then _can_api=true; fi
 
+    if [[ -n "$GH_DASHBOARD_TOKEN" && -n "$_gh_user" ]]; then
+      _accounts=$(echo "$_accounts" | jq --arg acct "$_gh_user" '
+        if any(.name == $acct and .source == "GH_TOKEN") then .
+        else . + [{name: $acct, status: "ok", method: "token", source: "GH_TOKEN", active: true}]
+        end')
+      _active="$_gh_user"
+    fi
+
     # Bot token check (from .env.local GH_BOT_TOKEN)
-    _bt="${GH_BOT_TOKEN:-}"
-    if [[ -n "$_bt" ]]; then
-      # Support 1Password references
-      if [[ "$_bt" == op://* ]] && command -v op &>/dev/null; then
-        _bt=$(op read "$_bt" 2>/dev/null || echo "")
+    if [[ -n "${GH_BOT_TOKEN:-}" ]]; then
+      if [[ -n "$GH_BOT_TOKEN_RESOLVED" ]]; then
+        _bu=$(gh_with_token "$GH_BOT_TOKEN_RESOLVED" api user --jq '.login' 2>/dev/null || echo "")
+      else
+        _bu=""
       fi
-      if [[ -n "$_bt" ]]; then
-        _bu=$(
-          printf '%s\n' \
-            "url = $(curl_config_quote "https://api.github.com/user")" \
-            "header = $(curl_config_quote "Authorization: token $_bt")" \
-          | curl -s -m 3 -K - 2>/dev/null | jq -r '.login // empty'
-        )
-        if [[ -n "$_bu" ]]; then
-          _accounts=$(echo "$_accounts" | jq --arg acct "$_bu" '. + [{name: $acct, status: "ok", method: "token", source: "env"}]')
-        else
-          _accounts=$(echo "$_accounts" | jq '. + [{name: "bot", status: "invalid", method: "token", source: "env"}]')
-        fi
+      if [[ -n "$_bu" ]]; then
+        _accounts=$(echo "$_accounts" | jq --arg acct "$_bu" '
+          if any(.name == $acct and .source == "GH_BOT_TOKEN") then .
+          else . + [{name: $acct, status: "ok", method: "token", source: "GH_BOT_TOKEN"}]
+          end')
+      else
+        _accounts=$(echo "$_accounts" | jq '. + [{name: "bot", status: "invalid", method: "token", source: "GH_BOT_TOKEN"}]')
       fi
     fi
 
@@ -317,16 +375,26 @@ GH_CAN_API=$(cat "$_tmp/gh_can_api")
 GH_USER=$(cat "$_tmp/gh_user")
 
 if [[ "$GH_CAN_API" == "true" ]] && [[ -n "$GH_USER" ]]; then
-  gh pr list --json number,title,headRefName,statusCheckRollup,reviewDecision,reviews 2>/dev/null >"$_tmp/pr_list" &
-  gh repo view --json owner,name 2>/dev/null >"$_tmp/repo_info" &
-  wait
+  if ! PR_LIST_RAW=$(gh_with_token "$GH_DASHBOARD_TOKEN" pr list --json number,title,headRefName,statusCheckRollup,reviewDecision,reviews 2>/dev/null); then
+    PR_LIST_RAW="[]"
+  fi
+  if ! json_is_type array "$PR_LIST_RAW"; then
+    PR_LIST_RAW="[]"
+  fi
+
+  if ! REPO_INFO_RAW=$(gh_with_token "$GH_DASHBOARD_TOKEN" repo view --json owner,name 2>/dev/null); then
+    REPO_INFO_RAW='{"owner":{"login":""},"name":""}'
+  fi
+  if ! json_is_type object "$REPO_INFO_RAW"; then
+    REPO_INFO_RAW='{"owner":{"login":""},"name":""}'
+  fi
 
   # Filter to user's PRs (branch prefix convention: user/branch-name)
-  ALL_PRS=$(cat "$_tmp/pr_list" 2>/dev/null |
+  ALL_PRS=$(printf '%s' "$PR_LIST_RAW" |
     jq --arg prefix "$GH_USER/" '[.[] | select(.headRefName | startswith($prefix))]' 2>/dev/null || echo "[]")
   # If no user-prefixed PRs found, show all PRs
   if [[ "$(echo "$ALL_PRS" | jq 'length')" == "0" ]]; then
-    ALL_PRS=$(cat "$_tmp/pr_list" 2>/dev/null || echo "[]")
+    ALL_PRS="$PR_LIST_RAW"
   fi
 
   PR_STATUS_JSON=$(echo "$ALL_PRS" | jq '[.[] | {
@@ -355,8 +423,8 @@ if [[ "$GH_CAN_API" == "true" ]] && [[ -n "$GH_USER" ]]; then
   )
   }]' 2>/dev/null || echo "[]")
 
-  REPO_OWNER=$(cat "$_tmp/repo_info" 2>/dev/null | jq -r '.owner.login // empty')
-  REPO_NAME=$(cat "$_tmp/repo_info" 2>/dev/null | jq -r '.name // empty')
+  REPO_OWNER=$(printf '%s' "$REPO_INFO_RAW" | jq -r '.owner.login // empty')
+  REPO_NAME=$(printf '%s' "$REPO_INFO_RAW" | jq -r '.name // empty')
 
   # Phase 3: Per-PR enrichment (parallel across PRs)
   PR_NUMS=$(echo "$PR_STATUS_JSON" | jq -r '.[].number')

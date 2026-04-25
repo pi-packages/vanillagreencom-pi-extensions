@@ -41,11 +41,13 @@ Install these before using orchestration workflows:
 
 ## Configuration
 
-Set in `.env.local` or export in the shell. Helper scripts source `.env.local` automatically.
+Set in `.env` or `.env.local`, or export in the shell. Helper scripts source both files automatically when present, with `.env.local` taking precedence.
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `ORCH_STATE_DIR` | State file directory | `tmp` |
+| `GH_TOKEN` | Main/user GitHub token for main-repo dashboard reads | current `gh` auth |
+| `GH_BOT_TOKEN` | Bot GitHub token for worktree auth and bot operations | current `gh` auth |
 | `GH_ISSUE_PATTERN` | Issue ID regex for branch names | `[A-Z]+-[0-9]+` |
 | `BOT_REVIEWERS` | Comma-separated review bot usernames | auto-detect |
 | `BOT_CHECK_NAME` | CI check name for early review detection | — |
@@ -57,5 +59,5 @@ Set in `.env.local` or export in the shell. Helper scripts source `.env.local` a
 ## Setup
 
 1. Install dependency skills: `linear`, `github`, `worktree`, `decider`, `project-management`.
-2. Set runtime config in `.env.local` (`LINEAR_API_KEY`, `ORCH_STATE_DIR`, etc.).
+2. Set runtime config in `.env` or `.env.local` (`LINEAR_API_KEY`, `ORCH_STATE_DIR`, etc.).
 3. Verify each dependency skill works from the project root before invoking a workflow.
