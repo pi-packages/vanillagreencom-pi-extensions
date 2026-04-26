@@ -192,10 +192,21 @@ When executing a command's workflow, follow ALL [Workflow Execution](#workflow-e
 ## Scripts
 
 ```bash
-.agents/skills/orchestration/scripts/workflow-state <action> <ISSUE_ID> [args]
+.agents/skills/orchestration/scripts/<script> [args]
 ```
 
-Read/write/append persistent state (survives compaction). `ORCH_STATE_DIR` overrides state directory (default: `tmp`).
+| Script | Purpose |
+|--------|---------|
+| `workflow-state` | Persistent state read/write/append (survives compaction) |
+| `open-terminal` | Launch worktree(s) for one or more issues with auto-detected harness — **never hand-roll tmux/terminal commands; use this for every session spawn** |
+| `parallel-groups` | Read/manage parallel issue groups |
+| `bot-review-wait` | Block until bot review posts on a PR |
+| `ci-wait` | Block until CI completes on a PR |
+| `session-init` | Initialize session state for a new worktree |
+
+### `workflow-state` actions
+
+`ORCH_STATE_DIR` overrides state directory (default: `tmp`).
 
 | Action | Purpose |
 |--------|---------|
@@ -204,6 +215,14 @@ Read/write/append persistent state (survives compaction). `ORCH_STATE_DIR` overr
 | `set <ID> <field> <value>` | Write state field |
 | `append <ID> <field> <value>` | Append to array field |
 | `increment <ID> <field>` | Increment counter |
+
+### `open-terminal` usage
+
+```bash
+.agents/skills/orchestration/scripts/open-terminal ISSUE-1 [ISSUE-2 ...] --harness <claude|codex|opencode> [--tmux | --ghostty]
+```
+
+Auto-detects terminal (tmux if `$TMUX` set, else GUI). Creates the worktree (reuses existing), pre-trusts the directory in Claude config, and launches the harness with `/orchestration start ISSUE` as the initial prompt. **Use this any time the user asks to spawn / launch / start sessions for issues.**
 
 ## Schemas
 
