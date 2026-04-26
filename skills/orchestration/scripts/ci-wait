@@ -12,18 +12,49 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-ENV_FILE="$PROJECT_ROOT/.env.local"
-if [[ -f "$ENV_FILE" ]]; then
-  # shellcheck source=/dev/null
-  source "$ENV_FILE"
+
+# --- Auth: mirror skills/github/scripts/github.sh — only override when GH_TOKEN unset ---
+if [ -z "${GH_TOKEN:-}" ]; then
+  for _env_file in "$PROJECT_ROOT/.env.local" "$PROJECT_ROOT/.env"; do
+    if [ -f "$_env_file" ]; then
+      _env_bot_token=$(
+        set +u
+        # shellcheck disable=SC1090
+        source "$_env_file" >/dev/null 2>&1 || true
+        printf '%s' "${GH_BOT_TOKEN:-}"
+      )
+      if [ -n "$_env_bot_token" ]; then
+        if [[ "$_env_bot_token" == op://* ]] && command -v op &>/dev/null; then
+          _resolved=$(op read "$_env_bot_token" 2>/dev/null || true)
+          [ -n "$_resolved" ] && _env_bot_token="$_resolved"
+        fi
+        if [[ "$_env_bot_token" =~ ^gh[pors]_ ]] || [[ "$_env_bot_token" =~ ^github_pat_ ]]; then
+          export GH_TOKEN="$_env_bot_token"
+        fi
+        break
+      fi
+    fi
+  done
+  unset _env_file _env_bot_token _resolved
 fi
 
 PR_NUM="${1:?Usage: ci-wait <PR#> [poll_interval] [max_wait]}"
 POLL_INTERVAL="${2:-15}"
 MAX_WAIT="${3:-600}"
 
+# --- Resolve repo explicitly so gh calls don't depend on local auth/inference ---
+REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || true)
+if [ -z "$REPO" ]; then
+  origin_url=$(git -C "$PROJECT_ROOT" remote get-url origin 2>/dev/null || true)
+  REPO=$(echo "$origin_url" | sed -nE 's#^.*github\.com[:/]+([^/]+/[^/]+?)(\.git)?$#\1#p')
+fi
+if [ -z "$REPO" ]; then
+  echo "Could not resolve GitHub repo (gh repo view and git remote both failed)" >&2
+  exit 1
+fi
+
 # --- Pre-flight: check PR is mergeable (CI won't trigger if conflicting) ---
-merge_state=$(gh pr view "$PR_NUM" --json mergeStateStatus --jq '.mergeStateStatus' 2>/dev/null || echo "UNKNOWN")
+merge_state=$(gh pr view "$PR_NUM" --repo "$REPO" --json mergeStateStatus --jq '.mergeStateStatus' 2>/dev/null || echo "UNKNOWN")
 case "$merge_state" in
   DIRTY|CONFLICTING)
     echo "PR #$PR_NUM has merge conflicts (state: $merge_state)" >&2
@@ -64,7 +95,7 @@ max_stale=6  # ~90s of only completed/skipped before assuming genuinely done
 is_transient_failure() {
   local run_id="$1"
   local logs
-  logs=$(gh run view "$run_id" --log-failed 2>/dev/null | head -200) || return 1
+  logs=$(gh run view "$run_id" --repo "$REPO" --log-failed 2>/dev/null | head -200) || return 1
 
   for pattern in "${TRANSIENT_PATTERNS[@]}"; do
     if echo "$logs" | grep -qi "$pattern"; then
@@ -75,25 +106,34 @@ is_transient_failure() {
   return 1
 }
 
+# Failure check `link` is `https://github.com/owner/repo/actions/runs/<RUN_ID>/job/<JOB_ID>` —
+# extract RUN_ID, not the trailing JOB_ID (which `gh run rerun` won't accept as a workflow run).
 get_failed_run_id() {
   local pr="$1"
-  gh pr checks "$pr" --json name,state,link 2>/dev/null | \
+  gh pr checks "$pr" --repo "$REPO" --json name,state,link 2>/dev/null | \
     jq -r '.[] | select(.state == "FAILURE") | .link' | \
-    head -1 | grep -oE '[0-9]+$' || echo ""
+    head -1 | sed -nE 's#.*/actions/runs/([0-9]+)(/.*)?$#\1#p'
 }
+
+checks_stderr=$(mktemp)
+trap 'rm -f "$checks_stderr"' EXIT
 
 elapsed=0
 while [ $elapsed -lt $MAX_WAIT ]; do
-  # Use JSON output for reliable state detection
-  checks_json=$(gh pr checks "$PR_NUM" --json name,state 2>/dev/null) || true
+  # Capture stderr so we can distinguish auth/repo failures from "no checks yet".
+  if ! checks_json=$(gh pr checks "$PR_NUM" --repo "$REPO" --json name,state 2>"$checks_stderr"); then
+    echo "gh pr checks failed for PR #$PR_NUM in $REPO:" >&2
+    cat "$checks_stderr" >&2
+    exit 1
+  fi
 
-  # Handle no checks / empty response
+  # Handle no checks / empty response (only reached when gh succeeded)
   if [ -z "$checks_json" ] || [ "$checks_json" = "[]" ] || [ "$checks_json" = "null" ]; then
     no_checks_count=$((no_checks_count + 1))
     if [ $no_checks_count -ge $max_no_checks ]; then
       echo "No CI checks after ${elapsed}s" >&2
       echo "Possible causes: merge conflicts, draft/defer-ci gating, or webhook delay." >&2
-      merge_state=$(gh pr view "$PR_NUM" --json mergeStateStatus --jq '.mergeStateStatus' 2>/dev/null || echo "UNKNOWN")
+      merge_state=$(gh pr view "$PR_NUM" --repo "$REPO" --json mergeStateStatus --jq '.mergeStateStatus' 2>/dev/null || echo "UNKNOWN")
       if [ "$merge_state" = "DIRTY" ] || [ "$merge_state" = "CONFLICTING" ]; then
         echo "PR has merge conflicts (state: $merge_state) — CI will not trigger." >&2
       fi
@@ -125,7 +165,7 @@ while [ $elapsed -lt $MAX_WAIT ]; do
     # Try auto-retry for transient failures
     if [ -n "$failed_run" ] && [ $retries -lt $max_retries ] && is_transient_failure "$failed_run"; then
       echo "Retrying transient failure (attempt $((retries + 1))/$max_retries)..." >&2
-      gh run rerun "$failed_run" --failed 2>/dev/null || true
+      gh run rerun "$failed_run" --repo "$REPO" --failed 2>/dev/null || true
       retries=$((retries + 1))
       seen_in_progress=false  # Reset — rerun will produce new checks
       sleep 10
@@ -160,5 +200,5 @@ while [ $elapsed -lt $MAX_WAIT ]; do
 done
 
 echo "CI timeout after ${MAX_WAIT}s"
-gh pr checks "$PR_NUM"
+gh pr checks "$PR_NUM" --repo "$REPO"
 exit 1
