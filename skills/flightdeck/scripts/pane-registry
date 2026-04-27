@@ -34,7 +34,13 @@ case "$ACTION" in
     ISSUE="${1:-}"; shift || true
     [[ -z "$ISSUE" ]] && { echo "Usage: pane-registry init <ISSUE> [flags]" >&2; exit 2; }
 
-    WINDOW=""; HARNESS=""; WORKTREE=""; PANE_INDEX="0"; PR=""
+    # Default pane index follows tmux's pane-base-index (commonly 0; some
+    # configs set 1). Fingerprinting in the watch loop still resolves the
+    # actual orchestrator pane when a TUI lays out differently — this just
+    # avoids a wasted round-trip when the default-index is correct.
+    DEFAULT_PANE_INDEX="$(tmux show-options -g pane-base-index 2>/dev/null | awk '{print $2}')"
+    DEFAULT_PANE_INDEX="${DEFAULT_PANE_INDEX:-0}"
+    WINDOW=""; HARNESS=""; WORKTREE=""; PANE_INDEX="$DEFAULT_PANE_INDEX"; PR=""
     while [[ $# -gt 0 ]]; do
       case "$1" in
         --window) WINDOW="$2"; shift 2 ;;

@@ -22,7 +22,9 @@ tmux capture-pane -t HT:cc-463.0 -p -S -200
 
 ### When pane 0 isn't the orchestrator
 
-Some TUIs may lay out their main UI on a non-zero pane. At registry init, fingerprint each window's panes:
+Pane indices follow tmux's `pane-base-index` option — commonly `0`, but some configs use `1`. `pane-registry init` queries the option and uses it as the default index, so the registry entry is correct on first try when the orchestrator is in the default position.
+
+Some TUIs lay out their main UI on a non-default pane regardless. At registry init, fingerprint each window's panes:
 
 ```bash
 for pane_idx in $(tmux list-panes -t <session>:<window> -F '#{pane_index}'); do
