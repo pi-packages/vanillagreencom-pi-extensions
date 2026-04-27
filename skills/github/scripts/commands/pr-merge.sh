@@ -1,6 +1,15 @@
 #!/bin/bash
 # Merge PR as bot account with safety checks
-# Usage: pr-merge <PR_NUMBER> [--check] [--force] [--dry-run]
+# Usage: pr-merge <PR_NUMBER> [--check] [--force] [--auto] [--dry-run]
+#
+# Outcomes (distinct exit codes + messages):
+#   0   MERGED                 — merge completed immediately
+#   75  QUEUED FOR AUTO-MERGE  — --auto enabled, merge fires when CI/branch-protection clears
+#   1   BLOCKED                — checks failed; no merge attempted, none queued
+#
+# When BLOCKED, stderr distinguishes TRANSIENT issues (mergeable UNKNOWN,
+# ci pending — caller should `await-mergeable` and retry) from PERMANENT
+# issues (conflicts, ci_failed, changes_requested — caller must fix and re-push).
 
 set -euo pipefail
 
@@ -9,6 +18,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Source shared library for load_bot_token (also sets PROJECT_ROOT)
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/../lib/github-api.sh"
+
+# Issue prefixes that resolve on their own once GitHub finishes computing or
+# CI completes. Callers should `await-mergeable` and retry rather than fix.
+TRANSIENT_PREFIXES='unknown:|ci_unconfigured:|ci_fetch_failed:'
 
 show_help() {
     cat <<'EOF'
@@ -24,21 +37,33 @@ Options:
   --keep-branch    Keep branch after merge
   --check          Run checks only, output JSON, don't merge
   --force          Skip checks and merge (requires explicit user decision)
+  --auto           If immediate merge is blocked, enable GitHub auto-merge
+                   (will fire when CI + branch protection clear). Exits 75.
   --dry-run        Show what would happen without merging
 
 Modes:
   (default)        Run checks, block if critical issues, merge if pass
   --check          Run checks, output JSON for workflow to parse
   --force          Skip all checks, merge immediately
+  --auto           Enable auto-merge when immediate merge is blocked
+
+Exit codes:
+  0    MERGED                 — merge completed immediately
+  75   QUEUED FOR AUTO-MERGE  — --auto enabled, will fire when CI clears
+  1    BLOCKED                — checks failed; nothing queued
 
 Examples:
-  github.sh pr-merge 42 --check   # Check only, workflow handles result
-  github.sh pr-merge 42           # Check + merge if pass
-  github.sh pr-merge 42 --force   # Skip checks, merge (DANGEROUS)
+  github.sh pr-merge 42 --check          # Check only, JSON output
+  github.sh pr-merge 42                  # Check + merge if pass
+  github.sh pr-merge 42 --auto           # Merge now or queue auto-merge
+  github.sh pr-merge 42 --force          # Skip checks, merge (DANGEROUS)
 EOF
 }
 
 # Run safety checks, output JSON
+# JSON shape:
+#   {can_merge, issues, warnings, mergeable, review,
+#    transient: bool}     # true when only TRANSIENT issues are blocking
 run_checks() {
     local pr_num="$1"
     local can_merge=true
@@ -47,7 +72,7 @@ run_checks() {
 
     # Check PR exists first (use title - number alone doesn't validate)
     if ! gh pr view "$pr_num" --json title >/dev/null 2>&1; then
-        jq -n '{can_merge: false, issues: ["not_found: PR #'"$pr_num"' not found"], warnings: [], mergeable: "UNKNOWN", review: ""}'
+        jq -n '{can_merge: false, issues: ["not_found: PR #'"$pr_num"' not found"], warnings: [], mergeable: "UNKNOWN", review: "", transient: false}'
         return 0 # Return 0 so JSON is output, caller checks can_merge
     fi
 
@@ -61,7 +86,7 @@ run_checks() {
         issues+=("conflicts: PR has merge conflicts. Resolve by rebasing onto your default branch and force-pushing")
     else
         can_merge=false
-        issues+=("unknown: GitHub still computing mergeable status, retry in a few seconds")
+        issues+=("unknown: GitHub still computing mergeable status, await-mergeable then retry")
     fi
 
     # 2. Check CI status
@@ -117,18 +142,49 @@ run_checks() {
     issues_json=$(printf '%s\n' "${issues[@]:-}" | jq -R -s -c 'split("\n") | map(select(. != ""))')
     warnings_json=$(printf '%s\n' "${warnings[@]:-}" | jq -R -s -c 'split("\n") | map(select(. != ""))')
 
+    # Classify whether the blocking issues are entirely transient. A transient
+    # block can be retried after `await-mergeable`; a permanent block needs
+    # human action (fix conflicts, push CI fix, dismiss review).
+    local transient
+    transient=$(echo "$issues_json" | jq --arg p "^($TRANSIENT_PREFIXES)" '
+        (length > 0) and (all(. | test($p)))
+    ')
+
     jq -n \
         --argjson can_merge "$can_merge" \
         --argjson issues "$issues_json" \
         --argjson warnings "$warnings_json" \
         --arg mergeable "$mergeable" \
         --arg review "$review" \
-        '{can_merge: $can_merge, issues: $issues, warnings: $warnings, mergeable: $mergeable, review: $review}'
+        --argjson transient "$transient" \
+        '{can_merge: $can_merge, issues: $issues, warnings: $warnings, mergeable: $mergeable, review: $review, transient: $transient}'
+}
+
+# Print BLOCKED breakdown to stderr, distinguishing transient vs permanent.
+print_blocked() {
+    local check_result="$1"
+    local pr_num="$2"
+    local transient
+    transient=$(echo "$check_result" | jq -r '.transient')
+
+    echo "BLOCKED PR #$pr_num — no merge attempted, none queued" >&2
+    if [ "$transient" = "true" ]; then
+        echo "  (transient — GitHub still computing or CI pending)" >&2
+    else
+        echo "  (permanent — needs fix or review action)" >&2
+    fi
+    echo "$check_result" | jq -r '.issues[]' | sed 's/^/  ✗ /' >&2
+    echo "$check_result" | jq -r '.warnings[]' | sed 's/^/  ⚠ /' >&2
+    echo "" >&2
+    if [ "$transient" = "true" ]; then
+        echo "Hint: $(basename "$(dirname "$SCRIPT_DIR")")/github.sh await-mergeable $pr_num && retry" >&2
+    fi
+    echo "Use --auto to queue for auto-merge, or --force to merge anyway." >&2
 }
 
 main() {
     local pr_num="" method="--squash" delete_branch=true
-    local check_only=false force=false dry_run=false
+    local check_only=false force=false dry_run=false auto=false
 
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -158,6 +214,10 @@ main() {
             ;;
         --force)
             force=true
+            shift
+            ;;
+        --auto)
+            auto=true
             shift
             ;;
         --dry-run)
@@ -194,18 +254,19 @@ main() {
     token=$(load_bot_token)
 
     # Unless --force, run checks
+    local check_result=""
     if [ "$force" = false ]; then
-        local check_result can_merge
+        local can_merge
         check_result=$(run_checks "$pr_num")
         can_merge=$(echo "$check_result" | jq -r '.can_merge')
 
         if [ "$can_merge" != "true" ]; then
-            echo "Safety checks failed:" >&2
-            echo "$check_result" | jq -r '.issues[]' | sed 's/^/  ✗ /' >&2
-            echo "$check_result" | jq -r '.warnings[]' | sed 's/^/  ⚠ /' >&2
-            echo "" >&2
-            echo "Use --force to merge anyway (requires explicit decision)." >&2
-            exit 1
+            # If --auto, fall through to enable auto-merge below.
+            # Otherwise, exit BLOCKED with breakdown.
+            if [ "$auto" != true ]; then
+                print_blocked "$check_result" "$pr_num"
+                exit 1
+            fi
         fi
 
         # Show warnings even on success
@@ -222,29 +283,65 @@ main() {
     if [ "$dry_run" = true ]; then
         local token_status="not configured"
         [ -n "$token" ] && token_status="configured"
-        echo "Would merge PR #$pr_num ($method, delete_branch=$delete_branch, token=$token_status)"
+        local mode="immediate"
+        [ "$auto" = true ] && mode="auto-merge fallback"
+        echo "Would merge PR #$pr_num ($method, mode=$mode, delete_branch=$delete_branch, token=$token_status)"
         exit 0
     fi
 
-    # Execute merge (never pass --delete-branch to gh; it tries local git
-    # checkout which fails inside worktrees). Delete remote branch via API.
+    # Build merge command. --auto enables GitHub's auto-merge — it queues the
+    # merge to fire when CI + branch protection clear, returning success now.
+    # Without --auto, gh attempts an immediate merge and fails if blocked.
     local -a cmd=(gh pr merge "$pr_num" "$method")
+    [ "$auto" = true ] && cmd+=(--auto)
 
+    local merge_output merge_exit=0
     if [ -n "$token" ]; then
-        GH_TOKEN="$token" "${cmd[@]}"
+        merge_output=$(GH_TOKEN="$token" "${cmd[@]}" 2>&1) || merge_exit=$?
     else
         echo "Warning: GH_BOT_TOKEN not configured, using current user" >&2
-        "${cmd[@]}"
+        merge_output=$("${cmd[@]}" 2>&1) || merge_exit=$?
     fi
 
-    # Delete remote branch via API (avoids gh's local git checkout)
-    if [ "$delete_branch" = true ]; then
-        local branch
-        branch=$(gh pr view "$pr_num" --json headRefName --jq '.headRefName' 2>/dev/null || true)
-        if [ -n "$branch" ]; then
-            gh api -X DELETE "repos/{owner}/{repo}/git/refs/heads/$branch" 2>/dev/null || true
-        fi
+    if [ "$merge_exit" -ne 0 ]; then
+        # Merge command itself failed. Surface as BLOCKED with raw output.
+        echo "BLOCKED PR #$pr_num — gh pr merge failed" >&2
+        printf '%s\n' "$merge_output" | sed 's/^/  /' >&2
+        exit 1
     fi
+
+    # Determine outcome by re-reading PR state. With --auto, gh exits 0 in
+    # both the merged-immediately case (CI was already green) and the queued
+    # case — only the post-call state distinguishes them.
+    local post_state post_auto
+    post_state=$(gh pr view "$pr_num" --json state --jq '.state' 2>/dev/null || echo "UNKNOWN")
+    post_auto=$(gh pr view "$pr_num" --json autoMergeRequest --jq '.autoMergeRequest != null' 2>/dev/null || echo "false")
+
+    if [ "$post_state" = "MERGED" ]; then
+        echo "MERGED PR #$pr_num" >&2
+        # Delete remote branch via API (avoids gh's local git checkout, which
+        # fails inside worktrees). Best-effort — branch may already be gone.
+        if [ "$delete_branch" = true ]; then
+            local branch
+            branch=$(gh pr view "$pr_num" --json headRefName --jq '.headRefName' 2>/dev/null || true)
+            if [ -n "$branch" ]; then
+                gh api -X DELETE "repos/{owner}/{repo}/git/refs/heads/$branch" 2>/dev/null || true
+            fi
+        fi
+        exit 0
+    fi
+
+    if [ "$auto" = true ] && [ "$post_auto" = "true" ]; then
+        echo "QUEUED FOR AUTO-MERGE PR #$pr_num — will fire when CI + branch protection clear" >&2
+        echo "  Track with: github.sh await-mergeable $pr_num" >&2
+        exit 75
+    fi
+
+    # gh exited 0 but PR isn't merged and isn't queued. Treat as BLOCKED so
+    # callers don't assume success based on exit code alone.
+    echo "BLOCKED PR #$pr_num — gh reported success but state=$post_state, autoMerge=$post_auto" >&2
+    printf '%s\n' "$merge_output" | sed 's/^/  /' >&2
+    exit 1
 }
 
 main "$@"

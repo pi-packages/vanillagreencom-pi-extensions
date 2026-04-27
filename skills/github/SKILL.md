@@ -28,7 +28,7 @@ CLI wrapper for GitHub API operations used in PR workflows. Provides structured 
 | `pr-list-ready [--all] [--format=safe\|table]` | List PRs ready for merge |
 | `pr-list-failing [--all] [--format=safe\|table]` | List PRs with CI failures |
 | `pr-create [--title T] [--body B] [--draft] [--dry-run] [--force]` | Create PR as bot. Safety checks: not main, has commits, pushed. `--force` skips checks. |
-| `pr-merge <N> [--check\|--force]` | Merge PR. `--check`: JSON readiness output without merging. |
+| `pr-merge <N> [--check\|--force\|--auto]` | Merge PR. `--check`: JSON readiness only. `--auto`: queue for auto-merge if blocked now. Three exit codes — see below. |
 | `pr-cross-check [N...] [--quick\|--verify]` | Cross-PR analysis. `--verify`: full build+test (auto-detects build system). |
 | `pr-issue <N> [--format=safe\|text]` | Extract issue ID from PR branch (configurable via `GH_ISSUE_PATTERN`) |
 | `await-mergeable <N> [--interval S] [--max-iter N] [--quiet]` | Block until GitHub resolves a PR's merge state. Polls `state` + `mergeStateStatus`. Exit 0 + JSON on resolve, 124 on timeout. |
@@ -45,11 +45,31 @@ CLI wrapper for GitHub API operations used in PR workflows. Provides structured 
 
 Most commands accept no PR number to auto-detect from the current branch.
 
+### PR Merge Outcomes
+
+`pr-merge` returns three distinct outcomes — branch on the exit code, not on
+parsing stderr:
+
+| Exit | Meaning | Stderr line | When |
+|------|---------|-------------|------|
+| `0`  | MERGED                | `MERGED PR #N`               | Merge completed immediately |
+| `75` | QUEUED FOR AUTO-MERGE | `QUEUED FOR AUTO-MERGE PR #N`| `--auto` enabled GitHub auto-merge; fires when CI + branch protection clear |
+| `1`  | BLOCKED               | `BLOCKED PR #N`              | Checks failed; nothing merged, nothing queued |
+
+A BLOCKED outcome is further classified on stderr as **transient** (mergeable
+UNKNOWN, CI pending — caller should `await-mergeable` and retry) or
+**permanent** (conflicts, ci_failed, changes_requested — caller must fix and
+re-push). Programmatic callers can check the `transient` field in the
+`--check` JSON output before deciding to retry.
+
 ### PR Merge Check Output
 
 ```json
-{"can_merge": true, "issues": [], "warnings": [], "mergeable": "MERGEABLE", "review": "APPROVED"}
+{"can_merge": true, "issues": [], "warnings": [], "mergeable": "MERGEABLE", "review": "APPROVED", "transient": false}
 ```
+
+`transient: true` means every blocking issue is recoverable by waiting
+(prefixes `unknown:`, `ci_unconfigured:`, `ci_fetch_failed:`).
 
 ### Waiting for merge state (gotcha)
 
