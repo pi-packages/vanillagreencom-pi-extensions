@@ -25,7 +25,6 @@ Invoke via your AI coding harness (e.g., `/$orchestration <command>`).
 | `roadmap create @[plan-file]` | Execute roadmap plan |
 | `parallel-check [ISSUE_IDS]` | Verify parallel work safety |
 | `research-spike` | Quick research exploration |
-| `start-retro` | Analyze workflow execution of just-completed session |
 
 ## Skill Dependencies
 

@@ -6,7 +6,7 @@ This file is for humans installing or debugging the skill. Agents should read `S
 
 ## What it does
 
-After orchestration's `start` workflow (or its parallel-group variant) launches one or more issue panes via `open-terminal`, the agent that ran the command becomes the master overseer of every spawned pane in the current tmux session. The exact invocation syntax depends on the harness (Claude Code uses `/orchestration start`, Codex uses `$orchestration start`, OpenCode uses `/orchestration start` or similar — see your harness docs). It:
+When the user invokes flightdeck's `start` workflow (or its parallel-group variant) from main, it launches one or more issue panes via `open-terminal` and the same agent transitions to master overseer of every spawned pane in the current tmux session. The exact invocation syntax depends on the harness (Claude Code uses `/flightdeck start`, Codex uses `$flightdeck start`, OpenCode uses `/flightdeck start` or similar — see your harness docs). It:
 
 - Polls each pane for prompts (bell flag, capture-pane sentinel matching).
 - Classifies prompts and answers them with learned defaults.

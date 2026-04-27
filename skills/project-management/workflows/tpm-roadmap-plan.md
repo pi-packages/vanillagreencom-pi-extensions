@@ -10,7 +10,7 @@ Analyze proposed issues for cross-project conflicts, architecture coverage, and 
 |-----|-------------|
 | `--input [file_path]` | JSON file with proposed issues |
 
-**Input schema**: Provided by the orchestration skill (roadmap-plan-input).
+**Input schema**: Defined in `schemas/roadmap-plan-input.md` (this skill).
 
 ---
 

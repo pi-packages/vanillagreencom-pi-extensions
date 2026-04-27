@@ -126,7 +126,6 @@ Post-review cleanup: reconcile fixes, post summaries, handoff to downstream issu
 
    Omit sections with no data. Include sub-issues tree if bundled.
 
-   Run `start-retro` if workflow issues or knowledge gaps were encountered.
 
    </output_format>
 

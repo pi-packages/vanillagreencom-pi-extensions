@@ -14,7 +14,7 @@ Analyze issues for proper configuration: relations, agent labels, hierarchy, pro
 | `--project` (no name) | PROJECT | All issues in active project |
 | `--issues <file_path>` | ISSUES | Proposed issues from JSON file |
 
-**ISSUE mode file schema**: Provided by the orchestration skill (audit-issues-input).
+**ISSUE mode file schema**: Defined in `schemas/audit-issues-input.md` (this skill).
 
 File contains all context — read with Read tool. Optional fields for research-complete: `blocked_issues`, `research_ref`, `decision_ref`.
 
