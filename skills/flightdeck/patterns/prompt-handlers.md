@@ -231,6 +231,26 @@ For rebase-multi-choice post-action specifically:
 - Function signature collapsed to wrong shape → the upstream fix was reverted; re-message with the rebase guidance triplet again, more emphatic.
 - Tests fail → escalate to user. This indicates the rebase resolution was wrong in a way the master can't safely correct.
 
+## Sending responses: three modes
+
+`scripts/pane-respond` has three input modes. Pick the one that matches the prompt UX:
+
+| Mode | When | Example |
+|------|------|---------|
+| Free-text payload (positional) | "Type your own answer" / "Chat about this" — combined option pick + guidance | `pane-respond <pane> "Rebase + force push.\n\nPRESERVE: ..." --tag rebase-multi-choice` |
+| `--option N` | Numeric option pick from a list | `pane-respond <pane> --option 2` |
+| `--keys k1,k2,...` | Multi-step form (toggle, advance page, submit) | `pane-respond <pane> --keys Space,Right,Enter` |
+
+### Why `--option N` is harness-aware
+
+Number keys are NOT option shortcuts in Claude Code prompts — the footer says `Enter to select · ↑/↓ to navigate`. A digit gets buffered as text (often into a "Type something" free-text field) and the trailing Enter fires on whatever option the arrow cursor is currently on, which defaults to option 1. Sending `"2"` looks like it picked option 2 but actually picks option 1; the bug is silent.
+
+`pane-respond --option N` dispatches per harness via `select_option_for_harness`. The Claude Code adapter sends `(N-1) × Down` then `Enter`. Add new adapters in `scripts/pane-respond` when supporting other harnesses; do not extend the Down-key mechanic blindly.
+
+### Multi-step forms (`--keys`)
+
+Some prompts span multiple pages: toggle a row, press Right to advance to the Submit page, press Enter to confirm. `--keys` accepts a comma-separated list of tmux key names: `Up Down Left Right Enter Tab Space Escape BSpace`. Unrecognized keys are rejected so multi-character text doesn't smuggle through this path — text belongs in payload mode.
+
 ## General rules
 
 - All responses go through `scripts/pane-respond` which targets pane 0 explicitly.

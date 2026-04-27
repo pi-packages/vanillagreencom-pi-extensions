@@ -28,8 +28,8 @@ See `patterns/prompt-handlers.md` § Handler: `cleanup-prompt`.
 
 1. Extract the target worktree path from the prompt buffer.
 2. Compare to `<ISSUE_ID>.worktree` from the registry.
-3. **Equal** → answer the affirmative option (typically `1` or `Yes`). `pane-respond <pane_target> "1"`.
-4. **Not equal** → use a custom answer that scopes only to the asker's own worktree, or pick the negative option if the prompt is binary.
+3. **Equal** → answer the affirmative option (typically `1` or `Yes`). `pane-respond <pane_target> --option 1`.
+4. **Not equal** → use a custom answer that scopes only to the asker's own worktree, or pick the negative option if the prompt is binary (`--option 2`).
 5. Log: `pane-registry log-decision <ISSUE_ID> cleanup-prompt <answer>`.
 
 ---

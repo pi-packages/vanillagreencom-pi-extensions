@@ -60,7 +60,7 @@ Every script in `scripts/` appears in `SKILL.md`'s Scripts table. No hidden scri
 | `flightdeck-state` | Atomic CRUD on `tmp/flightdeck-state-<TMUX_SESSION>.json` |
 | `pane-registry` | Issue↔pane mapping wrapper |
 | `pane-poll` | Bell + capture-pane (pane 0 explicit) + classify |
-| `pane-respond` | Send to pane 0; validates rebase payloads have preserve/apply/verify triplet |
+| `pane-respond` | Send to pane 0 (free-text / `--option N` / `--keys` modes); harness-aware option pick; validates rebase payloads have preserve/apply/verify triplet |
 | `pane-clear-bell` | Atomic chained `select-window` cycle |
 | `pr-conflict-graph` | File-intersection adjacency for a PR list |
 | `prompt-classify` | Sentinel matcher → handler tag |

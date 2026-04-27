@@ -105,7 +105,7 @@ Lessons distilled from real multi-issue session experience are grouped by domain
 | `flightdeck-state` | Master-state CRUD wrapper — atomic init/get/set/append/increment for `tmp/flightdeck-state-<TMUX_SESSION>.json` |
 | `pane-registry` | Issue↔pane mapping CRUD (init from spawned issue list, list, update state per issue) |
 | `pane-poll` | Single-window status read: bell flag + `capture-pane -t <session>:<window>.0 -p -S -200` + classify |
-| `pane-respond` | Send keystrokes to pane 0 explicitly. Validates rebase-multi-choice payloads include the preserve/apply/verify triplet before sending |
+| `pane-respond` | Send a response to a pane. Three modes: positional `<payload>` for free-text, `--option N` for numeric option pick (harness-aware: Claude Code uses arrow navigation, NOT digit-as-shortcut), `--keys k1,k2,...` for multi-step forms (toggle / advance page / submit). Validates rebase-multi-choice payloads include the preserve/apply/verify triplet |
 | `pane-clear-bell` | Atomic chained-command bell clear (no flicker) |
 | `pr-conflict-graph` | Build file-intersection adjacency for a list of PR numbers via `gh pr view --json files` |
 | `prompt-classify` | Regex/sentinel matcher mapping a captured prompt buffer to a handler tag (`cleanup-prompt`, `bot-review-wait-stuck`, `rebase-multi-choice`, `audit-relation-prompt`, `merge-ready-but-unknown`, `scope-creep-detected`, `generic-multi-choice`, `rendering`) |

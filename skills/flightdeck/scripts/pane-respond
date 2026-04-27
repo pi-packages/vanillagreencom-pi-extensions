@@ -1,27 +1,41 @@
 #!/usr/bin/env bash
 # Send a response to a pane's per-issue orchestrator UI.
 #
-# Always targets pane 0 explicitly (or whatever index was pinned during
-# registry init via fingerprinting). Validates rebase-multi-choice payloads
-# include the preserve/apply/verify triplet. Submits with Enter. Clears the
-# window's bell flag after submission.
+# Modes (mutually exclusive):
+#   <payload>             Free-text — types the payload into the cursor's current location.
+#                         Used for "Type your own answer" flows after navigating to that
+#                         option, or for plain text input.
+#   --option N            Numeric option pick — navigates to option N (1-indexed) using
+#                         the harness's option-list mechanic and submits.
+#   --keys k1,k2,...      Raw key sequence — sends each key name through tmux send-keys.
+#                         Use for multi-step forms (e.g., toggle then advance page then
+#                         submit). Recognized: Up Down Left Right Enter Tab Space Escape.
+#
+# Always targets an explicit pane index. Harness-aware: option-pick mechanics differ
+# across harnesses (Claude Code uses arrow keys; numeric digits are buffered as text,
+# not shortcuts). The --harness flag selects the adapter; default is claude.
 #
 # Usage:
-#   pane-respond <pane-target> <payload> [--tag <classification-tag>]
+#   pane-respond <pane-target> <payload> [--tag <tag>] [--no-enter] [--no-clear]
+#   pane-respond <pane-target> --option <N> [--harness <h>] [--no-clear]
+#   pane-respond <pane-target> --keys <k1,k2,...> [--no-clear]
 #
 # Examples:
-#   pane-respond HT:cc-463.0 "1"
 #   pane-respond HT:cc-463.0 "Rebase + force push.\n\nPRESERVE: ..." --tag rebase-multi-choice
+#   pane-respond HT:cc-463.0 --option 2
+#   pane-respond HT:cc-463.0 --keys Space,Right,Enter           # toggle, next page, submit
 #
 # Flags:
-#   --tag <tag>   Classification tag — triggers payload validation for known shapes.
-#                 Currently enforced: rebase-multi-choice (must include PRESERVE/APPLY/VERIFY).
-#   --no-enter    Send without trailing Enter (for partial input).
-#   --no-clear    Skip bell clearing (for batched sends).
+#   --tag <tag>          Classification tag — triggers payload validation for known shapes.
+#                        Currently enforced: rebase-multi-choice (must include
+#                        PRESERVE/APPLY/VERIFY).
+#   --harness <name>     Harness adapter for option-pick mode. Default: claude.
+#   --no-enter           Send free-text without trailing Enter (for partial input).
+#   --no-clear           Skip bell clearing (for batched sends).
 #
 # Exit codes:
 #   0 - sent successfully
-#   1 - validation failure (bad payload for declared tag)
+#   1 - validation failure (bad payload for declared tag, or unsupported harness)
 #   2 - bad arguments / not in tmux
 set -euo pipefail
 
@@ -33,59 +47,154 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 TARGET="${1:-}"
-PAYLOAD="${2:-}"
-if [[ -z "$TARGET" || -z "$PAYLOAD" ]]; then
-  echo "Usage: pane-respond <pane-target> <payload> [--tag <tag>] [--no-enter] [--no-clear]" >&2
+if [[ -z "$TARGET" ]]; then
+  echo "Usage: pane-respond <pane-target> <payload>|--option N|--keys k1,k2,... [flags]" >&2
   exit 2
 fi
-shift 2
+shift
 
+PAYLOAD=""
+MODE="payload"
+OPTION_N=""
+KEYS_CSV=""
 TAG=""
+HARNESS="claude"
 SEND_ENTER=1
 CLEAR_BELL=1
+
+# Optional positional payload (must precede flags).
+if [[ $# -gt 0 && "$1" != --* ]]; then
+  PAYLOAD="$1"
+  shift
+fi
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --option) MODE="option"; OPTION_N="$2"; shift 2 ;;
+    --option=*) MODE="option"; OPTION_N="${1#--option=}"; shift ;;
+    --keys) MODE="keys"; KEYS_CSV="$2"; shift 2 ;;
+    --keys=*) MODE="keys"; KEYS_CSV="${1#--keys=}"; shift ;;
     --tag) TAG="$2"; shift 2 ;;
     --tag=*) TAG="${1#--tag=}"; shift ;;
+    --harness) HARNESS="$2"; shift 2 ;;
+    --harness=*) HARNESS="${1#--harness=}"; shift ;;
     --no-enter) SEND_ENTER=0; shift ;;
     --no-clear) CLEAR_BELL=0; shift ;;
     *) echo "Unknown flag: $1" >&2; exit 2 ;;
   esac
 done
 
-# Enforce explicit pane index (pane-0 rule)
+# Mode validation.
+case "$MODE" in
+  option)
+    [[ -z "$OPTION_N" || ! "$OPTION_N" =~ ^[1-9][0-9]*$ ]] && {
+      echo "Error: --option requires a positive integer" >&2; exit 2; }
+    [[ -n "$PAYLOAD" ]] && {
+      echo "Error: --option is mutually exclusive with positional payload" >&2; exit 2; }
+    ;;
+  keys)
+    [[ -z "$KEYS_CSV" ]] && { echo "Error: --keys requires a comma-separated list" >&2; exit 2; }
+    [[ -n "$PAYLOAD" ]] && {
+      echo "Error: --keys is mutually exclusive with positional payload" >&2; exit 2; }
+    ;;
+  payload)
+    [[ -z "$PAYLOAD" ]] && {
+      echo "Usage: pane-respond <pane-target> <payload>|--option N|--keys k1,k2,... [flags]" >&2
+      exit 2; }
+    ;;
+esac
+
+# Enforce explicit pane index.
 if [[ "$TARGET" != *"."* ]]; then
   echo "Error: target must include explicit pane index (e.g., HT:cc-463.0)" >&2
   exit 2
 fi
 
-# Tag-specific payload validation
-case "$TAG" in
-  rebase-multi-choice)
-    missing=()
-    grep -q -F "PRESERVE:" <<< "$PAYLOAD" || missing+=("PRESERVE")
-    grep -q -F "APPLY:"    <<< "$PAYLOAD" || missing+=("APPLY")
-    grep -q -F "VERIFY:"   <<< "$PAYLOAD" || missing+=("VERIFY")
-    if [[ ${#missing[@]} -gt 0 ]]; then
-      echo "Error: rebase-multi-choice payload missing required section(s): ${missing[*]}" >&2
-      echo "       Each rebase response must include PRESERVE / APPLY / VERIFY (see patterns/prompt-handlers.md)." >&2
-      exit 1
+# Tag-specific payload validation (payload mode only).
+if [[ "$MODE" == "payload" ]]; then
+  case "$TAG" in
+    rebase-multi-choice)
+      missing=()
+      grep -q -F "PRESERVE:" <<< "$PAYLOAD" || missing+=("PRESERVE")
+      grep -q -F "APPLY:"    <<< "$PAYLOAD" || missing+=("APPLY")
+      grep -q -F "VERIFY:"   <<< "$PAYLOAD" || missing+=("VERIFY")
+      if [[ ${#missing[@]} -gt 0 ]]; then
+        echo "Error: rebase-multi-choice payload missing required section(s): ${missing[*]}" >&2
+        echo "       Each rebase response must include PRESERVE / APPLY / VERIFY (see patterns/prompt-handlers.md)." >&2
+        exit 1
+      fi
+      ;;
+    "" | *) : ;;
+  esac
+fi
+
+# --- Per-harness option-pick adapters ---------------------------------------
+#
+# Each harness has its own prompt UX. Numeric digits are NOT shortcuts in
+# Claude Code — they're buffered as text. Picking option N requires arrow
+# navigation. If your harness uses a different mechanic (number keys,
+# vim-style j/k, etc.), add an adapter here.
+
+claude_select_option() {
+  local pane="$1" n="$2"
+  local steps=$((n - 1))
+  if [[ $steps -gt 0 ]]; then
+    for _ in $(seq 1 "$steps"); do
+      tmux send-keys -t "$pane" Down
+    done
+  fi
+  tmux send-keys -t "$pane" Enter
+}
+
+select_option_for_harness() {
+  local harness="$1" pane="$2" n="$3"
+  case "$harness" in
+    claude) claude_select_option "$pane" "$n" ;;
+    *)
+      echo "Error: --option not yet supported for harness '$harness'" >&2
+      echo "       Add an adapter in pane-respond before using." >&2
+      return 1
+      ;;
+  esac
+}
+
+# Allowed key names for --keys mode. Reject anything else so we don't smuggle
+# arbitrary text through this path; multi-character input belongs in payload mode.
+KEYS_ALLOWED='^(Up|Down|Left|Right|Enter|Tab|Space|Escape|BSpace)$'
+
+send_keys_sequence() {
+  local pane="$1" csv="$2"
+  local IFS=,
+  local -a keys
+  read -ra keys <<< "$csv"
+  for k in "${keys[@]}"; do
+    if ! [[ "$k" =~ $KEYS_ALLOWED ]]; then
+      echo "Error: unrecognized key '$k' (allowed: Up Down Left Right Enter Tab Space Escape BSpace)" >&2
+      return 1
+    fi
+    tmux send-keys -t "$pane" "$k"
+  done
+}
+
+# --- Dispatch ---------------------------------------------------------------
+
+case "$MODE" in
+  option)
+    select_option_for_harness "$HARNESS" "$TARGET" "$OPTION_N"
+    ;;
+  keys)
+    send_keys_sequence "$TARGET" "$KEYS_CSV"
+    ;;
+  payload)
+    buf_name="flightdeck-respond-$$"
+    printf '%s' "$PAYLOAD" | tmux load-buffer -b "$buf_name" -
+    tmux paste-buffer -b "$buf_name" -t "$TARGET" -p
+    tmux delete-buffer -b "$buf_name" 2>/dev/null || true
+    if [[ $SEND_ENTER -eq 1 ]]; then
+      tmux send-keys -t "$TARGET" Enter
     fi
     ;;
-  "" | *)
-    : # no validation for other tags
-    ;;
 esac
-
-# Send via load-buffer for safety with multi-line / special-char payloads.
-buf_name="flightdeck-respond-$$"
-printf '%s' "$PAYLOAD" | tmux load-buffer -b "$buf_name" -
-tmux paste-buffer -b "$buf_name" -t "$TARGET" -p
-tmux delete-buffer -b "$buf_name" 2>/dev/null || true
-
-if [[ $SEND_ENTER -eq 1 ]]; then
-  tmux send-keys -t "$TARGET" Enter
-fi
 
 # Clear bell on the window (strip the .pane suffix to get window target).
 if [[ $CLEAR_BELL -eq 1 ]]; then
