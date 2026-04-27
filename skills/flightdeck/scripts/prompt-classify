@@ -13,6 +13,7 @@
 #
 # Tags (in match-priority order):
 #   rendering                  - prompt isn't fully painted yet
+#   terminal-state-reached     - inner pane has signaled work-complete, end-the-session, or destroyed-cwd
 #   force-merge-confirm        - "Force merge?" dialog after extended UNKNOWN
 #   merge-ready-but-unknown    - "Mergeable status still UNKNOWN"
 #   merge-now                  - "PR ... is approved with CI passing. Merge now?"
@@ -70,6 +71,17 @@ if ! grep -qE '(Enter to (select|toggle|submit)|↑.*↓ (to )?navigate|esc.*dis
 fi
 
 # Specific-shape sentinels in priority order. Most specific first.
+
+# terminal-state-reached — work complete, session over, no further prompts coming.
+# Portable signals (any harness):
+#   - explicit "MERGED" / "session complete" / "end the session" / "Please end the session"
+#   - destroyed-CWD pattern indicating worktree was removed mid-session
+# Harness-specific signals are evaluated by the close-issue workflow with the
+# pane's harness adapter; the classifier surfaces the tag on the portable
+# signal alone, and the handler does the multi-signal verification.
+if grep -qE '(✅|\bMERGED\b).*PR ?#?[0-9]+|Please end the session|session complete|SESSION CWD DESTROYED|Path does not exist.*tree' <<< "$buf"; then
+  emit terminal-state-reached "session-end signal"
+fi
 
 # force-merge after sustained UNKNOWN
 if grep -qE 'Mergeable status still UNKNOWN.*Force merge|UNKNOWN.* Force merge' <<< "$buf"; then

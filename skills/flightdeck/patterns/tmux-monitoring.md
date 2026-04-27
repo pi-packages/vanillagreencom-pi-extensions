@@ -97,3 +97,35 @@ tmux list-windows -t <session> -F '#{window_index}:#{window_name} bell=#{window_
 - **Bracketed paste vs typing**: long inputs (rebase guidance payloads) should use `tmux load-buffer + paste-buffer` or `send-keys -l` to avoid keybinding interpretation in the receiving TUI.
 - **Enter key**: `tmux send-keys ... Enter` is portable. `\n` in the payload string does NOT submit; the literal `Enter` token does.
 - **Multi-line payloads**: prefer `load-buffer` + `paste-buffer` for anything over ~200 chars; long send-keys can be misinterpreted by some TUIs as paste-bracketed input.
+
+## Per-harness signals
+
+Some pane signals are harness-specific. Adapters live in scripts (e.g., `pane-respond` for option-pick mechanics) and in handler workflows (e.g., `close-issue.md` for terminal-state recognition). Document each harness's contract here as it's wired up.
+
+### Idle / quiescent indicator (handler: `close-issue.md` § 1)
+
+| Harness | Signal |
+|---------|--------|
+| Claude Code | `* Idle` line near buffer end, no input cursor waiting |
+| codex | (TBD — add when first wired) |
+| opencode | (TBD — add when first wired) |
+
+### Destroyed-CWD failure pattern (handler: `close-issue.md` § 1)
+
+Inner pane's shell is dead because the worktree was removed mid-session. After that, every Bash call fails to set cwd.
+
+| Harness | Signal |
+|---------|--------|
+| Claude Code | `Path does not exist` in tool error AND a worktree path in the line; OR explicit `SESSION CWD DESTROYED` message |
+| codex | (TBD) |
+| opencode | (TBD) |
+
+### Option-pick mechanic (script: `pane-respond` `--option` mode)
+
+| Harness | Mechanic |
+|---------|----------|
+| Claude Code | `(N-1) × Down` then `Enter`. Numbers are NOT shortcuts; they're buffered as text. |
+| codex | (TBD) |
+| opencode | (TBD) |
+
+When adding a new harness, add its row in each table above and wire the matching adapter in the relevant script/workflow. Do not blanket-apply Claude Code's mechanic to other harnesses without verification.

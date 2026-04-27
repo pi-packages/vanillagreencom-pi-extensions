@@ -51,6 +51,7 @@ For each tracked issue currently in a non-terminal state (`waiting | prompting |
    |-----|-----------|-------|
    | `idle` | unchanged | nothing to do |
    | `rendering` | unchanged | re-poll next cycle |
+   | `terminal-state-reached` | (handled below) | route to `close-issue.md`; do not enter `prompting` |
    | `cleanup-prompt` | `prompting` | substate = tag |
    | `bot-review-wait-stuck` | `prompting` | substate = tag |
    | `rebase-multi-choice` | `prompting` | substate = tag |
@@ -61,7 +62,9 @@ For each tracked issue currently in a non-terminal state (`waiting | prompting |
    | `external-fix-suggestions` | `prompting` | substate = tag |
    | `cycle-fix-suggestions` | `prompting` | substate = tag |
    | `descope-related` | `prompting` | substate = tag |
-   | `generic-multi-choice` | `prompting` | substate = tag (handler will escalate) |
+   | `generic-multi-choice` | `prompting` | substate = tag (handler auto-decides per § 10 of `handle-prompt.md`, escalates only on novelty) |
+
+   **`terminal-state-reached` routing**: do not transition to `prompting`. Instead invoke `⤵ workflows/close-issue.md <ISSUE_ID>`. That workflow verifies the signal (two-signal rule), updates master state, and tears down the window. Returns here when done.
 
 4. Hash debounce: if `capture_hash` matches `last_capture_hash` AND `bell == false`, skip routing — the prompt is the same one already handled.
 5. Update `last_capture_hash` and `last_polled_at` on every poll.
