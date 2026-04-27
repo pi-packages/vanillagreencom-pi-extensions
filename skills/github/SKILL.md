@@ -31,6 +31,7 @@ CLI wrapper for GitHub API operations used in PR workflows. Provides structured 
 | `pr-merge <N> [--check\|--force]` | Merge PR. `--check`: JSON readiness output without merging. |
 | `pr-cross-check [N...] [--quick\|--verify]` | Cross-PR analysis. `--verify`: full build+test (auto-detects build system). |
 | `pr-issue <N> [--format=safe\|text]` | Extract issue ID from PR branch (configurable via `GH_ISSUE_PATTERN`) |
+| `await-mergeable <N> [--interval S] [--max-iter N] [--quiet]` | Block until GitHub resolves a PR's merge state. Polls `state` + `mergeStateStatus`. Exit 0 + JSON on resolve, 124 on timeout. |
 | `ci-logs <N> [--lines N] [--format=safe\|text]` | Get CI failure logs for PR |
 | `bot-token [--format=safe\|text]` | Check if bot token is configured |
 | `dismiss-review <PR> [--bot\|--user NAME] [--message M]` | Dismiss blocking review |
@@ -49,6 +50,28 @@ Most commands accept no PR number to auto-detect from the current branch.
 ```json
 {"can_merge": true, "issues": [], "warnings": [], "mergeable": "MERGEABLE", "review": "APPROVED"}
 ```
+
+### Waiting for merge state (gotcha)
+
+**Never gate termination on `gh pr view --json mergeable`.** That field stays
+`UNKNOWN` permanently after a PR is merged — it is only meaningful while the
+PR is open, where it transitions through `MERGEABLE` / `CONFLICTING` /
+`UNKNOWN`. An inline `until [ "$(...mergeable...)" != "UNKNOWN" ]` loop will
+never terminate post-merge.
+
+To wait for resolution, use `await-mergeable`, which polls `state` and
+`mergeStateStatus` correctly:
+
+```bash
+github.sh await-mergeable 42                    # block until resolved
+STATE=$(github.sh await-mergeable 42 | jq -r '.state')   # capture for branching
+```
+
+Resolution rules:
+- `state in {MERGED, CLOSED}` → resolved.
+- `mergeStateStatus != UNKNOWN` (any of `CLEAN`, `BLOCKED`, `BEHIND`, `DIRTY`,
+  `UNSTABLE`, `HAS_HOOKS`) → resolved.
+- `mergeable` alone is never used for termination.
 
 ## Output Formats
 

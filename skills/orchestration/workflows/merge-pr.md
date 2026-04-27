@@ -67,6 +67,23 @@ For each PR:
 CHECK=$(.agents/skills/github/scripts/github.sh pr-merge [PR_NUMBER] --check)
 ```
 
+### 3.1 Resolve transient "unknown" before prompting
+
+If `issues` contains an entry starting with `unknown:` (GitHub still computing
+mergeable status), do NOT prompt the user — wait for resolution and re-check:
+
+```bash
+.agents/skills/github/scripts/github.sh await-mergeable [PR_NUMBER]
+CHECK=$(.agents/skills/github/scripts/github.sh pr-merge [PR_NUMBER] --check)
+```
+
+`await-mergeable` polls `state` and `mergeStateStatus` (NOT `mergeable` —
+that field stays UNKNOWN permanently after merge and will hang forever).
+Returns when GitHub has computed a real merge state, or exits 124 on timeout.
+On timeout, surface the failure to the user instead of looping further.
+
+### 3.2 Parse and act
+
 Parse result and present to user:
 
 | `can_merge` | Action |
@@ -122,6 +139,15 @@ If `false`: Ask user: `Merge as current user` | `Abort`
    ```bash
    (cd [MAIN_REPO_ROOT] && .agents/skills/github/scripts/github.sh pr-merge [PR_NUMBER] [--force])
    ```
+
+   If exit code is `75` (queued for auto-merge), the merge will fire when CI
+   and branch protection clear. Wait before downstream sync steps:
+   ```bash
+   (cd [MAIN_REPO_ROOT] && .agents/skills/github/scripts/github.sh await-mergeable [PR_NUMBER])
+   ```
+   Do NOT poll `gh pr view --json mergeable` inline — the field stays UNKNOWN
+   permanently after merge and the loop never terminates. Always use the
+   `await-mergeable` subcommand.
 
 3. **Sync issue tracker cache** (merged PRs close issues via magic words — cache must reflect done states):
    ```bash
