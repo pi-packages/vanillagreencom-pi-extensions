@@ -312,7 +312,7 @@ Worktree creation is idempotent: existing worktrees are reused (rebased onto lat
 2. **Inform user**:
 
    <output_format>
-   If you are using a desktop app (no terminal), switch to the worktree(s) yourself and run `/orchestration start [ISSUE_ID]` (or `$orchestration start [ISSUE_ID]` on Codex).
+   If you are using a desktop app (no terminal), switch to the worktree(s) yourself and run `/orchestration start [ISSUE_ID]` (or `$orchestration start [ISSUE_ID]` on Codex, `/skill:orchestration start [ISSUE_ID]` on omp).
    </output_format>
 
 3. **Ask user** which harness and: `Launch [N] issues` | `Select subset` | `I'll launch them myself` | `Cancel`
