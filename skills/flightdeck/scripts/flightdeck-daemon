@@ -172,21 +172,32 @@ _check_deps_inline() {
 }
 _check_deps_inline
 
-# Resolve session_id (stable across rename) for state-file keying.
-resolve_session_id() {
-  tmux display-message -p -t "$SESSION_NAME" '#{session_id}' 2>/dev/null || echo ""
+# Resolve --session input to canonical (name, id) pair. Accepts EITHER
+# session_name or session_id (e.g. "$143"). tmux's -t target flag accepts
+# both forms; we look up both fields once so downstream code never has to
+# care which the caller passed.
+resolve_session_pair() {
+  local input="$1"
+  local sid sname
+  sid=$(tmux display-message -p -t "$input" '#{session_id}' 2>/dev/null) || sid=""
+  sname=$(tmux display-message -p -t "$input" '#{session_name}' 2>/dev/null) || sname=""
+  printf '%s|%s\n' "$sname" "$sid"
 }
 
 # Single helper: tmux session_id "$143" → state-file key "s143". Used
 # everywhere we need to derive a key from an id (avoids drift between sed
-# and parameter-expansion paths).
-session_key_from_id() {
-  local id="$1"
-  [[ -z "$id" ]] && { echo ""; return; }
-  echo "s${id#\$}"
-}
+# and parameter-expansion paths). Aliased to the lib helper.
+session_key_from_id() { fd_session_key_from_id "$1"; }
 
-SESSION_ID=$(resolve_session_id)
+# Normalize the input. After this, SESSION_NAME is the canonical tmux
+# session name (regardless of whether the caller passed a name or id) and
+# SESSION_ID is the canonical session_id form ("$N").
+_session_pair=$(resolve_session_pair "$SESSION_NAME")
+_resolved_name="${_session_pair%|*}"
+SESSION_ID="${_session_pair#*|}"
+if [[ -n "$_resolved_name" ]]; then
+  SESSION_NAME="$_resolved_name"
+fi
 if [[ -z "$SESSION_ID" ]]; then
   # For stop/status the daemon may be running for a session that's already
   # gone — fall back to a name-keyed lookup so cleanup works.
