@@ -5,9 +5,15 @@
 # state. Intended to be called per-tracked-window in the watch loop.
 #
 # Usage:
-#   pane-poll <window-target> [<pane-index>] [--harness <h>]
+#   pane-poll <window-target> [<pane-index>] [--harness <h>] [--worktree <path>] [--pr <N>]
 #   pane-poll HT:cc-463
 #   pane-poll HT:cc-463 0 --harness opencode
+#   pane-poll HT:cc-463 0 --harness opencode --worktree trees/cc-463 --pr 463
+#
+# When --worktree and --pr are both passed and the worktree directory is
+# gone AND `gh pr view <PR>` returns MERGED, the tag is forced to
+# terminal-state-reached even if the classifier didn't recognize the
+# orchestrator's end-of-flow text. Defense-in-depth for the lifecycle.
 #
 # JSON fields:
 #   {
@@ -46,10 +52,16 @@ PANE_INDEX="${2:-0}"
 shift || true; shift || true
 
 HARNESS=""
+WORKTREE=""
+PR=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --harness) HARNESS="$2"; shift 2 ;;
     --harness=*) HARNESS="${1#--harness=}"; shift ;;
+    --worktree) WORKTREE="$2"; shift 2 ;;
+    --worktree=*) WORKTREE="${1#--worktree=}"; shift ;;
+    --pr) PR="$2"; shift 2 ;;
+    --pr=*) PR="${1#--pr=}"; shift ;;
     *) shift ;;
   esac
 done
@@ -106,6 +118,24 @@ silence=$(awk -F'|' '{print $4}' <<< "$flags_line")
 buf=$(tmux capture-pane -t "$PANE_TARGET" "${CAPTURE_ARGS[@]}" 2>/dev/null | strip_osc_leak || echo "")
 capture_hash=$(printf '%s' "$buf" | sha256sum | awk '{print "sha256:"$1}')
 tag=$(printf '%s' "$buf" | "$SCRIPT_DIR/prompt-classify" 2>/dev/null || echo "idle")
+
+# Orphan cross-check — when caller passes --worktree and --pr, synthesize
+# terminal-state-reached if the worktree directory is gone AND the PR is
+# merged. Defense-in-depth against the classifier missing the orchestrator's
+# end-of-flow text (Round 4: 6 issues all merged + worktree-cleaned but the
+# orchestrator's final summary screen didn't match terminal-state sentinels,
+# so close-issue.md never ran and 6 windows piled up). Only runs when the
+# pane's own buffer didn't already say terminal-state-reached.
+if [[ "$tag" != "terminal-state-reached" && -n "$WORKTREE" && -n "$PR" ]]; then
+  if [[ ! -d "$WORKTREE" ]]; then
+    if command -v gh >/dev/null 2>&1; then
+      pr_state=$(gh pr view "$PR" --json state --jq '.state' 2>/dev/null || echo "")
+      if [[ "$pr_state" == "MERGED" ]]; then
+        tag="terminal-state-reached"
+      fi
+    fi
+  fi
+fi
 
 # Fingerprint check — confirm the registered pane still hosts the
 # orchestrator TUI. If sub-agent panes were spawned and the orchestrator

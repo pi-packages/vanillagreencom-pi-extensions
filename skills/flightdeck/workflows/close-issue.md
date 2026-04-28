@@ -14,6 +14,8 @@ Inner pane has signaled it's done. Verify the signal, mark the issue terminal in
 
 A single sentinel match is not sufficient — pane output can include words like "MERGED" mid-session (e.g., quoting a commit message). Require **at least two independent signals** before tearing down.
 
+**Fast-path — orphaned (worktree gone + PR merged)**: when the registry's `worktree` directory does not exist on disk AND `gh pr view <pr_number>` returns `state: MERGED`, the issue is observably done regardless of pane content. The two-signal rule is satisfied by the worktree-gone + PR-merged pair; skip the buffer-signal accumulation and proceed directly to § 3 with `state = merged`. This is the path triggered when `pane-poll` synthesizes `terminal-state-reached` via its `--worktree` / `--pr` cross-check.
+
 Signals (any two):
 
 | Signal | Source |

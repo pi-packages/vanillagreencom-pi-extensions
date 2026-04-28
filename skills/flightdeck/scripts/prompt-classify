@@ -99,7 +99,7 @@ fi
 # Harness-specific signals are evaluated by the close-issue workflow with the
 # pane's harness adapter; the classifier surfaces the tag on the portable
 # signal alone, and the handler does the multi-signal verification.
-if grep -qE '(✅|\bMERGED\b).*PR ?#?[0-9]+|Please end the session|session complete|SESSION CWD DESTROYED|Path does not exist.*tree' <<< "$buf"; then
+if grep -qE '(✅|\bMERGED\b).*PR ?#?[0-9]+|Please end the session|session complete|SESSION CWD DESTROYED|Path does not exist.*tree|Shutting down team\.|\[✓\]\s*§\s*5\s*Finalize session|Finalize session\b.*✓|Finalize session\b.*\bdone\b' <<< "$buf"; then
   emit terminal-state-reached "session-end signal"
 fi
 
