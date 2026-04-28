@@ -64,6 +64,26 @@ case "$HARNESS" in
   *)        CAPTURE_ARGS=(-p -S -200) ;;
 esac
 
+# Strip OSC color-query response leakage from captured opencode buffers.
+# Opencode's TUI does not consume OSC 4 / OSC 10 / OSC 11 / OSC 12
+# responses from the terminal; they land in the input buffer and get
+# captured back verbatim as text like "4;150;rgb:afaf/d7d7/8787".
+# Filtering here keeps fingerprints stable (the leak otherwise causes
+# spurious hash churn that delays daemon stability classification) and
+# prevents the leak from being fed back into pane-respond as typed input.
+strip_osc_leak() {
+  if [[ "$HARNESS" == "opencode" ]]; then
+    # OSC 4 (palette color) and OSC 10/11/12 (fg/bg/cursor) responses.
+    # Match the post-stripping text form (most common) and the raw OSC
+    # framing if it slipped past tmux. Anchored to digits-then-rgb so we
+    # don't eat legitimate text that happens to mention 'rgb:'.
+    sed -E -e 's/(^|[[:space:]])[0-9]+;[0-9]+;rgb:[0-9a-fA-F]{4}\/[0-9a-fA-F]{4}\/[0-9a-fA-F]{4}//g' \
+           -e 's/\x1b\][0-9]+;[^\x07\x1b]*(\x07|\x1b\\)//g'
+  else
+    cat
+  fi
+}
+
 # Verify window exists; emit dead state if not.
 if ! tmux list-windows -t "${TARGET%:*}" -F '#{window_index}:#{window_name}' 2>/dev/null \
      | awk -F: -v w="${TARGET#*:}" '$2 == w {found=1} END {exit !found}'; then
@@ -81,7 +101,7 @@ activity=$(awk -F'|' '{print $3}' <<< "$flags_line")
 silence=$(awk -F'|' '{print $4}' <<< "$flags_line")
 
 # Capture and classify
-buf=$(tmux capture-pane -t "$PANE_TARGET" "${CAPTURE_ARGS[@]}" 2>/dev/null || echo "")
+buf=$(tmux capture-pane -t "$PANE_TARGET" "${CAPTURE_ARGS[@]}" 2>/dev/null | strip_osc_leak || echo "")
 capture_hash=$(printf '%s' "$buf" | sha256sum | awk '{print "sha256:"$1}')
 tag=$(printf '%s' "$buf" | "$SCRIPT_DIR/prompt-classify" 2>/dev/null || echo "idle")
 
