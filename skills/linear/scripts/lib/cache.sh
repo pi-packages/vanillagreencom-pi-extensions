@@ -115,7 +115,9 @@ cache_get_children() {
 
 cache_get_children_recursive() {
     local parent="$1" max_depth="${2:-3}"
-    # Returns flat array with depth field
+    # Returns flat array with depth field. Emits both `id` and `identifier`
+    # so consumers reading either field (raw cache vs formatted output)
+    # work consistently.
     jq --arg p "$parent" --argjson max "$max_depth" '
         . as $all |
         def descendants($pid; depth):
@@ -124,6 +126,7 @@ cache_get_children_recursive() {
                 map(. as $c |
                     {
                         id: $c.identifier,
+                        identifier: $c.identifier,
                         uuid: $c.id,
                         title: ($c.title // ""),
                         description: ($c.description // ""),

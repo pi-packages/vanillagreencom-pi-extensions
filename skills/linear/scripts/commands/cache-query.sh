@@ -294,7 +294,12 @@ cache_get_issue() {
         local pending_count
         pending_count=$(echo "$children" | jq '[.[] | select(.state_type | IN("completed", "canceled") | not)] | length')
 
-        # Construct the formatted output directly
+        # Construct the formatted output directly. Both `id` and `identifier`
+        # are emitted so consumers that key on either field (raw cache reader
+        # vs formatted output reader) work consistently — the cache schema
+        # uses `identifier` for the human-readable form, formatted output
+        # uses `id` for it. Defensive parity prevents the Round-4 class of
+        # 'id: null' / 'identifier missing' bugs across format variants.
         local result
         result=$(jq -n \
             --argjson issue "$issue" \
@@ -303,6 +308,7 @@ cache_get_issue() {
             --argjson attachments "$attachments" \
             '{
                 id: $issue.identifier,
+                identifier: $issue.identifier,
                 uuid: $issue.id,
                 title: ($issue.title // ""),
                 description: ($issue.description // ""),
@@ -332,6 +338,8 @@ cache_get_issue() {
 
         case "$FORMAT" in
         compact)
+            # Preserve both `id` and `identifier` for consumer parity (see
+            # comment on the result construction above).
             echo "$result" | jq 'del(.description, .url, .created_at, .updated_at, .uuid, .project_id, .platform, .related, .milestone, .cycle)'
             ;;
         raw) echo "$result" ;;

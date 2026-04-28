@@ -45,6 +45,7 @@ format_issue_single() {
     local raw="$1"
     echo "$raw" | jq '{
         id: .issue.identifier,
+        identifier: .issue.identifier,
         uuid: .issue.id,
         title: (.issue.title // ""),
         description: (.issue.description // ""),
@@ -82,6 +83,7 @@ format_issue_with_bundle() {
         def flatten_children(depth):
             . as $node | [{
                 id: $node.identifier,
+                identifier: $node.identifier,
                 uuid: $node.id,
                 title: ($node.title // ""),
                 description: ($node.description // ""),
@@ -103,6 +105,7 @@ format_issue_with_bundle() {
 
         {
             id: .issue.identifier,
+            identifier: .issue.identifier,
             uuid: .issue.id,
             title: (.issue.title // ""),
             description: (.issue.description // ""),
@@ -138,6 +141,7 @@ format_issue_compact() {
     local raw="$1"
     echo "$raw" | jq '{
         id: .issue.identifier,
+        identifier: .issue.identifier,
         title: (.issue.title // ""),
         state: (.issue.state.name // ""),
         state_type: (.issue.state.type // ""),
