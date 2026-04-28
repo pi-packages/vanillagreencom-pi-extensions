@@ -35,11 +35,19 @@
 #   --harness <name>     Harness adapter for option-pick mode. Default: claude.
 #   --no-enter           Send free-text without trailing Enter (for partial input).
 #   --no-clear           Skip bell clearing (for batched sends).
+#   --allow-interrupt    Permit Escape in --keys for opencode (default: rejected).
+#                        opencode interprets Escape as process-interrupt, which
+#                        will abort an in-flight orchestration step.
+#   --confirm-advanced   After sending, poll the pane until the prompt sentinel
+#                        is gone (or 8s timeout). Returns non-zero on timeout
+#                        so callers can recover. Recommended for opencode.
 #
 # Exit codes:
-#   0 - sent successfully
+#   0 - sent successfully (and prompt advanced if --confirm-advanced was set)
 #   1 - validation failure (bad payload for declared tag, or unsupported harness)
 #   2 - bad arguments / not in tmux
+#   3 - busy: pane shows active spinner; caller should wait and retry
+#   4 - confirm-advanced timed out; prompt sentinel still present after 8s
 set -euo pipefail
 
 if [[ -z "${TMUX:-}" ]]; then
@@ -64,6 +72,8 @@ TAG=""
 HARNESS="claude"
 SEND_ENTER=1
 CLEAR_BELL=1
+ALLOW_INTERRUPT=0
+CONFIRM_ADVANCED=0
 
 # Optional positional payload (must precede flags).
 if [[ $# -gt 0 && "$1" != --* ]]; then
@@ -83,6 +93,8 @@ while [[ $# -gt 0 ]]; do
     --harness=*) HARNESS="${1#--harness=}"; shift ;;
     --no-enter) SEND_ENTER=0; shift ;;
     --no-clear) CLEAR_BELL=0; shift ;;
+    --allow-interrupt) ALLOW_INTERRUPT=1; shift ;;
+    --confirm-advanced) CONFIRM_ADVANCED=1; shift ;;
     *) echo "Unknown flag: $1" >&2; exit 2 ;;
   esac
 done
@@ -189,11 +201,63 @@ send_keys_sequence() {
       echo "Error: unrecognized key '$k' (allowed: Up Down Left Right Enter Tab Space Escape BSpace)" >&2
       return 1
     fi
+    # opencode interprets Escape as process-interrupt — sending it during
+    # an in-flight orchestration step aborts the running work. Reject by
+    # default; --allow-interrupt opts in for the rare legitimate case.
+    if [[ "$HARNESS" == "opencode" && "$k" == "Escape" && $ALLOW_INTERRUPT -eq 0 ]]; then
+      echo "Error: refusing to send Escape to opencode pane (treated as process-interrupt)." >&2
+      echo "       Pass --allow-interrupt if aborting the in-flight step is intentional." >&2
+      return 1
+    fi
     tmux send-keys -t "$pane" "$k"
   done
 }
 
+# Pre-send busy check — refuse if the pane shows an active spinner row.
+# Sending into a busy pane is the cause of the 'queued but no advance'
+# class of opencode mishaps from Round 4. Caller waits and retries.
+pane_is_busy() {
+  local pane="$1" harness="$2"
+  case "$harness" in
+    opencode|claude)
+      # Last 3 lines should reach the input row. opencode shows ■■■ or
+      # spinner glyphs while the model is mid-response; Claude shows ⠋⠙⠸⠴⠦⠧⠇⠏.
+      local tail
+      tail=$(tmux capture-pane -t "$pane" -p 2>/dev/null | tail -n 3)
+      if grep -qE '■■■|⠋|⠙|⠸|⠴|⠦|⠧|⠇|⠏' <<< "$tail"; then
+        return 0
+      fi
+      return 1
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+# Post-send verification — poll the pane until the prompt-footer sentinel
+# is gone (indicating the prompt advanced) or 8s elapse. Returns 0 on
+# advance, 4 on timeout. Footer pattern matches the same set
+# prompt-classify gates on (Enter to select / ↑↓ select / esc dismiss).
+verify_prompt_advanced() {
+  local pane="$1"
+  local deadline=$((SECONDS + 8))
+  while (( SECONDS < deadline )); do
+    local buf
+    buf=$(tmux capture-pane -t "$pane" -p 2>/dev/null | tail -n 12)
+    if ! grep -qE '(Enter to (select|toggle|submit)|↑.*↓ (to )?navigate|esc.*dismiss|↑↓ select)' <<< "$buf"; then
+      return 0
+    fi
+    sleep 0.5
+  done
+  return 4
+}
+
 # --- Dispatch ---------------------------------------------------------------
+
+# Pre-send busy check (opencode is most affected; harmless on others).
+if pane_is_busy "$TARGET" "$HARNESS"; then
+  echo "Error: pane $TARGET shows active spinner; refusing to send. Wait and retry." >&2
+  exit 3
+fi
 
 case "$MODE" in
   option)
@@ -212,6 +276,16 @@ case "$MODE" in
     fi
     ;;
 esac
+
+# Post-send verification: ensure the prompt advanced. Returns exit 4 on
+# timeout so callers can recover (escalate to user, retry, or pick a
+# different option).
+if [[ $CONFIRM_ADVANCED -eq 1 ]]; then
+  if ! verify_prompt_advanced "$TARGET"; then
+    echo "Error: prompt sentinel still present 8s after send to $TARGET; advance not confirmed." >&2
+    exit 4
+  fi
+fi
 
 # Clear bell on the window (strip the .pane suffix to get window target).
 if [[ $CLEAR_BELL -eq 1 ]]; then
