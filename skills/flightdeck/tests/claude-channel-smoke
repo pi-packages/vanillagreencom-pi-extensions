@@ -136,7 +136,12 @@ note "  expected transcript=$TRANSCRIPT"
 note "step 2: spawn claude --session-id + --mcp-config + --dangerously-load-development-channels"
 SESSION_NAME=$(tmux display-message -p '#S')
 LAST_IDX=$(tmux list-windows -t "$SESSION_NAME" -F '#{window_index}' | tail -1)
-CMD=$(printf "%s --session-id %s --mcp-config %q --dangerously-skip-permissions --dangerously-load-development-channels server:webhook 'reply with READY-CHECK and nothing else'" \
+## NOTE: --dangerously-load-development-channels is variadic (accepts
+## multiple `server:NAME` / `plugin:N@M` entries). Without an explicit
+## `--` separator before the prompt, claude consumes the prompt as
+## another channel entry and exits 1 with
+## "entries must be tagged: <prompt>".
+CMD=$(printf "%s --session-id %s --mcp-config %q --dangerously-skip-permissions --dangerously-load-development-channels server:webhook -- 'reply with READY-CHECK and nothing else'" \
         "$CLAUDE_BIN" "$UUID" "$MCP_CFG")
 tmux new-window -d -a -t "${SESSION_NAME}:${LAST_IDX}" -n "$WINDOW_NAME" -c "$ABS_WORKTREE" "$CMD"
 TEST_WINDOW="${SESSION_NAME}:${WINDOW_NAME}"

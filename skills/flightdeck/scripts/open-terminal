@@ -446,12 +446,17 @@ cc_write_mcp_config() {
   cc_mcp_config "$issue"
 }
 
-# Build claude spawn cmd for tmux. The trust prompt for
-# --dangerously-load-development-channels is dismissed via a delayed
-# tmux send-keys after the pane opens (see post-spawn step).
+# Build claude spawn cmd for tmux. The `--` separator BEFORE the
+# prompt is critical: --dangerously-load-development-channels accepts
+# multiple values (variadic), so without `--` claude consumes the
+# prompt as a second channel entry and errors with
+# "entries must be tagged: <prompt>".
+#
+# The trust prompt for --dangerously-load-development-channels is
+# dismissed via a delayed tmux send-keys after the pane opens.
 build_claude_channel_cmd() {
   local bin="$1" mcp_path="$2" uuid="$3" issue="$4" bypass="$5"
-  printf "%s -n %q %s --model 'opus[1m]' --effort max --session-id %s --mcp-config %q --dangerously-load-development-channels server:webhook '/orchestration start %s'" \
+  printf "%s -n %q %s --model 'opus[1m]' --effort max --session-id %s --mcp-config %q --dangerously-load-development-channels server:webhook -- '/orchestration start %s'" \
     "$bin" "$issue" "$bypass" "$uuid" "$mcp_path" "$issue"
 }
 
