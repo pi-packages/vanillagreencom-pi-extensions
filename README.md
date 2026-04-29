@@ -353,6 +353,7 @@ Windows note:
 | `prompt-stash` | Project-local prompt stash history for Pi; `Ctrl+S` stashes editor text or opens a searchable pop/delete popup when empty. |
 | `pi-session-bridge` | Unix-socket JSONL side channel for active Pi sessions: send prompts, steer/follow-up, abort, inspect state/history, questions, and stream events. |
 | `pi-statusline` | Compact interactive Pi TUI status line showing project/git/model/context information. |
+| `pi-subagents` | Delegates work to project/user agents, with persistent tmux panes, grid layout, and automatic completion pickup. |
 
 vstack installs selected Pi extension packages into `<scope>/packages/<name>` and registers `./packages/<name>` in Pi's `settings.json`. Detailed usage lives in each package's `pi-extensions/<name>/README.md`.
 
