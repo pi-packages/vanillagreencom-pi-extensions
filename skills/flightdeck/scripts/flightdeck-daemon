@@ -65,14 +65,18 @@
 #                                   for this long after first sighting.
 #                                   Prevents cold-start TUI banners from
 #                                   firing classifier wakes.
-#   FD_OPENCODE_STABILITY 5         Stability threshold for opencode panes
-#                                   (mid-frame churn requires longer settle).
+#   FD_OC_POLL_SEC      2           Per-opencode-pane subscriber poll
+#                                   interval against /session/<id>/message.
 set -euo pipefail
 
 # Resolve daemon state dir + session-keyed file paths via shared helper so
 # flightdeck-state's master-busy writer and the daemon's reader agree.
+# Also resolve opencode HTTP-attach paths.
+_daemon_script_dir="$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "$0")")"
 # shellcheck source=lib/daemon-paths.sh
-source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "$0")")/lib/daemon-paths.sh"
+source "$_daemon_script_dir/lib/daemon-paths.sh"
+# shellcheck source=lib/oc-paths.sh
+source "$_daemon_script_dir/lib/oc-paths.sh"
 STATE_DIR=$(fd_resolve_state_dir)
 POLL_SEC="${FD_POLL_SEC:-2}"
 STABILITY_SEC="${FD_STABILITY:-3}"
@@ -90,9 +94,7 @@ WAKE_PENDING_TTL="${FD_WAKE_PENDING_TTL:-300}"
 HEARTBEAT_TICKS="${FD_HEARTBEAT_TICKS:-60}"
 MAX_LIFETIME="${FD_MAX_LIFETIME:-14400}"  # 4h; 0 disables
 GRACE_SEC="${FD_GRACE_SEC:-30}"           # cold-start wake-suppression window
-# opencode TUI has higher mid-frame hash churn than Claude Code; bump
-# stability threshold for opencode panes specifically.
-OPENCODE_STABILITY_SEC="${FD_OPENCODE_STABILITY:-5}"
+OC_POLL_SEC="${FD_OC_POLL_SEC:-2}"        # opencode subscriber poll interval
 
 # Canonical classifier tag allowlist for stable-wake. Only these wake the
 # master from a stable buffer. Bell wake is independent and unconditional.
@@ -265,8 +267,18 @@ gc_orphan_state() {
               "$STATE_DIR/fd-daemon-${key}.lock" \
               "$STATE_DIR/fd-daemon-${key}.log" \
               "$STATE_DIR/fd-daemon-${key}.heartbeat" \
-              "$STATE_DIR/fd-master-${key}.busy"
+              "$STATE_DIR/fd-master-${key}.busy" \
+              "$STATE_DIR/fd-wake-events-${key}.log"
       fi
+    fi
+  done
+  # Sweep subscriber pid files whose pid is dead. Live subscribers
+  # belong to live daemons elsewhere on this host — leave them alone.
+  local sub_file sub_pid
+  for sub_file in "$STATE_DIR"/fd-subscriber-*.pid; do
+    sub_pid=$(cat "$sub_file" 2>/dev/null || echo "")
+    if [[ ! "$sub_pid" =~ ^[1-9][0-9]*$ ]] || ! kill -0 "$sub_pid" 2>/dev/null; then
+      rm -f "$sub_file"
     fi
   done
   shopt -u nullglob
@@ -320,30 +332,17 @@ session_alive() {
   tmux list-sessions -F '#{session_id}' 2>/dev/null | grep -qx "$SESSION_ID"
 }
 
-# --- Capture strategy (per harness) -------------------------------------------
-# Harness arg is per-pane (from PANE_HARNESS map populated at run_loop init);
-# falls back to the global FD_HARNESS env if no per-pane mapping was passed.
+# --- Capture strategy ---------------------------------------------------------
+# Harness-agnostic. Per-harness quirks live in adapters (opencode HTTP attach,
+# Phase 1; claude channels, Phase 2; ...) — the tmux capture path is the
+# fallback for harnesses without adapters and panes with absent metadata.
 capture_pane() {
-  local target="$1" pane_harness="${2:-$HARNESS}"
-  case "$pane_harness" in
-    opencode)
-      # opencode TUI scrolls rendered buffer above viewport; -S returns stale
-      # middle content. Visible viewport only.
-      tmux capture-pane -t "$target" -p 2>/dev/null
-      ;;
-    *)
-      tmux capture-pane -t "$target" -p -S "-${CAPTURE_LINES}" 2>/dev/null
-      ;;
-  esac
+  local target="$1"
+  tmux capture-pane -t "$target" -p -S "-${CAPTURE_LINES}" 2>/dev/null
 }
 
-# Per-pane stability threshold. opencode's mid-frame churn requires a
-# longer settle window before classifying.
 stability_for_harness() {
-  case "$1" in
-    opencode) echo "$OPENCODE_STABILITY_SEC" ;;
-    *)        echo "$STABILITY_SEC" ;;
-  esac
+  echo "$STABILITY_SEC"
 }
 
 # --- Classifier ----------------------------------------------------------------
@@ -718,9 +717,119 @@ clear_bell_for_window() {
   tmux select-window -t "$win_id" \; select-window -t "$orig_wid" 2>/dev/null || true
 }
 
+# --- Opencode HTTP-attach subscriber ------------------------------------------
+# Per-opencode-pane subprocess that polls /session/<id>/message at
+# OC_POLL_SEC cadence, classifies the last assistant text, and appends a
+# normalized turn-end event to the wake-events log under SESSION_LOCK.
+# Replaces the per-tick capture-pane → hash → classify path for opencode
+# panes with adapter metadata in the registry.
+PANE_REGISTRY="$_daemon_script_dir/pane-registry"
+WAKE_EVENTS_LOG=$(oc_wake_events_log "$SESSION_KEY")
+
+oc_subscriber_loop() {
+  local pane_id="$1" oc_url="$2" session_id="$3" parent_pid="$4"
+  local last_hash=""
+  while true; do
+    if ! kill -0 "$parent_pid" 2>/dev/null; then exit 0; fi
+    local resp last_text hash tag text_excerpt
+    resp=$(curl -s --max-time 5 "$oc_url/session/$session_id/message" 2>/dev/null || echo "")
+    if [[ -n "$resp" ]]; then
+      last_text=$(jq -r "$OC_LAST_ASSISTANT_JQ" <<< "$resp" 2>/dev/null || echo "")
+      if [[ -n "$last_text" ]]; then
+        hash=$(printf '%s' "$last_text" | sha256sum | cut -d' ' -f1 | head -c 12)
+        if [[ "$hash" != "$last_hash" ]]; then
+          if [[ -n "$CLASSIFIER" && -x "$CLASSIFIER" ]]; then
+            tag=$(printf '%s' "$last_text" | "$CLASSIFIER" 2>/dev/null || echo "rendering")
+          else
+            tag="rendering"
+          fi
+          text_excerpt=$(printf '%s' "$last_text" | head -c 1024)
+          # Append under SESSION_LOCK on a fresh FD so concurrent
+          # subscribers + the main loop's drain serialize.
+          ( exec 211>"$SESSION_LOCK"
+            flock 211
+            jq -nc --arg ts "$(date -Iseconds)" \
+                   --arg pid "$pane_id" \
+                   --arg harness "opencode" \
+                   --arg text "$text_excerpt" \
+                   --arg tag "$tag" \
+                   --arg h "$hash" \
+                   '{ts:$ts, pane_id:$pid, harness:$harness, last_assistant_text:$text, classifier_tag:$tag, hash:$h}' \
+                   >> "$WAKE_EVENTS_LOG"
+          )
+          last_hash="$hash"
+        fi
+      fi
+    fi
+    sleep "$OC_POLL_SEC"
+  done
+}
+
+spawn_oc_subscriber() {
+  local pane_id="$1" oc_url="$2" session_id="$3"
+  local pid_file; pid_file=$(oc_subscriber_pid_file "$pane_id")
+  if [[ -f "$pid_file" ]]; then
+    local existing; existing=$(cat "$pid_file" 2>/dev/null || echo "")
+    if [[ "$existing" =~ ^[1-9][0-9]*$ ]] && kill -0 "$existing" 2>/dev/null; then
+      log oc-subscriber "pane=$pane_id existing pid=$existing; reattaching"
+      return 0
+    fi
+  fi
+  oc_subscriber_loop "$pane_id" "$oc_url" "$session_id" $$ &
+  local sub_pid=$!
+  echo "$sub_pid" > "$pid_file"
+  log oc-subscriber-spawn "pane=$pane_id pid=$sub_pid url=$oc_url session=$session_id"
+}
+
+kill_all_oc_subscribers() {
+  shopt -s nullglob
+  local f pid
+  for f in "$STATE_DIR"/fd-subscriber-*.pid; do
+    pid=$(cat "$f" 2>/dev/null || echo "")
+    if [[ "$pid" =~ ^[1-9][0-9]*$ ]] && kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true
+    fi
+    rm -f "$f"
+  done
+  shopt -u nullglob
+}
+
+# Atomically drain the wake-events log under SESSION_LOCK. Each line is
+# emitted as a JSONL record; caller consumes line-by-line. Snapshot+rm
+# pattern matches drain_events: lock-held read+remove guarantees no
+# subscriber can append a record we miss.
+drain_oc_wake_events() {
+  [[ -f "$WAKE_EVENTS_LOG" ]] || return 0
+  exec 212>"$SESSION_LOCK"
+  flock 212
+  if [[ -f "$WAKE_EVENTS_LOG" ]]; then
+    local snap="${WAKE_EVENTS_LOG}.draining.$$"
+    if mv "$WAKE_EVENTS_LOG" "$snap" 2>/dev/null; then
+      cat "$snap"
+      rm -f "$snap"
+    fi
+  fi
+  exec 212>&-
+}
+
+# Resolve oc-attach metadata for a pane_target. Looks up the issue via
+# pane-registry find-by-pane, then oc-attach-args. Empty stdout when
+# either resolution fails — caller falls back to capture-pane loop.
+resolve_oc_meta() {
+  local pane_target="$1"
+  local issue
+  issue=$("$PANE_REGISTRY" find-by-pane "$pane_target" 2>/dev/null || echo "")
+  [[ -z "$issue" ]] && return 1
+  local args
+  args=$("$PANE_REGISTRY" oc-attach-args "$issue" 2>/dev/null || echo "")
+  [[ -z "$args" ]] && return 1
+  echo "$args"
+}
+
 # --- Main loop -----------------------------------------------------------------
 run_loop() {
   declare -A LAST_HASH HASH_SINCE NOTIFIED_HASH LAST_BELL_HASH LAST_GONE_LOG FIRST_SEEN PANE_HARNESS
+  declare -A OC_SUBSCRIBED OC_PANE_TARGET
   IFS=',' read -r -a INNER_TARGET_ARR <<< "$INNER_TARGETS"
   # Parallel harness list. Caller passes either the same length as
   # --inner (per-pane mapping) or omits it entirely (fallback to global
@@ -755,13 +864,32 @@ run_loop() {
     SEEN_INNER[$id]=1
     INNER_IDS+=("$id")
     PANE_HARNESS[$id]="${INNER_HARNESS_ARR[$idx]:-$HARNESS}"
+    OC_PANE_TARGET[$id]="$t"
     (( idx++ ))
+  done
+
+  # Spawn opencode subscribers for panes with HTTP-attach metadata in the
+  # registry. Panes without metadata fall through to the per-tick
+  # capture-pane loop (legacy fallback path). Subscribers survive
+  # max-lifetime exec; on re-entry, spawn_oc_subscriber sees the existing
+  # pid file and reattaches without spawning a duplicate.
+  for inner_id in "${INNER_IDS[@]}"; do
+    [[ "${PANE_HARNESS[$inner_id]:-}" == "opencode" ]] || continue
+    local _meta _url _sid
+    if _meta=$(resolve_oc_meta "${OC_PANE_TARGET[$inner_id]}"); then
+      _url=$(awk '{for(i=1;i<=NF;i++)if($i=="--url"){print $(i+1);exit}}' <<< "$_meta")
+      _sid=$(awk '{for(i=1;i<=NF;i++)if($i=="--session"){print $(i+1);exit}}' <<< "$_meta")
+      if [[ -n "$_url" && -n "$_sid" ]]; then
+        spawn_oc_subscriber "$inner_id" "$_url" "$_sid"
+        OC_SUBSCRIBED[$inner_id]=1
+      fi
+    fi
   done
 
   local HEARTBEAT_COUNTER=0
   local START_EPOCH; START_EPOCH=$(date +%s)
   local HEARTBEAT_FILE; HEARTBEAT_FILE=$(fd_heartbeat_file "$STATE_DIR" "$SESSION_KEY")
-  log start "pid=$$ session_id=$SESSION_ID name=$SESSION_NAME master_id=$master_id inner_ids=${INNER_IDS[*]}"
+  log start "pid=$$ session_id=$SESSION_ID name=$SESSION_NAME master_id=$master_id inner_ids=${INNER_IDS[*]} oc_subscribed=${#OC_SUBSCRIBED[@]}"
   # Separate traps:
   #   - EXIT: cleanup only (called on natural exit too).
   #   - INT/TERM: cleanup + explicit exit (so SIGTERM from `stop` actually
@@ -769,7 +897,9 @@ run_loop() {
   # Both use non-blocking SESSION_LOCK to avoid self-deadlock if signal fires
   # while we already hold the lock.
   _on_exit() {
+    kill_all_oc_subscribers
     rm -f "$PID_FILE" "$HEARTBEAT_FILE"
+    rm -f "$WAKE_EVENTS_LOG"
     locked_state_cleanup --nonblock
     log stop "pid=$$"
   }
@@ -824,6 +954,48 @@ run_loop() {
     declare -a tick_pending_is_bell=()  # subset of tick_pending_ids that came from bell branch
     declare -a tick_bell_wins=()
 
+    # Drain opencode subscriber events first. Each event is a "turn-end"
+    # signal from /session/<id>/message poll: structured tag + hash. We
+    # apply the same wake-decision pipeline (cold-start grace,
+    # NOTIFIED_HASH dedup, canonical-tag check) as the per-pane bell /
+    # stable-hash branches below.
+    local _wake_events
+    _wake_events=$(drain_oc_wake_events)
+    if [[ -n "$_wake_events" ]]; then
+      while IFS= read -r _line; do
+        [[ -z "$_line" ]] && continue
+        local ev_pid ev_hash ev_tag
+        ev_pid=$(jq -r '.pane_id // ""' <<< "$_line" 2>/dev/null)
+        ev_hash=$(jq -r '.hash // ""' <<< "$_line" 2>/dev/null)
+        ev_tag=$(jq -r '.classifier_tag // "rendering"' <<< "$_line" 2>/dev/null)
+        [[ -z "$ev_pid" || -z "$ev_hash" ]] && continue
+        pane_alive "$ev_pid" || continue
+        if [[ -z "${FIRST_SEEN[$ev_pid]:-}" ]]; then
+          FIRST_SEEN[$ev_pid]="$now"
+        fi
+        local _ev_age=$(( now - ${FIRST_SEEN[$ev_pid]} ))
+        if (( _ev_age < GRACE_SEC )) && is_canonical_tag "$ev_tag"; then
+          log grace-skip "$ev_pid oc-event suppressed tag=$ev_tag (age=${_ev_age}s < ${GRACE_SEC}s)"
+          NOTIFIED_HASH[$ev_pid]="$ev_hash"
+          continue
+        fi
+        if [[ "${NOTIFIED_HASH[$ev_pid]:-}" == "$ev_hash" ]]; then
+          continue
+        fi
+        if is_canonical_tag "$ev_tag"; then
+          log classify "$ev_pid oc-event tag=$ev_tag (canonical)"
+          tick_reasons+=("oc:$ev_pid:$ev_tag")
+          tick_pending_ids+=("$ev_pid")
+          tick_pending_hashes+=("$ev_hash")
+          tick_pending_tags+=("$ev_tag")
+          append_event "$ev_pid" "$ev_hash" "$ev_tag" "oc-event" 0 false
+        else
+          (( VERBOSE == 1 )) && log classify "$ev_pid oc-event tag=$ev_tag (non-canonical)"
+          NOTIFIED_HASH[$ev_pid]="$ev_hash"
+        fi
+      done <<< "$_wake_events"
+    fi
+
     for inner_id in "${INNER_IDS[@]}"; do
       if ! pane_alive "$inner_id"; then
         local last_gone="${LAST_GONE_LOG[$inner_id]:-0}"
@@ -831,6 +1003,13 @@ run_loop() {
           log pane-gone "$inner_id no longer exists; skipping"
           LAST_GONE_LOG[$inner_id]="$now"
         fi
+        continue
+      fi
+
+      # Adapter-covered panes: subscriber emits wake events; main loop
+      # processed them above. Skip the capture-pane / bell / hash-stable
+      # path entirely so we don't double-wake on the same turn.
+      if [[ "${OC_SUBSCRIBED[$inner_id]:-}" == "1" ]]; then
         continue
       fi
 
