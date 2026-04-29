@@ -135,7 +135,7 @@ function panelLine(content: string, width: number): string {
 }
 
 function selectedLine(theme: Theme, content: string, width: number): string {
-	return theme.bg("selectedBg", padAnsi(theme.fg("text", content), width));
+	return theme.bg("toolSuccessBg", padAnsi(theme.fg("text", content), width));
 }
 
 function popupContentWidth(width: number): number {
@@ -258,9 +258,13 @@ async function openStashPopup(ctx: ExtensionContext): Promise<void> {
 						const countText = `~${count} ${count === 1 ? "line" : "lines"}`;
 						const countWidth = visibleWidth(countText);
 						const rowWidth = innerWidth;
-						const previewWidth = Math.max(1, rowWidth - countWidth - 2);
+						const marker = index === selected ? theme.fg("accent", "› ") : "  ";
+						const markerWidth = visibleWidth("› ");
+						const previewWidth = Math.max(1, rowWidth - markerWidth - countWidth - 2);
 						const preview = truncateToWidth(previewText(item.text), previewWidth, "");
-						const row = `${preview}${" ".repeat(Math.max(1, rowWidth - visibleWidth(preview) - countWidth))}${theme.fg("dim", countText)}`;
+						const styledPreview = index === selected ? theme.bold(preview) : preview;
+						const styledCount = index === selected ? theme.fg("text", countText) : theme.fg("dim", countText);
+						const row = `${marker}${styledPreview}${" ".repeat(Math.max(1, rowWidth - markerWidth - visibleWidth(preview) - countWidth))}${styledCount}`;
 						lines.push(index === selected ? selectedLine(theme, row, innerWidth) : panelLine(row, innerWidth));
 					}
 				}
