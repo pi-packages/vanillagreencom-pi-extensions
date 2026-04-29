@@ -196,8 +196,10 @@ if grep -qE '(←|→).*(☐|☒|✔|✓)|(☐|☒|✔|✓).*(←|→)' <<< "$bu
   emit multi-select-tabbed "tabbed checkbox select"
 fi
 
-# Generic option-list shape (numbered options + footer)
-if grep -qE '^\s*[1-9]\. ' <<< "$buf"; then
+# Generic option-list shape (numbered options). Accepts both `1.` and
+# `1)` delimiters — different harnesses use different conventions
+# (claude/opencode tend toward `1.`, pi tends toward `1)`).
+if grep -qE '^\s*[1-9][.)] ' <<< "$buf"; then
   emit generic-multi-choice "unmatched option list"
 fi
 
