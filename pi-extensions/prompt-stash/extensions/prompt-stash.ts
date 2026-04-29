@@ -159,16 +159,16 @@ function framePopup(lines: string[], width: number, theme: Theme): string[] {
 	return framed.map((line) => truncateToWidth(line, width, ""));
 }
 
-function renderSearch(query: string, cursor: number, width: number, theme: Theme): string {
-	if (query.length === 0) {
-		return `${theme.bg("selectedBg", theme.fg("text", "S"))}${theme.fg("dim", "earch")}`;
-	}
-
+function renderSearchInput(query: string, cursor: number, width: number, theme: Theme): string {
+	const safeWidth = Math.max(1, width);
 	const safeCursor = Math.max(0, Math.min(cursor, query.length));
-	const before = query.slice(0, safeCursor);
-	const char = safeCursor < query.length ? query[safeCursor] : " ";
-	const after = safeCursor < query.length ? query.slice(safeCursor + 1) : "";
-	return truncateToWidth(`${before}${theme.bg("selectedBg", theme.fg("text", char))}${after}`, width, "");
+	const visibleQuery = query.length === 0 ? theme.fg("dim", "Search") : query;
+	const before = query.length === 0 ? "" : query.slice(0, safeCursor);
+	const cursorChar = query.length === 0 ? " " : safeCursor < query.length ? query[safeCursor] : " ";
+	const after = query.length === 0 ? visibleQuery : safeCursor < query.length ? query.slice(safeCursor + 1) : "";
+	const cursorGlyph = theme.bg("selectedBg", theme.fg("text", cursorChar));
+	const raw = `${theme.fg("borderMuted", "▏ ")}${before}${cursorGlyph}${after}`;
+	return theme.bg("toolPendingBg", padAnsi(raw, safeWidth));
 }
 
 function filterItems(items: StashItem[], query: string): StashItem[] {
@@ -246,7 +246,7 @@ async function openStashPopup(ctx: ExtensionContext): Promise<void> {
 				lines.push(panelLine(`${title}${" ".repeat(titleGap)}${esc}`, innerWidth));
 				lines.push(panelLine(theme.fg("dim", "Type to search · ↑↓/jk select · enter pop · ctrl+d delete · ctrl+x delete all"), innerWidth));
 				lines.push(panelLine("", innerWidth));
-				lines.push(panelLine(`${theme.fg("muted", "Search")} ${renderSearch(query, searchCursor, Math.max(1, innerWidth - 7), theme)}`, innerWidth));
+				lines.push(panelLine(renderSearchInput(query, searchCursor, innerWidth, theme), innerWidth));
 				lines.push(panelLine("", innerWidth));
 
 				if (results.length === 0) {
