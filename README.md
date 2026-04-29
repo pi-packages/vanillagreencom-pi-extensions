@@ -346,78 +346,13 @@ Windows note:
 
 ### Pi Extensions
 
-#### `pi-background-tasks`
+| Extension | Critical functionality |
+|---|---|
+| `pi-background-tasks` | Non-blocking shell task management for Pi via `bg_task` and `/bg`; tracks logs and can notify on task exit or matching output. |
+| `pi-session-bridge` | Unix-socket JSONL side channel for active Pi sessions: send prompts, steer/follow-up, abort, inspect state/history, and stream events. |
+| `pi-statusline` | Compact interactive Pi TUI status line showing project/git/model/context information. |
 
-- **Purpose:** Adds explicit non-blocking shell task management to Pi so long-running commands do not block the current turn.
-- **Tools:** `bg_task` for spawn/list/log/stop/clear; `bg_status` compatibility tool for PID-based status/log/stop.
-- **Commands:** `/bg`, `/bg run <cmd>`, `/bg list`, `/bg log <id>`, `/bg stop <id>`, `/bg clear`.
-- **UI:** `Ctrl+Shift+B` opens a padded, bordered dashboard overlay in interactive Pi; a compact task widget appears below the editor while tasks are tracked.
-- **Logs:** `${PI_BG_TASK_DIR:-$TMPDIR/vstack-pi-bg}`.
-- **Safety:** tasks default to a 10-minute timeout and are stopped as a process group on Unix; session shutdown terminates running tasks.
-- **More:** [pi-extensions/pi-background-tasks/README.md](pi-extensions/pi-background-tasks/README.md).
-
-#### `pi-session-bridge`
-
-- **Purpose:** Keeps the normal interactive Pi TUI visible while exposing a Unix-socket JSONL side channel for external control and event streaming.
-- **Enables:** send prompts, steer/follow-up, abort, inspect state/history, subscribe to live events — all without tmux send-keys or pane scraping.
-- **Socket registry:** `${PI_BRIDGE_DIR:-/tmp/pi-session-bridge-$UID}/instances/<pid>.json`
-- **Socket path:** `${PI_BRIDGE_DIR:-/tmp/pi-session-bridge-$UID}/pi-<pid>.sock`
-- **CLI** (`pi-bridge`):
-  - `pi-bridge list`
-  - `pi-bridge state --pid <pid>`
-  - `pi-bridge commands --pid <pid>`
-  - `pi-bridge stream --pid <pid>`
-  - `pi-bridge send --pid <pid> "message"`
-  - `pi-bridge steer --pid <pid> "message"`
-  - `pi-bridge follow-up --pid <pid> "message"`
-  - `pi-bridge history --pid <pid> [limit]`
-  - `pi-bridge emit --pid <pid> "test event"`
-- **More:** [pi-extensions/session-bridge/README.md](pi-extensions/session-bridge/README.md).
-
-#### `pi-statusline`
-
-- **Purpose:** Replaces Pi's default footer/editor chrome with a compact Claude-style status line and `π` prompt.
-- **Shows:** repo/project, branch with worktree dirty state, model, thinking level, context window size, remaining context percent.
-- **Behavior:** wraps long input cleanly, adds one blank line below the prompt, keeps autocomplete visible.
-- **Commands:** none.
-- **Best for:** interactive Pi TUI mode. Safely degrades / no-ops in RPC, JSON, and print modes.
-- **More:** [pi-extensions/pi-statusline/README.md](pi-extensions/pi-statusline/README.md).
-
-Source layout:
-
-```text
-pi-extensions/
-└─ <name>/
-   ├─ package.json        npm-shaped, with `pi.extensions` and optional `bin`
-   ├─ extensions/*.ts     loaded by Pi via the `pi.extensions` manifest
-   ├─ bin/*               optional CLI scripts
-   ├─ README.md
-   └─ THIRD_PARTY_NOTICES.md  optional attribution for vendored/base code
-```
-
-Authoring a new Pi extension package: write a `package.json` with `keywords: ["pi-package"]`, `pi.extensions`, and any `bin` scripts. vstack will pick it up automatically the next time you run `vstack add` against a source repo containing it.
-
-Updates: edit files under `pi-extensions/<name>/` in the vstack repo, then run `vstack refresh` (or `vstack add` again) — installed Pi scopes pick up the change. Users never edit the deployed copy directly.
-
-#### Settings layout
-
-vstack writes Pi's `packages` array using the relative form Pi resolves against the settings file directory:
-
-```json
-{
-  "packages": [
-    "./packages/pi-session-bridge",
-    "./packages/pi-statusline"
-  ]
-}
-```
-
-| Scope | Settings file | Packages directory |
-|---|---|---|
-| Global | `~/.pi/agent/settings.json` | `~/.pi/agent/packages/<name>/` |
-| Project | `.pi/settings.json` | `.pi/packages/<name>/` |
-
-Other entries in `settings.json` are preserved across installs and refreshes; vstack only mutates the `packages` array, dedupes the entries it owns, and writes the file back. A legacy absolute-path entry (from earlier vstack versions) is replaced with the canonical relative form on the next `vstack add`/`refresh`.
+vstack installs selected Pi extension packages into `<scope>/packages/<name>` and registers `./packages/<name>` in Pi's `settings.json`. Detailed usage lives in each package's `pi-extensions/<name>/README.md`.
 
 ## License
 
