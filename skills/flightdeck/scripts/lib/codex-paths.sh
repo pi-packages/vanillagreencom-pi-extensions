@@ -169,18 +169,31 @@ cx_bridge_run() {
 
 # jq filter: extract last assistant text from `bridge turns` output.
 # Verified shape (codex 0.125.0):
-#   userMessage: { type:"userMessage", content: [{type:"text", text:"..."}] }
-#   agentMessage: { type:"agentMessage", text:"...", phase:"final_answer" }
-# agentMessage uses .text directly, NOT .content[].text — different
-# from userMessage. Filter tries .text first, falls back to .content
-# walk for resilience across versions.
+#   - turns/list returns turns in REVERSE-CHRONOLOGICAL order (newest
+#     first, hence the field name `backwardsCursor`).
+#   - userMessage: { type:"userMessage", content: [{type:"text", text:"..."}] }
+#   - agentMessage: { type:"agentMessage", text:"...", phase:"final_answer" }
+#     (text directly, NOT .content[]).
+#
+# Pick the most recently *completed* turn by completedAt (falls back to
+# startedAt if not set), take the LAST agentMessage in that turn's
+# items (final answer in case there were multiple agent steps).
 CX_LAST_ASSISTANT_JQ='
-  ( [ ( .data // [] ) | .[]? | (.items // [])[] | select(.type == "agentMessage") ] | last )
-  | if . == null then ""
+  ( [ ( .data // [] ) | .[]? | select((.status // "") == "completed") ]
+    | sort_by(.completedAt // .startedAt // 0)
+    | last
+  ) as $turn
+  | if $turn == null then ""
     else
-      ( .text
-        // ( ( .content // [] )
-             | (if type == "array" then map(select(.type == "text") | .text // "") | join("") else . end) )
-        // "" )
+      ( $turn.items // [] )
+      | map(select(.type == "agentMessage"))
+      | last
+      | if . == null then ""
+        else
+          ( .text
+            // ( ( .content // [] )
+                 | (if type == "array" then map(select(.type == "text") | .text // "") | join("") else . end) )
+            // "" )
+        end
     end
 '
