@@ -164,11 +164,11 @@ function renderSearchInput(query: string, cursor: number, width: number, theme: 
 	const safeCursor = Math.max(0, Math.min(cursor, query.length));
 	const visibleQuery = query.length === 0 ? theme.fg("dim", "Search") : query;
 	const before = query.length === 0 ? "" : query.slice(0, safeCursor);
-	const cursorChar = query.length === 0 ? " " : safeCursor < query.length ? query[safeCursor] : " ";
+	const cursorChar = query.length === 0 || safeCursor >= query.length ? "▌" : query[safeCursor];
 	const after = query.length === 0 ? visibleQuery : safeCursor < query.length ? query.slice(safeCursor + 1) : "";
-	const cursorGlyph = theme.bg("selectedBg", theme.fg("text", cursorChar));
+	const cursorGlyph = theme.fg("accent", cursorChar);
 	const raw = `${theme.fg("borderMuted", "▏ ")}${before}${cursorGlyph}${after}`;
-	return theme.bg("userMessageBg", padAnsi(raw, safeWidth));
+	return theme.bg("toolSuccessBg", padAnsi(raw, safeWidth));
 }
 
 function filterItems(items: StashItem[], query: string): StashItem[] {
