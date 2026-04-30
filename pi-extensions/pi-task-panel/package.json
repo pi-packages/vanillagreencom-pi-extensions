@@ -91,6 +91,25 @@
           "apply": "live"
         },
         {
+          "key": "compactToolOutput",
+          "label": "Compact todo_write output",
+          "description": "Render todo_write results as a single inline status row instead of Pi's padded tool box.",
+          "type": "boolean",
+          "default": true,
+          "category": "Tool Output",
+          "apply": "reload",
+          "requiresReload": true
+        },
+        {
+          "key": "showWorkflowReminder",
+          "label": "Task workflow reminders",
+          "description": "Remind the agent to start tasks before focused work, mark tasks done/drop when status changes, and add discovered follow-ups.",
+          "type": "boolean",
+          "default": true,
+          "category": "Reminder",
+          "apply": "live"
+        },
+        {
           "key": "showIncompleteReminder",
           "label": "Incomplete-task reminders",
           "description": "Show a subtle reminder when an agent turn ends with incomplete tasks.",

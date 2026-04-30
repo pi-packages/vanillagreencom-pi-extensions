@@ -141,6 +141,19 @@ function renderTaskLine(task: TaskItem, theme: Theme, active = false): string {
 	return ` ${marker} ${taskText(task, active, theme)}${notes}`;
 }
 
+class SingleLineText {
+	constructor(private readonly text: string) {}
+	invalidate(): void {}
+	render(width: number): string[] {
+		if (!this.text.trim()) return [];
+		return [truncateToWidth(this.text, Math.max(1, width), "")];
+	}
+}
+
+function singleLine(text: string): SingleLineText {
+	return new SingleLineText(text);
+}
+
 function formatShortcutHint(shortcut: string): string {
 	return shortcut
 		.split("+")
@@ -357,22 +370,59 @@ function summarize(state: TodoState): string {
 	return `${state.tasks.length} task(s), ${remainingCount(state)} remaining, panel=${state.panel}`;
 }
 
+function quoteTask(content: string): string {
+	return `"${content.replace(/\s+/g, " ").trim().replace(/"/g, "'")}"`;
+}
+
+function taskSuffix(state: TodoState): string {
+	const remaining = remainingCount(state);
+	return remaining === 0 ? "all complete" : `${remaining} remaining`;
+}
+
 function toolResultSummary(action: string, message: string, state: TodoState): string {
 	if (message.startsWith("No task")) return message;
-	const remaining = remainingCount(state);
-	const suffix = remaining === 0 ? "all complete" : `${remaining} remaining`;
+	const suffix = taskSuffix(state);
 	switch (action) {
 		case "replace": return `${state.tasks.length} tasks written (${suffix})`;
-		case "add_task": return `1 task added (${suffix})`;
-		case "add_phase": return "phase added";
-		case "start_task": return `task started (${suffix})`;
-		case "mark_done": return `1 task completed (${suffix})`;
-		case "drop_task": return `1 task dropped (${suffix})`;
-		case "remove_task": return `1 task removed (${suffix})`;
-		case "append_note": return "task note added";
-		case "set_panel": return `task panel ${state.panel}`;
+		case "add_task": return `Task ${quoteTask(message)} added (${suffix})`;
+		case "add_phase": return `Phase ${quoteTask(message)} added`;
+		case "start_task": return `Task ${quoteTask(message)} started (${suffix})`;
+		case "mark_done": return `Task ${quoteTask(message)} completed (${suffix})`;
+		case "drop_task": return `Task ${quoteTask(message)} dropped (${suffix})`;
+		case "remove_task": return `Task ${quoteTask(message)} removed (${suffix})`;
+		case "append_note": return `Note added to ${quoteTask(message)}`;
+		case "set_panel": return `Task panel ${state.panel}`;
 		default: return message;
 	}
+}
+
+function resultColor(action: string, summary: string): string {
+	if (summary.startsWith("No task")) return "warning";
+	if (action === "mark_done") return "success";
+	if (action === "drop_task" || action === "remove_task") return "error";
+	if (action === "start_task" || action === "add_task" || action === "replace") return "accent";
+	return "muted";
+}
+
+function renderTodoToolSummary(summary: string, action: string, theme: Theme): string {
+	const color = resultColor(action, summary);
+	const bullet = theme.fg(color, "● ");
+	const taskMatch = summary.match(/^(Task )("[^"]+")( .+)$/);
+	if (taskMatch) {
+		return `${bullet}${theme.fg("muted", taskMatch[1] ?? "Task ")}${theme.fg("accent", taskMatch[2] ?? "")}${theme.fg(color, taskMatch[3] ?? "")}`;
+	}
+	return `${bullet}${theme.fg(color === "muted" ? "muted" : "text", summary)}`;
+}
+
+function workflowReminder(state: TodoState): string {
+	const active = activeTask(state);
+	const activeText = active ? ` Current active task: ${quoteTask(active.content)}.` : "";
+	return `Task workflow reminder:${activeText} Use todo_write start_task before focused work, mark_done/drop_task immediately when task status changes, and add_task for discovered follow-ups.`;
+}
+
+function toolResultContent(summary: string, state: TodoState, cwd: string): string {
+	if (!settingBoolean("showWorkflowReminder", true, cwd) || remainingCount(state) === 0) return `• ${summary}`;
+	return `• ${summary}\n${workflowReminder(state)}`;
 }
 
 const TodoToolParams = Type.Object({
@@ -404,6 +454,10 @@ export default function taskPanel(pi: ExtensionAPI): void {
 		state = emptyState(ctx.cwd);
 		for (const entry of ctx.sessionManager.getBranch()) {
 			if (entry.type === "custom" && entry.customType === STATE_TYPE) state = normalizeState(entry.data, ctx.cwd);
+			if (entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "todo_write") {
+				const restored = normalizeState(entry.message.details?.state, ctx.cwd);
+				if (restored.tasks.length > 0 || restored.phases.length > 0) state = restored;
+			}
 		}
 		updatePanelAfterTaskChange(state, ctx.cwd);
 		syncWidget(ctx);
@@ -482,7 +536,10 @@ export default function taskPanel(pi: ExtensionAPI): void {
 
 	pi.registerCommand("todo", { description: "Manage the persistent task panel", handler: async (args, ctx) => handleTodoCommand(args, ctx) });
 
+	const compactToolOutput = settingBoolean("compactToolOutput", true);
+
 	pi.registerTool({
+		...(compactToolOutput ? { renderShell: "self" as const } : {}),
 		name: "todo_write",
 		label: "Todo Write",
 		description: "Structured task panel updates: replace/add/start/done/drop/remove/note/panel.",
@@ -499,26 +556,28 @@ export default function taskPanel(pi: ExtensionAPI): void {
 			const message = mutate(runCtx, () => {
 				switch (params.action) {
 					case "replace": state = emptyState(runCtx.cwd); for (const input of params.tasks ?? []) { const task = addTask(state, input.content, input.phase, runCtx.cwd); task.status = isStatus(input.status) ? input.status : "pending"; task.notes = input.notes ?? []; } updatePanelAfterTaskChange(state, runCtx.cwd); return `Replaced tasks (${state.tasks.length})`;
-					case "add_phase": ensurePhase(state, params.phase ?? "General"); return `Added phase ${params.phase ?? "General"}`;
-					case "add_task": return `Added ${addTask(state, params.task ?? "Task", params.phase, runCtx.cwd).id}`;
+					case "add_phase": ensurePhase(state, params.phase ?? "General"); return params.phase ?? "General";
+					case "add_task": return addTask(state, params.task ?? "Task", params.phase, runCtx.cwd).content;
 					case "start_task": return startTask(state, params.task ?? "", runCtx.cwd)?.content ?? "No task matched";
 					case "mark_done": return markStatus(state, params.task ?? "", "completed", runCtx.cwd)?.content ?? "No task matched";
 					case "drop_task": return markStatus(state, params.task ?? "", "abandoned", runCtx.cwd)?.content ?? "No task matched";
-					case "remove_task": return removeTask(state, params.task ?? "", runCtx.cwd) ? "Removed task" : "No task matched";
-					case "append_note": { const task = findTaskOrActive(state, params.task ?? ""); if (!task) return "No task matched"; task.notes.push(params.note ?? ""); return `Noted ${task.content}`; }
+					case "remove_task": { const task = findTask(state, params.task ?? ""); if (!task) return "No task matched"; state.tasks = state.tasks.filter((candidate) => candidate.id !== task.id); updatePanelAfterTaskChange(state, runCtx.cwd); return task.content; }
+					case "append_note": { const task = findTaskOrActive(state, params.task ?? ""); if (!task) return "No task matched"; task.notes.push(params.note ?? ""); return task.content; }
 					case "set_panel": state.panel = params.panel ?? "compact"; return `Panel ${state.panel}`;
 					default: return "No todo action matched";
 				}
 			});
 			const summary = toolResultSummary(params.action, message, state);
-			return { content: [{ type: "text", text: `• ${summary}` }], details: { summary, state: cloneState(state) } };
+			return { content: [{ type: "text", text: toolResultContent(summary, state, runCtx.cwd) }], details: { action: params.action, message, summary, state: cloneState(state) } };
 		},
 		renderCall(_args, theme) {
-			return new Text(theme.fg("toolTitle", "todo_write"), 0, 0);
+			return compactToolOutput ? singleLine("") : new Text(theme.fg("toolTitle", "todo_write"), 0, 0);
 		},
 		renderResult(result, _options, theme) {
-			const text = result.content?.find((part: any) => part?.type === "text")?.text ?? "• tasks updated";
-			return new Text(theme.fg("muted", text), 0, 0);
+			const summary = result.details?.summary ?? result.content?.find((part: any) => part?.type === "text")?.text?.replace(/^•\s*/, "") ?? "tasks updated";
+			const action = result.details?.action ?? "";
+			if (compactToolOutput) return singleLine(renderTodoToolSummary(summary, action, theme));
+			return new Text(theme.fg("muted", `• ${summary}`), 0, 0);
 		},
 	});
 
@@ -526,12 +585,16 @@ export default function taskPanel(pi: ExtensionAPI): void {
 		restore(ctx);
 	});
 	pi.on("session_tree", (_event, ctx) => restore(ctx));
+	pi.on("before_agent_start", (event, ctx) => {
+		if (!settingBoolean("showWorkflowReminder", true, ctx.cwd) || remainingCount(state) === 0) return;
+		return { systemPrompt: `${event.systemPrompt}\n\n${workflowReminder(state)}` };
+	});
 	pi.on("agent_end", (_event, ctx) => {
 		if (!settingBoolean("showIncompleteReminder", true, ctx.cwd) || remainingCount(state) === 0) return;
 		const now = Date.now();
 		if (now - lastReminderAt > 60_000) {
 			lastReminderAt = now;
-			ctx.ui.notify(`${remainingCount(state)} task(s) still incomplete. Use /todo manage or todo_write to update.`, "info");
+			ctx.ui.notify(`${remainingCount(state)} task(s) still incomplete. ${workflowReminder(state)}`, "info");
 		}
 	});
 	pi.on("session_shutdown", (_event, ctx) => ctx.ui.setWidget(WIDGET_KEY, undefined));
