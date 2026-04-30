@@ -2,7 +2,7 @@
 
 Compact renderers for built-in Pi tools.
 
-By default this package renders non-mutating tool calls (`read`, `bash`, and, when available, `grep`/`find`/`ls`) as tight Claude-style stacked rows instead of padded boxes. It re-registers built-in tools with the same names and delegates execution to the original Pi implementations. It changes only `renderCall`/`renderResult` so `Ctrl+O` remains Pi's expand/collapse mechanism.
+By default this package renders non-mutating tool calls (`read`, `bash`, and, when available, `grep`/`find`/`ls`) as tight Claude-style stacked rows instead of padded boxes. It re-registers built-in tools with the same names and delegates execution to the original Pi implementations. Stack rows are width-truncated instead of wrapped to keep the ASCII tree compact. It changes only `renderCall`/`renderResult` so `Ctrl+O` remains Pi's expand/collapse mechanism.
 
 It does **not** override Pi's built-in `edit`/`write` renderers by default, so standard diff/edit rendering is preserved. Disable `stackToolCalls` to keep the compact renderers inside Pi's normal tool boxes, or disable `enabled` to return fully to Pi defaults.
 

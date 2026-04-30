@@ -1,4 +1,4 @@
-import { CustomEditor, type ExtensionAPI, type ExtensionContext, type KeybindingsManager } from "@mariozechner/pi-coding-agent";
+import { CustomEditor, type ExtensionAPI, type ExtensionContext, type KeybindingsManager, type Theme } from "@mariozechner/pi-coding-agent";
 import type { EditorTheme, TUI } from "@mariozechner/pi-tui";
 import { matchesKey, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -159,16 +159,10 @@ function attachmentLabels(text: string, cwd = process.cwd()): string[] {
 	return [...seen].sort((a, b) => Number(a.replace(/\D/g, "")) - Number(b.replace(/\D/g, "")) || a.localeCompare(b));
 }
 
-function chip(label: string, style: string, theme?: EditorTheme): string {
+function chip(label: string, theme?: Theme): string {
 	const text = ` ${label} `;
-	if (theme) {
-		if (style === "minimal") return theme.fg("accent", text);
-		if (style === "subtle") return theme.bg("customMessageBg", theme.fg("customMessageLabel", text));
-		return theme.bg("selectedBg", theme.fg("text", text));
-	}
-	if (style === "minimal") return `\x1b[38;5;45m${text}${RESET}`;
-	if (style === "subtle") return `\x1b[48;5;236m\x1b[38;5;153m${text}${RESET}`;
-	return `\x1b[48;5;27m\x1b[38;5;231m${text}${RESET}`;
+	if (theme) return theme.fg("accent", theme.inverse(text));
+	return `\x1b[7m${text}${RESET}`;
 }
 
 function stripAnsi(text: string): string {
@@ -177,16 +171,15 @@ function stripAnsi(text: string): string {
 		.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
 }
 
-function styleImageChips(line: string, cwd: string, theme?: EditorTheme): string {
+function styleImageChips(line: string, cwd: string, theme?: Theme): string {
 	if (!settingBoolean("showImageChips", true, cwd)) return line;
-	const style = settingString("imageChipStyle", "filled", cwd);
-	let out = stripAnsi(line).replace(/\[Image\s+#(\d+)\]/gi, (_match, n) => chip(`Image #${n}`, style, theme));
+	let out = stripAnsi(line).replace(/\[Image\s+#(\d+)\]/gi, (_match, n) => chip(`Image #${n}`, theme));
 	let imageIndex = 0;
 	out = out.replace(IMAGE_PATH_PATTERN, (match, prefix: string, rawPath: string) => {
 		const resolved = resolveMaybeImagePath(rawPath, cwd);
 		if (!resolved) return match;
 		imageIndex += 1;
-		return `${prefix}${chip(`Image ${imageIndex}`, style, theme)}`;
+		return `${prefix}${chip(`Image ${imageIndex}`, theme)}`;
 	});
 	return out;
 }
@@ -200,7 +193,7 @@ function statusText(ctx: ExtensionContext, text: string): string | undefined {
 class QolEditor extends CustomEditor {
 	constructor(
 		tui: TUI,
-		private readonly editorTheme: EditorTheme,
+		editorTheme: EditorTheme,
 		keybindings: KeybindingsManager,
 		private readonly ctx: ExtensionContext,
 	) {
@@ -224,7 +217,7 @@ class QolEditor extends CustomEditor {
 	}
 
 	render(width: number): string[] {
-		return super.render(width).map((line) => truncateToWidth(styleImageChips(line, this.ctx.cwd, this.editorTheme), width, ""));
+		return super.render(width).map((line) => truncateToWidth(styleImageChips(line, this.ctx.cwd, this.ctx.ui.theme), width, ""));
 	}
 
 	private collapseImagePaths(): void {
@@ -266,7 +259,7 @@ function statusMessage(ctx: ExtensionContext): string {
 		"Pi QOL status",
 		`Shift+Enter newline: ${settingBoolean("newlineOnShiftEnter", true, ctx.cwd) ? "enabled" : "disabled"}`,
 		`Fallback newline key: ${settingString("newlineFallbackKey", "ctrl+j", ctx.cwd)}`,
-		`Image chips: ${settingBoolean("showImageChips", true, ctx.cwd) ? `${settingString("imageChipStyle", "filled", ctx.cwd)} (placeholders and existing image paths)` : "off"}`,
+		`Image chips: ${settingBoolean("showImageChips", true, ctx.cwd) ? "filled (placeholders and existing image paths)" : "off"}`,
 		`Image placeholders/paths in draft: ${labels.length ? labels.join(", ") : "none"}`,
 		`Hidden Thinking... placeholder setting: ${String(cfg.showHiddenThinkingPlaceholder ?? false)} (Pi API currently has no assistant-renderer hook, so this is a settings contract only.)`,
 		"If Shift+Enter still submits, configure your terminal/tmux to send a distinct Shift+Enter sequence or use the fallback key.",

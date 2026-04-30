@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Text } from "@mariozechner/pi-tui";
+import { Text, truncateToWidth } from "@mariozechner/pi-tui";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -94,7 +94,14 @@ function diffStats(diff: string): { additions: number; removals: number } {
 }
 
 function truncatedMarker(text: string): boolean {
-	return /truncated|Full output|Output truncated/i.test(text);
+	return /^\s*\[(?:Output|Full output|Read output|Search output|Bash output)[^\n\]]*truncated|^\s*\[[^\n\]]*Full output saved to:/im.test(text);
+}
+
+function resultTruncated(result: any): boolean {
+	const details = result?.details;
+	if (typeof details?.truncation?.truncated === "boolean") return details.truncation.truncated;
+	if (typeof details?.truncated === "boolean") return details.truncated;
+	return truncatedMarker(textContent(result));
 }
 
 function makeText(text: string): Text {
@@ -108,6 +115,34 @@ function makeEmpty() {
 			return [];
 		},
 	};
+}
+
+class TruncatedLines {
+	private cachedLines?: string[];
+	private cachedWidth?: number;
+	private readonly lines: string[];
+
+	constructor(text: string) {
+		this.lines = text ? text.split(/\r?\n/) : [];
+	}
+
+	invalidate(): void {
+		this.cachedLines = undefined;
+		this.cachedWidth = undefined;
+	}
+
+	render(width: number): string[] {
+		if (this.cachedLines && this.cachedWidth === width) return this.cachedLines;
+		const targetWidth = Math.max(1, width);
+		const lines = this.lines.map((line) => truncateToWidth(line, targetWidth));
+		this.cachedLines = lines;
+		this.cachedWidth = width;
+		return lines;
+	}
+}
+
+function makeTruncatedLines(text: string): TruncatedLines {
+	return new TruncatedLines(text);
 }
 
 function stackToolCalls(cwd?: string): boolean {
@@ -157,6 +192,7 @@ interface StackItem {
 	resultText: string;
 	status: StackItemStatus;
 	toolName: StackableToolName;
+	truncated: boolean;
 }
 
 interface StackBatch {
@@ -198,7 +234,7 @@ function ensureStackItem(toolName: StackableToolName, id: string, args: any): St
 	}
 	const batch = currentStackBatch ?? createStackBatch(id);
 	if (!batch.items.includes(id)) batch.items.push(id);
-	const item: StackItem = { args, batchId: batch.id, id, isError: false, resultText: "", status: "running", toolName };
+	const item: StackItem = { args, batchId: batch.id, id, isError: false, resultText: "", status: "running", toolName, truncated: false };
 	stackItems.set(id, item);
 	batch.updatedAt = Date.now();
 	notifyStackBatch(batch.id);
@@ -221,20 +257,21 @@ function stackItemSummary(item: StackItem, theme: any): string {
 	if (item.toolName === "read") {
 		const count = lineCount(item.resultText);
 		let text = theme.fg("success", `${count} line${count === 1 ? "" : "s"}`);
-		if (truncatedMarker(item.resultText)) text += theme.fg("warning", " · truncated");
+		if (item.truncated) text += theme.fg("warning", " · truncated");
 		return text;
 	}
 	if (item.toolName === "bash") {
 		const exit = commandExit(item.resultText);
 		const count = lineCount(item.resultText);
-		let text = exit && exit !== 0 ? theme.fg("error", `exit ${exit}`) : theme.fg("success", "done");
+		const exitLabel = exit === null ? "exit 0" : `exit ${exit}`;
+		let text = exit !== null && exit !== 0 ? theme.fg("error", exitLabel) : theme.fg("success", exitLabel);
 		text += theme.fg("dim", ` · ${count} line${count === 1 ? "" : "s"}`);
-		if (truncatedMarker(item.resultText)) text += theme.fg("warning", " · truncated");
+		if (item.truncated) text += theme.fg("warning", " · truncated");
 		return text;
 	}
 	const count = item.resultText.trim() ? lineCount(item.resultText) : 0;
 	let text = theme.fg("success", `${count} result${count === 1 ? "" : "s"}`);
-	if (truncatedMarker(item.resultText)) text += theme.fg("warning", " · truncated");
+	if (item.truncated) text += theme.fg("warning", " · truncated");
 	return text;
 }
 
@@ -285,7 +322,7 @@ function stackBatchHeadline(batch: StackBatch, theme: any, expanded: boolean, ch
 	return `${stackPrefix(theme)}${sentence}${running ? "…" : ""}${progress}${expandHint}`;
 }
 
-function renderStackBatch(batch: StackBatch, theme: any, expanded: boolean, cwd?: string, childDisplay: StackChildDisplay = "rows"): Text {
+function renderStackBatch(batch: StackBatch, theme: any, expanded: boolean, cwd?: string, childDisplay: StackChildDisplay = "rows"): TruncatedLines {
 	let text = stackBatchHeadline(batch, theme, expanded, childDisplay);
 	if (childDisplay === "anchor-list" || (childDisplay === "headline" && expanded)) {
 		const items = batch.items.map((id) => stackItems.get(id)).filter(Boolean) as StackItem[];
@@ -293,7 +330,7 @@ function renderStackBatch(batch: StackBatch, theme: any, expanded: boolean, cwd?
 			text += `\n${renderStackItemText(item, theme, false, cwd, index === items.length - 1 ? "└" : "├")}`;
 		});
 	}
-	return makeText(text);
+	return makeTruncatedLines(text);
 }
 
 function renderStackedToolResult(toolName: StackableToolName, result: any, isPartial: boolean, expanded: boolean, theme: any, context: any, cwd: string) {
@@ -304,6 +341,7 @@ function renderStackedToolResult(toolName: StackableToolName, result: any, isPar
 		item.status = context?.isError ? "error" : "done";
 		item.isError = Boolean(context?.isError);
 		item.resultText = textContent(result);
+		item.truncated = resultTruncated(result);
 		stackBatches.get(item.batchId)!.updatedAt = Date.now();
 	}
 	const batch = stackBatches.get(item.batchId);
@@ -314,7 +352,7 @@ function renderStackedToolResult(toolName: StackableToolName, result: any, isPar
 	if (childDisplay !== "rows") return makeEmpty();
 	const items = batch.items.map((itemId) => stackItems.get(itemId)).filter(Boolean) as StackItem[];
 	const index = Math.max(0, items.findIndex((candidate) => candidate.id === id));
-	return makeText(renderStackItemText(item, theme, false, effectiveCwd, index === items.length - 1 ? "└" : "├"));
+	return makeTruncatedLines(renderStackItemText(item, theme, false, effectiveCwd, index === items.length - 1 ? "└" : "├"));
 }
 
 function registerStackEvents(pi: ExtensionAPI): void {
@@ -334,6 +372,7 @@ function registerStackEvents(pi: ExtensionAPI): void {
 		item.status = event.isError ? "error" : "done";
 		item.isError = Boolean(event.isError);
 		item.resultText = textContent(event.result);
+		item.truncated = resultTruncated(event.result);
 		notifyStackBatch(item.batchId);
 	});
 	pi.on("agent_end", () => {
@@ -341,8 +380,43 @@ function registerStackEvents(pi: ExtensionAPI): void {
 	});
 }
 
+type BuiltInToolName = StackableToolName | "edit" | "write";
+type BuiltInToolSet = Partial<Record<BuiltInToolName, any>>;
+
+const builtInToolCache = new Map<string, BuiltInToolSet>();
+
+function normalizedCwd(cwd?: string): string {
+	return resolve(cwd || process.cwd());
+}
+
+function createBuiltInToolSet(agent: any, cwd: string): BuiltInToolSet {
+	return {
+		read: agent.createReadTool?.(cwd),
+		bash: agent.createBashTool?.(cwd),
+		edit: agent.createEditTool?.(cwd),
+		write: agent.createWriteTool?.(cwd),
+		grep: agent.createGrepTool?.(cwd),
+		find: agent.createFindTool?.(cwd),
+		ls: agent.createLsTool?.(cwd),
+	};
+}
+
+function getBuiltInTool(agent: any, cwd: string, toolName: BuiltInToolName): any {
+	const key = normalizedCwd(cwd);
+	let tools = builtInToolCache.get(key);
+	if (!tools) {
+		tools = createBuiltInToolSet(agent, key);
+		builtInToolCache.set(key, tools);
+	}
+	return tools[toolName];
+}
+
+function contextCwd(context: any, fallback: string): string {
+	return context?.cwd ?? fallback;
+}
+
 function registerRead(pi: ExtensionAPI, agent: any, cwd: string): void {
-	const original = agent.createReadTool?.(cwd);
+	const original = getBuiltInTool(agent, cwd, "read");
 	if (!original) return;
 	pi.registerTool({
 		...stackShell(cwd),
@@ -350,8 +424,8 @@ function registerRead(pi: ExtensionAPI, agent: any, cwd: string): void {
 		label: "read",
 		description: original.description,
 		parameters: original.parameters,
-		async execute(id: string, params: any, signal: AbortSignal | undefined, onUpdate: unknown) {
-			return original.execute(id, params, signal, onUpdate);
+		async execute(id: string, params: any, signal: AbortSignal | undefined, onUpdate: unknown, context: any) {
+			return getBuiltInTool(agent, contextCwd(context, cwd), "read").execute(id, params, signal, onUpdate);
 		},
 		renderCall(args: any, theme: any, context: any) {
 			if (stackToolCalls(context?.cwd ?? cwd)) return makeEmpty();
@@ -364,7 +438,7 @@ function registerRead(pi: ExtensionAPI, agent: any, cwd: string): void {
 			const content = textContent(result);
 			const count = lineCount(content);
 			let text = theme.fg("success", `${count} line${count === 1 ? "" : "s"}`);
-			if (truncatedMarker(content)) text += theme.fg("warning", " · truncated");
+			if (resultTruncated(result)) text += theme.fg("warning", " · truncated");
 			if (expanded && content) {
 				const limit = Math.max(1, Math.floor(settingNumber("readPreviewLines", 80, context?.cwd)));
 				text += `\n${theme.fg("dim", preview(content, limit, "head", context?.cwd))}`;
@@ -376,7 +450,7 @@ function registerRead(pi: ExtensionAPI, agent: any, cwd: string): void {
 }
 
 function registerBash(pi: ExtensionAPI, agent: any, cwd: string): void {
-	const original = agent.createBashTool?.(cwd);
+	const original = getBuiltInTool(agent, cwd, "bash");
 	if (!original) return;
 	pi.registerTool({
 		...stackShell(cwd),
@@ -384,8 +458,8 @@ function registerBash(pi: ExtensionAPI, agent: any, cwd: string): void {
 		label: "bash",
 		description: original.description,
 		parameters: original.parameters,
-		async execute(id: string, params: any, signal: AbortSignal | undefined, onUpdate: unknown) {
-			return original.execute(id, params, signal, onUpdate);
+		async execute(id: string, params: any, signal: AbortSignal | undefined, onUpdate: unknown, context: any) {
+			return getBuiltInTool(agent, contextCwd(context, cwd), "bash").execute(id, params, signal, onUpdate);
 		},
 		renderCall(args: any, theme: any, context: any) {
 			if (stackToolCalls(context?.cwd ?? cwd)) return makeEmpty();
@@ -398,9 +472,10 @@ function registerBash(pi: ExtensionAPI, agent: any, cwd: string): void {
 			const output = textContent(result);
 			const exit = commandExit(output);
 			const count = lineCount(output);
-			let text = exit && exit !== 0 ? theme.fg("error", `exit ${exit}`) : theme.fg("success", "done");
+			const exitLabel = exit === null ? "exit 0" : `exit ${exit}`;
+			let text = exit !== null && exit !== 0 ? theme.fg("error", exitLabel) : theme.fg("success", exitLabel);
 			text += theme.fg("dim", ` · ${count} line${count === 1 ? "" : "s"}`);
-			if (truncatedMarker(output)) text += theme.fg("warning", " · truncated");
+			if (resultTruncated(result)) text += theme.fg("warning", " · truncated");
 			if (expanded && output) {
 				const limit = Math.max(1, Math.floor(settingNumber("bashPreviewLines", 80, context?.cwd)));
 				text += `\n${theme.fg("dim", preview(output, limit, "tail", context?.cwd))}`;
@@ -412,15 +487,15 @@ function registerBash(pi: ExtensionAPI, agent: any, cwd: string): void {
 }
 
 function registerEdit(pi: ExtensionAPI, agent: any, cwd: string): void {
-	const original = agent.createEditTool?.(cwd);
+	const original = getBuiltInTool(agent, cwd, "edit");
 	if (!original) return;
 	pi.registerTool({
 		name: "edit",
 		label: "edit",
 		description: original.description,
 		parameters: original.parameters,
-		async execute(id: string, params: any, signal: AbortSignal | undefined, onUpdate: unknown) {
-			return original.execute(id, params, signal, onUpdate);
+		async execute(id: string, params: any, signal: AbortSignal | undefined, onUpdate: unknown, context: any) {
+			return getBuiltInTool(agent, contextCwd(context, cwd), "edit").execute(id, params, signal, onUpdate);
 		},
 		renderCall(args: any, theme: any) {
 			return makeText(`${theme.fg("toolTitle", theme.bold("Edit "))}${theme.fg("accent", args.path ?? "")}`);
@@ -438,15 +513,15 @@ function registerEdit(pi: ExtensionAPI, agent: any, cwd: string): void {
 }
 
 function registerWrite(pi: ExtensionAPI, agent: any, cwd: string): void {
-	const original = agent.createWriteTool?.(cwd);
+	const original = getBuiltInTool(agent, cwd, "write");
 	if (!original) return;
 	pi.registerTool({
 		name: "write",
 		label: "write",
 		description: original.description,
 		parameters: original.parameters,
-		async execute(id: string, params: any, signal: AbortSignal | undefined, onUpdate: unknown) {
-			return original.execute(id, params, signal, onUpdate);
+		async execute(id: string, params: any, signal: AbortSignal | undefined, onUpdate: unknown, context: any) {
+			return getBuiltInTool(agent, contextCwd(context, cwd), "write").execute(id, params, signal, onUpdate);
 		},
 		renderCall(args: any, theme: any) {
 			const count = lineCount(args.content ?? "");
@@ -468,8 +543,8 @@ function registerWrite(pi: ExtensionAPI, agent: any, cwd: string): void {
 	});
 }
 
-function registerReadOnly(pi: ExtensionAPI, agent: any, cwd: string, toolName: "grep" | "find" | "ls", factoryName: string): void {
-	const original = agent[factoryName]?.(cwd);
+function registerReadOnly(pi: ExtensionAPI, agent: any, cwd: string, toolName: "grep" | "find" | "ls"): void {
+	const original = getBuiltInTool(agent, cwd, toolName);
 	if (!original) return;
 	pi.registerTool({
 		...stackShell(cwd),
@@ -477,8 +552,8 @@ function registerReadOnly(pi: ExtensionAPI, agent: any, cwd: string, toolName: "
 		label: toolName,
 		description: original.description,
 		parameters: original.parameters,
-		async execute(id: string, params: any, signal: AbortSignal | undefined, onUpdate: unknown) {
-			return original.execute(id, params, signal, onUpdate);
+		async execute(id: string, params: any, signal: AbortSignal | undefined, onUpdate: unknown, context: any) {
+			return getBuiltInTool(agent, contextCwd(context, cwd), toolName).execute(id, params, signal, onUpdate);
 		},
 		renderCall(args: any, theme: any, context: any) {
 			if (stackToolCalls(context?.cwd ?? cwd)) return makeEmpty();
@@ -491,7 +566,7 @@ function registerReadOnly(pi: ExtensionAPI, agent: any, cwd: string, toolName: "
 			const output = textContent(result);
 			const count = output.trim() ? lineCount(output) : 0;
 			let text = theme.fg("success", `${count} result${count === 1 ? "" : "s"}`);
-			if (truncatedMarker(output)) text += theme.fg("warning", " · truncated");
+			if (resultTruncated(result)) text += theme.fg("warning", " · truncated");
 			if (expanded && output) {
 				const limit = Math.max(1, Math.floor(settingNumber("searchPreviewLines", 80, context?.cwd)));
 				text += `\n${theme.fg("dim", preview(output, limit, "head", context?.cwd))}`;
@@ -518,7 +593,7 @@ export default async function toolRenderer(pi: ExtensionAPI): Promise<void> {
 		registerEdit(pi, agent, cwd);
 		registerWrite(pi, agent, cwd);
 	}
-	registerReadOnly(pi, agent, cwd, "grep", "createGrepTool");
-	registerReadOnly(pi, agent, cwd, "find", "createFindTool");
-	registerReadOnly(pi, agent, cwd, "ls", "createLsTool");
+	registerReadOnly(pi, agent, cwd, "grep");
+	registerReadOnly(pi, agent, cwd, "find");
+	registerReadOnly(pi, agent, cwd, "ls");
 }

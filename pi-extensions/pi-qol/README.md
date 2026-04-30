@@ -6,7 +6,7 @@ Features:
 
 - Intercepts distinguishable `Shift+Enter` / `Shift+Return` in the prompt editor and inserts a newline.
 - Provides a configurable fallback newline key (`ctrl+j` by default) for terminals/tmux setups that collapse modified Enter into plain Enter. If a terminal reports Shift+Enter as Alt+Enter, move `app.message.followUp` to another key and bind `alt+enter` to `tui.input.newLine` in Pi keybindings.
-- Styles `[Image #1]`, `[Image #2]`, ... placeholders as compact theme-aware chips in the editor.
+- Styles `[Image #1]`, `[Image #2]`, ... placeholders as compact filled chips in the editor using the active theme's `accent` color.
 - Collapses existing pasted image file paths to `[Image #N]` aliases and attaches those images on submit.
 - Exposes a settings contract for hiding the collapsed `Thinking...` placeholder. Current Pi extension APIs do not expose assistant-message renderer replacement, so this setting is visible but cannot yet change built-in assistant rendering.
 

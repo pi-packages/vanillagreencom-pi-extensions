@@ -64,20 +64,6 @@
           "apply": "live"
         },
         {
-          "key": "imageChipStyle",
-          "label": "Image chip style",
-          "description": "Theme-aware visual style for image attachment placeholders. Filled uses selectedBg; subtle uses customMessageBg/customMessageLabel; minimal uses accent text.",
-          "type": "enum",
-          "enumValues": [
-            "minimal",
-            "filled",
-            "subtle"
-          ],
-          "default": "filled",
-          "category": "Images",
-          "apply": "live"
-        },
-        {
           "key": "showAttachmentCountInStatus",
           "label": "Show attachment count",
           "description": "Show a lightweight status badge when the draft contains image placeholders.",
