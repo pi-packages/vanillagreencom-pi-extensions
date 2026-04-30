@@ -8,6 +8,8 @@ Features:
 - Provides a configurable fallback newline key (`ctrl+j` by default) for terminals/tmux setups that collapse modified Enter into plain Enter. If a terminal reports Shift+Enter as Alt+Enter, move `app.message.followUp` to another key and bind `alt+enter` to `tui.input.newLine` in Pi keybindings.
 - Styles `[Image #1]`, `[Image #2]`, ... placeholders as compact filled chips in the editor using the active theme's `accent` color.
 - Collapses existing pasted image file paths to `[Image #N]` aliases and attaches those images on submit.
+- Adds `/session-name [name]` to set or show the current session's friendly name in Pi's session selector (toggle with `enableSessionNameCommand`, default on).
+- Adds `/handoff <goal>` to generate a focused handoff prompt, optionally review it, and open a new session with that prompt as a draft (toggle with `enableHandoffCommand`, default on; review with `handoffReviewPrompt`, default on).
 - Exposes a settings contract for hiding the collapsed `Thinking...` placeholder. Current Pi extension APIs do not expose assistant-message renderer replacement, so this setting is visible but cannot yet change built-in assistant rendering.
 
 Commands:
@@ -16,5 +18,7 @@ Commands:
 - `/qol attachments`
 - `/qol collapse`
 - `/qol reset`
+- `/session-name [name]`
+- `/handoff <goal>`
 
 Known limitation: Pi owns native pending image attachment state and does not expose it to extensions. This package can attach image paths it collapses itself, but native Pi paste/drag attachments remain Pi-owned.

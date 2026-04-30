@@ -1,7 +1,7 @@
 {
   "name": "pi-qol",
   "version": "0.1.0",
-  "description": "Pi quality-of-life extension: reliable multiline input, styled pasted-image chips, and hidden-thinking placeholder settings contract.",
+  "description": "Pi quality-of-life extension: reliable multiline input, styled pasted-image chips, session naming, handoff, and hidden-thinking placeholder settings contract.",
   "license": "MIT",
   "keywords": [
     "pi-package",
@@ -73,6 +73,35 @@
           "apply": "live"
         },
         {
+          "key": "enableSessionNameCommand",
+          "label": "Enable /session-name command",
+          "description": "Register /session-name [name] to set or show the current session's friendly name in Pi's session selector.",
+          "type": "boolean",
+          "default": true,
+          "category": "Session",
+          "apply": "reload",
+          "requiresReload": true
+        },
+        {
+          "key": "enableHandoffCommand",
+          "label": "Enable /handoff command",
+          "description": "Register /handoff <goal> to generate a focused prompt and create a new session with the prompt as a draft.",
+          "type": "boolean",
+          "default": true,
+          "category": "Session",
+          "apply": "reload",
+          "requiresReload": true
+        },
+        {
+          "key": "handoffReviewPrompt",
+          "label": "Review handoff prompt",
+          "description": "Open an editor to review or edit the generated handoff prompt before creating the new session.",
+          "type": "boolean",
+          "default": true,
+          "category": "Session",
+          "apply": "live"
+        },
+        {
           "key": "showHiddenThinkingPlaceholder",
           "label": "Show hidden-thinking placeholder",
           "description": "Settings contract for suppressing the collapsed Thinking... placeholder when Pi exposes a renderer hook. Current Pi API has no assistant-renderer override.",
@@ -85,6 +114,7 @@
     }
   },
   "peerDependencies": {
+    "@mariozechner/pi-ai": "*",
     "@mariozechner/pi-coding-agent": "*",
     "@mariozechner/pi-tui": "*"
   },

@@ -1,4 +1,5 @@
-import { CustomEditor, type ExtensionAPI, type ExtensionContext, type KeybindingsManager, type Theme } from "@mariozechner/pi-coding-agent";
+import { complete, type Message } from "@mariozechner/pi-ai";
+import { BorderedLoader, convertToLlm, CustomEditor, serializeConversation, type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext, type KeybindingsManager, type SessionEntry, type SessionMessageEntry, type Theme } from "@mariozechner/pi-coding-agent";
 import type { EditorTheme, TUI } from "@mariozechner/pi-tui";
 import { matchesKey, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -12,6 +13,28 @@ const RESET = "\x1b[0m";
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff", ".heic", ".heif"]);
 const IMAGE_PATH_PATTERN = /(^|[\s(\[{<"'`])(@?(?:~|\.\.?|\/)[^\s)\]}>"'`]+?\.(?:png|jpe?g|gif|webp|bmp|tiff?|heic|heif))(?=$|[\s)\]}>"'`,.;:!?])/gi;
 const IMAGE_ALIAS_SYMBOL = Symbol.for("vstack.pi-qol.image-path-aliases");
+
+const HANDOFF_SYSTEM_PROMPT = `You are a context transfer assistant. Given a conversation history and the user's goal for a new thread, generate a focused prompt that:
+
+1. Summarizes relevant context from the conversation (decisions made, approaches taken, key findings)
+2. Lists any relevant files that were discussed or modified
+3. Clearly states the next task based on the user's goal
+4. Is self-contained - the new thread should be able to proceed without the old conversation
+
+Format your response as a prompt the user can send to start the new thread. Be concise but include all necessary context. Do not include any preamble like "Here's the prompt" - just output the prompt itself.
+
+Example output format:
+## Context
+We've been working on X. Key decisions:
+- Decision 1
+- Decision 2
+
+Files involved:
+- path/to/file1.ts
+- path/to/file2.ts
+
+## Task
+[Clear description of what to do next based on user's goal]`;
 
 type VstackConfig = Record<string, unknown>;
 
@@ -354,6 +377,105 @@ function collapseEditorImagePaths(ctx: ExtensionContext): boolean {
 	return true;
 }
 
+async function runHandoff(args: string, ctx: ExtensionCommandContext): Promise<void> {
+	if (!ctx.hasUI) {
+		ctx.ui.notify("handoff requires interactive mode", "error");
+		return;
+	}
+
+	if (!ctx.model) {
+		ctx.ui.notify("No model selected", "error");
+		return;
+	}
+
+	const goal = args.trim();
+	if (!goal) {
+		ctx.ui.notify("Usage: /handoff <goal for new thread>", "error");
+		return;
+	}
+
+	const branch = ctx.sessionManager.getBranch();
+	const messages = branch
+		.filter((entry: SessionEntry): entry is SessionMessageEntry => entry.type === "message")
+		.map((entry: SessionMessageEntry) => entry.message);
+
+	if (messages.length === 0) {
+		ctx.ui.notify("No conversation to hand off", "error");
+		return;
+	}
+
+	const llmMessages = convertToLlm(messages);
+	const conversationText = serializeConversation(llmMessages);
+	const currentSessionFile = ctx.sessionManager.getSessionFile();
+
+	const result = await ctx.ui.custom<string | null>((tui: any, theme: any, _kb: any, done: (value: string | null) => void) => {
+		const loader = new BorderedLoader(tui, theme, "Generating handoff prompt...");
+		loader.onAbort = () => done(null);
+
+		const doGenerate = async () => {
+			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(ctx.model!);
+			if (!auth.ok || !auth.apiKey) {
+				throw new Error(auth.ok ? `No API key for ${ctx.model!.provider}` : auth.error);
+			}
+
+			const userMessage: Message = {
+				role: "user",
+				content: [
+					{
+						type: "text",
+						text: `## Conversation History\n\n${conversationText}\n\n## User's Goal for New Thread\n\n${goal}`,
+					},
+				],
+				timestamp: Date.now(),
+			};
+
+			const response = await complete(
+				ctx.model!,
+				{ systemPrompt: HANDOFF_SYSTEM_PROMPT, messages: [userMessage] },
+				{ apiKey: auth.apiKey, headers: auth.headers, signal: loader.signal },
+			);
+
+			if (response.stopReason === "aborted") return null;
+			return response.content
+				.filter((content): content is { type: "text"; text: string } => content.type === "text")
+				.map((content) => content.text)
+				.join("\n");
+		};
+
+		doGenerate()
+			.then(done)
+			.catch((error) => {
+				console.error("Handoff generation failed:", error);
+				done(null);
+			});
+
+		return loader;
+	});
+
+	if (result === null) {
+		ctx.ui.notify("Cancelled", "info");
+		return;
+	}
+
+	const prompt = settingBoolean("handoffReviewPrompt", true, ctx.cwd) ? await ctx.ui.editor("Edit handoff prompt", result) : result;
+	if (prompt === undefined) {
+		ctx.ui.notify("Cancelled", "info");
+		return;
+	}
+
+	const newSessionResult = await ctx.newSession({
+		parentSession: currentSessionFile,
+		withSession: async (replacementCtx: any) => {
+			replacementCtx.ui.setEditorText(prompt);
+			replacementCtx.ui.notify("Handoff ready. Submit when ready.", "info");
+		},
+	});
+
+	if (newSessionResult.cancelled) {
+		ctx.ui.notify("New session cancelled", "info");
+	}
+}
+
 function statusMessage(ctx: ExtensionContext): string {
 	const cfg = readVstackConfig(ctx.cwd);
 	const labels = attachmentLabels(currentEditorText(ctx), ctx.cwd);
@@ -363,6 +485,9 @@ function statusMessage(ctx: ExtensionContext): string {
 		`Fallback newline key: ${settingString("newlineFallbackKey", "ctrl+j", ctx.cwd)}`,
 		`Image chips: ${settingBoolean("showImageChips", true, ctx.cwd) ? "filled (placeholders and existing image paths)" : "off"}`,
 		`Image placeholders/paths in draft: ${labels.length ? labels.join(", ") : "none"}`,
+		`Session-name command: ${settingBoolean("enableSessionNameCommand", true, ctx.cwd) ? "enabled" : "disabled"}`,
+		`Handoff command: ${settingBoolean("enableHandoffCommand", true, ctx.cwd) ? "enabled" : "disabled"}`,
+		`Handoff prompt review: ${settingBoolean("handoffReviewPrompt", true, ctx.cwd) ? "enabled" : "disabled"}`,
 		`Hidden Thinking... placeholder setting: ${String(cfg.showHiddenThinkingPlaceholder ?? false)} (Pi API currently has no assistant-renderer hook, so this is a settings contract only.)`,
 		"If Shift+Enter still submits, configure your terminal/tmux to send a distinct Shift+Enter sequence or use the fallback key.",
 	].join("\n");
@@ -415,6 +540,30 @@ export default function qol(pi: ExtensionAPI): void {
 		if (images.length === 0) return { action: "continue" };
 		return { action: "transform", images: [...(event.images ?? []), ...images], text: event.text };
 	});
+
+	if (settingBoolean("enableSessionNameCommand", true)) {
+		pi.registerCommand("session-name", {
+			description: "Set or show session name (usage: /session-name [new name])",
+			handler: async (args, ctx) => {
+				const name = args.trim();
+				if (name) {
+					pi.setSessionName(name);
+					ctx.ui.notify(`Session named: ${name}`, "info");
+					return;
+				}
+
+				const current = pi.getSessionName();
+				ctx.ui.notify(current ? `Session: ${current}` : "No session name set", "info");
+			},
+		});
+	}
+
+	if (settingBoolean("enableHandoffCommand", true)) {
+		pi.registerCommand("handoff", {
+			description: "Transfer context to a new focused session (usage: /handoff <goal>)",
+			handler: async (args, ctx) => runHandoff(args, ctx),
+		});
+	}
 
 	pi.registerCommand("qol", {
 		description: "QOL status and attachment helpers: /qol status, /qol attachments, /qol reset.",
