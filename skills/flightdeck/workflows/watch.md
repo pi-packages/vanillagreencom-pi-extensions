@@ -58,7 +58,7 @@ Master mode entry point. Polls every spawned issue pane, classifies their prompt
    ```
    PENDING=$(.agents/skills/flightdeck/scripts/flightdeck-daemon events --session "$SESSION_ID")
    ```
-   `PENDING` is JSONL with `{ts, pane_id, hash, tag, reason, stable_age_sec}` per ready pane. Use as routing hint; § 2 polls every tracked pane regardless.
+   `PENDING` is JSONL with `{ts, pane_id, hash, tag, reason, stable_age_sec}` per ready pane. Structured question events (`oc-question`, `pi-question`) also include `details: {event_type, request_id, question, harness}`. Use these as routing hints; § 2 polls every tracked pane regardless except when a structured question event already supplies the prompt payload.
 8. If resuming, recompute the conflict graph against the live PR set in case PRs moved during compaction:
    ```
    .agents/skills/flightdeck/scripts/pr-conflict-graph <PR1> <PR2> ...
@@ -71,7 +71,9 @@ Master mode entry point. Polls every spawned issue pane, classifies their prompt
 
 For each tracked issue currently in a non-terminal state (`waiting | prompting | submitting | merge-ready`):
 
-0. **Pane-hijack check** — only if `orchestration_started` is `false` for this issue:
+0. **Structured-question event check** — if `PENDING` contains an event for this issue's pane with `tag == "oc-question"` or `tag == "pi-question"`, set state to `prompting`, substate to that tag, and carry `details.request_id` + `details.question` into `handle-prompt.md`. Do not try to rediscover this by `capture-pane`; the inline/modal question may not appear in plain assistant text.
+
+0.5. **Pane-hijack check** — only if `orchestration_started` is `false` for this issue:
    - If the orchestration workflow-state file exists at `tmp/workflow-state-<ISSUE>.json` (or wherever `ORCH_STATE_DIR` resolves to), set `orchestration_started: true` via `pane-registry set <ISSUE> orchestration_started true` and proceed to step 1.
    - Otherwise check `(now - spawned_at)`. If elapsed exceeds `FLIGHTDECK_HIJACK_GRACE_SECS` (default 90), the pane was either hijacked for unrelated work or orchestration silently failed to start. Escalate: `paused_for_user = {issue_id, reason: "orchestration-never-started", prompt_text: "<ISSUE> spawned <elapsed>s ago; no workflow-state file. Pane may have been hijacked or orchestration failed to start."}`. Skip the rest of § 2 for this issue.
 1. Run `pane-poll`. Pass `--harness <h>`, `--worktree <path>`, and `--pr <N>` from the registry so harness-specific capture quirks (e.g., opencode viewport scroll) are handled and the orphan cross-check can synthesize `terminal-state-reached` when the buffer's own sentinels miss but the worktree is gone + PR merged:
@@ -110,6 +112,8 @@ For each tracked issue currently in a non-terminal state (`waiting | prompting |
    | `multi-select-tabbed` | `prompting` | substate = tag (handler picks via `--option-multi`) |
    | `awaiting-direction` | `prompting` | substate = tag (handler synthesizes a continuation directive from registry intent) |
    | `generic-multi-choice` | `prompting` | substate = tag (handler auto-decides per § 10 of `handle-prompt.md`, escalates only on novelty) |
+   | `oc-question` | `prompting` | substate = tag; handler uses structured event details, not pane text |
+   | `pi-question` | `prompting` | substate = tag; handler uses structured event details, including `allowCustom` |
 
    **`terminal-state-reached` routing**: do not transition to `prompting`. Instead invoke `⤵ workflows/close-issue.md <ISSUE_ID>`. That workflow verifies the signal (two-signal rule), updates master state, and tears down the window. Returns here when done.
 
@@ -124,7 +128,7 @@ For each tracked issue currently in a non-terminal state (`waiting | prompting |
 
 For each issue currently in `state == "prompting"` and not debounced in § 2, **one at a time**:
 
-1. `⤵ workflows/handle-prompt.md <ISSUE_ID> <SUBSTATE_TAG> → § 4` — pass the captured buffer plus the classification tag. Handler decides the response (auto-answer, escalate, or "Type your own" with combined guidance).
+1. `⤵ workflows/handle-prompt.md <ISSUE_ID> <SUBSTATE_TAG> → § 4` — pass the captured buffer plus the classification tag. For `oc-question` / `pi-question`, pass the structured event `details` (`request_id`, `question`, `harness`) instead of treating the TUI buffer as authoritative. Handler decides the response (auto-answer, escalate, or custom/free-text with combined guidance).
 2. After handler returns:
    - If a response was sent: `pane-respond` already cleared the bell and logged the decision via `pane-registry log-decision`. For tmux-fallback panes pass `--confirm-advanced` — it polls until the prompt sentinel is gone (8s timeout, exit 4 on miss) so the loop doesn't move on while the previous send is still in flight. Adapter-mode opencode is naturally synchronous (`opencode run --attach` blocks until the turn completes), so `--confirm-advanced` is a safe no-op there.
    - If escalated to user: master state's `paused_for_user` is now populated; the watch loop yields control to the user. Resumption happens when the user re-invokes `watch`.

@@ -1,5 +1,5 @@
 import type { AgentToolResult, ExtensionAPI, ExtensionContext, Theme } from "@mariozechner/pi-coding-agent";
-import { matchesKey, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import { Editor, type EditorTheme, matchesKey, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -8,11 +8,13 @@ const INSTALL_SYMBOL = Symbol.for("vstack.pi-questions.installed");
 const SERVICE_SYMBOL = Symbol.for("vstack.pi-questions.service");
 const POPUP_WIDTH = 96;
 const POPUP_MAX_HEIGHT = "80%";
-const PADDING_X = 4;
-const PADDING_Y = 1;
+const DEFAULT_RENDER_MODE = "editor";
+const PADDING_X = 2;
+const PADDING_Y = 0;
 const OPTION_ROWS = 10;
 
 type VstackConfig = Record<string, unknown>;
+type QuestionRenderMode = "editor" | "overlay";
 
 type QuestionResult = QuestionAnswerResult | QuestionCancelResult;
 type QuestionSource = "ui" | "bridge" | "tool" | "api" | "shutdown" | "ui_error";
@@ -38,6 +40,9 @@ interface QuestionTab {
 	question: string;
 	options: QuestionOption[];
 	multiple: boolean;
+	allowCustom: boolean;
+	customLabel: string;
+	customPlaceholder: string;
 }
 
 interface QuestionRequest {
@@ -132,12 +137,17 @@ function settingString(key: string, fallback: string, cwd?: string): string {
 	return typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback;
 }
 
+function questionRenderMode(cwd?: string): QuestionRenderMode {
+	const mode = settingString("renderMode", DEFAULT_RENDER_MODE, cwd);
+	return mode === "overlay" ? "overlay" : "editor";
+}
+
 const QUESTION_TOOL_PARAMETERS = {
 	type: "object",
 	additionalProperties: false,
 	properties: {
 		id: { type: "string", description: "Stable request id. Defaults to que_<random>." },
-		header: { type: "string", description: "Popup title bar text." },
+		header: { type: "string", description: "Question title text." },
 		questions: {
 			type: "array",
 			minItems: 1,
@@ -161,6 +171,9 @@ const QUESTION_TOOL_PARAMETERS = {
 						},
 					},
 					multiple: { type: "boolean", default: false },
+					allowCustom: { type: "boolean", default: false, description: "Allow the user to type a custom free-form answer for this tab." },
+					customLabel: { type: "string", description: "Label for the free-form answer row. Defaults to 'Type custom answer'." },
+					customPlaceholder: { type: "string", description: "Placeholder/help text shown for the free-form answer editor." },
 				},
 				required: ["header", "question", "options"],
 			},
@@ -203,6 +216,18 @@ function panelLine(content: string, width: number): string {
 	return padAnsi(content, width);
 }
 
+class CompactLines {
+	constructor(private readonly getLines: (width: number) => string[]) {}
+	invalidate(): void {}
+	render(width: number): string[] {
+		return this.getLines(Math.max(1, width)).map((line) => truncateToWidth(line, Math.max(1, width), ""));
+	}
+}
+
+function compactLines(getLines: (width: number) => string[]): CompactLines {
+	return new CompactLines(getLines);
+}
+
 function wrapPlain(text: string, width: number, maxLines = 3): string[] {
 	const words = text.trim().split(/\s+/).filter(Boolean);
 	if (words.length === 0) return [""];
@@ -228,6 +253,13 @@ function wrapPlain(text: string, width: number, maxLines = 3): string[] {
 		lines[maxLines - 1] = truncateToWidth(`${lines[maxLines - 1]}…`, width, "");
 	}
 	return lines.length > 0 ? lines : [""];
+}
+
+function wrapStyled(label: string, text: string, width: number): string[] {
+	const labelWidth = visibleWidth(label);
+	const contentWidth = Math.max(12, width - labelWidth);
+	const chunks = wrapPlain(text || "—", contentWidth, 4);
+	return chunks.map((chunk, index) => `${index === 0 ? label : " ".repeat(labelWidth)}${chunk}`);
 }
 
 function makeRequestId(): string {
@@ -269,6 +301,9 @@ function normalizeRequest(payload: unknown): QuestionRequest {
 		});
 
 		return {
+			allowCustom: question.allowCustom === true,
+			customLabel: readString(question.customLabel, "Type custom answer"),
+			customPlaceholder: readString(question.customPlaceholder, "Type your answer, then press Enter."),
 			header: readString(question.header, `Question ${index + 1}`),
 			multiple: question.multiple === true,
 			options,
@@ -298,8 +333,10 @@ function normalizeAnswers(request: QuestionRequest, rawAnswers: unknown): string
 		const unique: string[] = [];
 		for (const rawLabel of rawTabAnswers) {
 			if (typeof rawLabel !== "string") throw new Error(`answers[${index}] entries must be strings`);
-			if (!valid.has(rawLabel)) throw new Error(`answers[${index}] contains invalid label: ${rawLabel}`);
-			if (!unique.includes(rawLabel)) unique.push(rawLabel);
+			const label = rawLabel.trim();
+			if (!label) continue;
+			if (!valid.has(label) && !question.allowCustom) throw new Error(`answers[${index}] contains invalid label: ${label}`);
+			if (!unique.includes(label)) unique.push(label);
 		}
 		if (!question.multiple && unique.length > 1) {
 			throw new Error(`answers[${index}] accepts only one label because multiple=false`);
@@ -357,7 +394,7 @@ class QuestionServiceImpl implements QuestionService {
 		this.publish({ action: "opened", openedAt, request, requestId: request.id, source });
 
 		if (ctx.hasUI) {
-			void openQuestionPopup(ctx, pending).catch((error) => {
+			void openQuestionUi(ctx, pending).catch((error) => {
 				pending.complete({ cancelled: true, error: stringifyError(error), requestId: request.id }, "ui_error");
 			});
 		}
@@ -428,26 +465,42 @@ function attachContext(ctx: ExtensionContext | undefined, service: QuestionServi
 	});
 }
 
-async function openQuestionPopup(ctx: ExtensionContext, pending: PendingQuestion): Promise<void> {
+async function openQuestionUi(ctx: ExtensionContext, pending: PendingQuestion): Promise<void> {
 	const request = pending.request;
 	const optionRows = Math.max(1, Math.floor(settingNumber("optionRows", OPTION_ROWS, ctx.cwd)));
 	const selections = request.questions.map(() => new Set<string>());
+	const customAnswers = request.questions.map(() => "");
 	const selectedRows = request.questions.map(() => 0);
 	const scrollOffsets = request.questions.map(() => 0);
+	const useOverlay = questionRenderMode(ctx.cwd) === "overlay";
 	let activeTab = 0;
+	let startCustomInput: (() => void) | undefined;
+
+	const rowCount = (question: QuestionTab): number => question.options.length + (question.allowCustom ? 1 : 0);
+	const visibleRowsFor = (index: number): number => {
+		const count = rowCount(request.questions[index]);
+		return useOverlay ? optionRows : Math.max(1, Math.min(optionRows, count));
+	};
+	const isCustomRow = (question: QuestionTab, index: number): boolean => question.allowCustom && index === question.options.length;
 
 	const clamp = () => {
 		activeTab = Math.max(0, Math.min(activeTab, request.questions.length - 1));
-		const optionCount = request.questions[activeTab]?.options.length ?? 0;
+		const optionCount = rowCount(request.questions[activeTab]);
+		const visibleRows = visibleRowsFor(activeTab);
 		selectedRows[activeTab] = Math.max(0, Math.min(selectedRows[activeTab] ?? 0, Math.max(0, optionCount - 1)));
 		if (selectedRows[activeTab] < scrollOffsets[activeTab]) scrollOffsets[activeTab] = selectedRows[activeTab];
-		if (selectedRows[activeTab] >= scrollOffsets[activeTab] + optionRows) {
-			scrollOffsets[activeTab] = selectedRows[activeTab] - optionRows + 1;
+		if (selectedRows[activeTab] >= scrollOffsets[activeTab] + visibleRows) {
+			scrollOffsets[activeTab] = selectedRows[activeTab] - visibleRows + 1;
 		}
-		scrollOffsets[activeTab] = Math.max(0, Math.min(scrollOffsets[activeTab], Math.max(0, optionCount - optionRows)));
+		scrollOffsets[activeTab] = Math.max(0, Math.min(scrollOffsets[activeTab], Math.max(0, optionCount - visibleRows)));
 	};
 
-	const answers = () => request.questions.map((_question, index) => [...selections[index]]);
+	const answers = () => request.questions.map((question, index) => {
+		const labels = [...selections[index]];
+		const custom = customAnswers[index].trim();
+		if (question.multiple) return custom ? [...labels, custom] : labels;
+		return custom ? [custom] : labels.slice(0, 1);
+	});
 	const submit = () => pending.complete({ answers: answers(), requestId: request.id }, "ui");
 	const advanceOrSubmit = () => {
 		if (activeTab >= request.questions.length - 1) {
@@ -460,14 +513,23 @@ async function openQuestionPopup(ctx: ExtensionContext, pending: PendingQuestion
 	};
 	const chooseSingle = () => {
 		const question = request.questions[activeTab];
+		if (isCustomRow(question, selectedRows[activeTab])) {
+			startCustomInput?.();
+			return;
+		}
 		const option = question.options[selectedRows[activeTab]];
 		if (!option) return;
+		customAnswers[activeTab] = "";
 		selections[activeTab].clear();
 		selections[activeTab].add(option.label);
 		advanceOrSubmit();
 	};
 	const toggleMulti = () => {
 		const question = request.questions[activeTab];
+		if (isCustomRow(question, selectedRows[activeTab])) {
+			startCustomInput?.();
+			return;
+		}
 		const option = question.options[selectedRows[activeTab]];
 		if (!option) return;
 		const selected = selections[activeTab];
@@ -480,27 +542,78 @@ async function openQuestionPopup(ctx: ExtensionContext, pending: PendingQuestion
 		(tui, theme, _keybindings, done) => {
 			pending.uiDone = done;
 			pending.requestRender = () => tui.requestRender();
+			let inputMode = false;
+
+			const editorTheme: EditorTheme = {
+				borderColor: (s) => theme.fg("accent", s),
+				selectList: {
+					selectedPrefix: (t) => theme.fg("accent", t),
+					selectedText: (t) => theme.fg("accent", t),
+					description: (t) => theme.fg("muted", t),
+					scrollInfo: (t) => theme.fg("dim", t),
+					noMatch: (t) => theme.fg("warning", t),
+				},
+			};
+			const editor = new Editor(tui, editorTheme);
+			const refresh = () => tui.requestRender();
+
+			startCustomInput = () => {
+				inputMode = true;
+				editor.setText(customAnswers[activeTab]);
+				refresh();
+			};
+
+			editor.onSubmit = (value) => {
+				const trimmed = value.trim();
+				if (!trimmed) {
+					customAnswers[activeTab] = "";
+					inputMode = false;
+					editor.setText("");
+					refresh();
+					return;
+				}
+				customAnswers[activeTab] = trimmed;
+				inputMode = false;
+				editor.setText("");
+				if (request.questions[activeTab].multiple) {
+					refresh();
+					return;
+				}
+				selections[activeTab].clear();
+				advanceOrSubmit();
+			};
 
 			const renderTabs = (width: number): string => {
+				const currentAnswers = answers();
 				const parts = request.questions.map((question, index) => {
-					const label = ` ${index + 1}. ${question.header} `;
-					return index === activeTab
-						? theme.bg("toolSuccessBg", theme.fg("text", theme.bold(label)))
-						: theme.fg("muted", label);
+					const doneMark = currentAnswers[index].length > 0 ? "✓ " : "";
+					const label = ` ${doneMark}${index + 1}. ${question.header} `;
+					if (index === activeTab) return theme.fg("accent", theme.inverse(theme.bold(label)));
+					const color = currentAnswers[index].length > 0 ? "success" : "muted";
+					return theme.bg("selectedBg", theme.fg(color, label));
 				});
 				return truncateToWidth(parts.join(" "), width, "");
 			};
 
-			const renderOption = (question: QuestionTab, option: QuestionOption, index: number, width: number): string => {
+			const renderOption = (question: QuestionTab, index: number, width: number): string => {
+				const custom = isCustomRow(question, index);
+				const option = custom ? undefined : question.options[index];
+				if (!custom && !option) return panelLine("", width);
 				const isCursor = index === selectedRows[activeTab];
-				const isChecked = selections[activeTab].has(option.label);
+				const customValue = customAnswers[activeTab].trim();
+				const isChecked = custom ? customValue.length > 0 : selections[activeTab].has(option!.label);
 				const marker = isCursor ? theme.fg("accent", "› ") : "  ";
 				const checkbox = question.multiple ? (isChecked ? "☑" : "☐") : isChecked ? "●" : "○";
 				const prefix = `${marker}${theme.fg(isChecked ? "accent" : "muted", checkbox)} `;
 				const prefixWidth = visibleWidth("› ☐ ");
-				const desc = option.description ? ` ${theme.fg(isCursor ? "text" : "dim", option.description)}` : "";
+				const rawLabel = custom && customValue ? `${question.customLabel}: ${customValue}` : custom ? question.customLabel : option!.label;
+				const rawDesc = custom
+					? customValue ? "edit custom response" : question.customPlaceholder
+					: option!.description;
+				const descWidth = rawDesc ? Math.min(Math.max(10, Math.floor(width * 0.38)), visibleWidth(rawDesc)) : 0;
+				const desc = rawDesc ? ` ${theme.fg(isCursor ? "text" : "dim", truncateToWidth(rawDesc, descWidth, ""))}` : "";
 				const labelWidth = Math.max(1, width - prefixWidth - visibleWidth(desc));
-				const label = truncateToWidth(option.label, labelWidth, "");
+				const label = truncateToWidth(rawLabel, labelWidth, "");
 				const row = `${prefix}${isCursor ? theme.bold(label) : label}${desc}`;
 				return isCursor ? selectedLine(theme, row, width) : panelLine(row, width);
 			};
@@ -511,31 +624,46 @@ async function openQuestionPopup(ctx: ExtensionContext, pending: PendingQuestion
 				const question = request.questions[activeTab];
 				const lines: string[] = [];
 
-				const title = `${theme.fg("accent", theme.bold(request.header))} ${theme.fg("muted", pending.requestId)}`;
-				const esc = theme.fg("dim", "esc");
-				const titleGap = Math.max(1, innerWidth - visibleWidth(`${request.header} ${pending.requestId}`) - visibleWidth("esc"));
+				const title = theme.fg("accent", theme.bold(request.header));
+				const esc = theme.fg("dim", inputMode ? "esc back" : "esc");
+				const titleGap = Math.max(1, innerWidth - visibleWidth(request.header) - visibleWidth(inputMode ? "esc back" : "esc"));
 				lines.push(panelLine(`${title}${" ".repeat(titleGap)}${esc}`, innerWidth));
 				lines.push(panelLine(renderTabs(innerWidth), innerWidth));
 				lines.push(panelLine("", innerWidth));
 				for (const line of wrapPlain(question.question, innerWidth, 3)) {
 					lines.push(panelLine(theme.fg("text", line), innerWidth));
 				}
-				const mode = question.multiple
-					? "multi-select · space toggles · enter continues"
-					: "single-select · enter picks and continues";
+				const mode = inputMode
+					? "free-text · enter submits · esc returns to options"
+					: question.multiple
+						? `multi-select · space toggles · enter continues${question.allowCustom ? " · custom row types" : ""}`
+						: `single-select · enter picks and continues${question.allowCustom ? " · custom row types" : ""}`;
 				lines.push(panelLine(theme.fg("dim", mode), innerWidth));
 				lines.push(panelLine("", innerWidth));
 
 				const start = scrollOffsets[activeTab];
-				for (const [visibleIndex, option] of question.options.slice(start, start + optionRows).entries()) {
-					lines.push(renderOption(question, option, start + visibleIndex, innerWidth));
+				const visibleRows = visibleRowsFor(activeTab);
+				const totalRows = rowCount(question);
+				const end = Math.min(totalRows, start + visibleRows);
+				for (let index = start; index < end; index += 1) {
+					lines.push(renderOption(question, index, innerWidth));
 				}
-				for (let i = question.options.slice(start, start + optionRows).length; i < optionRows; i += 1) {
+				if (useOverlay) {
+					for (let i = end - start; i < visibleRows; i += 1) lines.push(panelLine("", innerWidth));
+				}
+
+				if (inputMode) {
 					lines.push(panelLine("", innerWidth));
+					lines.push(panelLine(theme.fg("muted", "Your answer:"), innerWidth));
+					for (const line of editor.render(Math.max(1, innerWidth - 2))) {
+						lines.push(panelLine(` ${line}`, innerWidth));
+					}
 				}
 
 				lines.push(panelLine("", innerWidth));
-				const footer = `${theme.fg("text", "enter")} ${theme.fg("dim", question.multiple ? "next/submit" : "choose")}  ${theme.fg("text", "space")} ${theme.fg("dim", question.multiple ? "toggle" : "-")}  ${theme.fg("text", "←/→")} ${theme.fg("dim", "tabs")}`;
+				const footer = inputMode
+					? `${theme.fg("text", "enter")} ${theme.fg("dim", "submit text")}  ${theme.fg("text", "esc")} ${theme.fg("dim", "back")}`
+					: `${theme.fg("text", "enter")} ${theme.fg("dim", question.multiple ? "next/submit" : "choose")}  ${theme.fg("text", "space")} ${theme.fg("dim", question.multiple ? "toggle/type" : question.allowCustom ? "type custom" : "-")}  ${theme.fg("text", "tab/←/→")} ${theme.fg("dim", "tabs")}`;
 				lines.push(panelLine(footer, innerWidth));
 				return framePopup(lines, width, theme);
 			};
@@ -543,6 +671,17 @@ async function openQuestionPopup(ctx: ExtensionContext, pending: PendingQuestion
 			return {
 				handleInput(data: string) {
 					const question = request.questions[activeTab];
+					if (inputMode) {
+						if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
+							inputMode = false;
+							editor.setText("");
+							tui.requestRender();
+							return;
+						}
+						editor.handleInput(data);
+						tui.requestRender();
+						return;
+					}
 					if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
 						pending.complete({ cancelled: true, requestId: request.id }, "ui");
 						return;
@@ -572,23 +711,25 @@ async function openQuestionPopup(ctx: ExtensionContext, pending: PendingQuestion
 						return;
 					}
 					if (matchesKey(data, "pageup")) {
-						selectedRows[activeTab] -= optionRows;
+						selectedRows[activeTab] -= visibleRowsFor(activeTab);
 						clamp();
 						tui.requestRender();
 						return;
 					}
 					if (matchesKey(data, "pagedown")) {
-						selectedRows[activeTab] += optionRows;
+						selectedRows[activeTab] += visibleRowsFor(activeTab);
 						clamp();
 						tui.requestRender();
 						return;
 					}
 					if (matchesKey(data, "return") || matchesKey(data, "enter")) {
-						if (question.multiple) advanceOrSubmit();
-						else chooseSingle();
+						if (question.multiple) {
+							if (isCustomRow(question, selectedRows[activeTab])) toggleMulti();
+							else advanceOrSubmit();
+						} else chooseSingle();
 						return;
 					}
-					if (data === " " && question.multiple) {
+					if (data === " " && (question.multiple || isCustomRow(question, selectedRows[activeTab]))) {
 						toggleMulti();
 					}
 				},
@@ -596,14 +737,16 @@ async function openQuestionPopup(ctx: ExtensionContext, pending: PendingQuestion
 				render,
 			};
 		},
-		{
-			overlay: true,
-			overlayOptions: {
-				anchor: "center",
-				maxHeight: settingString("popupMaxHeight", POPUP_MAX_HEIGHT, ctx.cwd),
-				width: Math.max(40, Math.floor(settingNumber("popupWidth", POPUP_WIDTH, ctx.cwd))),
-			},
-		},
+		useOverlay
+			? {
+				overlay: true,
+				overlayOptions: {
+					anchor: "center",
+					maxHeight: settingString("popupMaxHeight", POPUP_MAX_HEIGHT, ctx.cwd),
+					width: Math.max(40, Math.floor(settingNumber("popupWidth", POPUP_WIDTH, ctx.cwd))),
+				},
+			}
+			: undefined,
 	);
 }
 
@@ -631,9 +774,16 @@ export default function questions(pi: ExtensionAPI): void {
 	});
 
 	pi.registerTool({
+		renderShell: "self",
 		name: "question",
 		label: "Question",
-		description: "Ask the user one or more structured multiple-choice questions. Returns selected option labels per tab.",
+		description: "Ask the user one or more structured multiple-choice questions, optionally with free-form custom answers. Returns selected labels/text per tab.",
+		promptSnippet: "Ask the user structured multiple-choice questions and return selected labels or allowed custom text.",
+		promptGuidelines: [
+			"Use question when you need explicit user clarification before proceeding; keep options concise and mutually exclusive unless multiple=true.",
+			"When using question, provide a clear header, question text, and descriptive option labels.",
+			"Set question allowCustom=true only when an option list may not cover the user's answer; custom text is returned in that tab's answers array.",
+		],
 		parameters: QUESTION_TOOL_PARAMETERS as never,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx): Promise<AgentToolResult<QuestionResult>> {
 			const runCtx = ctx ?? activeCtx;
@@ -642,7 +792,7 @@ export default function questions(pi: ExtensionAPI): void {
 				return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
 			}
 			if (!runCtx.hasUI) {
-				const result: QuestionCancelResult = { cancelled: true, error: "No interactive UI available for question popup", requestId: typeof params.id === "string" ? params.id : "que_unavailable" };
+				const result: QuestionCancelResult = { cancelled: true, error: "No interactive UI available for question prompt", requestId: typeof params.id === "string" ? params.id : "que_unavailable" };
 				return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
 			}
 			activeCtx = runCtx;
@@ -650,36 +800,32 @@ export default function questions(pi: ExtensionAPI): void {
 			const result = await service.ask(runCtx, params, "tool");
 			return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
 		},
-		renderCall(args, theme) {
-			let label = "pending";
-			let header = "Question";
-			try {
-				const request = normalizeRequest(args);
-				label = request.id;
-				header = request.header;
-			} catch {
-				if (typeof args?.id === "string") label = args.id;
-				if (typeof args?.header === "string") header = args.header;
-			}
-			return {
-				invalidate() {},
-				render(width: number) {
-					const text = `${theme.fg("accent", theme.bold("? Question"))} ${theme.fg("muted", label)} ${header}`;
-					return [truncateToWidth(text, width, "")];
-				},
-			};
+		renderCall() {
+			return compactLines(() => []);
 		},
-		renderResult(result, _options, theme) {
+		renderResult(result, _options, theme, context) {
 			const details = result.details as QuestionResult | undefined;
-			return {
-				invalidate() {},
-				render(width: number) {
-					const text = details && "answers" in details
-						? `${theme.fg("success", "answered")} ${JSON.stringify(details.answers)}`
-						: theme.fg("warning", "question cancelled");
-					return [truncateToWidth(text, width, "")];
-				},
-			};
+			return compactLines((width: number) => {
+				const request = (() => {
+					try { return normalizeRequest(context?.args); }
+					catch { return undefined; }
+				})();
+				const title = request?.header ?? "Question";
+				const prefix = details && "answers" in details ? theme.fg("success", "● ") : theme.fg("warning", "● ");
+				const state = details && "answers" in details ? theme.fg("success", "answered") : theme.fg("warning", "cancelled");
+				const head = `${prefix}${theme.fg("toolTitle", theme.bold("Question"))} ${state}${title ? ` ${theme.fg("muted", "—")} ${theme.fg("text", title)}` : ""}`;
+				if (!details || !("answers" in details)) return [head];
+
+				const lines = [head];
+				for (const [index, answers] of details.answers.entries()) {
+					const tab = request?.questions[index];
+					const labelText = tab?.header ?? `Q${index + 1}`;
+					const answerText = answers.length > 0 ? answers.join(", ") : "—";
+					const label = `  ${theme.fg("muted", "•")} ${theme.fg("accent", `${labelText}: `)}`;
+					lines.push(...wrapStyled(label, theme.fg("text", answerText), width));
+				}
+				return lines;
+			});
 		},
 	});
 }

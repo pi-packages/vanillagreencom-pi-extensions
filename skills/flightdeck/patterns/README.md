@@ -10,3 +10,4 @@ Behaviors the master agent must encode when responding to spawned panes, grouped
 | [`decision-biases.md`](decision-biases.md) | Scope-creep detector, smaller-PR-first, rule-of-three, expansion bias, merge-order tiebreakers |
 | [`claude-channels.md`](claude-channels.md) | Opt-in claude code Channels MCP webhook + JSONL adapter; known orchestration-trust limitation |
 | [`opencode-questions.md`](opencode-questions.md) | Opencode question-tool routing via HTTP API; off-list-label policy |
+| [`pi-questions.md`](pi-questions.md) | Pi `pi-questions` routing via `pi-bridge answer/reject`; custom free-text policy |

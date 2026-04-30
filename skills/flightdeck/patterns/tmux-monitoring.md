@@ -112,7 +112,7 @@ Per-harness adapters live in `pane-respond` (sending), `pane-poll` (reading), an
 |---------|---------|---------------|
 | Claude Code | Channels MCP webhook POST (opt-in via `--use-channels` / `FLIGHTDECK_CLAUDE_CHANNELS=1`) | `tmux load-buffer + paste-buffer + Enter`, plus arrow-nav for `--option N` (Numbers are NOT shortcuts; they're buffered as text). |
 | opencode | `opencode run --attach --format json` to the per-pane HTTP server. `--option N` sends bare digit as message text; `--question` posts to `POST /question/<id>/{reply,reject}`. | Tmux paste-buffer for free text. `--option` not supported (no digit-key tmux mechanic for opencode). |
-| pi | `pi-bridge send --pid <PID> --auto <msg>` via the Unix-socket session bridge | Tmux paste-buffer fallback |
+| pi | `pi-bridge send --pid <PID> --auto <msg>` via the Unix-socket session bridge. `--question` uses `pi-bridge answer|reject`; `--answer-text` maps to the `pi-questions` custom/free-type answer when `allowCustom=true`. | Tmux paste-buffer fallback; for true modal key-driving use `--keys-allow-tmux` and the inline UI keys. |
 | codex | `codex-bridge send --url <ws> --thread <TID>` via the JSON-RPC client to `codex app-server` | Tmux paste-buffer fallback |
 
 ### Read path (script: `pane-poll` + daemon subscribers)
@@ -121,7 +121,7 @@ Per-harness adapters live in `pane-respond` (sending), `pane-poll` (reading), an
 |---------|---------|---------------|
 | Claude Code | Tail `~/.claude/projects/<encoded-cwd>/<uuid>.jsonl` for assistant `stop_reason` events | `tmux capture-pane -p -S -200` |
 | opencode | `GET /session/<id>/message` → last assistant text. Daemon also polls `GET /question` for the question tool. | `tmux capture-pane -p -S -200` |
-| pi | `pi-bridge history` / `pi-bridge stream` filtered for assistant `turn_end` | `tmux capture-pane -p -S -200` |
+| pi | `pi-bridge history` / `pi-bridge stream` filtered for assistant `turn_end`; `pi-questions` opens emit canonical `pi-question` events | `tmux capture-pane -p -S -200` |
 | codex | `codex-bridge turns` / stream filtered for `thread/status/changed → idle` | `tmux capture-pane -p -S -200` |
 
 ### Idle / quiescent indicator (handler: `close-issue.md` § 1)

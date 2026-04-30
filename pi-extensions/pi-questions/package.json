@@ -1,7 +1,7 @@
 {
   "name": "pi-questions",
   "version": "0.1.0",
-  "description": "Pi extension for structured multi-tab popup questions and bridge-driven replies.",
+  "description": "Pi extension for structured multi-tab inline questions and bridge-driven replies.",
   "license": "MIT",
   "keywords": [
     "pi-package",
@@ -31,7 +31,7 @@
         {
           "key": "enabled",
           "label": "Enable questions",
-          "description": "Register the question tool, popup UI, and bridge question service.",
+          "description": "Register the question tool, inline question UI, and bridge question service.",
           "type": "boolean",
           "default": true,
           "category": "General",
@@ -39,9 +39,22 @@
           "requiresReload": true
         },
         {
+          "key": "renderMode",
+          "label": "Question UI mode",
+          "description": "Where interactive questions render: editor replaces the input area; overlay restores the floating popup.",
+          "type": "enum",
+          "enumValues": [
+            "editor",
+            "overlay"
+          ],
+          "default": "editor",
+          "category": "UI",
+          "apply": "live"
+        },
+        {
           "key": "popupWidth",
-          "label": "Popup width",
-          "description": "Preferred question popup width in terminal columns.",
+          "label": "Overlay popup width",
+          "description": "Preferred overlay popup width in terminal columns when Question UI mode is overlay.",
           "type": "number",
           "default": 96,
           "category": "UI",
@@ -49,8 +62,8 @@
         },
         {
           "key": "popupMaxHeight",
-          "label": "Popup max height",
-          "description": "Maximum overlay height, number or percentage string.",
+          "label": "Overlay popup max height",
+          "description": "Maximum overlay height when Question UI mode is overlay; accepts a number or percentage string.",
           "type": "string",
           "default": "80%",
           "category": "UI",
@@ -59,7 +72,7 @@
         {
           "key": "optionRows",
           "label": "Visible option rows",
-          "description": "Number of option rows shown before scrolling.",
+          "description": "Maximum option rows shown before scrolling. Editor mode does not pad short lists with blank rows.",
           "type": "number",
           "default": 10,
           "category": "UI",
@@ -67,7 +80,7 @@
         },
         {
           "key": "defaultHeader",
-          "label": "Default popup header",
+          "label": "Default question header",
           "description": "Fallback title when a question request has no header.",
           "type": "string",
           "default": "Question",

@@ -18,7 +18,22 @@ Read `<ISSUE_ID>`'s registry entry to obtain `pane_target` and `worktree`:
 .agents/skills/flightdeck/scripts/pane-registry get <ISSUE_ID>
 ```
 
-Route by `<TAG>` to the matching subsection below. Each subsection is documented in detail in `patterns/prompt-handlers.md` and `patterns/conflict-detection.md`.
+Route by `<TAG>` to the matching subsection below. Each subsection is documented in detail in `patterns/prompt-handlers.md`, `patterns/conflict-detection.md`, `patterns/opencode-questions.md`, and `patterns/pi-questions.md`.
+
+---
+
+## § 1.5: Handler — `oc-question` / `pi-question`
+
+Structured question events already include the authoritative request payload; do not infer labels from the rendered TUI.
+
+1. Read `request_id`, `harness`, and `question` from the daemon event details passed by `watch.md` § 2. If details are absent, fetch pending questions through the adapter (`GET /question` for opencode, `pi-bridge questions --pid <PID>` for Pi) and match by request id.
+2. For known prompt shapes, choose exact labels from `question.questions[i].options[].label` and answer:
+   - Opencode: `pane-respond <pane_target> --harness opencode --question <request_id> --answer "<label>"`, `--answer-multi "l1,l2"`, or `--answers-json '[[...]]'` for multi-tab requests.
+   - Pi: `pane-respond <pane_target> --harness pi --question <request_id> --answer "<label>"`, `--answer-multi "l1,l2"`, or `--answers-json '[[...]]'` for multi-tab requests.
+3. For Pi free-form/custom answers, use `--answer-text "<text>"` only when the target tab has `allowCustom=true`. This is the bridge equivalent of tabbing to the custom row and typing into the inline editor.
+4. For opencode free-form answers, do not pass off-list labels; reject and follow up with a normal attached user message as documented in `patterns/opencode-questions.md`.
+5. If the prompt shape is novel or the safe label/custom answer cannot be determined, escalate by setting `paused_for_user` with the structured question payload excerpt.
+6. Log via `pane-registry log-decision <ISSUE_ID> <TAG> <answer-summary>`.
 
 ---
 

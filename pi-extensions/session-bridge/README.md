@@ -54,6 +54,8 @@ pi-bridge steer --pid <pid> "steer current work"
 pi-bridge follow-up --pid <pid> "after you finish, do this"
 pi-bridge questions --pid <pid>
 pi-bridge answer --pid <pid> --request-id que_... --answers '[["Stop here"]]'
+# For pi-questions tabs with allowCustom=true, the answer string may be free-form text.
+pi-bridge answer --pid <pid> --request-id que_... --answers '[["Use CC-1234 and continue"]]'
 pi-bridge reject --pid <pid> --request-id que_...
 ```
 
@@ -83,7 +85,8 @@ Commands:
 {"id":"9","type":"get_commands"}
 {"id":"10","type":"questions"}
 {"id":"11","type":"answer","requestId":"que_example","answers":[["Stop here"]]}
-{"id":"12","type":"reject","requestId":"que_example"}
+{"id":"12","type":"answer","requestId":"que_example","answers":[["free-form text for an allowCustom tab"]]}
+{"id":"13","type":"reject","requestId":"que_example"}
 ```
 
 Responses:

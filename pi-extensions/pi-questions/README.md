@@ -1,12 +1,13 @@
 # pi-questions
 
-Structured popup questions for Pi, with multi-tab categories and `pi-bridge` reply/reject support.
+Structured inline questions for Pi, with multi-tab categories and `pi-bridge` reply/reject support.
 
 ## What it provides
 
 - `question` tool: asks the user one or more multiple-choice categories.
 - `ctx.askQuestions(payload)`: extension API helper for other Pi extensions.
-- Interactive popup with tabs, single-select and multi-select modes.
+- Interactive UI that takes over the editor input area by default, matching opencode/Claude-style prompts.
+- Optional legacy floating overlay mode via settings.
 - Session-bridge integration: external controllers can list, answer, reject, and stream question events.
 
 ## Payload
@@ -23,7 +24,9 @@ Structured popup questions for Pi, with multi-tab categories and `pi-bridge` rep
         { "label": "Use current branch", "description": "Continue without a tracker issue." },
         { "label": "Stop here", "description": "Wait for operator guidance." }
       ],
-      "multiple": false
+      "multiple": false,
+      "allowCustom": true,
+      "customLabel": "Type issue ID"
     }
   ]
 }
@@ -41,13 +44,32 @@ Cancellation/reject:
 { "requestId": "que_example", "cancelled": true }
 ```
 
-## Popup keys
+## Free-form answers
 
-- `←/→`: switch tabs
+Set `allowCustom: true` on a tab to add a free-type row. Selecting that row opens an inline text editor; the submitted text is returned in that tab's answer array. Bridge callers may provide the same custom answer by passing any non-empty string for that tab when `allowCustom` is true.
+
+Optional custom fields:
+
+- `customLabel`: label for the free-type row. Default: `Type custom answer`.
+- `customPlaceholder`: help text shown beside the custom row/editor.
+
+## Interactive keys
+
+- `←/→` or `Tab`: switch tabs
 - `↑/↓` or `j/k`: move selection
-- `Enter`: single-select picks row and advances; multi-select advances/submits
-- `Space`: toggles row in multi-select tabs
-- `Esc`: cancel the whole request
+- `Enter`: single-select picks row and advances; multi-select advances/submits; on the custom row, opens text input
+- `Space`: toggles row in multi-select tabs; on the custom row, opens text input
+- `Esc`: cancel the whole request, or leave text input when editing a custom answer
+
+## Settings
+
+Settings are exposed through `pi-extension-manager` under **Questions**.
+
+- `renderMode`: `editor` (default) takes over the editor input area; `overlay` restores the old floating popup.
+- `optionRows`: maximum visible option rows before scrolling. Editor mode no longer pads short lists with empty rows.
+- `popupWidth` / `popupMaxHeight`: only used when `renderMode = overlay`.
+- `defaultHeader`: fallback question title.
+- `bridgeRepliesEnabled`: allow `pi-session-bridge` to answer/reject pending questions.
 
 ## Flightdeck-style bridge control
 

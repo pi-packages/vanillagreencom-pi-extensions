@@ -9,7 +9,7 @@ This file is for humans installing or debugging the skill. Agents should read `S
 When the user invokes flightdeck's `start` workflow (or its parallel-group variant) from main, it launches one or more issue panes via `open-terminal` and the same agent transitions to master overseer of every spawned pane in the current tmux session. The exact invocation syntax depends on the harness (Claude Code uses `/flightdeck start`, Codex uses `$flightdeck start`, OpenCode uses `/flightdeck start` or similar — see your harness docs). It:
 
 - Subscribes to per-pane harness adapter event streams: opencode (HTTP), claude (Channels MCP + JSONL tail), pi (Unix-socket bridge), codex (JSON-RPC over WebSocket app-server). Falls back to bell flag + capture-pane sentinel matching for adapter-unavailable panes.
-- Classifies prompts and answers them with learned defaults — adapter-mode responses go through the harness's structured input path (`opencode run --attach`, channel POST, `pi-bridge send`, `codex-bridge send`), not tmux send-keys.
+- Classifies prompts and answers them with learned defaults — adapter-mode responses go through the harness's structured input path (`opencode run --attach` / question API, channel POST, `pi-bridge send` / `answer|reject`, `codex-bridge send`), not tmux send-keys.
 - For prompts that trigger sub-agent delegation (rebase resolution, fix delegation), embeds the necessary guidance in the same input as the option pick (a follow-up message arrives too late).
 - Watches PR state, builds a file-level conflict graph between in-flight PRs, plans merge order smallest-scope-first.
 - Force-merges when a PR is APPROVED + all-green + content-disjoint and GitHub's `mergeStateStatus` has been `UNKNOWN` past the configured threshold.
@@ -64,7 +64,7 @@ Every script in `scripts/` appears in `SKILL.md`'s Scripts table. No hidden scri
 | `codex-app-server-spawn` / `codex-app-server-stop` | Idempotent per-session bring-up + teardown of the codex `app-server --listen ws://...` shared by all `codex --remote` panes |
 | `pane-registry` | Issue↔pane mapping wrapper. Tracks per-harness bridge metadata (oc/cc/pi/cx URL+id+port fields); per-harness `*-bridge-args <ISSUE>` and `find-by-pane <pane-target>` lookups drive adapter dispatch in pane-respond / pane-poll |
 | `pane-poll` | Bell + per-harness adapter (opencode `/session/<id>/message`, claude JSONL tail, `pi-bridge history`, `codex-bridge turns`) or tmux capture-pane fallback + classify |
-| `pane-respond` | Send to pane: free-text / `--option N` / `--option-multi` / `--keys` / `--question <reqID> --answer "<label>"` (opencode question-tool API). Per-harness adapters route via `opencode run --attach`, channel POST, `pi-bridge send`, `codex-bridge send`; tmux paste-buffer fallback. Validates rebase payloads have preserve/apply/verify triplet |
+| `pane-respond` | Send to pane: free-text / `--option N` / `--option-multi` / `--keys` / `--question <reqID> --answer "<label>" \| --answer-multi "l1,l2" \| --answer-text "free text" \| --answers-json '[[...]]' \| --reject` (opencode/Pi structured question APIs; Pi free text requires `allowCustom=true`; `--answers-json` handles multi-tab requests). Per-harness adapters route via `opencode run --attach` / question API, channel POST, `pi-bridge send` / `answer|reject`, `codex-bridge send`; tmux paste-buffer fallback. Validates rebase payloads have preserve/apply/verify triplet |
 | `pane-clear-bell` | Atomic chained `select-window` cycle |
 | `pr-conflict-graph` | File-intersection adjacency for a PR list |
 | `prompt-classify` | Sentinel matcher → handler tag |
@@ -79,6 +79,7 @@ Lessons that motivated this skill, distilled into domain-grouped docs under `pat
 - `decision-biases.md` — smaller-PR-first, scope-creep detector, rule-of-three, expansion bias, merge-order tiebreakers
 - `claude-channels.md` — opt-in claude code Channels MCP webhook + JSONL adapter contract, known orchestration-trust limitation
 - `opencode-questions.md` — opencode question-tool routing via HTTP API (daemon `oc-question` event → `pane-respond --question`); off-list-label policy
+- `pi-questions.md` — Pi `pi-questions` routing via `pi-bridge answer|reject`; custom/free-type answer policy
 
 ## Debugging
 

@@ -123,6 +123,7 @@ CANONICAL_TAGS=(
   cycle-fix-suggestions
   descope-related
   oc-question
+  pi-question
 )
 
 is_canonical_tag() {
@@ -625,7 +626,7 @@ locked_cleanup_for_key() {
 declare -A LAST_EVENT_KEY  # pane_id|hash|tag → 1
 
 append_event() {
-  local pane_id="$1" hash="$2" tag="$3" reason="$4" age="${5:-0}" is_bell="${6:-false}"
+  local pane_id="$1" hash="$2" tag="$3" reason="$4" age="${5:-0}" is_bell="${6:-false}" extra_json="${7:-null}"
   local key="${pane_id}|${hash}|${tag}"
   if [[ -n "${LAST_EVENT_KEY[$key]:-}" ]]; then
     return
@@ -641,7 +642,8 @@ append_event() {
         --arg tag "$tag" \
         --arg reason "$reason" \
         --argjson age "$age" \
-        '{ts:$ts, pane_id:$pid, hash:$hash, tag:$tag, reason:$reason, stable_age_sec:$age}' >> "$EVENTS_FILE"
+        --argjson extra "$extra_json" \
+        '{ts:$ts, pane_id:$pid, hash:$hash, tag:$tag, reason:$reason, stable_age_sec:$age} + (if $extra == null then {} else {details:$extra} end)' >> "$EVENTS_FILE"
   # If a wake is already in flight, extend in_flight under the same lock.
   if [[ -f "$WAKE_PENDING" ]]; then
     local tmp="${WAKE_PENDING}.tmp.$$"
@@ -951,6 +953,7 @@ pi_subscriber_loop() {
   exec 200<&- 2>/dev/null || true
   local pane_id="$1" pi_pid="$2" parent_pid="$3"
   local last_hash=""
+  local seen_qids=","
   local sub_log; sub_log="${LOG}.pi-sub-$(pi_pane_id_safe "$pane_id")"
   printf '%s [pi-sub-start] pane=%s pi_pid=%s parent=%s\n' \
     "$(date -Iseconds)" "$pane_id" "$pi_pid" "$parent_pid" \
@@ -962,14 +965,50 @@ pi_subscriber_loop() {
     exit 1
   }
 
-  # Stream events filtered for assistant + stopReason. Each line is
-  # one JSON event. While stream is open: read each line, hash text,
-  # classify, append wake event.
+  # Stream bridge events. We emit two classes:
+  #   - pi-question: structured pi-questions prompts opened by the child pane.
+  #   - normal assistant turn-end text events, classified through prompt-classify.
   "$pi_bin" stream --pid "$pi_pid" 2>/dev/null \
-    | jq --unbuffered -c 'select(.type == "event" and .data.message.role == "assistant" and (.data.message.stopReason // "") != "")' \
+    | jq --unbuffered -c 'select(
+        (.type == "event" and .event == "question" and (.data.action // "") == "opened")
+        or
+        (.type == "event" and .data.message.role == "assistant" and (.data.message.stopReason // "") != "")
+      )' \
     | while IFS= read -r line; do
       if ! kill -0 "$parent_pid" 2>/dev/null; then exit 0; fi
       [[ -z "$line" ]] && continue
+
+      local event_name
+      event_name=$(jq -r '.event // ""' <<< "$line" 2>/dev/null)
+      if [[ "$event_name" == "question" ]]; then
+        local qid
+        qid=$(jq -r '.data.requestId // .data.request.id // ""' <<< "$line" 2>/dev/null)
+        [[ -z "$qid" || "$qid" == "null" ]] && continue
+        if [[ "$seen_qids" != *",$qid,"* ]]; then
+          seen_qids+="$qid,"
+          local qpayload qhash
+          qpayload=$(jq -c '.data.request // .data' <<< "$line" 2>/dev/null)
+          [[ -z "$qpayload" || "$qpayload" == "null" ]] && continue
+          qhash=$(printf '%s' "$qid" | sha256sum | awk '{print substr($1,1,12)}')
+          printf '%s [pi-question-emit] pane=%s request_id=%s\n' \
+            "$(date -Iseconds)" "$pane_id" "$qid" \
+            >> "$sub_log" 2>/dev/null || true
+          ( exec 218>"$SESSION_LOCK"
+            flock 218
+            jq -nc --arg ts "$(date -Iseconds)" \
+                   --arg pid "$pane_id" \
+                   --arg harness "pi" \
+                   --arg req "$qid" \
+                   --arg tag "pi-question" \
+                   --arg h "$qhash" \
+                   --argjson q "$qpayload" \
+                   '{ts:$ts, pane_id:$pid, harness:$harness, event_type:"question", request_id:$req, question:$q, classifier_tag:$tag, hash:$h}' \
+                   >> "$WAKE_EVENTS_LOG"
+          )
+        fi
+        continue
+      fi
+
       local last_text
       last_text=$(jq -r '
         ( .data.message.content // [] )
@@ -1379,8 +1418,8 @@ run_loop() {
     declare -a tick_pending_is_bell=()  # subset of tick_pending_ids that came from bell branch
     declare -a tick_bell_wins=()
 
-    # Drain opencode subscriber events first. Each event is a "turn-end"
-    # signal from /session/<id>/message poll: structured tag + hash. We
+    # Drain adapter subscriber events first. Each event is a structured
+    # turn-end or question signal from opencode/claude/pi/codex: tag + hash. We
     # apply the same wake-decision pipeline (cold-start grace,
     # NOTIFIED_HASH dedup, canonical-tag check) as the per-pane bell /
     # stable-hash branches below.
@@ -1411,22 +1450,26 @@ run_loop() {
           continue
         fi
         # Distinguish question events from turn-end events in logs +
-        # daemon-events source field. Both are emitted by oc-subscriber,
-        # but "oc-event" historically meant turn-end; "oc-question-event"
-        # is the question-tool wake.
+        # daemon-events source field.
         local _src
         if [[ "$ev_tag" == "oc-question" ]]; then
           _src="oc-question-event"
+        elif [[ "$ev_tag" == "pi-question" ]]; then
+          _src="pi-question-event"
         else
-          _src="oc-event"
+          _src="adapter-event"
         fi
         if is_canonical_tag "$ev_tag"; then
           log classify "$ev_pid $_src tag=$ev_tag (canonical)"
-          tick_reasons+=("oc:$ev_pid:$ev_tag")
+          tick_reasons+=("adapter:$ev_pid:$ev_tag")
           tick_pending_ids+=("$ev_pid")
           tick_pending_hashes+=("$ev_hash")
           tick_pending_tags+=("$ev_tag")
-          append_event "$ev_pid" "$ev_hash" "$ev_tag" "$_src" 0 false
+          _extra="null"
+          if [[ "$ev_tag" == "oc-question" || "$ev_tag" == "pi-question" ]]; then
+            _extra=$(jq -c '{event_type, request_id, question, harness}' <<< "$_line" 2>/dev/null || echo 'null')
+          fi
+          append_event "$ev_pid" "$ev_hash" "$ev_tag" "$_src" 0 false "$_extra"
         else
           (( VERBOSE == 1 )) && log classify "$ev_pid $_src tag=$ev_tag (non-canonical)"
           NOTIFIED_HASH[$ev_pid]="$ev_hash"
