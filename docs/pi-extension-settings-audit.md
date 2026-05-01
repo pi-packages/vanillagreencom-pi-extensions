@@ -16,6 +16,12 @@ Settings persist under `vstack.extensionManager.config.<packageName>` in Pi `set
 - Useful settings: show/hide built-in tools, default save scope, best-effort `/settings` wrapper.
 - Apply semantics: inventory settings are live; command registration changes need reload/restart.
 
+### `pi-skills-manager`
+
+- Toggle: `enabled` registers/unregisters `/skills`, marker expansion, startup skill-list hiding, and skills management UI after reload; `/skills enable` remains as recovery.
+- Useful settings: hide native `/skill:*` commands, hide startup `[Skills]` block, cleanup partial markers, AI skill generation, default create location, popup dimensions, visible list rows.
+- Apply semantics: search/toggle/create UI settings are live; command registration, native skill-command hiding, and startup-block hiding need reload. Skill enable/disable writes Pi resource filters and requires `/reload` to fully affect model prompt resources.
+
 ### `pi-background-tasks`
 
 - Toggle: `enabled` registers/unregisters `bg_task`, `bg_status`, `/bg`, dashboard shortcut, and widgets after reload.

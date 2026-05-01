@@ -361,6 +361,13 @@ All vstack Pi packages declare `vstack.extensionManager.settings` metadata, incl
 - **Notes:** Pi has no public native API for third-party `/settings` tabs or live module unloads; package/module toggles apply after `/reload` or restart.
 - **More:** [pi-extensions/pi-extension-manager/README.md](pi-extensions/pi-extension-manager/README.md).
 
+#### `pi-skills-manager`
+
+- **Purpose:** Dedicated `/skills` shell for browsing, previewing, inserting, creating, editing, renaming, deleting, and enabling/disabling Pi skills.
+- **Behavior:** hides native `/skill:*` commands and the startup `[Skills]` block by default, then expands inserted `[skill] <name>` markers into full skill content before prompts are sent.
+- **Settings:** native command/startup hiding, AI generation toggle, default create location, marker cleanup, popup dimensions, visible list rows.
+- **More:** [pi-extensions/pi-skills-manager/README.md](pi-extensions/pi-skills-manager/README.md).
+
 #### `pi-background-tasks`
 
 - **Purpose:** Adds explicit non-blocking shell task management to Pi so long-running commands do not block the current turn.

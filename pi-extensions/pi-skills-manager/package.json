@@ -1,0 +1,124 @@
+{
+  "name": "pi-skills-manager",
+  "version": "0.1.0",
+  "description": "Polished Pi skills manager with a dedicated /skills menu for browsing, previewing, inserting, creating, editing, renaming, deleting, and toggling skills.",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "coding-agent",
+    "skills",
+    "manager"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/skills-manager.ts"
+    ]
+  },
+  "vstack": {
+    "extensionManager": {
+      "displayName": "Skills Manager",
+      "settings": [
+        {
+          "key": "enabled",
+          "label": "Enable skills manager",
+          "description": "Register /skills, marker expansion, startup skill-list hiding, and skills management UI. If disabled, /skills enable remains available as a recovery command.",
+          "type": "boolean",
+          "default": true,
+          "category": "General",
+          "apply": "reload",
+          "requiresReload": true
+        },
+        {
+          "key": "hideNativeSkillCommands",
+          "label": "Hide native /skill commands",
+          "description": "Write enableSkillCommands=false to the matching Pi settings scope so the main slash menu stays clean and /skills becomes the skill entrypoint.",
+          "type": "boolean",
+          "default": true,
+          "category": "Integration",
+          "apply": "reload",
+          "requiresReload": true
+        },
+        {
+          "key": "hideStartupSkillsBlock",
+          "label": "Hide startup skills block",
+          "description": "Hide Pi's built-in startup [Skills] list so skills are managed through the dedicated menu instead.",
+          "type": "boolean",
+          "default": true,
+          "category": "Integration",
+          "apply": "reload",
+          "requiresReload": true
+        },
+        {
+          "key": "cleanupIncompleteMarkers",
+          "label": "Clean incomplete markers",
+          "description": "Remove partial [skill] marker fragments from the editor after aborted menu insertions when Pi exposes terminal-input hooks.",
+          "type": "boolean",
+          "default": true,
+          "category": "Editor",
+          "apply": "live"
+        },
+        {
+          "key": "aiGenerationEnabled",
+          "label": "AI skill generation",
+          "description": "Use the currently selected model/thinking level to draft new SKILL.md files. If unavailable or disabled, a deterministic fallback template is used.",
+          "type": "boolean",
+          "default": true,
+          "category": "Creation",
+          "apply": "live"
+        },
+        {
+          "key": "defaultCreateLocation",
+          "label": "Default create location",
+          "description": "Initial visibility choice when creating a skill.",
+          "type": "enum",
+          "enumValues": [
+            "project",
+            "global"
+          ],
+          "default": "project",
+          "category": "Creation",
+          "apply": "live"
+        },
+        {
+          "key": "popupWidth",
+          "label": "Popup width",
+          "description": "Preferred overlay width. Accepts a number of columns or a percentage string such as 82%.",
+          "type": "string",
+          "default": "82%",
+          "category": "UI",
+          "apply": "live"
+        },
+        {
+          "key": "popupMaxHeight",
+          "label": "Popup max height",
+          "description": "Maximum overlay height. Accepts a number of rows or a percentage string.",
+          "type": "string",
+          "default": "86%",
+          "category": "UI",
+          "apply": "live"
+        },
+        {
+          "key": "listRows",
+          "label": "Visible list rows",
+          "description": "Number of list rows shown before scrolling in browse mode.",
+          "type": "number",
+          "default": 14,
+          "category": "UI",
+          "apply": "live"
+        }
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*"
+  },
+  "files": [
+    "extensions/",
+    "README.md",
+    "THIRD_PARTY_NOTICES.md",
+    "package.json"
+  ]
+}
