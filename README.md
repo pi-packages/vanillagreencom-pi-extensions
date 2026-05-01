@@ -422,7 +422,7 @@ All vstack Pi packages declare `vstack.extensionManager.settings` metadata, incl
 #### `pi-tool-renderer`
 
 - **Purpose:** Compact Claude/opencode-style built-in tool renderers while preserving original tool execution.
-- **Behavior:** individual `read`/`bash` calls collapse to concise summaries; mutation tools show stats and bounded expanded previews via Pi's normal `Ctrl+O` model; `tool_batch` is preferred for independent read/search/list/diagnostic bash calls as one compact renderable unit.
+- **Behavior:** individual `read`/`bash`/search calls render as compact bullet rows with no padded box; mutation tools show stats and bounded expanded previews via Pi's normal `Ctrl+O` model; `tool_batch` is preferred for independent read/search/list/diagnostic bash calls as one compact renderable unit.
 - **Settings:** preview line counts, command preview width, batch tool toggle/limit, renderer line width.
 - **More:** [pi-extensions/pi-tool-renderer/README.md](pi-extensions/pi-tool-renderer/README.md).
 
