@@ -217,7 +217,7 @@ function makeTruncatedLines(text: string): TruncatedLines {
 }
 
 function stackToolCalls(cwd?: string): boolean {
-	return settingBoolean("stackToolCalls", true, cwd);
+	return settingBoolean("stackToolCalls", false, cwd);
 }
 
 type StackChildDisplay = "rows" | "headline" | "anchor-list";
@@ -595,16 +595,28 @@ function toolBatchOutput(items: BatchToolItem[]): string {
 	return lines.join("\n");
 }
 
+function renderToolBatchCallText(args: any, theme: any, cwd?: string): string {
+	const calls = normalizeBatchCalls(args?.calls);
+	const lines = [stackPrefix(theme) + theme.fg("toolTitle", theme.bold(`${calls.length || 0} batched tool${calls.length === 1 ? "" : "s"} launching`))];
+	calls.slice(0, 12).forEach((call, index) => {
+		const item: StackItem = { args: call.args, batchId: "call", id: String(index), isError: false, resultText: "", status: "running", toolName: call.tool, truncated: false };
+		lines.push(`${theme.fg("muted", `  ${index === calls.length - 1 ? "└" : "├"} `)}${stackItemCallText(item, theme, cwd)}`);
+	});
+	if (calls.length > 12) lines.push(theme.fg("muted", `  └ … +${calls.length - 12} more`));
+	return lines.join("\n");
+}
+
 function registerToolBatch(pi: ExtensionAPI, agent: any, cwd: string): void {
 	pi.registerTool({
 		renderShell: "self",
 		name: "tool_batch",
 		label: "Tool Batch",
 		description:
-			"Run multiple independent read/grep/find/ls/bash calls as one composite tool with a single stacked renderer. Use bash only for diagnostic commands whose side effects and ordering do not matter.",
-		promptSnippet: "Run multiple independent read/search/list/bash calls as one compact batch.",
+			"Run multiple independent read/grep/find/ls/bash calls as one composite tool with a single stacked renderer. Prefer this over separate parallel read/search/list/diagnostic bash calls. Use bash only for diagnostic commands whose side effects and ordering do not matter.",
+		promptSnippet: "Batch 2+ independent read/search/list/diagnostic bash calls into one compact result.",
 		promptGuidelines: [
-			"Use tool_batch when you need 2+ independent read, grep, find, ls, or diagnostic bash calls and want one compact stacked result.",
+			"Prefer tool_batch instead of separate parallel read, grep, find, ls, or diagnostic bash calls whenever the calls are independent.",
+			"Use individual read/grep/find/ls/bash calls when there is only one call, when calls depend on previous results, when bash mutates state, when streaming/live output matters, or when the user explicitly wants separate tool entries.",
 			"Do not use tool_batch for edit/write or for bash commands that mutate files, depend on ordering, need streaming output, or should be inspected as separate commands.",
 		],
 		parameters: ToolBatchParams as never,
@@ -650,19 +662,11 @@ function registerToolBatch(pi: ExtensionAPI, agent: any, cwd: string): void {
 			const details: BatchToolDetails = { failed, items, succeeded: items.length - failed, total: items.length };
 			return { content: [{ type: "text", text: toolBatchOutput(items) }], details, isError: failed > 0 };
 		},
-		renderCall(args: any, theme: any, context: any) {
-			const calls = normalizeBatchCalls(args?.calls);
-			const effectiveCwd = context?.cwd ?? cwd;
-			const lines = [stackPrefix(theme) + theme.fg("toolTitle", theme.bold(`${calls.length || 0} batched tool${calls.length === 1 ? "" : "s"} launching`))];
-			calls.slice(0, 12).forEach((call, index) => {
-				const item: StackItem = { args: call.args, batchId: "call", id: String(index), isError: false, resultText: "", status: "running", toolName: call.tool, truncated: false };
-				lines.push(`${theme.fg("muted", `  ${index === calls.length - 1 ? "└" : "├"} `)}${stackItemCallText(item, theme, effectiveCwd)}`);
-			});
-			if (calls.length > 12) lines.push(theme.fg("muted", `  └ … +${calls.length - 12} more`));
-			return makeTruncatedLines(lines.join("\n"));
+		renderCall() {
+			return makeEmpty();
 		},
 		renderResult(result: any, { expanded, isPartial }: any, theme: any, context: any) {
-			if (isPartial) return makeTruncatedLines(stackPrefix(theme) + theme.fg("warning", "Running batched tools…"));
+			if (isPartial) return makeTruncatedLines(renderToolBatchCallText(context?.args, theme, context?.cwd ?? cwd));
 			const details = result.details as BatchToolDetails | undefined;
 			if (!details?.items) return makeTruncatedLines(textContent(result) || "(no output)");
 			return makeTruncatedLines(renderToolBatchText(details.items, theme, expanded, context?.cwd ?? cwd));
@@ -674,7 +678,7 @@ function registerRead(pi: ExtensionAPI, agent: any, cwd: string): void {
 	const original = getBuiltInTool(agent, cwd, "read");
 	if (!original) return;
 	pi.registerTool({
-		...stackShell(cwd),
+		renderShell: "self",
 		name: "read",
 		label: "read",
 		description: original.description,
@@ -682,24 +686,28 @@ function registerRead(pi: ExtensionAPI, agent: any, cwd: string): void {
 		async execute(id: string, params: any, signal: AbortSignal | undefined, onUpdate: unknown, context: any) {
 			return getBuiltInTool(agent, contextCwd(context, cwd), "read").execute(id, params, signal, onUpdate);
 		},
-		renderCall(args: any, theme: any, context: any) {
-			if (stackToolCalls(context?.cwd ?? cwd)) return makeEmpty();
-			return makeText(readCallText(args, theme));
+		renderCall() {
+			return makeEmpty();
 		},
 		renderResult(result: any, { expanded, isPartial }: any, theme: any, context: any) {
 			const stacked = stackToolCalls(context?.cwd ?? cwd);
 			if (stacked) return renderStackedToolResult("read", result, isPartial, expanded, theme, context, cwd);
-			if (isPartial) return makeText(theme.fg("warning", "Reading…"));
+			const call = readCallText(context?.args ?? {}, theme);
+			if (isPartial) return makeTruncatedLines(`${stackPrefix(theme)}${call}${theme.fg("dim", " · ")}${theme.fg("warning", "reading…")}`);
 			const content = textContent(result);
 			const count = lineCount(content);
-			let text = theme.fg("success", `${count} line${count === 1 ? "" : "s"}`);
-			if (resultTruncated(result)) text += theme.fg("warning", " · truncated");
+			let summary = theme.fg("success", `${count} line${count === 1 ? "" : "s"}`);
+			if (resultTruncated(result)) summary += theme.fg("warning", " · truncated");
+			let text = `${stackPrefix(theme)}${call}${theme.fg("dim", " · ")}${summary}`;
 			if (expanded && content) {
 				const limit = Math.max(1, Math.floor(settingNumber("readPreviewLines", 80, context?.cwd)));
-				text += `\n${theme.fg("dim", preview(content, limit, "head", context?.cwd))}`;
-				if (count > limit) text += `\n${theme.fg("muted", `… ${count - limit} more line(s)`)}`;
+				text += `\n${preview(content, limit, "head", context?.cwd)
+					.split(/\r?\n/)
+					.map((line) => `${theme.fg("muted", "  │ ")}${theme.fg("dim", line)}`)
+					.join("\n")}`;
+				if (count > limit) text += `\n${theme.fg("muted", `  │ … ${count - limit} more line(s)`)}`;
 			}
-			return makeText(text);
+			return makeTruncatedLines(text);
 		},
 	});
 }
@@ -708,7 +716,7 @@ function registerBash(pi: ExtensionAPI, agent: any, cwd: string): void {
 	const original = getBuiltInTool(agent, cwd, "bash");
 	if (!original) return;
 	pi.registerTool({
-		...stackShell(cwd),
+		renderShell: "self",
 		name: "bash",
 		label: "bash",
 		description: original.description,
@@ -716,27 +724,31 @@ function registerBash(pi: ExtensionAPI, agent: any, cwd: string): void {
 		async execute(id: string, params: any, signal: AbortSignal | undefined, onUpdate: unknown, context: any) {
 			return getBuiltInTool(agent, contextCwd(context, cwd), "bash").execute(id, params, signal, onUpdate);
 		},
-		renderCall(args: any, theme: any, context: any) {
-			if (stackToolCalls(context?.cwd ?? cwd)) return makeEmpty();
-			return makeText(bashCallText(args, theme, context?.cwd ?? cwd));
+		renderCall() {
+			return makeEmpty();
 		},
 		renderResult(result: any, { expanded, isPartial }: any, theme: any, context: any) {
 			const stacked = stackToolCalls(context?.cwd ?? cwd);
 			if (stacked) return renderStackedToolResult("bash", result, isPartial, expanded, theme, context, cwd);
-			if (isPartial) return makeText(theme.fg("warning", "Running…"));
+			const call = bashCallText(context?.args ?? {}, theme, context?.cwd ?? cwd);
+			if (isPartial) return makeTruncatedLines(`${stackPrefix(theme)}${call}${theme.fg("dim", " · ")}${theme.fg("warning", "running…")}`);
 			const output = textContent(result);
 			const exit = commandExit(output);
 			const count = lineCount(output);
 			const exitLabel = exit === null ? "exit 0" : `exit ${exit}`;
-			let text = exit !== null && exit !== 0 ? theme.fg("error", exitLabel) : theme.fg("success", exitLabel);
-			text += theme.fg("dim", ` · ${count} line${count === 1 ? "" : "s"}`);
-			if (resultTruncated(result)) text += theme.fg("warning", " · truncated");
+			let summary = exit !== null && exit !== 0 ? theme.fg("error", exitLabel) : theme.fg("success", exitLabel);
+			summary += theme.fg("dim", ` · ${count} line${count === 1 ? "" : "s"}`);
+			if (resultTruncated(result)) summary += theme.fg("warning", " · truncated");
+			let text = `${stackPrefix(theme)}${call}${theme.fg("dim", " · ")}${summary}`;
 			if (expanded && output) {
 				const limit = Math.max(1, Math.floor(settingNumber("bashPreviewLines", 80, context?.cwd)));
-				text += `\n${theme.fg("dim", preview(output, limit, "tail", context?.cwd))}`;
-				if (count > limit) text += `\n${theme.fg("muted", `… ${count - limit} older line(s)`)}`;
+				text += `\n${preview(output, limit, "tail", context?.cwd)
+					.split(/\r?\n/)
+					.map((line) => `${theme.fg("muted", "  │ ")}${theme.fg("dim", line)}`)
+					.join("\n")}`;
+				if (count > limit) text += `\n${theme.fg("muted", `  │ … ${count - limit} older line(s)`)}`;
 			}
-			return makeText(text);
+			return makeTruncatedLines(text);
 		},
 	});
 }
@@ -802,7 +814,7 @@ function registerReadOnly(pi: ExtensionAPI, agent: any, cwd: string, toolName: "
 	const original = getBuiltInTool(agent, cwd, toolName);
 	if (!original) return;
 	pi.registerTool({
-		...stackShell(cwd),
+		renderShell: "self",
 		name: toolName,
 		label: toolName,
 		description: original.description,
@@ -810,24 +822,28 @@ function registerReadOnly(pi: ExtensionAPI, agent: any, cwd: string, toolName: "
 		async execute(id: string, params: any, signal: AbortSignal | undefined, onUpdate: unknown, context: any) {
 			return getBuiltInTool(agent, contextCwd(context, cwd), toolName).execute(id, params, signal, onUpdate);
 		},
-		renderCall(args: any, theme: any, context: any) {
-			if (stackToolCalls(context?.cwd ?? cwd)) return makeEmpty();
-			return makeText(readOnlyCallText(toolName, args, theme, context?.cwd ?? cwd));
+		renderCall() {
+			return makeEmpty();
 		},
 		renderResult(result: any, { expanded, isPartial }: any, theme: any, context: any) {
 			const stacked = stackToolCalls(context?.cwd ?? cwd);
 			if (stacked) return renderStackedToolResult(toolName, result, isPartial, expanded, theme, context, cwd);
-			if (isPartial) return makeText(theme.fg("warning", `${toolName}…`));
+			const call = readOnlyCallText(toolName, context?.args ?? {}, theme, context?.cwd ?? cwd);
+			if (isPartial) return makeTruncatedLines(`${stackPrefix(theme)}${call}${theme.fg("dim", " · ")}${theme.fg("warning", `${toolName}…`)}`);
 			const output = textContent(result);
 			const count = output.trim() ? lineCount(output) : 0;
-			let text = theme.fg("success", `${count} result${count === 1 ? "" : "s"}`);
-			if (resultTruncated(result)) text += theme.fg("warning", " · truncated");
+			let summary = theme.fg("success", `${count} result${count === 1 ? "" : "s"}`);
+			if (resultTruncated(result)) summary += theme.fg("warning", " · truncated");
+			let text = `${stackPrefix(theme)}${call}${theme.fg("dim", " · ")}${summary}`;
 			if (expanded && output) {
 				const limit = Math.max(1, Math.floor(settingNumber("searchPreviewLines", 80, context?.cwd)));
-				text += `\n${theme.fg("dim", preview(output, limit, "head", context?.cwd))}`;
-				if (count > limit) text += `\n${theme.fg("muted", `… ${count - limit} more result line(s)`)}`;
+				text += `\n${preview(output, limit, "head", context?.cwd)
+					.split(/\r?\n/)
+					.map((line) => `${theme.fg("muted", "  │ ")}${theme.fg("dim", line)}`)
+					.join("\n")}`;
+				if (count > limit) text += `\n${theme.fg("muted", `  │ … ${count - limit} more result line(s)`)}`;
 			}
-			return makeText(text);
+			return makeTruncatedLines(text);
 		},
 	});
 }

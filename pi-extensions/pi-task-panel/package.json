@@ -103,7 +103,7 @@
         {
           "key": "showWorkflowReminder",
           "label": "Task workflow reminders",
-          "description": "Remind the agent to start tasks before focused work, mark tasks done/drop when status changes, and add discovered follow-ups.",
+          "description": "Inject task workflow reminders and hidden current task context so the agent reconciles active/done/dropped/follow-up tasks before final replies.",
           "type": "boolean",
           "default": true,
           "category": "Reminder",

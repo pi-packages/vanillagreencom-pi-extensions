@@ -67,13 +67,13 @@ Settings persist under `vstack.extensionManager.config.<packageName>` in Pi `set
 ### `pi-tool-renderer`
 
 - Toggle: `enabled` registers/unregisters compact built-in tool renderers after reload.
-- Useful settings: command preview chars, bash/read/search/edit/write preview lines, optional `tool_batch` composite tool and max batch calls, max render line width.
+- Useful settings: command preview chars, bash/read/search/edit/write preview lines, preferred `tool_batch` composite tool and max batch calls, legacy native-tool stacking, max render line width.
 - Apply semantics: preview and batch-limit settings are live; renderer/batch-tool registration needs reload.
 
 ### `pi-task-panel`
 
 - Toggle: `enabled` registers/unregisters `todo_write`, `/todo`, panel widget, reminders, and shortcuts after reload.
-- Useful settings: default panel state, Ctrl+T takeover, Alt+T tri-state toggle, compact task count, active-task auto-advance/hide, expanded notes, auto-show, incomplete-task reminders.
+- Useful settings: default panel state, Ctrl+T takeover, Alt+T tri-state toggle, compact task count, active-task auto-advance/hide, expanded notes, auto-show, sequential task updates, model-facing workflow context/reminders, incomplete-task reminders.
 - Apply semantics: panel/reminder settings are live; shortcut registration needs reload.
 
 ### `pi-caveman`

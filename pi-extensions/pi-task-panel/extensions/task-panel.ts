@@ -1,5 +1,5 @@
 import { StringEnum } from "@mariozechner/pi-ai";
-import type { AgentToolResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext, Theme } from "@mariozechner/pi-coding-agent";
+import type { AgentToolResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext, Theme, ToolExecutionMode } from "@mariozechner/pi-coding-agent";
 import { Text, truncateToWidth } from "@mariozechner/pi-tui";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -8,6 +8,7 @@ import { Type } from "typebox";
 
 const INSTALL_SYMBOL = Symbol.for("vstack.pi-task-panel.installed");
 const STATE_TYPE = "vstack-task-panel:state";
+const TASK_CONTEXT_TYPE = "vstack-task-panel:context";
 const WIDGET_KEY = "vstack-task-panel";
 const PANEL_INDENT = "  ";
 const PANEL_BAR = "┃";
@@ -451,7 +452,15 @@ function renderTodoToolSummary(summary: string, action: string, theme: Theme): s
 function workflowReminder(state: TodoState): string {
 	const active = activeTask(state);
 	const activeText = active ? ` Current active task: ${quoteTask(active.content)}.` : "";
-	return `Task workflow reminder:${activeText} Use todo_write start_task before focused work, mark_done/drop_task immediately when task status changes, and add_task for discovered follow-ups.`;
+	return `Task workflow reminder:${activeText} Before focused work, ensure the active task matches the work. Before final replies or when status changes, reconcile the task panel: mark_done completed tasks, drop_task obsolete tasks, and add_task discovered follow-ups. mark_done auto-advances to the next pending task.`;
+}
+
+function taskContextMessage(state: TodoState): string {
+	const remaining = sortTasks(state.tasks.filter((task) => task.status === "pending" || task.status === "in_progress"));
+	const active = activeTask(state);
+	const preview = remaining.slice(0, 8).map((task) => `${task.id === active?.id ? "*" : "-"} ${task.content} [${task.status}]`).join("\n");
+	const hidden = Math.max(0, remaining.length - 8);
+	return `<task_panel_state>\nActive task: ${active ? active.content : "(none)"}\nProgress: ${completedCount(state)}/${state.tasks.length} done; ${remaining.length} remaining\n${preview}${hidden ? `\n... ${hidden} more remaining` : ""}\n\nTask workflow requirements:\n- If you are about to say work is done/fixed/committed/verified, first call todo_write mark_done for the matching task.\n- If the active task is stale or no longer relevant, call todo_write drop_task or start_task for the correct task before continuing.\n- If new work is discovered, call todo_write add_task.\n- Prefer one todo_write transition at a time; mark_done automatically advances to the next pending task.\n</task_panel_state>`;
 }
 
 function toolResultContent(summary: string, state: TodoState, cwd: string): string {
@@ -574,14 +583,17 @@ export default function taskPanel(pi: ExtensionAPI): void {
 
 	pi.registerTool({
 		...(compactToolOutput ? { renderShell: "self" as const } : {}),
+		executionMode: "sequential" as ToolExecutionMode,
 		name: "todo_write",
 		label: "Todo Write",
 		description: "Structured task panel updates: replace/add/start/done/drop/remove/note/panel.",
 		promptSnippet: "Create and update the persistent task panel for multi-step work.",
 		promptGuidelines: [
 			"Use todo_write to keep a visible task list when the user asks for multi-step work or when you need to track progress across tool calls.",
-			"Use todo_write replace for a fresh plan, add_task for discovered follow-ups, start_task before working a task, and mark_done/drop_task when status changes.",
-			"todo_write automatically keeps one current task in progress, advances to the next pending task when the active task is completed/dropped, hides the panel when all tasks are complete, and shows it again when pending work appears.",
+			"Use todo_write replace for a fresh plan, add_task for discovered follow-ups, start_task before working a task, and mark_done/drop_task immediately when status changes.",
+			"Before final replies that claim work is done, fixed, committed, verified, or no longer relevant, call todo_write to reconcile the active task first.",
+			"todo_write runs sequentially and automatically advances to the next pending task after mark_done/drop_task; do not issue a separate start_task unless switching to a non-next task.",
+			"todo_write hides the panel when all tasks are complete and shows it again when pending work appears.",
 		],
 		parameters: TodoToolParams,
 		async execute(_id, params, _signal, _onUpdate, ctx): Promise<AgentToolResult<unknown>> {
@@ -619,9 +631,24 @@ export default function taskPanel(pi: ExtensionAPI): void {
 		restore(ctx);
 	});
 	pi.on("session_tree", (_event, ctx) => restore(ctx));
+	pi.on("context", (event, ctx) => {
+		let latestContextIndex = -1;
+		for (let index = 0; index < event.messages.length; index++) {
+			if ((event.messages[index] as any)?.customType === TASK_CONTEXT_TYPE) latestContextIndex = index;
+		}
+		const messages = event.messages.filter((message: any, index: number) => {
+			if (message?.customType !== TASK_CONTEXT_TYPE) return true;
+			if (!settingBoolean("showWorkflowReminder", true, ctx.cwd) || remainingCount(state) === 0) return false;
+			return index === latestContextIndex;
+		});
+		return messages.length === event.messages.length ? undefined : { messages };
+	});
 	pi.on("before_agent_start", (event, ctx) => {
 		if (!settingBoolean("showWorkflowReminder", true, ctx.cwd) || remainingCount(state) === 0) return;
-		return { systemPrompt: `${event.systemPrompt}\n\n${workflowReminder(state)}` };
+		return {
+			message: { customType: TASK_CONTEXT_TYPE, content: taskContextMessage(state), display: false },
+			systemPrompt: `${event.systemPrompt}\n\n${workflowReminder(state)}`,
+		};
 	});
 	pi.on("agent_end", (_event, ctx) => {
 		if (!settingBoolean("showIncompleteReminder", true, ctx.cwd) || remainingCount(state) === 0) return;

@@ -422,14 +422,14 @@ All vstack Pi packages declare `vstack.extensionManager.settings` metadata, incl
 #### `pi-tool-renderer`
 
 - **Purpose:** Compact Claude/opencode-style built-in tool renderers while preserving original tool execution.
-- **Behavior:** `read`/`bash` collapse to concise summaries; mutation tools show stats and bounded expanded previews via Pi's normal `Ctrl+O` model; optional `tool_batch` runs independent read/search/list/diagnostic bash calls as one compact renderable unit.
+- **Behavior:** individual `read`/`bash` calls collapse to concise summaries; mutation tools show stats and bounded expanded previews via Pi's normal `Ctrl+O` model; `tool_batch` is preferred for independent read/search/list/diagnostic bash calls as one compact renderable unit.
 - **Settings:** preview line counts, command preview width, batch tool toggle/limit, renderer line width.
 - **More:** [pi-extensions/pi-tool-renderer/README.md](pi-extensions/pi-tool-renderer/README.md).
 
 #### `pi-task-panel`
 
 - **Purpose:** Persistent structured task panel above the status line/editor plus `/todo` commands and `todo_write` tool.
-- **Settings:** default panel state, Ctrl+T takeover opt-in, Alt+T tri-state toggle, compact count, auto-advance/hide, notes/reminders.
+- **Settings:** default panel state, Ctrl+T takeover opt-in, Alt+T tri-state toggle, compact count, auto-advance/hide, notes, sequential task updates, model-facing workflow context/reminders.
 - **More:** [pi-extensions/pi-task-panel/README.md](pi-extensions/pi-task-panel/README.md).
 
 #### `pi-caveman`
