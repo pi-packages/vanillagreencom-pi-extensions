@@ -331,13 +331,14 @@ function renderPanelWidgetLines(state: TodoState, theme: Theme, cwd: string, wid
 	return lines.map((line) => truncateToWidth(`${prefix}${line}`, Math.max(1, width), ""));
 }
 
-function renderPanelHeader(state: TodoState, theme: Theme, active?: TaskItem): string {
+function renderPanelHeader(state: TodoState, theme: Theme, active?: TaskItem, hint = ""): string {
 	const remaining = remainingCount(state);
 	const activePhase = active?.phaseId ? phaseTitle(state, active.phaseId) : "";
 	const phaseBadge = state.panel === "compact" && activePhase && activePhase !== "Tasks"
 		? ` ${theme.fg("dim", "›")} ${theme.fg("muted", activePhase)}`
 		: "";
-	return `${theme.fg(PANEL_TITLE_COLOR, theme.bold("Tasks"))}${phaseBadge} ${theme.fg("muted", `${completedCount(state)}/${state.tasks.length} done · ${remaining} remaining`)}`;
+	const toggleHint = hint ? ` ${theme.fg("dim", `· ${hint}`)}` : "";
+	return `${theme.fg(PANEL_TITLE_COLOR, theme.bold("Tasks"))}${phaseBadge} ${theme.fg("muted", `${completedCount(state)}/${state.tasks.length} done · ${remaining} remaining`)}${toggleHint}`;
 }
 
 function pushTaskGroup(lines: string[], title: string, tasks: TaskItem[], theme: Theme, cwd: string): void {
@@ -350,7 +351,7 @@ function renderPanelLines(state: TodoState, theme: Theme, cwd: string): string[]
 	const remaining = remainingCount(state);
 	const active = activeTask(state);
 	const hint = panelToggleHint(cwd);
-	const header = renderPanelHeader(state, theme, active);
+	const header = renderPanelHeader(state, theme, active, hint);
 	if (state.panel === "compact") {
 		const limit = Math.max(1, Math.floor(settingNumber("maxCompactTasks", 4, cwd)));
 		const candidates = active?.phaseId ? sortTasks(state.tasks.filter((task) => task.phaseId === active.phaseId)) : sortTasks(state.tasks);
@@ -361,12 +362,10 @@ function renderPanelLines(state: TodoState, theme: Theme, cwd: string): string[]
 		for (const task of visible) lines.push(renderTaskLine(task, theme));
 		const shown = visible.length + (active ? 1 : 0);
 		const hidden = Math.max(0, remaining - shown);
-		const tail = hint ? ` · ${hint}` : "";
-		if (hidden > 0) lines.push(theme.fg("dim", ` ╰ +${hidden} more${tail}`));
-		else if (hint) lines.push(theme.fg("dim", ` ╰ ${hint}`));
+		if (hidden > 0) lines.push(theme.fg("dim", ` ╰ +${hidden} more`));
 		return lines;
 	}
-	const lines = [hint ? `${header} ${theme.fg("dim", `· ${hint}`)}` : header];
+	const lines = [header];
 	const phases = [...state.phases].sort((a, b) => a.order - b.order);
 	const unphased = sortTasks(state.tasks.filter((task) => !task.phaseId));
 	if (unphased.length) pushTaskGroup(lines, "Unphased", unphased, theme, cwd);
@@ -445,9 +444,9 @@ function renderTodoToolSummary(summary: string, action: string, theme: Theme): s
 	const bullet = theme.fg(color, "● ");
 	const taskMatch = summary.match(/^(Task )("[^"]+")( .+)$/);
 	if (taskMatch) {
-		return `${bullet}${theme.fg("muted", taskMatch[1] ?? "Task ")}${theme.fg("accent", taskMatch[2] ?? "")}${theme.fg(color, taskMatch[3] ?? "")}`;
+		return `${bullet}${theme.fg("text", taskMatch[1] ?? "Task ")}${theme.fg("accent", taskMatch[2] ?? "")}${theme.fg(color, taskMatch[3] ?? "")}`;
 	}
-	return `${bullet}${theme.fg(color === "muted" ? "muted" : "text", summary)}`;
+	return `${bullet}${theme.fg("text", summary)}`;
 }
 
 function workflowReminder(state: TodoState): string {
@@ -634,7 +633,7 @@ export default function taskPanel(pi: ExtensionAPI): void {
 			const summary = result.details?.summary ?? result.content?.find((part: any) => part?.type === "text")?.text?.replace(/^•\s*/, "") ?? "tasks updated";
 			const action = result.details?.action ?? "";
 			if (compactToolOutput) return singleLine(renderTodoToolSummary(summary, action, theme));
-			return new Text(theme.fg("muted", `• ${summary}`), 0, 0);
+			return new Text(theme.fg("text", `• ${summary}`), 0, 0);
 		},
 	});
 

@@ -1,6 +1,6 @@
 import { complete, type Message } from "@mariozechner/pi-ai";
 import { AssistantMessageComponent, BorderedLoader, convertToLlm, CustomEditor, serializeConversation, type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext, type KeybindingsManager, type SessionEntry, type SessionMessageEntry, type Theme } from "@mariozechner/pi-coding-agent";
-import type { EditorTheme, TUI } from "@mariozechner/pi-tui";
+import type { AutocompleteItem, AutocompleteSuggestions, EditorTheme, TUI } from "@mariozechner/pi-tui";
 import { matchesKey, Text, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { execFile, execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -117,6 +117,41 @@ function settingNumber(key: string, fallback: number, cwd?: string): number {
 	const value = readVstackConfig(cwd)[key];
 	const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
 	return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+const ANSI_PATTERN = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/g;
+
+function stripAnsi(text: string): string {
+	return text.replace(ANSI_PATTERN, "");
+}
+
+function styleAutocompleteHintItem(item: AutocompleteItem, theme: Theme): AutocompleteItem {
+	const label = stripAnsi(item.label || item.value);
+	const styled: AutocompleteItem = { ...item, label: theme.fg("accent", label) };
+	if (typeof item.description === "string" && item.description.length > 0) {
+		styled.description = theme.fg("text", stripAnsi(item.description));
+	}
+	return styled;
+}
+
+function styleSlashAutocompleteHints(suggestions: AutocompleteSuggestions | null, theme: Theme): AutocompleteSuggestions | null {
+	if (!suggestions || !suggestions.prefix.startsWith("/")) return suggestions;
+	return { ...suggestions, items: suggestions.items.map((item) => styleAutocompleteHintItem(item, theme)) };
+}
+
+function installAutocompleteHintStyling(ctx: ExtensionContext): void {
+	if (!ctx.hasUI) return;
+	ctx.ui.addAutocompleteProvider((current) => ({
+		async getSuggestions(lines, cursorLine, cursorCol, options) {
+			return styleSlashAutocompleteHints(await current.getSuggestions(lines, cursorLine, cursorCol, options), ctx.ui.theme);
+		},
+		applyCompletion(lines, cursorLine, cursorCol, item, prefix) {
+			return current.applyCompletion(lines, cursorLine, cursorCol, item, prefix);
+		},
+		shouldTriggerFileCompletion(lines, cursorLine, cursorCol) {
+			return current.shouldTriggerFileCompletion?.(lines, cursorLine, cursorCol) ?? true;
+		},
+	}));
 }
 
 type QolNotificationKind = "ready" | "direction" | "question" | "task-complete" | "critical" | "test";
@@ -1374,6 +1409,7 @@ export default function qol(pi: ExtensionAPI): void {
 	pi.on("session_start", (_event, ctx) => {
 		currentCtx = ctx;
 		resetThinkingTimer(ctx);
+		installAutocompleteHintStyling(ctx);
 		ctx.ui.setEditorComponent((tui, theme, keybindings) => new QolEditor(tui, theme, keybindings, ctx));
 		if (editorPollTimer) clearInterval(editorPollTimer);
 		lastPolledDraft = "";

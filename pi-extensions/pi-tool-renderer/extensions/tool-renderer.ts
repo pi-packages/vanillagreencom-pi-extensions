@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import { Text, truncateToWidth } from "@mariozechner/pi-tui";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, extname, join, resolve } from "node:path";
 
 const INSTALL_SYMBOL = Symbol.for("vstack.pi-tool-renderer.installed");
 const USER_MESSAGE_PATCH_SYMBOL = Symbol.for("vstack.pi-tool-renderer.user-message-patch");
@@ -233,23 +233,460 @@ function stackShell(cwd?: string): { renderShell?: "self" } {
 }
 
 function stackPrefix(theme: any): string {
-	return theme.fg("muted", "● ");
+	return theme.fg("accent", "● ");
+}
+
+function toolRule(theme: any, text: string): string {
+	try {
+		return theme.fg("borderMuted", text);
+	} catch {
+		return theme.fg("muted", text);
+	}
+}
+
+function treeConnector(theme: any, branch: "├" | "└" | "│" = "├"): string {
+	if (branch === "│") return toolRule(theme, "  │ ");
+	return toolRule(theme, `  ${branch}─ `);
+}
+
+function toolLabel(theme: any, label: string): string {
+	return theme.fg("text", theme.bold(label));
 }
 
 function readCallText(args: any, theme: any): string {
 	const range = args?.offset || args?.limit ? `:${args.offset ?? 1}${args.limit ? `-${Number(args.offset ?? 1) + Number(args.limit) - 1}` : ""}` : "";
-	return `${theme.fg("toolTitle", theme.bold("Read "))}${theme.fg("accent", `${args?.path ?? ""}${range}`)}`;
+	return `${toolLabel(theme, "Read ")}${theme.fg("accent", `${args?.path ?? ""}${range}`)}`;
 }
 
 function bashCallText(args: any, theme: any, cwd?: string): string {
 	const max = Math.max(20, Math.floor(settingNumber("commandPreviewChars", 96, cwd)));
 	const command = args?.command && args.command.length > max ? `${args.command.slice(0, max - 1)}…` : args?.command;
-	return `${theme.fg("toolTitle", theme.bold("Bash $ "))}${theme.fg("accent", command ?? "")}`;
+	return `${toolLabel(theme, "Bash $ ")}${theme.fg("accent", command ?? "")}`;
 }
 
 function readOnlyCallText(toolName: string, args: any, theme: any, cwd?: string): string {
 	const query = args?.pattern ?? args?.glob ?? args?.path ?? args?.query ?? "";
-	return `${theme.fg("toolTitle", theme.bold(`${toolName} `))}${theme.fg("accent", clipLine(String(query), cwd))}`;
+	return `${toolLabel(theme, `${toolName} `)}${theme.fg("accent", clipLine(String(query), cwd))}`;
+}
+
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
+const DIFF_RESET = "\x1b[0m";
+const DIFF_BG_ADD = "\x1b[48;2;18;48;31m";
+const DIFF_BG_DEL = "\x1b[48;2;54;24;27m";
+const DIFF_BG_CTX = "\x1b[49m";
+const DIFF_FG_ADD = "\x1b[38;2;110;220;145m";
+const DIFF_FG_DEL = "\x1b[38;2;235;120;120m";
+const DIFF_FG_DIM = "\x1b[38;2;130;135;145m";
+const DIFF_FG_RULE = "\x1b[38;2;72;76;86m";
+const DIFF_FG_NUM = "\x1b[38;2;105;112;125m";
+const DIFF_SPLIT_MIN_WIDTH = 132;
+const DIFF_LCS_CELL_LIMIT = 250_000;
+const DIFF_CONTEXT_LINES = 3;
+const MAX_DIFF_INPUT_BYTES = 700 * 1024;
+
+type DiffKind = "ctx" | "add" | "del" | "sep";
+interface StructuredDiffLine {
+	content: string;
+	newNum: number | null;
+	oldNum: number | null;
+	type: DiffKind;
+}
+interface StructuredDiff {
+	additions: number;
+	chars: number;
+	lines: StructuredDiffLine[];
+	removals: number;
+}
+
+interface BlinkEntry {
+	invalidate: () => void;
+}
+
+const blinkEntries = new Map<unknown, BlinkEntry>();
+let blinkTimer: ReturnType<typeof setInterval> | undefined;
+
+function stripAnsi(text: string): string {
+	return text.replace(ANSI_RE, "");
+}
+
+function visibleLength(text: string): number {
+	return stripAnsi(text).length;
+}
+
+function padVisible(text: string, width: number): string {
+	const missing = width - visibleLength(text);
+	return missing > 0 ? `${text}${" ".repeat(missing)}` : text;
+}
+
+function terminalWidth(): number {
+	const raw = Number(process.stdout.columns || (process.stderr as any).columns || process.env.COLUMNS || 120);
+	return Math.max(60, Math.min(raw - 4, 220));
+}
+
+function truncateAnsi(text: string, width: number): string {
+	return truncateToWidth(text, Math.max(1, width), "");
+}
+
+function blinkKey(context: any): unknown {
+	return context?.toolCallId ?? context?.id ?? context;
+}
+
+function startBlinkTimer(): void {
+	if (blinkTimer) return;
+	blinkTimer = setInterval(() => {
+		for (const entry of blinkEntries.values()) {
+			try {
+				entry.invalidate();
+			} catch {
+				// Rendering invalidation is best-effort only.
+			}
+		}
+		if (blinkEntries.size === 0 && blinkTimer) {
+			clearInterval(blinkTimer);
+			blinkTimer = undefined;
+		}
+	}, 450);
+	blinkTimer.unref?.();
+}
+
+function trackBlink(context: any): void {
+	const key = blinkKey(context);
+	if (!key || typeof context?.invalidate !== "function") return;
+	blinkEntries.set(key, { invalidate: () => context.invalidate() });
+	startBlinkTimer();
+}
+
+function clearBlink(context: any): void {
+	const key = blinkKey(context);
+	if (key) blinkEntries.delete(key);
+	if (blinkEntries.size === 0 && blinkTimer) {
+		clearInterval(blinkTimer);
+		blinkTimer = undefined;
+	}
+}
+
+function blinkingPrefix(theme: any, context: any): string {
+	trackBlink(context);
+	const on = Math.floor(Date.now() / 450) % 2 === 0;
+	return theme.fg(on ? "success" : "muted", on ? "● " : "○ ");
+}
+
+const NF_DIR = "\x1b[38;2;100;140;220m\x1b[0m";
+const NF_FILE = "\x1b[38;2;130;130;130m\x1b[0m";
+const ICON_BY_NAME: Record<string, string> = {
+	"dockerfile": "\x1b[38;2;56;152;236m\x1b[0m",
+	"license": "\x1b[38;2;218;218;218m\x1b[0m",
+	"makefile": "\x1b[38;2;130;130;130m\x1b[0m",
+	"package.json": "\x1b[38;2;137;180;130m\x1b[0m",
+	"readme.md": "\x1b[38;2;66;165;245m󰂺\x1b[0m",
+	"tsconfig.json": "\x1b[38;2;49;120;198m\x1b[0m",
+};
+const ICON_BY_EXT: Record<string, string> = {
+	bash: "\x1b[38;2;137;180;130m\x1b[0m",
+	c: "\x1b[38;2;85;154;211m\x1b[0m",
+	cpp: "\x1b[38;2;85;154;211m\x1b[0m",
+	css: "\x1b[38;2;66;165;245m\x1b[0m",
+	gif: "\x1b[38;2;160;116;196m\x1b[0m",
+	go: "\x1b[38;2;0;173;216m\x1b[0m",
+	graphql: "\x1b[38;2;224;51;144m󰡷\x1b[0m",
+	html: "\x1b[38;2;228;77;38m\x1b[0m",
+	java: "\x1b[38;2;204;62;68m\x1b[0m",
+	jpg: "\x1b[38;2;160;116;196m\x1b[0m",
+	jpeg: "\x1b[38;2;160;116;196m\x1b[0m",
+	js: "\x1b[38;2;241;224;90m\x1b[0m",
+	json: "\x1b[38;2;241;224;90m\x1b[0m",
+	jsx: "\x1b[38;2;97;218;251m\x1b[0m",
+	lock: "\x1b[38;2;130;130;130m\x1b[0m",
+	lua: "\x1b[38;2;81;160;207m\x1b[0m",
+	md: "\x1b[38;2;66;165;245m󰍔\x1b[0m",
+	png: "\x1b[38;2;160;116;196m\x1b[0m",
+	py: "\x1b[38;2;55;118;171m\x1b[0m",
+	rb: "\x1b[38;2;204;52;45m\x1b[0m",
+	rs: "\x1b[38;2;222;165;132m\x1b[0m",
+	scss: "\x1b[38;2;207;100;154m\x1b[0m",
+	sh: "\x1b[38;2;137;180;130m\x1b[0m",
+	sql: "\x1b[38;2;218;218;218m\x1b[0m",
+	svg: "\x1b[38;2;255;180;50m󰜡\x1b[0m",
+	svelte: "\x1b[38;2;255;62;0m\x1b[0m",
+	toml: "\x1b[38;2;160;116;196m\x1b[0m",
+	ts: "\x1b[38;2;49;120;198m\x1b[0m",
+	tsx: "\x1b[38;2;49;120;198m\x1b[0m",
+	vue: "\x1b[38;2;65;184;131m\x1b[0m",
+	xml: "\x1b[38;2;228;77;38m󰗀\x1b[0m",
+	yaml: "\x1b[38;2;160;116;196m\x1b[0m",
+	yml: "\x1b[38;2;160;116;196m\x1b[0m",
+	zsh: "\x1b[38;2;137;180;130m\x1b[0m",
+};
+
+function nerdIcon(pathText: string, isDirectory = false): string {
+	if (isDirectory) return NF_DIR;
+	const clean = stripAnsi(pathText).trim().replace(/\/$/, "");
+	const name = basename(clean).toLowerCase();
+	if (ICON_BY_NAME[name]) return ICON_BY_NAME[name];
+	const ext = extname(name).replace(/^\./, "").toLowerCase();
+	return ICON_BY_EXT[ext] ?? NF_FILE;
+}
+
+function renderPathListPreview(output: string, toolName: "find" | "ls", theme: any, expanded: boolean, cwd?: string): string {
+	const rawItems = output.split(/\r?\n/).filter((line) => line.trim().length > 0);
+	if (rawItems.length === 0) return theme.fg("muted", toolName === "ls" ? "empty directory" : "no files found");
+	const limit = Math.max(1, Math.floor(settingNumber("searchPreviewLines", 80, cwd)));
+	const shown = rawItems.slice(0, expanded ? limit : Math.min(limit, 12));
+	const lines = shown.map((item, index) => {
+		const clean = stripAnsi(item).trim();
+		const isDir = clean.endsWith("/");
+		const branch = index === shown.length - 1 && shown.length === rawItems.length ? "└" : "├";
+		const icon = nerdIcon(clean, isDir);
+		const label = isDir ? theme.fg("accent", theme.bold(clean)) : theme.fg("dim", clean);
+		return `${treeConnector(theme, branch as "├" | "└")}${icon} ${label}`;
+	});
+	const remaining = rawItems.length - shown.length;
+	if (remaining > 0) {
+		const noun = toolName === "ls" ? (remaining === 1 ? "entry" : "entries") : `file${remaining === 1 ? "" : "s"}`;
+		lines.push(`${treeConnector(theme, "└")}${theme.fg("muted", `… ${remaining} more ${noun}`)}`);
+	}
+	return lines.join("\n");
+}
+
+function splitContentLines(text: string): string[] {
+	if (!text) return [];
+	const lines = text.replace(/\r\n/g, "\n").split("\n");
+	if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
+	return lines;
+}
+
+function diffOps(oldLines: string[], newLines: string[]): Array<{ text: string; type: "ctx" | "add" | "del" }> {
+	let start = 0;
+	while (start < oldLines.length && start < newLines.length && oldLines[start] === newLines[start]) start++;
+	let oldEnd = oldLines.length - 1;
+	let newEnd = newLines.length - 1;
+	while (oldEnd >= start && newEnd >= start && oldLines[oldEnd] === newLines[newEnd]) {
+		oldEnd--;
+		newEnd--;
+	}
+	const ops: Array<{ text: string; type: "ctx" | "add" | "del" }> = [];
+	for (let i = 0; i < start; i++) ops.push({ text: oldLines[i] ?? "", type: "ctx" });
+	const oldMid = oldLines.slice(start, oldEnd + 1);
+	const newMid = newLines.slice(start, newEnd + 1);
+	if (oldMid.length * newMid.length > DIFF_LCS_CELL_LIMIT) {
+		for (const text of oldMid) ops.push({ text, type: "del" });
+		for (const text of newMid) ops.push({ text, type: "add" });
+	} else {
+		const m = oldMid.length;
+		const n = newMid.length;
+		const width = n + 1;
+		const table = new Uint32Array((m + 1) * (n + 1));
+		for (let i = m - 1; i >= 0; i--) {
+			for (let j = n - 1; j >= 0; j--) {
+				table[i * width + j] = oldMid[i] === newMid[j]
+					? table[(i + 1) * width + j + 1] + 1
+					: Math.max(table[(i + 1) * width + j], table[i * width + j + 1]);
+			}
+		}
+		let i = 0;
+		let j = 0;
+		while (i < m && j < n) {
+			if (oldMid[i] === newMid[j]) {
+				ops.push({ text: oldMid[i] ?? "", type: "ctx" });
+				i++;
+				j++;
+			} else if (table[(i + 1) * width + j] >= table[i * width + j + 1]) {
+				ops.push({ text: oldMid[i] ?? "", type: "del" });
+				i++;
+			} else {
+				ops.push({ text: newMid[j] ?? "", type: "add" });
+				j++;
+			}
+		}
+		while (i < m) ops.push({ text: oldMid[i++] ?? "", type: "del" });
+		while (j < n) ops.push({ text: newMid[j++] ?? "", type: "add" });
+	}
+	for (let i = oldEnd + 1; i < oldLines.length; i++) ops.push({ text: oldLines[i] ?? "", type: "ctx" });
+	return ops;
+}
+
+function hiddenDiffLine(count: number): StructuredDiffLine {
+	return {
+		content: `… ${count} unchanged line${count === 1 ? "" : "s"} …`,
+		newNum: null,
+		oldNum: null,
+		type: "sep",
+	};
+}
+
+function compactStructuredDiffLines(lines: StructuredDiffLine[], contextLines = DIFF_CONTEXT_LINES): StructuredDiffLine[] {
+	const changed = lines
+		.map((line, index) => (line.type === "add" || line.type === "del" ? index : -1))
+		.filter((index) => index >= 0);
+	if (changed.length === 0) return lines;
+
+	const ranges: Array<{ end: number; start: number }> = [];
+	for (const index of changed) {
+		const start = Math.max(0, index - contextLines);
+		const end = Math.min(lines.length - 1, index + contextLines);
+		const previous = ranges[ranges.length - 1];
+		if (!previous || start > previous.end + 1) ranges.push({ start, end });
+		else previous.end = Math.max(previous.end, end);
+	}
+
+	const compacted: StructuredDiffLine[] = [];
+	let previousEnd = -1;
+	for (const range of ranges) {
+		const hidden = range.start - previousEnd - 1;
+		if (hidden > 0) compacted.push(hiddenDiffLine(hidden));
+		compacted.push(...lines.slice(range.start, range.end + 1));
+		previousEnd = range.end;
+	}
+	const trailingHidden = lines.length - previousEnd - 1;
+	if (trailingHidden > 0) compacted.push(hiddenDiffLine(trailingHidden));
+	return compacted;
+}
+
+function buildStructuredDiff(oldText: string, newText: string): StructuredDiff {
+	const ops = diffOps(splitContentLines(oldText), splitContentLines(newText));
+	let oldNum = 1;
+	let newNum = 1;
+	let additions = 0;
+	let removals = 0;
+	const lines: StructuredDiffLine[] = [];
+	for (const op of ops) {
+		if (op.type === "ctx") {
+			lines.push({ content: op.text, newNum, oldNum, type: "ctx" });
+			oldNum++;
+			newNum++;
+		} else if (op.type === "del") {
+			lines.push({ content: op.text, newNum: null, oldNum, type: "del" });
+			oldNum++;
+			removals++;
+		} else {
+			lines.push({ content: op.text, newNum, oldNum: null, type: "add" });
+			newNum++;
+			additions++;
+		}
+	}
+	return { additions, chars: oldText.length + newText.length, lines: compactStructuredDiffLines(lines), removals };
+}
+
+function diffStatBar(additions: number, removals: number): string {
+	const total = additions + removals;
+	if (total <= 0) return "";
+	const slots = Math.max(6, Math.min(18, Math.ceil(total / 3)));
+	let addSlots = Math.round((additions / total) * slots);
+	if (additions > 0 && addSlots === 0) addSlots = 1;
+	if (removals > 0 && addSlots === slots) addSlots = slots - 1;
+	const delSlots = slots - addSlots;
+	return `${DIFF_FG_DIM}[${DIFF_RESET}${DIFF_FG_ADD}${"━".repeat(addSlots)}${DIFF_FG_DEL}${"━".repeat(delSlots)}${DIFF_RESET}${DIFF_FG_DIM}]${DIFF_RESET}`;
+}
+
+function diffSummary(diff: StructuredDiff, theme: any): string {
+	const parts: string[] = [];
+	if (diff.additions > 0) parts.push(theme.fg("success", `+${diff.additions}`));
+	if (diff.removals > 0) parts.push(theme.fg("error", `-${diff.removals}`));
+	if (parts.length === 0) return theme.fg("muted", "no changes");
+	const bar = diffStatBar(diff.additions, diff.removals);
+	return `${parts.join(" ")}${bar ? ` ${bar}` : ""}`;
+}
+
+function colorDiffText(line: StructuredDiffLine, text: string): string {
+	if (line.type === "add") return `${DIFF_BG_ADD}${DIFF_FG_ADD}${text}${DIFF_RESET}`;
+	if (line.type === "del") return `${DIFF_BG_DEL}${DIFF_FG_DEL}${text}${DIFF_RESET}`;
+	if (line.type === "sep") return `${DIFF_FG_DIM}${text}${DIFF_RESET}`;
+	return `${DIFF_BG_CTX}${DIFF_FG_DIM}${text}${DIFF_RESET}`;
+}
+
+function formatNum(value: number | null, width: number): string {
+	return value === null ? " ".repeat(width) : `${" ".repeat(Math.max(0, width - String(value).length))}${value}`;
+}
+
+function renderUnifiedDiff(diff: StructuredDiff, rows: StructuredDiffLine[], width: number): string[] {
+	const maxNum = Math.max(1, ...diff.lines.map((line) => Math.max(line.oldNum ?? 0, line.newNum ?? 0)));
+	const numWidth = Math.max(2, String(maxNum).length);
+	return rows.map((line) => {
+		const sign = line.type === "add" ? "+" : line.type === "del" ? "-" : " ";
+		const gutter = `${DIFF_FG_NUM}${formatNum(line.oldNum, numWidth)} ${formatNum(line.newNum, numWidth)}${DIFF_RESET} ${line.type === "add" ? DIFF_FG_ADD : line.type === "del" ? DIFF_FG_DEL : DIFF_FG_DIM}${sign}${DIFF_RESET} `;
+		const contentWidth = Math.max(10, width - visibleLength(gutter));
+		return `${gutter}${truncateAnsi(colorDiffText(line, line.content || " "), contentWidth)}`;
+	});
+}
+
+function pairDiffRows(rows: StructuredDiffLine[]): Array<{ left: StructuredDiffLine | null; right: StructuredDiffLine | null }> {
+	const paired: Array<{ left: StructuredDiffLine | null; right: StructuredDiffLine | null }> = [];
+	let index = 0;
+	while (index < rows.length) {
+		const line = rows[index]!;
+		if (line.type === "ctx" || line.type === "sep") {
+			paired.push({ left: line, right: line });
+			index++;
+			continue;
+		}
+		const dels: StructuredDiffLine[] = [];
+		const adds: StructuredDiffLine[] = [];
+		while (index < rows.length && rows[index]!.type === "del") dels.push(rows[index++]!);
+		while (index < rows.length && rows[index]!.type === "add") adds.push(rows[index++]!);
+		const count = Math.max(dels.length, adds.length);
+		for (let i = 0; i < count; i++) paired.push({ left: dels[i] ?? null, right: adds[i] ?? null });
+	}
+	return paired;
+}
+
+function renderDiffHalf(line: StructuredDiffLine | null, side: "old" | "new", width: number, numWidth: number): string {
+	if (!line) return " ".repeat(width);
+	const num = side === "old" ? line.oldNum : line.newNum;
+	const sign = line.type === "add" ? "+" : line.type === "del" ? "-" : " ";
+	const raw = `${formatNum(num, numWidth)} ${sign} ${line.content || " "}`;
+	return padVisible(truncateAnsi(colorDiffText(line, raw), width), width);
+}
+
+function renderSplitDiff(diff: StructuredDiff, rows: StructuredDiffLine[], width: number): string[] {
+	const maxNum = Math.max(1, ...diff.lines.map((line) => Math.max(line.oldNum ?? 0, line.newNum ?? 0)));
+	const numWidth = Math.max(2, String(maxNum).length);
+	const divider = `${DIFF_FG_RULE}│${DIFF_RESET}`;
+	const half = Math.max(24, Math.floor((width - visibleLength(divider)) / 2));
+	const header = `${padVisible(`${DIFF_FG_DIM}old${DIFF_RESET}`, half)}${divider}${DIFF_FG_DIM}new${DIFF_RESET}`;
+	const rule = `${DIFF_FG_RULE}${"─".repeat(half)}${DIFF_RESET}${divider}${DIFF_FG_RULE}${"─".repeat(half)}${DIFF_RESET}`;
+	const out = [header, rule];
+	for (const pair of pairDiffRows(rows)) {
+		out.push(`${renderDiffHalf(pair.left, "old", half, numWidth)}${divider}${renderDiffHalf(pair.right, "new", half, numWidth)}`);
+	}
+	out.push(rule);
+	return out;
+}
+
+function renderStructuredDiff(diff: StructuredDiff, theme: any, expanded: boolean, cwd?: string): string {
+	if (diff.additions === 0 && diff.removals === 0) return theme.fg("muted", "no changes");
+	const width = terminalWidth();
+	const fallbackLimit = expanded ? 4000 : 24;
+	const configuredLimit = Math.floor(settingNumber(expanded ? "diffExpandedLines" : "diffPreviewLines", fallbackLimit, cwd));
+	const maxRows = expanded && configuredLimit <= 0 ? diff.lines.length : Math.max(4, configuredLimit);
+	const rows = diff.lines.slice(0, maxRows);
+	const useSplit = settingBoolean("splitDiffs", true, cwd) && width >= DIFF_SPLIT_MIN_WIDTH;
+	const rendered = useSplit ? renderSplitDiff(diff, rows, width) : renderUnifiedDiff(diff, rows, width);
+	const remaining = diff.lines.length - rows.length;
+	if (remaining > 0) rendered.push(`${DIFF_FG_DIM}… ${remaining} more diff line(s)${expanded ? ` · UI cap ${rows.length}/${diff.lines.length}` : " · Ctrl+O to expand"}${DIFF_RESET}`);
+	return rendered.join("\n");
+}
+
+function readTextForDiff(pathValue: unknown, cwd: string): string | undefined {
+	if (typeof pathValue !== "string" || !pathValue.trim()) return undefined;
+	const target = resolve(cwd, pathValue);
+	try {
+		if (!existsSync(target)) return undefined;
+		const text = readFileSync(target, "utf8");
+		return Buffer.byteLength(text, "utf8") <= MAX_DIFF_INPUT_BYTES ? text : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function attachDiffDetails(result: any, before: string | undefined, after: string | undefined): any {
+	if (before === undefined && after === undefined) return result;
+	const oldText = before ?? "";
+	const newText = after ?? "";
+	if (oldText === newText) return result;
+	const diff = buildStructuredDiff(oldText, newText);
+	const extra = { vstackDiff: diff, vstackDiffWasNewFile: before === undefined };
+	result.details = result?.details && typeof result.details === "object" ? { ...result.details, ...extra } : extra;
+	return result;
 }
 
 type StackableToolName = "read" | "bash" | "grep" | "find" | "ls";
@@ -346,8 +783,9 @@ function stackItemSummary(item: StackItem, theme: any): string {
 	return text;
 }
 
-function stackItemPreview(item: StackItem, cwd?: string): string {
+function stackItemPreview(item: StackItem, theme: any, expanded: boolean, cwd?: string): string {
 	if (!item.resultText || item.status === "running") return "";
+	if (item.toolName === "find" || item.toolName === "ls") return renderPathListPreview(item.resultText, item.toolName, theme, expanded, cwd);
 	if (item.toolName === "bash") return preview(item.resultText, Math.max(1, Math.floor(settingNumber("bashPreviewLines", 80, cwd))), "tail", cwd);
 	if (item.toolName === "read") return preview(item.resultText, Math.max(1, Math.floor(settingNumber("readPreviewLines", 80, cwd))), "head", cwd);
 	return preview(item.resultText, Math.max(1, Math.floor(settingNumber("searchPreviewLines", 80, cwd))), "head", cwd);
@@ -355,10 +793,10 @@ function stackItemPreview(item: StackItem, cwd?: string): string {
 
 function renderStackItemText(item: StackItem, theme: any, expanded: boolean, cwd?: string, branch = "├"): string {
 	const isLast = branch === "└";
-	const stem = theme.fg("muted", isLast ? "     " : "  │  ");
-	let text = `${theme.fg("muted", `  ${branch} `)}${stackItemCallText(item, theme, cwd)}${theme.fg("dim", " · ")}${stackItemSummary(item, theme)}`;
+	const stem = isLast ? theme.fg("muted", "     ") : treeConnector(theme, "│");
+	let text = `${treeConnector(theme, branch as "├" | "└")}${stackItemCallText(item, theme, cwd)}${theme.fg("dim", " · ")}${stackItemSummary(item, theme)}`;
 	if (expanded) {
-		const previewText = stackItemPreview(item, cwd);
+		const previewText = stackItemPreview(item, theme, expanded, cwd);
 		if (previewText) {
 			const lines = previewText.split(/\r?\n/).map((line) => `${stem}${theme.fg("dim", line)}`);
 			text += `\n${lines.join("\n")}`;
@@ -579,7 +1017,7 @@ function renderToolBatchText(items: BatchToolItem[], theme: any, expanded: boole
 	const succeeded = items.length - failed;
 	const header =
 		stackPrefix(theme) +
-		theme.fg("toolTitle", theme.bold(`Batch ran ${plural(items.length, "tool")}`)) +
+		toolLabel(theme, `Batch ran ${plural(items.length, "tool")}`) +
 		theme.fg(failed > 0 ? "warning" : "success", ` · ${succeeded}/${items.length} succeeded`) +
 		(expanded ? "" : theme.fg("dim", " · Ctrl+O to inspect"));
 	const lines = [header];
@@ -602,12 +1040,12 @@ function toolBatchOutput(items: BatchToolItem[]): string {
 
 function renderToolBatchCallText(args: any, theme: any, cwd?: string): string {
 	const calls = normalizeBatchCalls(args?.calls);
-	const lines = [stackPrefix(theme) + theme.fg("toolTitle", theme.bold(`${calls.length || 0} batched tool${calls.length === 1 ? "" : "s"} launching`))];
+	const lines = [stackPrefix(theme) + toolLabel(theme, `${calls.length || 0} batched tool${calls.length === 1 ? "" : "s"} launching`)];
 	calls.slice(0, 12).forEach((call, index) => {
 		const item: StackItem = { args: call.args, batchId: "call", id: String(index), isError: false, resultText: "", status: "running", toolName: call.tool, truncated: false };
-		lines.push(`${theme.fg("muted", `  ${index === calls.length - 1 ? "└" : "├"} `)}${stackItemCallText(item, theme, cwd)}`);
+		lines.push(`${treeConnector(theme, index === calls.length - 1 ? "└" : "├")}${stackItemCallText(item, theme, cwd)}`);
 	});
-	if (calls.length > 12) lines.push(theme.fg("muted", `  └ … +${calls.length - 12} more`));
+	if (calls.length > 12) lines.push(`${treeConnector(theme, "└")}${theme.fg("muted", `… +${calls.length - 12} more`)}`);
 	return lines.join("\n");
 }
 
@@ -698,7 +1136,8 @@ function registerRead(pi: ExtensionAPI, agent: any, cwd: string): void {
 			const stacked = stackToolCalls(context?.cwd ?? cwd);
 			if (stacked) return renderStackedToolResult("read", result, isPartial, expanded, theme, context, cwd);
 			const call = readCallText(context?.args ?? {}, theme);
-			if (isPartial) return makeTruncatedLines(`${stackPrefix(theme)}${call}${theme.fg("dim", " · ")}${theme.fg("warning", "reading…")}`);
+			if (isPartial) return makeTruncatedLines(`${blinkingPrefix(theme, context)}${call}${theme.fg("dim", " · ")}${theme.fg("warning", "reading…")}`);
+			clearBlink(context);
 			const content = textContent(result);
 			const count = lineCount(content);
 			let summary = theme.fg("success", `${count} line${count === 1 ? "" : "s"}`);
@@ -708,9 +1147,9 @@ function registerRead(pi: ExtensionAPI, agent: any, cwd: string): void {
 				const limit = Math.max(1, Math.floor(settingNumber("readPreviewLines", 80, context?.cwd)));
 				text += `\n${preview(content, limit, "head", context?.cwd)
 					.split(/\r?\n/)
-					.map((line) => `${theme.fg("muted", "  │ ")}${theme.fg("dim", line)}`)
+					.map((line) => `${treeConnector(theme, "│")}${theme.fg("dim", line)}`)
 					.join("\n")}`;
-				if (count > limit) text += `\n${theme.fg("muted", `  │ … ${count - limit} more line(s)`)}`;
+				if (count > limit) text += `\n${treeConnector(theme, "│")}${theme.fg("muted", `… ${count - limit} more line(s)`)}`;
 			}
 			return makeTruncatedLines(text);
 		},
@@ -736,8 +1175,13 @@ function registerBash(pi: ExtensionAPI, agent: any, cwd: string): void {
 			const stacked = stackToolCalls(context?.cwd ?? cwd);
 			if (stacked) return renderStackedToolResult("bash", result, isPartial, expanded, theme, context, cwd);
 			const call = bashCallText(context?.args ?? {}, theme, context?.cwd ?? cwd);
-			if (isPartial) return makeTruncatedLines(`${stackPrefix(theme)}${call}${theme.fg("dim", " · ")}${theme.fg("warning", "running…")}`);
 			const output = textContent(result);
+			if (isPartial) {
+				const count = output.trim() ? output.split(/\r?\n/).filter((line) => line.trim().length > 0).length : 0;
+				const lineText = count === 0 ? "starting" : `${count} line${count === 1 ? "" : "s"}`;
+				return makeTruncatedLines(`${blinkingPrefix(theme, context)}${call}${theme.fg("dim", " · ")}${theme.fg("warning", `running… ${lineText}`)}`);
+			}
+			clearBlink(context);
 			const exit = commandExit(output);
 			const count = lineCount(output);
 			const exitLabel = exit === null ? "exit 0" : `exit ${exit}`;
@@ -749,9 +1193,9 @@ function registerBash(pi: ExtensionAPI, agent: any, cwd: string): void {
 				const limit = Math.max(1, Math.floor(settingNumber("bashPreviewLines", 80, context?.cwd)));
 				text += `\n${preview(output, limit, "tail", context?.cwd)
 					.split(/\r?\n/)
-					.map((line) => `${theme.fg("muted", "  │ ")}${theme.fg("dim", line)}`)
+					.map((line) => `${treeConnector(theme, "│")}${theme.fg("dim", line)}`)
 					.join("\n")}`;
-				if (count > limit) text += `\n${theme.fg("muted", `  │ … ${count - limit} older line(s)`)}`;
+				if (count > limit) text += `\n${treeConnector(theme, "│")}${theme.fg("muted", `… ${count - limit} older line(s)`)}`;
 			}
 			return makeTruncatedLines(text);
 		},
@@ -762,24 +1206,37 @@ function registerEdit(pi: ExtensionAPI, agent: any, cwd: string): void {
 	const original = getBuiltInTool(agent, cwd, "edit");
 	if (!original) return;
 	pi.registerTool({
+		renderShell: "self",
 		name: "edit",
 		label: "edit",
 		description: original.description,
 		parameters: original.parameters,
 		async execute(id: string, params: any, signal: AbortSignal | undefined, onUpdate: unknown, context: any) {
-			return getBuiltInTool(agent, contextCwd(context, cwd), "edit").execute(id, params, signal, onUpdate);
+			const effectiveCwd = contextCwd(context, cwd);
+			const targetPath = params?.path ?? params?.file_path;
+			const before = readTextForDiff(targetPath, effectiveCwd);
+			const result = await getBuiltInTool(agent, effectiveCwd, "edit").execute(id, params, signal, onUpdate);
+			const after = result?.isError ? before : readTextForDiff(targetPath, effectiveCwd);
+			return attachDiffDetails(result, before, after);
 		},
-		renderCall(args: any, theme: any) {
-			return makeText(`${theme.fg("toolTitle", theme.bold("Edit "))}${theme.fg("accent", args.path ?? "")}`);
+		renderCall() {
+			return makeEmpty();
 		},
-		renderResult(result: any, { expanded, isPartial }: any, theme: any, _context: any) {
-			if (isPartial) return makeText(theme.fg("warning", "Editing…"));
-			const diff = result?.details?.diff ?? "";
-			const stats = diffStats(diff);
-			let text = `${theme.fg("success", `+${stats.additions}`)} ${theme.fg("error", `-${stats.removals}`)}`;
-			if (!diff) text = theme.fg("success", "applied");
-			if (expanded && diff) text += `\n${diff}`;
-			return makeText(text);
+		renderResult(result: any, { expanded, isPartial }: any, theme: any, context: any) {
+			const args = context?.args ?? {};
+			const targetPath = args.path ?? args.file_path ?? "";
+			const call = `${toolLabel(theme, "Edit ")}${theme.fg("accent", targetPath)}`;
+			if (isPartial) return makeTruncatedLines(`${blinkingPrefix(theme, context)}${call}${theme.fg("dim", " · ")}${theme.fg("warning", "editing…")}`);
+			clearBlink(context);
+			const structured = result?.details?.vstackDiff as StructuredDiff | undefined;
+			if (context?.isError || result?.isError) {
+				const errorText = textContent(result).split(/\r?\n/)[0] || "edit failed";
+				return makeTruncatedLines(`${stackPrefix(theme)}${call}${theme.fg("dim", " · ")}${theme.fg("error", errorText)}`);
+			}
+			const summary = structured ? diffSummary(structured, theme) : theme.fg("success", "applied");
+			let text = `${stackPrefix(theme)}${call}${theme.fg("dim", " · ")}${summary}`;
+			if (structured) text += `\n${renderStructuredDiff(structured, theme, expanded, context?.cwd ?? cwd)}`;
+			return makeTruncatedLines(text);
 		},
 	});
 }
@@ -788,29 +1245,39 @@ function registerWrite(pi: ExtensionAPI, agent: any, cwd: string): void {
 	const original = getBuiltInTool(agent, cwd, "write");
 	if (!original) return;
 	pi.registerTool({
+		renderShell: "self",
 		name: "write",
 		label: "write",
 		description: original.description,
 		parameters: original.parameters,
 		async execute(id: string, params: any, signal: AbortSignal | undefined, onUpdate: unknown, context: any) {
-			return getBuiltInTool(agent, contextCwd(context, cwd), "write").execute(id, params, signal, onUpdate);
+			const effectiveCwd = contextCwd(context, cwd);
+			const targetPath = params?.path ?? params?.file_path;
+			const before = readTextForDiff(targetPath, effectiveCwd);
+			const result = await getBuiltInTool(agent, effectiveCwd, "write").execute(id, params, signal, onUpdate);
+			const after = result?.isError ? before : typeof params?.content === "string" ? params.content : readTextForDiff(targetPath, effectiveCwd);
+			return attachDiffDetails(result, before, after);
 		},
-		renderCall(args: any, theme: any) {
-			const count = lineCount(args.content ?? "");
-			return makeText(`${theme.fg("toolTitle", theme.bold("Write "))}${theme.fg("accent", args.path ?? "")} ${theme.fg("dim", `· ${count} lines`)}`);
+		renderCall() {
+			return makeEmpty();
 		},
 		renderResult(result: any, { expanded, isPartial }: any, theme: any, context: any) {
-			if (isPartial) return makeText(theme.fg("warning", "Writing…"));
-			let text = theme.fg("success", "written");
 			const args = context?.args ?? {};
-			const content = args.content ?? textContent(result);
-			if (expanded && content) {
-				const limit = Math.max(1, Math.floor(settingNumber("writePreviewLines", 80, context?.cwd)));
-				text += `\n${theme.fg("dim", preview(content, limit, "head", context?.cwd))}`;
-				const count = lineCount(content);
-				if (count > limit) text += `\n${theme.fg("muted", `… ${count - limit} more line(s)`)}`;
+			const targetPath = args.path ?? args.file_path ?? "";
+			const lineTotal = lineCount(args.content ?? "");
+			const label = result?.details?.vstackDiffWasNewFile ? "Create " : "Write ";
+			const call = `${toolLabel(theme, label)}${theme.fg("accent", targetPath)} ${theme.fg("dim", `· ${lineTotal} lines`)}`;
+			if (isPartial) return makeTruncatedLines(`${blinkingPrefix(theme, context)}${call}${theme.fg("dim", " · ")}${theme.fg("warning", "writing…")}`);
+			clearBlink(context);
+			const structured = result?.details?.vstackDiff as StructuredDiff | undefined;
+			if (context?.isError || result?.isError) {
+				const errorText = textContent(result).split(/\r?\n/)[0] || "write failed";
+				return makeTruncatedLines(`${stackPrefix(theme)}${call}${theme.fg("dim", " · ")}${theme.fg("error", errorText)}`);
 			}
-			return makeText(text);
+			const summary = structured ? diffSummary(structured, theme) : theme.fg("success", "written");
+			let text = `${stackPrefix(theme)}${call}${theme.fg("dim", " · ")}${summary}`;
+			if (structured) text += `\n${renderStructuredDiff(structured, theme, expanded, context?.cwd ?? cwd)}`;
+			return makeTruncatedLines(text);
 		},
 	});
 }
@@ -834,19 +1301,26 @@ function registerReadOnly(pi: ExtensionAPI, agent: any, cwd: string, toolName: "
 			const stacked = stackToolCalls(context?.cwd ?? cwd);
 			if (stacked) return renderStackedToolResult(toolName, result, isPartial, expanded, theme, context, cwd);
 			const call = readOnlyCallText(toolName, context?.args ?? {}, theme, context?.cwd ?? cwd);
-			if (isPartial) return makeTruncatedLines(`${stackPrefix(theme)}${call}${theme.fg("dim", " · ")}${theme.fg("warning", `${toolName}…`)}`);
+			if (isPartial) return makeTruncatedLines(`${blinkingPrefix(theme, context)}${call}${theme.fg("dim", " · ")}${theme.fg("warning", `${toolName}…`)}`);
+			clearBlink(context);
 			const output = textContent(result);
 			const count = output.trim() ? lineCount(output) : 0;
-			let summary = theme.fg("success", `${count} result${count === 1 ? "" : "s"}`);
+			const noun = toolName === "grep" ? "match" : toolName === "ls" ? "entr" : "file";
+			const label = toolName === "ls" ? `${count} ${noun}${count === 1 ? "y" : "ies"}` : `${count} ${noun}${count === 1 ? "" : "s"}`;
+			let summary = count === 0 ? theme.fg("muted", toolName === "grep" ? "no matches" : toolName === "ls" ? "empty" : "no files") : theme.fg("success", label);
 			if (resultTruncated(result)) summary += theme.fg("warning", " · truncated");
 			let text = `${stackPrefix(theme)}${call}${theme.fg("dim", " · ")}${summary}`;
 			if (expanded && output) {
-				const limit = Math.max(1, Math.floor(settingNumber("searchPreviewLines", 80, context?.cwd)));
-				text += `\n${preview(output, limit, "head", context?.cwd)
-					.split(/\r?\n/)
-					.map((line) => `${theme.fg("muted", "  │ ")}${theme.fg("dim", line)}`)
-					.join("\n")}`;
-				if (count > limit) text += `\n${theme.fg("muted", `  │ … ${count - limit} more result line(s)`)}`;
+				if (toolName === "find" || toolName === "ls") {
+					text += `\n${renderPathListPreview(output, toolName, theme, expanded, context?.cwd)}`;
+				} else {
+					const limit = Math.max(1, Math.floor(settingNumber("searchPreviewLines", 80, context?.cwd)));
+					text += `\n${preview(output, limit, "head", context?.cwd)
+						.split(/\r?\n/)
+						.map((line) => `${treeConnector(theme, "│")}${theme.fg("dim", line)}`)
+						.join("\n")}`;
+					if (count > limit) text += `\n${treeConnector(theme, "│")}${theme.fg("muted", `… ${count - limit} more result line(s)`)}`;
+				}
 			}
 			return makeTruncatedLines(text);
 		},

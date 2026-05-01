@@ -5,7 +5,7 @@
  */
 
 import { CustomEditor, type ExtensionAPI, type ExtensionContext, type KeybindingsManager, type Theme } from "@mariozechner/pi-coding-agent";
-import type { EditorTheme, TUI } from "@mariozechner/pi-tui";
+import type { AutocompleteItem, AutocompleteSuggestions, EditorTheme, TUI } from "@mariozechner/pi-tui";
 import { matchesKey, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -96,6 +96,35 @@ function qolSettingBoolean(key: string, fallback: boolean, cwd?: string): boolea
 function qolSettingString(key: string, fallback: string, cwd?: string): string {
 	const value = readExtensionConfig("pi-qol", cwd)[key];
 	return typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback;
+}
+
+function styleAutocompleteHintItem(item: AutocompleteItem, theme: Theme): AutocompleteItem {
+	const label = stripAnsi(item.label || item.value);
+	const styled: AutocompleteItem = { ...item, label: theme.fg("accent", label) };
+	if (typeof item.description === "string" && item.description.length > 0) {
+		styled.description = theme.fg("text", stripAnsi(item.description));
+	}
+	return styled;
+}
+
+function styleSlashAutocompleteHints(suggestions: AutocompleteSuggestions | null, theme: Theme): AutocompleteSuggestions | null {
+	if (!suggestions || !suggestions.prefix.startsWith("/")) return suggestions;
+	return { ...suggestions, items: suggestions.items.map((item) => styleAutocompleteHintItem(item, theme)) };
+}
+
+function installAutocompleteHintStyling(ctx: ExtensionContext): void {
+	if (!ctx.hasUI) return;
+	ctx.ui.addAutocompleteProvider((current) => ({
+		async getSuggestions(lines, cursorLine, cursorCol, options) {
+			return styleSlashAutocompleteHints(await current.getSuggestions(lines, cursorLine, cursorCol, options), ctx.ui.theme);
+		},
+		applyCompletion(lines, cursorLine, cursorCol, item, prefix) {
+			return current.applyCompletion(lines, cursorLine, cursorCol, item, prefix);
+		},
+		shouldTriggerFileCompletion(lines, cursorLine, cursorCol) {
+			return current.shouldTriggerFileCompletion?.(lines, cursorLine, cursorCol) ?? true;
+		},
+	}));
 }
 
 function basename(input: string): string {
@@ -531,6 +560,7 @@ export default function statusline(pi: ExtensionAPI) {
 
 	pi.on("session_start", (_event, ctx) => {
 		if (!ctx.hasUI || !settingBoolean("enabled", true, ctx.cwd)) return;
+		installAutocompleteHintStyling(ctx);
 		gitState = makeFallbackGitState(ctx.cwd);
 		void refresh(ctx);
 
