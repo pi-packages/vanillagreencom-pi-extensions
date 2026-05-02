@@ -13,6 +13,9 @@ const STATUS_KEY = "session-manager";
 const DEFAULT_SHORTCUT = "ctrl+shift+r";
 const DEFAULT_WIDTH = 112;
 const DEFAULT_ROWS = 12;
+const POPUP_PADDING_X = 2;
+const POPUP_PADDING_Y = 1;
+const ROW_META_MAX_WIDTH = 44;
 const ANSI_PATTERN = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/g;
 
 type SessionInfo = Awaited<ReturnType<typeof SessionManager.list>>[number];
@@ -830,7 +833,8 @@ class SessionManagerOverlay implements Focusable {
 	render(width: number): string[] {
 		const configured = Math.max(72, Math.floor(settingNumber("overlayWidth", DEFAULT_WIDTH, this.ctx.cwd)));
 		const renderWidth = Math.min(Math.max(48, width), configured);
-		const inner = Math.max(10, renderWidth - 2);
+		const frameInner = Math.max(10, renderWidth - 2);
+		const bodyWidth = Math.max(10, frameInner - POPUP_PADDING_X * 2);
 		const th = this.theme;
 		const border = (s: string) => th.fg("borderAccent", s);
 		const dim = (s: string) => th.fg("dim", s);
@@ -840,33 +844,36 @@ class SessionManagerOverlay implements Focusable {
 		const error = (s: string) => th.fg("error", s);
 		const success = (s: string) => th.fg("success", s);
 
-		const fixed = (content = "", rowWidth = inner): string => {
+		const fixed = (content = "", rowWidth = bodyWidth): string => {
 			const safe = content.replace(/[\r\n\t]+/g, " ");
 			const clipped = truncateToWidth(safe, rowWidth, "");
 			return clipped + " ".repeat(Math.max(0, rowWidth - visibleWidth(clipped)));
 		};
-		const row = (content = "") => border("│") + fixed(content) + border("│");
-		const divider = () => row(muted("─".repeat(inner)));
+		const blank = () => border("│") + " ".repeat(frameInner) + border("│");
+		const row = (content = "") => border("│") + " ".repeat(POPUP_PADDING_X) + fixed(content) + " ".repeat(POPUP_PADDING_X) + border("│");
+		const divider = () => row(muted("─".repeat(bodyWidth)));
 		const lines: string[] = [];
 
-		lines.push(border(`╭${"─".repeat(inner)}╮`));
-		lines.push(row(this.renderHeader(inner, accent, muted, dim)));
-		lines.push(row(this.renderSubheader(inner, accent, muted, dim, warning, error)));
-		lines.push(row(this.renderSearch(inner, dim)));
+		lines.push(border(`╭${"─".repeat(frameInner)}╮`));
+		for (let i = 0; i < POPUP_PADDING_Y; i++) lines.push(blank());
+		lines.push(row(this.renderHeader(bodyWidth, accent, muted, dim)));
+		lines.push(row(this.renderSubheader(bodyWidth, accent, muted, dim, warning, error)));
+		lines.push(row(this.renderSearch(bodyWidth, dim)));
 		lines.push(divider());
 
 		if (this.mode === "loading") {
 			const progress = this.loadingProgress ? ` ${this.loadingProgress.loaded}/${this.loadingProgress.total}` : "";
-			lines.push(row(dim(`  Loading sessions${progress}…`)));
+			lines.push(row(dim(`Loading sessions${progress}…`)));
 			for (let i = 1; i < this.visibleRows; i++) lines.push(row(""));
 		} else {
-			lines.push(...this.renderListRows(inner, { row, fixed, dim, muted, accent, warning, error }));
+			lines.push(...this.renderListRows(bodyWidth, { row, fixed, dim, muted, accent, warning, error }));
 		}
 
 		lines.push(divider());
-		lines.push(...this.renderDetailRows(inner, { row, fixed, dim, muted, accent, warning, error, success }));
-		lines.push(row(this.renderFooter(inner, dim, warning, error)));
-		lines.push(border(`╰${"─".repeat(inner)}╯`));
+		lines.push(...this.renderDetailRows(bodyWidth, { row, fixed, dim, muted, accent, warning, error, success }));
+		for (const footerLine of this.renderFooter(bodyWidth, dim, warning, error)) lines.push(row(footerLine));
+		for (let i = 0; i < POPUP_PADDING_Y; i++) lines.push(blank());
+		lines.push(border(`╰${"─".repeat(frameInner)}╯`));
 		return lines.map((line) => truncateToWidth(line, renderWidth, ""));
 	}
 
@@ -875,32 +882,33 @@ class SessionManagerOverlay implements Focusable {
 		const scopeText = `${this.scope === "current" ? accent("● current") : muted("○ current")} ${dim("·")} ${this.scope === "all" ? accent("● all") : muted("○ all")}`;
 		const sortText = `${muted("sort:")} ${accent(this.sortMode)}`;
 		const nameText = `${muted("names:")} ${accent(this.nameFilter)}`;
-		const right = `${scopeText}  ${sortText}  ${nameText}`;
+		const pathText = `${muted("path:")} ${this.showPath ? accent("on") : muted("off")}`;
+		const right = `${scopeText}  ${sortText}  ${nameText}  ${pathText}`;
 		const available = Math.max(0, inner - visibleWidth(right) - 1);
-		const left = truncateToWidth(` ${title}`, available, "");
+		const left = truncateToWidth(title, available, "");
 		return left + " ".repeat(Math.max(1, inner - visibleWidth(left) - visibleWidth(right))) + right;
 	}
 
 	private renderSubheader(inner: number, accent: (s: string) => string, muted: (s: string) => string, dim: (s: string) => string, warning: (s: string) => string, error: (s: string) => string): string {
 		if (this.mode === "confirm-delete" && this.deleteTarget) {
-			return error(` Delete “${truncateToWidth(sessionResumeTitle(this.deleteTarget), Math.max(12, inner - 30), "…")}”? Enter confirms, Esc cancels.`);
+			return error(`Delete “${truncateToWidth(sessionResumeTitle(this.deleteTarget), Math.max(12, inner - 30), "…")}”? Enter confirms, Esc cancels.`);
 		}
-		if (this.mode === "deleting") return warning(" Deleting session…");
-		if (this.mode === "rename" && this.renameTarget) return accent(` Rename “${truncateToWidth(sessionResumeTitle(this.renameTarget), Math.max(12, inner - 28), "…")}” — Enter saves, Esc cancels.`);
+		if (this.mode === "deleting") return warning("Deleting session…");
+		if (this.mode === "rename" && this.renameTarget) return accent(`Rename “${truncateToWidth(sessionResumeTitle(this.renameTarget), Math.max(12, inner - 28), "…")}” — Enter saves, Esc cancels.`);
 		if (this.notice) {
-			return this.notice.kind === "error" ? error(` ${this.notice.text}`) : accent(` ${this.notice.text}`);
+			return this.notice.kind === "error" ? error(this.notice.text) : accent(this.notice.text);
 		}
-		if (this.queryError) return error(` Search error: ${this.queryError}`);
-		return dim(" Type to search · quote phrases · re:<pattern> regex · titles match Pi /resume");
+		if (this.queryError) return error(`Search error: ${this.queryError}`);
+		return dim("Tab scope · Ctrl+S sort · Ctrl+N names · Ctrl+P path · type search · re:<pattern> regex · \"phrase\" exact");
 	}
 
 	private renderSearch(inner: number, dim: (s: string) => string): string {
 		if (this.mode === "rename") {
-			const prefix = ` ${dim("rename ›")} `;
+			const prefix = `${dim("rename ›")} `;
 			const input = this.renameInput.render(Math.max(1, inner - visibleWidth(prefix)))[0] ?? "";
 			return prefix + input;
 		}
-		const prefix = ` ${dim("search ›")} `;
+		const prefix = `${dim("search ›")} `;
 		const input = this.searchInput.render(Math.max(1, inner - visibleWidth(prefix)))[0] ?? "";
 		return prefix + input;
 	}
@@ -965,7 +973,9 @@ class SessionManagerOverlay implements Focusable {
 			formatAge(session.modified),
 			this.showPath ? shortenPath(session.path) : this.scope === "all" && session.cwd ? shortenPath(session.cwd) : "",
 		].filter(Boolean);
-		const right = ui.dim(rightParts.join(" · "));
+		const rightRaw = rightParts.join(" · ");
+		const rightMax = Math.min(ROW_META_MAX_WIDTH, Math.max(14, Math.floor(inner * 0.38)));
+		const right = ui.dim(truncateToWidth(rightRaw, rightMax, "…"));
 		const leftFixed = cursor + ui.dim(prefix) + markers;
 		const availableTitle = Math.max(8, inner - visibleWidth(leftFixed) - visibleWidth(right) - 2);
 		let title = truncateToWidth(titleRaw, availableTitle, "…");
@@ -993,30 +1003,51 @@ class SessionManagerOverlay implements Focusable {
 		},
 	): string[] {
 		const lines: string[] = [];
-		const selected = this.selected();
-		const range = this.filtered.length === 0 ? "0 sessions" : `${this.selectedIndex + 1}/${this.filtered.length}`;
+		const selectedNode = this.filtered[this.selectedIndex];
+		const selected = selectedNode?.session;
 		const scope = this.scope === "current" ? "current project" : "all sessions";
-		lines.push(ui.row(ui.dim(` ${range} · ${scope} · ${this.sortMode} sort${this.nameFilter === "named" ? " · named only" : ""}`)));
+		const shown = `${this.filtered.length}/${this.sessions.length}`;
+		const search = oneLine(this.searchInput.getValue());
+		const state = `${shown} shown · ${scope} · ${this.sortMode} sort · ${this.nameFilter === "named" ? "named only" : "all names"}${this.showPath ? " · paths on" : ""}${search ? ` · query “${truncateToWidth(search, 28, "…")}”` : ""}`;
+		lines.push(ui.row(ui.dim(state)));
 		if (!selected) {
+			lines.push(ui.row(""));
 			lines.push(ui.row(""));
 			lines.push(ui.row(""));
 			return lines;
 		}
+
 		const title = sessionResumeTitle(selected);
-		const snippet = this.filtered[this.selectedIndex]?.snippet || oneLine(selected.firstMessage);
-		const path = this.showPath ? shortenPath(selected.path) : shortenPath(selected.cwd || selected.path);
-		const titlePrefix = this.isCurrent(selected) ? ui.success(" current ") : isNamed(selected) ? ui.warning(" named ") : ui.dim(" session ");
-		lines.push(ui.row(` ${titlePrefix}${truncateToWidth(title, Math.max(10, inner - visibleWidth(titlePrefix) - 2), "…")}`));
-		lines.push(ui.row(ui.dim(` ${path}${selected.parentSessionPath ? " · forked" : ""}${selected.id ? ` · ${selected.id.slice(0, 8)}` : ""}`)));
-		if (snippet) lines.push(ui.row(ui.muted(` “${truncateToWidth(snippet, Math.max(10, inner - 4), "…")}`)));
-		else lines.push(ui.row(""));
+		const badge = this.isCurrent(selected) ? ui.success("current") : isNamed(selected) ? ui.warning("named") : ui.dim("session");
+		const metaRaw = [`${selected.messageCount} msg`, formatAge(selected.modified), selected.id ? selected.id.slice(0, 8) : ""].filter(Boolean).join(" · ");
+		const meta = ui.dim(truncateToWidth(metaRaw, Math.min(ROW_META_MAX_WIDTH, Math.max(16, Math.floor(inner * 0.35))), "…"));
+		const titlePrefix = `${badge} `;
+		const titleWidth = Math.max(10, inner - visibleWidth(titlePrefix) - visibleWidth(meta) - 2);
+		const left = titlePrefix + truncateToWidth(title, titleWidth, "…");
+		lines.push(ui.row(left + " ".repeat(Math.max(1, inner - visibleWidth(left) - visibleWidth(meta))) + meta));
+
+		const locationLabel = this.showPath ? "file" : "cwd";
+		const location = this.showPath ? selected.path : selected.cwd || selected.path;
+		const locationPrefix = ui.dim(`${locationLabel.padEnd(7)} `);
+		lines.push(ui.row(locationPrefix + ui.muted(truncateToWidth(shortenPath(location), Math.max(10, inner - visibleWidth(locationPrefix)), "…"))));
+
+		const snippet = selectedNode?.snippet || oneLine(selected.firstMessage);
+		if (snippet) {
+			const previewPrefix = ui.dim(`${selectedNode?.snippet ? "match" : "first"}   `);
+			lines.push(ui.row(previewPrefix + ui.muted(`“${truncateToWidth(snippet, Math.max(10, inner - visibleWidth(previewPrefix) - 1), "…")}`)));
+		} else {
+			lines.push(ui.row(""));
+		}
 		return lines;
 	}
 
-	private renderFooter(inner: number, dim: (s: string) => string, warning: (s: string) => string, error: (s: string) => string): string {
-		if (this.mode === "confirm-delete") return error(" Enter confirm · Esc cancel");
-		if (this.mode === "rename") return warning(" Enter save · Esc cancel · empty name clears title");
-		return dim(" ↑↓/jk move · Enter resume · Ctrl+R rename · Ctrl+D delete · Tab scope · Ctrl+S sort · Ctrl+N names · Ctrl+P path · Esc close");
+	private renderFooter(inner: number, dim: (s: string) => string, warning: (s: string) => string, error: (s: string) => string): string[] {
+		if (this.mode === "confirm-delete") return [error("Enter confirm · Esc cancel")];
+		if (this.mode === "rename") return [warning("Enter save · Esc cancel · empty name clears title")];
+		return [
+			dim("↑↓/jk move · Enter resume · Ctrl+R rename · Ctrl+D delete"),
+			dim("Tab scope · Ctrl+S sort · Ctrl+N names · Ctrl+P path · Esc close"),
+		];
 	}
 
 	invalidate(): void {
