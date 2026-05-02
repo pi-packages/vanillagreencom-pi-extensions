@@ -871,6 +871,7 @@ class SessionManagerOverlay implements Focusable {
 
 		lines.push(divider());
 		lines.push(...this.renderDetailRows(bodyWidth, { row, fixed, dim, muted, accent, warning, error, success }));
+		lines.push(row(""));
 		for (const footerLine of this.renderFooter(bodyWidth, dim, warning, error)) lines.push(row(footerLine));
 		for (let i = 0; i < POPUP_PADDING_Y; i++) lines.push(blank());
 		lines.push(border(`╰${"─".repeat(frameInner)}╯`));
@@ -967,7 +968,7 @@ class SessionManagerOverlay implements Focusable {
 		const titleRaw = sessionResumeTitle(session);
 		const prefix = rowTreePrefix(node);
 		const cursor = selected ? ui.accent("› ") : "  ";
-		const markers = `${current ? ui.accent("● ") : session.parentSessionPath ? ui.dim("⑂ ") : "  "}`;
+		const marker = current ? ui.accent("● ") : session.parentSessionPath ? ui.dim("⑂ ") : "";
 		const rightParts = [
 			`${session.messageCount} msg`,
 			formatAge(session.modified),
@@ -976,7 +977,7 @@ class SessionManagerOverlay implements Focusable {
 		const rightRaw = rightParts.join(" · ");
 		const rightMax = Math.min(ROW_META_MAX_WIDTH, Math.max(14, Math.floor(inner * 0.38)));
 		const right = ui.dim(truncateToWidth(rightRaw, rightMax, "…"));
-		const leftFixed = cursor + ui.dim(prefix) + markers;
+		const leftFixed = cursor + ui.dim(prefix) + marker;
 		const availableTitle = Math.max(8, inner - visibleWidth(leftFixed) - visibleWidth(right) - 2);
 		let title = truncateToWidth(titleRaw, availableTitle, "…");
 		if (current) title = ui.accent(title);
@@ -1010,21 +1011,23 @@ class SessionManagerOverlay implements Focusable {
 		const search = oneLine(this.searchInput.getValue());
 		const state = `${shown} shown · ${scope} · ${this.sortMode} sort · ${this.nameFilter === "named" ? "named only" : "all names"}${this.showPath ? " · paths on" : ""}${search ? ` · query “${truncateToWidth(search, 28, "…")}”` : ""}`;
 		lines.push(ui.row(ui.dim(state)));
+		lines.push(ui.row(""));
 		if (!selected) {
-			lines.push(ui.row(""));
-			lines.push(ui.row(""));
+			lines.push(ui.row(ui.dim("No session selected")));
 			lines.push(ui.row(""));
 			return lines;
 		}
 
 		const title = sessionResumeTitle(selected);
 		const badge = this.isCurrent(selected) ? ui.success("current") : isNamed(selected) ? ui.warning("named") : ui.dim("session");
-		const metaRaw = [`${selected.messageCount} msg`, formatAge(selected.modified), selected.id ? selected.id.slice(0, 8) : ""].filter(Boolean).join(" · ");
-		const meta = ui.dim(truncateToWidth(metaRaw, Math.min(ROW_META_MAX_WIDTH, Math.max(16, Math.floor(inner * 0.35))), "…"));
-		const titlePrefix = `${badge} `;
-		const titleWidth = Math.max(10, inner - visibleWidth(titlePrefix) - visibleWidth(meta) - 2);
-		const left = titlePrefix + truncateToWidth(title, titleWidth, "…");
-		lines.push(ui.row(left + " ".repeat(Math.max(1, inner - visibleWidth(left) - visibleWidth(meta))) + meta));
+		const titleWidth = Math.max(10, inner - visibleWidth(badge) - 2);
+		const titleText = truncateToWidth(title, titleWidth, "…");
+		lines.push(ui.row(titleText + " ".repeat(Math.max(1, inner - visibleWidth(titleText) - visibleWidth(badge))) + badge));
+
+		const meta = [`${selected.messageCount} msg`, formatAge(selected.modified), selected.id ? selected.id.slice(0, 8) : ""].filter(Boolean).join(" · ");
+		const metaPrefix = ui.dim("meta    ");
+		lines.push(ui.row(metaPrefix + ui.muted(truncateToWidth(meta, Math.max(10, inner - visibleWidth(metaPrefix)), "…"))));
+		lines.push(ui.row(""));
 
 		const locationLabel = this.showPath ? "file" : "cwd";
 		const location = this.showPath ? selected.path : selected.cwd || selected.path;
