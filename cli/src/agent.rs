@@ -279,7 +279,8 @@ pub fn extract_body_from_codex_toml(content: &str) -> Option<String> {
 /// Generate a "Hook Rules" section from custom hooks that have descriptions.
 /// Harnesses that can't run scripts natively get this as inline instructions.
 pub fn custom_hooks_section(hooks: &[CustomHookEntry]) -> String {
-    let with_desc: Vec<&CustomHookEntry> = hooks.iter().filter(|h| h.description.is_some()).collect();
+    let with_desc: Vec<&CustomHookEntry> =
+        hooks.iter().filter(|h| h.description.is_some()).collect();
     if with_desc.is_empty() {
         return String::new();
     }
@@ -580,10 +581,7 @@ Always run clippy.
             extras.guidance.as_deref(),
             Some("Use for backend services.")
         );
-        assert_eq!(
-            extras.instructions.as_deref(),
-            Some("Always run clippy.")
-        );
+        assert_eq!(extras.instructions.as_deref(), Some("Always run clippy."));
     }
 
     #[test]

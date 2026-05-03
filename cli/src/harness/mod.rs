@@ -273,9 +273,7 @@ impl Harness {
             Harness::Codex => {
                 codex::generate_agent(agent, &dir, skills, optional_skills, hooks, extras)
             }
-            Harness::Pi => {
-                pi::generate_agent(agent, &dir, skills, optional_skills, hooks, extras)
-            }
+            Harness::Pi => pi::generate_agent(agent, &dir, skills, optional_skills, hooks, extras),
         }
     }
 
@@ -391,10 +389,8 @@ mod tests {
         static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let _guard = ENV_LOCK.lock().unwrap();
         let prev = std::env::var_os("PI_CODING_AGENT_DIR");
-        let sandbox = std::env::temp_dir().join(format!(
-            "vstack_pi_env_override_{}",
-            std::process::id()
-        ));
+        let sandbox =
+            std::env::temp_dir().join(format!("vstack_pi_env_override_{}", std::process::id()));
         unsafe {
             std::env::set_var("PI_CODING_AGENT_DIR", &sandbox);
         }

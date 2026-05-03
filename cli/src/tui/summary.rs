@@ -1,6 +1,8 @@
 use anyhow::Result;
 use crossterm::ExecutableCommand;
-use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseEventKind};
+use crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseEventKind,
+};
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::prelude::*;
 use std::io;
@@ -41,7 +43,7 @@ pub fn run_summary_screen(data: &SummaryData) -> Result<SummaryAction> {
                     KeyCode::Down => scroll = (scroll + 1).min(max_scroll),
                     KeyCode::Char('i') => break SummaryAction::InstallMore,
                     KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter => {
-                        break SummaryAction::Exit
+                        break SummaryAction::Exit;
                     }
                     _ => {}
                 }

@@ -729,8 +729,7 @@ pub fn draw_summary(frame: &mut Frame, data: &super::SummaryData, scroll: usize)
     frame.render_widget(sep, chunks[1]);
 
     // Summary info (what · how · where)
-    let total =
-        data.agents.len() + data.skills.len() + data.hooks.len() + data.pi_extensions.len();
+    let total = data.agents.len() + data.skills.len() + data.hooks.len() + data.pi_extensions.len();
     let n_updated = data.updated.len();
     let n_new = total.saturating_sub(n_updated);
 
@@ -1058,7 +1057,9 @@ fn draw_repo_dialog(frame: &mut Frame, select: &mut TabbedSelect) {
     let area = frame.area();
     let dialog_width = 56u16.min(area.width.saturating_sub(4));
     let option_count = dialog.options.len() as u16 + 1; // +1 for "+ Add repo"
-    let dialog_height = (option_count + 7).max(12).min(area.height.saturating_sub(4));
+    let dialog_height = (option_count + 7)
+        .max(12)
+        .min(area.height.saturating_sub(4));
     let dialog_area = Rect::new(
         (area.width.saturating_sub(dialog_width)) / 2,
         (area.height.saturating_sub(dialog_height)) / 2,

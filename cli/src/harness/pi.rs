@@ -138,10 +138,7 @@ mod tests {
 
     #[test]
     fn generate_agent_writes_pi_frontmatter_and_body() {
-        let dir = std::env::temp_dir().join(format!(
-            "vstack_pi_agent_{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("vstack_pi_agent_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
 
@@ -155,8 +152,7 @@ mod tests {
             "rust-arch".into(),
             "Architecture patterns for Rust: more details.".into(),
         )];
-        let path =
-            generate_agent(&agent, &dir, &skills, &[], &[], &extras).expect("generate ok");
+        let path = generate_agent(&agent, &dir, &skills, &[], &[], &extras).expect("generate ok");
 
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("name: rust"));
@@ -175,17 +171,14 @@ mod tests {
 
     #[test]
     fn generate_agent_reviewer_omits_pane_and_uses_read_tools() {
-        let dir = std::env::temp_dir().join(format!(
-            "vstack_pi_agent_reviewer_{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("vstack_pi_agent_reviewer_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
 
         let agent = agent_fixture("reviewer-arch", AgentRole::Reviewer, "sonnet");
         let extras = AgentExtras::default();
-        let path =
-            generate_agent(&agent, &dir, &[], &[], &[], &extras).expect("generate ok");
+        let path = generate_agent(&agent, &dir, &[], &[], &[], &extras).expect("generate ok");
 
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("model: openai/gpt-5.5:high"));

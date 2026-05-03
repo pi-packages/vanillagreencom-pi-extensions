@@ -104,10 +104,7 @@ pub fn run() -> Result<()> {
         }
 
         if !phantom.is_empty() {
-            eprintln!(
-                "\n  {} in lock but missing from disk:",
-                phantom.len()
-            );
+            eprintln!("\n  {} in lock but missing from disk:", phantom.len());
             for name in &phantom {
                 eprintln!("    ✗ {name} (skill)");
             }

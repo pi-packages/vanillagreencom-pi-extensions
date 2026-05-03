@@ -256,10 +256,7 @@ fn upsert_agent_value_in_section(
 /// replace it with the updated list (which includes upstream additions).
 /// Agents without an existing entry are ignored — `write_agent_skills`
 /// handles those.
-pub fn merge_upstream_agent_skills(
-    project_root: &Path,
-    updates: &HashMap<String, Vec<String>>,
-) {
+pub fn merge_upstream_agent_skills(project_root: &Path, updates: &HashMap<String, Vec<String>>) {
     if updates.is_empty() {
         return;
     }
@@ -400,10 +397,7 @@ fn replace_toml_array_value(
 ///
 /// This must be called AFTER `ensure_project_config` and AFTER the skill
 /// mapping is computed.
-pub fn write_agent_skills(
-    project_root: &Path,
-    agent_skill_map: &HashMap<String, Vec<String>>,
-) {
+pub fn write_agent_skills(project_root: &Path, agent_skill_map: &HashMap<String, Vec<String>>) {
     let path = project_root.join("vstack.toml");
     let existing = std::fs::read_to_string(&path).unwrap_or_default();
 
@@ -635,7 +629,9 @@ fn create_project_config(path: &Path, agents: &[String], skills: &[String]) {
     out.push_str("# Each hook needs: event, command, and optional matcher.\n");
     out.push_str("#\n");
     out.push_str("# [[custom-hooks]]\n");
-    out.push_str("# event = \"PreToolUse\"      # PreToolUse | PostToolUse | PostCompact | TaskCompleted\n");
+    out.push_str(
+        "# event = \"PreToolUse\"      # PreToolUse | PostToolUse | PostCompact | TaskCompleted\n",
+    );
     out.push_str("# matcher = \"Bash\"           # optional: Bash | Edit|Write | (omit for all)\n");
     out.push_str("# command = \"./scripts/my-hook.sh\"\n");
     out.push_str("# description = \"What this hook does\"     # inlined as instructions in non-Claude-Code harnesses\n");
@@ -746,7 +742,9 @@ fn insert_keys_into_section(content: &str, section_header: &str, new_keys: &[&St
 
             if !new_keys.is_empty() {
                 // Blank line before new entries if section already had content
-                if result.last().map_or(false, |l| !l.trim().is_empty() && l.trim() != section_header) {
+                if result.last().map_or(false, |l| {
+                    !l.trim().is_empty() && l.trim() != section_header
+                }) {
                     result.push(String::new());
                 }
                 for name in new_keys {
@@ -945,10 +943,8 @@ rust = "Use for Rust work."
 
     #[test]
     fn update_project_config_appends_new_agents() {
-        let dir = std::env::temp_dir().join(format!(
-            "vstack_test_update_config_{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("vstack_test_update_config_{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("vstack.toml");
 
@@ -980,10 +976,8 @@ rust = "Use for Rust work."
 
     #[test]
     fn update_project_config_preserves_user_edits() {
-        let dir = std::env::temp_dir().join(format!(
-            "vstack_test_preserve_edits_{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("vstack_test_preserve_edits_{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("vstack.toml");
 
@@ -1021,10 +1015,8 @@ rust = "Always use thiserror for errors."
 
     #[test]
     fn update_project_config_no_change_when_all_present() {
-        let dir = std::env::temp_dir().join(format!(
-            "vstack_test_no_change_{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("vstack_test_no_change_{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("vstack.toml");
 
@@ -1054,10 +1046,7 @@ rust = "Always use thiserror for errors."
         assert!(out.contains("rust = \"Pick the highest-priority backend task.\""));
         assert!(out.contains("generalist = \"\""));
         // Exactly one rust line
-        assert_eq!(
-            out.lines().filter(|l| l.starts_with("rust = ")).count(),
-            1
-        );
+        assert_eq!(out.lines().filter(|l| l.starts_with("rust = ")).count(), 1);
     }
 
     #[test]
@@ -1068,12 +1057,8 @@ rust = \"first\"\n\
 rust = \"second\"\n\
 rust = \"third\"\n\
 generalist = \"\"\n";
-        let out = upsert_agent_value_in_section(
-            toml,
-            "[agent-launch-instructions]",
-            "rust",
-            "canonical",
-        );
+        let out =
+            upsert_agent_value_in_section(toml, "[agent-launch-instructions]", "rust", "canonical");
         // Duplicates collapsed to a single line with the new value
         let rust_lines: Vec<&str> = out.lines().filter(|l| l.starts_with("rust = ")).collect();
         assert_eq!(
@@ -1201,10 +1186,8 @@ command = \"./scripts/x.sh\"\n";
 
     #[test]
     fn update_project_config_preserves_full_skills_reference() {
-        let dir = std::env::temp_dir().join(format!(
-            "vstack_test_skills_ref_{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("vstack_test_skills_ref_{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("vstack.toml");
 
@@ -1234,9 +1217,18 @@ command = \"./scripts/x.sh\"\n";
         let updated = std::fs::read_to_string(&path).unwrap();
 
         // ALL skills present in reference — not just the new one
-        assert!(updated.contains("#   rust-arch"), "rust-arch missing from reference");
-        assert!(updated.contains("#   rust-ffi"), "rust-ffi missing from reference");
-        assert!(updated.contains("#   worktree"), "worktree missing from reference");
+        assert!(
+            updated.contains("#   rust-arch"),
+            "rust-arch missing from reference"
+        );
+        assert!(
+            updated.contains("#   rust-ffi"),
+            "rust-ffi missing from reference"
+        );
+        assert!(
+            updated.contains("#   worktree"),
+            "worktree missing from reference"
+        );
         assert!(
             updated.contains("#   second-opinion"),
             "second-opinion missing from reference"

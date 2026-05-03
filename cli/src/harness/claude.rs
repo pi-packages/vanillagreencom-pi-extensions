@@ -71,10 +71,7 @@ pub fn generate_agent(
 }
 
 /// Format installed hooks and custom hooks into Claude Code YAML frontmatter.
-fn format_hooks_yaml_with_custom(
-    hooks: &[Hook],
-    custom: &[agent::CustomHookEntry],
-) -> String {
+fn format_hooks_yaml_with_custom(hooks: &[Hook], custom: &[agent::CustomHookEntry]) -> String {
     // Group by event → matcher → list of commands
     let mut by_event: BTreeMap<String, BTreeMap<String, Vec<String>>> = BTreeMap::new();
 
@@ -85,7 +82,10 @@ fn format_hooks_yaml_with_custom(
             .or_default()
             .entry(matcher)
             .or_default()
-            .push(format!("$CLAUDE_PROJECT_DIR/.claude/hooks/{}.sh", hook.name));
+            .push(format!(
+                "$CLAUDE_PROJECT_DIR/.claude/hooks/{}.sh",
+                hook.name
+            ));
     }
 
     for hook in custom {

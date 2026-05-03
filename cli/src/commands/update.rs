@@ -63,9 +63,7 @@ pub fn get_remote_version_with_timeout(timeout: Duration) -> Option<String> {
 }
 
 fn get_remote_version_inner(timeout: Option<Duration>) -> Option<String> {
-    let url = format!(
-        "https://raw.githubusercontent.com/{REPO}/main/cli/Cargo.toml"
-    );
+    let url = format!("https://raw.githubusercontent.com/{REPO}/main/cli/Cargo.toml");
 
     let mut child = Command::new("curl")
         .args(["-sfL", "--max-time", "5", &url])

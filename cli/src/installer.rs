@@ -83,8 +83,7 @@ pub fn install_skill(
             // already refreshed the canonical in this process.
             let marker = canonical.join(".vstack-refreshed");
             let current_pid = std::process::id().to_string();
-            let already_refreshed = marker
-                .exists()
+            let already_refreshed = marker.exists()
                 && std::fs::read_to_string(&marker).is_ok_and(|s| s.trim() == current_pid);
             if !already_refreshed {
                 remove_existing(&canonical)?;

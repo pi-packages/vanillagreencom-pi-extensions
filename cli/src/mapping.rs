@@ -186,9 +186,10 @@ mod tests {
     #[test]
     fn config_adds_explicit_agent_skills() {
         let mut config = MappingConfig::default();
-        config
-            .agent_skills
-            .insert("iced".into(), vec!["iced-rs".into(), "trading-design".into()]);
+        config.agent_skills.insert(
+            "iced".into(),
+            vec!["iced-rs".into(), "trading-design".into()],
+        );
         let available = vec!["iced-rs".into(), "trading-design".into(), "other".into()];
         let matched = config.skills_for_agent("iced", &AgentRole::Engineer, &available);
         assert!(matched.contains(&"iced-rs".to_string()));
@@ -312,9 +313,10 @@ mod tests {
         let mut config = MappingConfig::default();
         // When an explicit agent-skills entry exists, prefix matching is skipped.
         // The reviewer-iced agent inherits from the "iced" entry via prefix stripping.
-        config
-            .agent_skills
-            .insert("iced".into(), vec!["iced-rs".into(), "trading-design".into()]);
+        config.agent_skills.insert(
+            "iced".into(),
+            vec!["iced-rs".into(), "trading-design".into()],
+        );
         let available = vec!["iced-rs".into(), "trading-design".into()];
         let matched = config.skills_for_agent("reviewer-iced", &AgentRole::Reviewer, &available);
         assert!(matched.contains(&"iced-rs".to_string()));

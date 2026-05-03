@@ -217,8 +217,7 @@ pub fn run(
             all_hooks
         };
 
-        let total =
-            agents.len() + skills.len() + hooks.len() + pi_extensions.len();
+        let total = agents.len() + skills.len() + hooks.len() + pi_extensions.len();
         if total == 0 && (yes || all || harness_filter.is_some()) {
             eprintln!(
                 "No agents, skills, hooks, or pi-extensions found in {}",
@@ -457,17 +456,15 @@ pub fn run(
                     mapping.skills_for_agent(&a.name, &a.role, &available_skill_names)
                 };
 
-            let skill_pairs =
-                crate::resolve::resolve_skill_pairs(&skill_names, &selected_skills);
+            let skill_pairs = crate::resolve::resolve_skill_pairs(&skill_names, &selected_skills);
 
             // Use project [agent-skills-optional] if present, else source mapping
-            let optional_entries = if let Some(project_list) =
-                project_config.agent_skills_optional.get(&a.name)
-            {
-                project_list.clone()
-            } else {
-                mapping.optional_skills_for_agent(&a.name, &available_skill_names)
-            };
+            let optional_entries =
+                if let Some(project_list) = project_config.agent_skills_optional.get(&a.name) {
+                    project_list.clone()
+                } else {
+                    mapping.optional_skills_for_agent(&a.name, &available_skill_names)
+                };
             let optional_pairs = crate::resolve::resolve_optional_skill_pairs(&optional_entries);
 
             agent_skill_map
@@ -532,11 +529,7 @@ pub fn run(
         for ext in &selected_pi_extensions {
             match crate::pi_extension::install_pi_extension(ext, global) {
                 Ok(Some(dest)) => {
-                    let detail = format!(
-                        "{} → {} (Pi extension)",
-                        ext.name,
-                        dest.display()
-                    );
+                    let detail = format!("{} → {} (Pi extension)", ext.name, dest.display());
                     log_lines.push(detail.clone());
                     results.push(installer::InstallResult {
                         name: ext.name.clone(),
@@ -557,10 +550,7 @@ pub fn run(
                     // in the lock so vstack list reflects the actual state.
                 }
                 Err(e) => {
-                    eprintln!(
-                        "Warning: failed to install Pi extension {}: {e}",
-                        ext.name
-                    );
+                    eprintln!("Warning: failed to install Pi extension {}: {e}", ext.name);
                 }
             }
         }
@@ -585,12 +575,7 @@ pub fn run(
     for legacy in &migrated_pi_extensions {
         lock.remove(legacy);
     }
-    installer::record_install(
-        &mut lock,
-        &results,
-        &resolved_source.source,
-        method,
-    );
+    installer::record_install(&mut lock, &results, &resolved_source.source, method);
 
     // Also record hooks in the lock file
     let now = config::now_iso();
@@ -658,7 +643,10 @@ pub fn run(
             .map(|h| (h.name.clone(), h.event.clone()))
             .collect(),
         pi_extensions: if pi_in_harnesses {
-            selected_pi_extensions.iter().map(|e| e.name.clone()).collect()
+            selected_pi_extensions
+                .iter()
+                .map(|e| e.name.clone())
+                .collect()
         } else {
             Vec::new()
         },
@@ -724,7 +712,9 @@ pub fn run(
             harness_names.join(", ")
         );
         if !global && !selected_agents.is_empty() {
-            eprintln!("  Add per-agent guidance or instructions in vstack.toml, then run `vstack refresh` to apply");
+            eprintln!(
+                "  Add per-agent guidance or instructions in vstack.toml, then run `vstack refresh` to apply"
+            );
         }
         // Check for CLI updates in non-interactive mode
         crate::commands::update::check_update_hint();
@@ -902,16 +892,14 @@ fn reconcile_agents(
                 mapping.skills_for_agent(&agent.name, &agent.role, &installed_skills)
             };
 
-        let skill_pairs =
-            crate::resolve::resolve_skill_pairs(&skill_names, &source_skills);
+        let skill_pairs = crate::resolve::resolve_skill_pairs(&skill_names, &source_skills);
 
-        let optional_entries = if let Some(project_list) =
-            project_config.agent_skills_optional.get(&agent.name)
-        {
-            project_list.clone()
-        } else {
-            mapping.optional_skills_for_agent(&agent.name, &installed_skills)
-        };
+        let optional_entries =
+            if let Some(project_list) = project_config.agent_skills_optional.get(&agent.name) {
+                project_list.clone()
+            } else {
+                mapping.optional_skills_for_agent(&agent.name, &installed_skills)
+            };
         let optional_pairs = crate::resolve::resolve_optional_skill_pairs(&optional_entries);
 
         let matched_hooks: Vec<crate::hook::Hook> = mapping
@@ -926,8 +914,7 @@ fn reconcile_agents(
                     let existing_path = harness
                         .agents_dir(global)
                         .join(harness.agent_filename(&agent.name));
-                    let file_extras =
-                        crate::resolve::read_existing_extras(&existing_path, harness);
+                    let file_extras = crate::resolve::read_existing_extras(&existing_path, harness);
                     project_config.save_extracted(
                         &config::project_root(),
                         &agent.name,
@@ -960,4 +947,3 @@ fn reconcile_agents(
 
     Ok(())
 }
-

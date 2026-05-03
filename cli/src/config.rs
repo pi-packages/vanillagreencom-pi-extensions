@@ -379,10 +379,15 @@ fn extract_toml_section_for(path: &Path, name: &str) -> Vec<u8> {
         }
         if capturing {
             // Stop at next top-level key or section header
-            if trimmed.starts_with('[') || (!trimmed.is_empty() && !trimmed.starts_with('#')
-                && !trimmed.starts_with('"') && !trimmed.starts_with('{')
-                && !trimmed.starts_with(']') && !trimmed.starts_with(',')
-                && !line.starts_with(' ') && !line.starts_with('\t'))
+            if trimmed.starts_with('[')
+                || (!trimmed.is_empty()
+                    && !trimmed.starts_with('#')
+                    && !trimmed.starts_with('"')
+                    && !trimmed.starts_with('{')
+                    && !trimmed.starts_with(']')
+                    && !trimmed.starts_with(',')
+                    && !line.starts_with(' ')
+                    && !line.starts_with('\t'))
             {
                 capturing = false;
             } else {
@@ -486,7 +491,9 @@ pub fn compute_source_hash(entry: &LockEntry) -> String {
             }
         }
         ItemKind::Agent => {
-            let file = source_root.join("agents").join(format!("{}.md", entry.name));
+            let file = source_root
+                .join("agents")
+                .join(format!("{}.md", entry.name));
             if file.exists() {
                 state = fnv1a_chain(state, &hash_file_bytes(&file).to_le_bytes());
             }

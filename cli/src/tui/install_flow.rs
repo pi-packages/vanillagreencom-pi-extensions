@@ -15,12 +15,8 @@ use std::io;
 
 use super::multiselect::{self, ItemGroup, SelectItem, Tab, TabbedSelect};
 use super::render;
-use super::state::{
-    build_dep_display, build_item_tabs, load_installed_state, InstalledState,
-};
-use super::{
-    DiscoveredItems, InstallFlowResult, InstallSelections, SourceSelectorData,
-};
+use super::state::{InstalledState, build_dep_display, build_item_tabs, load_installed_state};
+use super::{DiscoveredItems, InstallFlowResult, InstallSelections, SourceSelectorData};
 
 type DependencyContext<'a> = (&'a [Skill], &'a HashMap<String, Vec<String>>);
 
@@ -46,8 +42,8 @@ pub fn run_install_flow(
 
     // Refresh cached remote repos so staleness checks see latest content
     if has_installed_items {
-        let project_lock =
-            crate::config::LockFile::load(&crate::config::lock_file_path(false)).unwrap_or_default();
+        let project_lock = crate::config::LockFile::load(&crate::config::lock_file_path(false))
+            .unwrap_or_default();
         crate::config::refresh_remote_caches(&project_lock);
         let global_lock =
             crate::config::LockFile::load(&crate::config::lock_file_path(true)).unwrap_or_default();
@@ -99,8 +95,7 @@ pub fn run_install_flow(
                 perform_inline_update(&names, &items, &installed);
                 // Clear outdated flags and remove from Updates tab
                 clear_updated_items(&mut step1_select, &names);
-                step1_select.flash_message =
-                    Some(format!("Updated {n} item(s)"));
+                step1_select.flash_message = Some(format!("Updated {n} item(s)"));
                 continue 'steps;
             }
         }
@@ -255,7 +250,9 @@ pub fn run_install_flow(
                 }
                 SelectResult::JumpToStep(1) => continue 'steps,
                 SelectResult::JumpToStep(2) => continue 'scope_step,
-                SelectResult::JumpToStep(3) | SelectResult::JumpToStep(4) | SelectResult::JumpToStep(5) => {}
+                SelectResult::JumpToStep(3)
+                | SelectResult::JumpToStep(4)
+                | SelectResult::JumpToStep(5) => {}
                 SelectResult::JumpToStep(_) => continue 'scope_step,
                 SelectResult::Confirmed | SelectResult::UpdateInPlace(_) => {}
             }
@@ -353,156 +350,166 @@ pub fn run_install_flow(
                     continue 'harness_step;
                 }
 
-            // ── Step 4: Install method ─────────────────────────────
-            let method_tabs = vec![Tab {
-                name: "Method".into(),
-                groups: vec![ItemGroup {
-                    label: String::new(),
-                    items: vec![
-                        SelectItem {
-                            label: "Symlink".into(),
-                            description: "Single source of truth — recommended".into(),
-                            selected: true,
-                            tag: None,
-                            suffix: Some("recommended".into()),
-                            locked: false,
-                            installed: false,
-                            installed_scope: None,
-                            outdated: false,
-                        },
-                        SelectItem {
-                            label: "Copy".into(),
-                            description: "Duplicate files to each harness directory".into(),
-                            selected: false,
-                            tag: None,
-                            suffix: None,
-                            locked: false,
-                            installed: false,
-                            installed_scope: None,
-                            outdated: false,
-                        },
-                    ],
-                }],
-            }];
+                // ── Step 4: Install method ─────────────────────────────
+                let method_tabs = vec![Tab {
+                    name: "Method".into(),
+                    groups: vec![ItemGroup {
+                        label: String::new(),
+                        items: vec![
+                            SelectItem {
+                                label: "Symlink".into(),
+                                description: "Single source of truth — recommended".into(),
+                                selected: true,
+                                tag: None,
+                                suffix: Some("recommended".into()),
+                                locked: false,
+                                installed: false,
+                                installed_scope: None,
+                                outdated: false,
+                            },
+                            SelectItem {
+                                label: "Copy".into(),
+                                description: "Duplicate files to each harness directory".into(),
+                                selected: false,
+                                tag: None,
+                                suffix: None,
+                                locked: false,
+                                installed: false,
+                                installed_scope: None,
+                                outdated: false,
+                            },
+                        ],
+                    }],
+                }];
 
-            let mut method_select = TabbedSelect::new("Installation method", method_tabs, false)
-                .with_step("4/5")
-                .with_step_labels(&step_labels)
-                .with_source_selector(
-                    source_selector.current_label.clone(),
-                    source_selector.options.clone(),
-                );
+                let mut method_select =
+                    TabbedSelect::new("Installation method", method_tabs, false)
+                        .with_step("4/5")
+                        .with_step_labels(&step_labels)
+                        .with_source_selector(
+                            source_selector.current_label.clone(),
+                            source_selector.options.clone(),
+                        );
 
-            let method = 'method_step: loop {
-            match run_tabbed_select(&mut method_select, None)? {
-                SelectResult::Cancelled => return Ok(InstallFlowResult::Cancelled),
-                SelectResult::Back => continue 'harness_step, // back to step 3
-                SelectResult::SwitchSource(source) => {
-                    return Ok(InstallFlowResult::SwitchSource(source));
-                }
-                SelectResult::JumpToStep(1) => continue 'steps,
-                SelectResult::JumpToStep(2) => continue 'scope_step,
-                SelectResult::JumpToStep(3) => continue 'harness_step,
-                SelectResult::JumpToStep(4) => continue 'method_step,
-                SelectResult::JumpToStep(5) | SelectResult::Confirmed => {}
-                SelectResult::JumpToStep(_) => continue 'method_step,
-                SelectResult::UpdateInPlace(_) => continue 'method_step,
-            }
+                let method = 'method_step: loop {
+                    match run_tabbed_select(&mut method_select, None)? {
+                        SelectResult::Cancelled => return Ok(InstallFlowResult::Cancelled),
+                        SelectResult::Back => continue 'harness_step, // back to step 3
+                        SelectResult::SwitchSource(source) => {
+                            return Ok(InstallFlowResult::SwitchSource(source));
+                        }
+                        SelectResult::JumpToStep(1) => continue 'steps,
+                        SelectResult::JumpToStep(2) => continue 'scope_step,
+                        SelectResult::JumpToStep(3) => continue 'harness_step,
+                        SelectResult::JumpToStep(4) => continue 'method_step,
+                        SelectResult::JumpToStep(5) | SelectResult::Confirmed => {}
+                        SelectResult::JumpToStep(_) => continue 'method_step,
+                        SelectResult::UpdateInPlace(_) => continue 'method_step,
+                    }
 
-            let method_selected = method_select.all_selected();
-            let method = if method_selected.iter().any(|(_, l)| *l == "Copy") {
-                InstallMethod::Copy
-            } else {
-                InstallMethod::Symlink
-            };
+                    let method_selected = method_select.all_selected();
+                    let method = if method_selected.iter().any(|(_, l)| *l == "Copy") {
+                        InstallMethod::Copy
+                    } else {
+                        InstallMethod::Symlink
+                    };
 
-            // ── Step 5: Install confirmation ──────────────────────
-            let mut count_lines: Vec<String> = Vec::new();
-            if !selected_agents.is_empty() {
-                count_lines.push(format!(
-                    "{} agent{}",
-                    selected_agents.len(),
-                    if selected_agents.len() == 1 { "" } else { "s" }
-                ));
-            }
-            if !selected_skills.is_empty() {
-                count_lines.push(format!(
-                    "{} skill{}",
-                    selected_skills.len(),
-                    if selected_skills.len() == 1 { "" } else { "s" }
-                ));
-            }
-            if !selected_hooks.is_empty() {
-                count_lines.push(format!(
-                    "{} hook{}",
-                    selected_hooks.len(),
-                    if selected_hooks.len() == 1 { "" } else { "s" }
-                ));
-            }
-            if !selected_pi_extensions.is_empty()
-                && harnesses.iter().any(|h| matches!(h, Harness::Pi))
-            {
-                count_lines.push(format!(
-                    "{} pi-extension{}",
-                    selected_pi_extensions.len(),
-                    if selected_pi_extensions.len() == 1 { "" } else { "s" }
-                ));
-            }
-            if update_cli {
-                count_lines.push("CLI binary update".into());
-            }
+                    // ── Step 5: Install confirmation ──────────────────────
+                    let mut count_lines: Vec<String> = Vec::new();
+                    if !selected_agents.is_empty() {
+                        count_lines.push(format!(
+                            "{} agent{}",
+                            selected_agents.len(),
+                            if selected_agents.len() == 1 { "" } else { "s" }
+                        ));
+                    }
+                    if !selected_skills.is_empty() {
+                        count_lines.push(format!(
+                            "{} skill{}",
+                            selected_skills.len(),
+                            if selected_skills.len() == 1 { "" } else { "s" }
+                        ));
+                    }
+                    if !selected_hooks.is_empty() {
+                        count_lines.push(format!(
+                            "{} hook{}",
+                            selected_hooks.len(),
+                            if selected_hooks.len() == 1 { "" } else { "s" }
+                        ));
+                    }
+                    if !selected_pi_extensions.is_empty()
+                        && harnesses.iter().any(|h| matches!(h, Harness::Pi))
+                    {
+                        count_lines.push(format!(
+                            "{} pi-extension{}",
+                            selected_pi_extensions.len(),
+                            if selected_pi_extensions.len() == 1 {
+                                ""
+                            } else {
+                                "s"
+                            }
+                        ));
+                    }
+                    if update_cli {
+                        count_lines.push("CLI binary update".into());
+                    }
 
-            let scope_label = if global { "Global" } else { "Project" };
-            let harness_list = harnesses
-                .iter()
-                .map(|h| h.name())
-                .collect::<Vec<_>>()
-                .join(", ");
-            let method_label = if method == InstallMethod::Copy { "Copy" } else { "Symlink" };
+                    let scope_label = if global { "Global" } else { "Project" };
+                    let harness_list = harnesses
+                        .iter()
+                        .map(|h| h.name())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let method_label = if method == InstallMethod::Copy {
+                        "Copy"
+                    } else {
+                        "Symlink"
+                    };
 
-            let install_tabs = vec![Tab {
-                name: "Summary".into(),
-                groups: vec![ItemGroup {
-                    label: String::new(),
-                    items: Vec::new(),
-                }],
-            }];
+                    let install_tabs = vec![Tab {
+                        name: "Summary".into(),
+                        groups: vec![ItemGroup {
+                            label: String::new(),
+                            items: Vec::new(),
+                        }],
+                    }];
 
-            let mut install_select = TabbedSelect::new("Confirm installation", install_tabs, false)
-                .with_step("5/5")
-                .with_step_labels(&step_labels)
-                .with_source_selector(
-                    source_selector.current_label.clone(),
-                    source_selector.options.clone(),
-                );
-            install_select.install_summary = vec![
-                count_lines.join(", "),
-                format!("Scope: {scope_label}"),
-                format!("Harnesses: {harness_list}"),
-                format!("Method: {method_label}"),
-            ];
-            install_select.action_button_focused = true;
+                    let mut install_select =
+                        TabbedSelect::new("Confirm installation", install_tabs, false)
+                            .with_step("5/5")
+                            .with_step_labels(&step_labels)
+                            .with_source_selector(
+                                source_selector.current_label.clone(),
+                                source_selector.options.clone(),
+                            );
+                    install_select.install_summary = vec![
+                        count_lines.join(", "),
+                        format!("Scope: {scope_label}"),
+                        format!("Harnesses: {harness_list}"),
+                        format!("Method: {method_label}"),
+                    ];
+                    install_select.action_button_focused = true;
 
-            match run_tabbed_select(&mut install_select, None)? {
-                SelectResult::Cancelled => return Ok(InstallFlowResult::Cancelled),
-                SelectResult::Back => continue 'method_step,
-                SelectResult::SwitchSource(source) => {
-                    return Ok(InstallFlowResult::SwitchSource(source));
-                }
-                SelectResult::JumpToStep(1) => continue 'steps,
-                SelectResult::JumpToStep(2) => continue 'scope_step,
-                SelectResult::JumpToStep(3) => continue 'harness_step,
-                SelectResult::JumpToStep(4) => continue 'method_step,
-                SelectResult::JumpToStep(5) => continue,
-                SelectResult::JumpToStep(_) => continue,
-                SelectResult::UpdateInPlace(_) => continue,
-                SelectResult::Confirmed => {
-                    break 'method_step method;
-                }
-            }
-            }; // end method_step
+                    match run_tabbed_select(&mut install_select, None)? {
+                        SelectResult::Cancelled => return Ok(InstallFlowResult::Cancelled),
+                        SelectResult::Back => continue 'method_step,
+                        SelectResult::SwitchSource(source) => {
+                            return Ok(InstallFlowResult::SwitchSource(source));
+                        }
+                        SelectResult::JumpToStep(1) => continue 'steps,
+                        SelectResult::JumpToStep(2) => continue 'scope_step,
+                        SelectResult::JumpToStep(3) => continue 'harness_step,
+                        SelectResult::JumpToStep(4) => continue 'method_step,
+                        SelectResult::JumpToStep(5) => continue,
+                        SelectResult::JumpToStep(_) => continue,
+                        SelectResult::UpdateInPlace(_) => continue,
+                        SelectResult::Confirmed => {
+                            break 'method_step method;
+                        }
+                    }
+                }; // end method_step
 
-            break 'harness_step (harnesses, method);
+                break 'harness_step (harnesses, method);
             }; // end harness_step
 
             break 'scope_step (global, harnesses, Vec::new(), method);
@@ -555,9 +562,7 @@ fn is_final_step(select: &TabbedSelect) -> bool {
 }
 
 fn try_confirm_select(select: &mut TabbedSelect) -> Result<Option<SelectResult>> {
-    if is_final_step(select)
-        && select.confirm_dialog.is_none()
-        && select.confirm_summary.is_none()
+    if is_final_step(select) && select.confirm_dialog.is_none() && select.confirm_summary.is_none()
     {
         // Final step without a confirm summary (e.g. Install step) — confirm directly
         return Ok(Some(SelectResult::Confirmed));
@@ -694,8 +699,7 @@ fn run_tabbed_select(
                                 let row = (pos.y - inner.y) as usize;
                                 let total_options = dialog.options.len();
                                 if row < total_options {
-                                    let source =
-                                        dialog.options[row].source.clone();
+                                    let source = dialog.options[row].source.clone();
                                     select.repo_dialog = None;
                                     break SelectResult::SwitchSource(source);
                                 } else if row == total_options {
@@ -728,9 +732,7 @@ fn run_tabbed_select(
                                 if target_step < cur_step {
                                     break SelectResult::JumpToStep(target_step);
                                 }
-                                if target_step > cur_step
-                                    && try_confirm_select(select)?.is_some()
-                                {
+                                if target_step > cur_step && try_confirm_select(select)?.is_some() {
                                     break SelectResult::JumpToStep(target_step);
                                 }
                             }
@@ -927,10 +929,7 @@ fn run_tabbed_select(
                                     remove_installed_items(select, &names);
                                     select.flash_message = Some(format!("Uninstalled {n} item(s)"));
                                 }
-                                multiselect::ConfirmAction::RemoveSource {
-                                    source,
-                                    packages,
-                                } => {
+                                multiselect::ConfirmAction::RemoveSource { source, packages } => {
                                     remove_installed_items(select, &packages);
                                     forget_source(select, &source);
                                     let n = packages.len();
@@ -1283,7 +1282,11 @@ fn remove_installed_items(select: &mut TabbedSelect, names: &[String]) {
     }
 
     // Clean up the Updates tab — remove uninstalled items
-    if let Some(tab_idx) = select.tabs.iter().position(|t| t.name.starts_with("Updates")) {
+    if let Some(tab_idx) = select
+        .tabs
+        .iter()
+        .position(|t| t.name.starts_with("Updates"))
+    {
         for group in &mut select.tabs[tab_idx].groups {
             group
                 .items
@@ -1335,12 +1338,7 @@ fn remove_installed_items(select: &mut TabbedSelect, names: &[String]) {
 
 /// Run an inline update for the named items without leaving the TUI.
 /// Re-installs agents, skills, and hooks from the discovered source.
-fn perform_inline_update(
-    names: &[String],
-    items: &DiscoveredItems,
-    _installed: &InstalledState,
-) {
-
+fn perform_inline_update(names: &[String], items: &DiscoveredItems, _installed: &InstalledState) {
     for scope_global in [false, true] {
         let lock_path = crate::config::lock_file_path(scope_global);
         let Ok(lock) = crate::config::LockFile::load(&lock_path) else {
@@ -1393,28 +1391,26 @@ fn perform_inline_update(
                     };
                     let source_skills =
                         mapping.skills_for_agent(&agent.name, &agent.role, &installed_skills);
-                    let skill_names: Vec<String> = if let Some(project_list) =
-                        project_config.agent_skills_for(&agent.name)
-                    {
-                        let mut merged = project_list.clone();
-                        let existing: std::collections::HashSet<String> =
-                            merged.iter().cloned().collect();
-                        for s in &source_skills {
-                            if !existing.contains(s) {
-                                merged.push(s.clone());
+                    let skill_names: Vec<String> =
+                        if let Some(project_list) = project_config.agent_skills_for(&agent.name) {
+                            let mut merged = project_list.clone();
+                            let existing: std::collections::HashSet<String> =
+                                merged.iter().cloned().collect();
+                            for s in &source_skills {
+                                if !existing.contains(s) {
+                                    merged.push(s.clone());
+                                }
                             }
-                        }
-                        if merged.len() > project_list.len() {
-                            project_config
-                                .agent_skills
-                                .insert(agent.name.clone(), merged.clone());
-                            upstream_skill_updates
-                                .insert(agent.name.clone(), merged.clone());
-                        }
-                        merged
-                    } else {
-                        source_skills
-                    };
+                            if merged.len() > project_list.len() {
+                                project_config
+                                    .agent_skills
+                                    .insert(agent.name.clone(), merged.clone());
+                                upstream_skill_updates.insert(agent.name.clone(), merged.clone());
+                            }
+                            merged
+                        } else {
+                            source_skills
+                        };
                     let skill_pairs =
                         crate::resolve::resolve_skill_pairs(&skill_names, &items.skills);
                     let optional_entries =
@@ -1492,9 +1488,7 @@ fn perform_inline_update(
                     }
                 }
                 crate::config::ItemKind::PiExtension => {
-                    let Some(ext) =
-                        items.pi_extensions.iter().find(|e| e.name == *name)
-                    else {
+                    let Some(ext) = items.pi_extensions.iter().find(|e| e.name == *name) else {
                         continue;
                     };
                     let _ = crate::pi_extension::install_pi_extension(ext, scope_global);
@@ -1542,7 +1536,11 @@ fn clear_updated_items(select: &mut TabbedSelect, names: &[String]) {
     }
 
     // Remove from Updates tab
-    if let Some(tab_idx) = select.tabs.iter().position(|t| t.name.starts_with("Updates")) {
+    if let Some(tab_idx) = select
+        .tabs
+        .iter()
+        .position(|t| t.name.starts_with("Updates"))
+    {
         for group in &mut select.tabs[tab_idx].groups {
             group
                 .items

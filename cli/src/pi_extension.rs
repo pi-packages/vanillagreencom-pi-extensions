@@ -66,10 +66,7 @@ impl PiExtension {
         let parsed: RawPackage = serde_json::from_str(&raw)
             .with_context(|| format!("parsing {}", pkg_path.display()))?;
 
-        let pi_extensions = parsed
-            .pi
-            .map(|m| m.extensions)
-            .unwrap_or_default();
+        let pi_extensions = parsed.pi.map(|m| m.extensions).unwrap_or_default();
 
         let bin = match parsed.bin {
             Some(BinField::Single(path)) => {
@@ -156,7 +153,11 @@ fn settings_references_package(name: &str, dest: &Path, global: bool) -> Result<
     Ok(settings
         .get("packages")
         .and_then(|p| p.as_array())
-        .is_some_and(|packages| packages.iter().any(|e| entry_matches_package(e, name, dest))))
+        .is_some_and(|packages| {
+            packages
+                .iter()
+                .any(|e| entry_matches_package(e, name, dest))
+        }))
 }
 
 fn remove_same_scope_legacy_packages(name: &str, global: bool) -> Result<()> {
@@ -168,9 +169,7 @@ fn remove_same_scope_legacy_packages(name: &str, global: bool) -> Result<()> {
         let removed = remove_pi_extension(legacy, global)?;
         let scope_label = if global { "global" } else { "project" };
         if removed.is_empty() {
-            eprintln!(
-                "  Migrated legacy pi-extension {legacy} → {name} ({scope_label} scope)"
-            );
+            eprintln!("  Migrated legacy pi-extension {legacy} → {name} ({scope_label} scope)");
         } else {
             let removed_list = removed
                 .iter()
@@ -327,9 +326,8 @@ fn install_bin_links(ext: &PiExtension, package_dest: &Path, global: bool) -> Re
             let _ = std::fs::remove_file(&link);
         }
         #[cfg(unix)]
-        std::os::unix::fs::symlink(&target, &link).with_context(|| {
-            format!("symlinking bin {} → {}", link.display(), target.display())
-        })?;
+        std::os::unix::fs::symlink(&target, &link)
+            .with_context(|| format!("symlinking bin {} → {}", link.display(), target.display()))?;
     }
     Ok(())
 }
@@ -343,11 +341,7 @@ fn relative_settings_entry(name: &str) -> String {
 /// - the canonical relative form (`./packages/<name>`)
 /// - the legacy absolute path we used to write
 /// - either form wrapped in a `{ "source": ... }` object
-fn entry_matches_package(
-    entry: &serde_json::Value,
-    name: &str,
-    absolute_dest: &Path,
-) -> bool {
+fn entry_matches_package(entry: &serde_json::Value, name: &str, absolute_dest: &Path) -> bool {
     let canonical = relative_settings_entry(name);
     let absolute = absolute_dest.to_string_lossy();
     let matches_str = |s: &str| s == canonical || s == absolute.as_ref();
@@ -441,8 +435,8 @@ fn load_or_init_settings(path: &Path) -> Result<serde_json::Value> {
     if !path.exists() {
         return Ok(serde_json::json!({}));
     }
-    let content = std::fs::read_to_string(path)
-        .with_context(|| format!("reading {}", path.display()))?;
+    let content =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     if content.trim().is_empty() {
         return Ok(serde_json::json!({}));
     }
@@ -503,10 +497,7 @@ fn copy_dir(src: &Path, dst: &Path) -> Result<()> {
                     .ok()
                     .and_then(|m| Some(m.permissions().mode()))
                     .unwrap_or(0o644);
-                let _ = std::fs::set_permissions(
-                    &target,
-                    std::fs::Permissions::from_mode(mode),
-                );
+                let _ = std::fs::set_permissions(&target, std::fs::Permissions::from_mode(mode));
             }
         }
     }
@@ -555,10 +546,8 @@ mod tests {
 
     #[test]
     fn parse_single_string_bin() {
-        let dir = std::env::temp_dir().join(format!(
-            "vstack_pi_pkg_single_bin_{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("vstack_pi_pkg_single_bin_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         write_pkg(
             &dir,
@@ -574,10 +563,7 @@ mod tests {
 
     #[test]
     fn discover_picks_up_packages() {
-        let root = std::env::temp_dir().join(format!(
-            "vstack_pi_discover_{}",
-            std::process::id()
-        ));
+        let root = std::env::temp_dir().join(format!("vstack_pi_discover_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         write_pkg(
@@ -626,9 +612,7 @@ mod tests {
         assert!(entry_matches_package(&rel, "pi-session-bridge", dest));
 
         // Legacy absolute form
-        let abs = serde_json::Value::String(
-            "/var/tmp/scope/packages/pi-session-bridge".into(),
-        );
+        let abs = serde_json::Value::String("/var/tmp/scope/packages/pi-session-bridge".into());
         assert!(entry_matches_package(&abs, "pi-session-bridge", dest));
 
         // Object form wrapping the absolute path
@@ -643,7 +627,11 @@ mod tests {
         assert!(!entry_matches_package(&other, "pi-session-bridge", dest));
 
         let other_pkg = serde_json::Value::String("./packages/pi-statusline".into());
-        assert!(!entry_matches_package(&other_pkg, "pi-session-bridge", dest));
+        assert!(!entry_matches_package(
+            &other_pkg,
+            "pi-session-bridge",
+            dest
+        ));
     }
 
     /// Mutex guarding `PI_CODING_AGENT_DIR` for tests that mutate it.
@@ -681,10 +669,8 @@ mod tests {
 
     #[test]
     fn install_and_remove_pi_extension_round_trip() {
-        let sandbox = std::env::temp_dir().join(format!(
-            "vstack_pi_install_{}",
-            std::process::id()
-        ));
+        let sandbox =
+            std::env::temp_dir().join(format!("vstack_pi_install_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&sandbox);
         std::fs::create_dir_all(&sandbox).unwrap();
         let source = sandbox.join("src").join("pi-mini");
@@ -699,8 +685,7 @@ mod tests {
 
             let settings_path = pi_dir.join("settings.json");
             let settings: serde_json::Value =
-                serde_json::from_str(&std::fs::read_to_string(&settings_path).unwrap())
-                    .unwrap();
+                serde_json::from_str(&std::fs::read_to_string(&settings_path).unwrap()).unwrap();
             let pkgs = settings
                 .get("packages")
                 .and_then(|p| p.as_array())
@@ -725,10 +710,8 @@ mod tests {
             let _ = remove_pi_extension(&ext.name, true).unwrap();
             assert!(!dest.exists());
 
-            let after: serde_json::Value = serde_json::from_str(
-                &std::fs::read_to_string(&settings_path).unwrap(),
-            )
-            .unwrap();
+            let after: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&settings_path).unwrap()).unwrap();
             assert!(
                 after.get("packages").is_none(),
                 "expected packages key gone after sole package removed, got {after}"
@@ -740,16 +723,18 @@ mod tests {
 
     #[test]
     fn install_creates_and_remove_clears_bin_symlinks() {
-        let sandbox = std::env::temp_dir().join(format!(
-            "vstack_pi_bin_links_{}",
-            std::process::id()
-        ));
+        let sandbox =
+            std::env::temp_dir().join(format!("vstack_pi_bin_links_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&sandbox);
         let source = sandbox.join("src").join("pi-bridgey");
         std::fs::create_dir_all(source.join("bin")).unwrap();
         std::fs::create_dir_all(source.join("extensions")).unwrap();
         std::fs::write(source.join("extensions").join("ext.ts"), "// noop\n").unwrap();
-        std::fs::write(source.join("bin").join("pi-bridge.js"), "#!/usr/bin/env node\n").unwrap();
+        std::fs::write(
+            source.join("bin").join("pi-bridge.js"),
+            "#!/usr/bin/env node\n",
+        )
+        .unwrap();
         std::fs::write(
             source.join("package.json"),
             r#"{
@@ -766,14 +751,21 @@ mod tests {
             let dest = install_pi_extension(&ext, true).unwrap().unwrap();
 
             let link = pi_dir.join("bin").join("pi-bridge");
-            assert!(link.is_symlink(), "expected bin symlink at {}", link.display());
+            assert!(
+                link.is_symlink(),
+                "expected bin symlink at {}",
+                link.display()
+            );
             let target = std::fs::read_link(&link).unwrap();
             assert_eq!(target, dest.join("./bin/pi-bridge.js"));
 
             // Remove clears the symlink
             let removed = remove_pi_extension(&ext.name, true).unwrap();
-            assert!(removed.iter().any(|p| p == &link),
-                "expected remove output to include bin link {}", link.display());
+            assert!(
+                removed.iter().any(|p| p == &link),
+                "expected remove output to include bin link {}",
+                link.display()
+            );
             assert!(!link.exists(), "bin link should be gone");
         });
 
@@ -808,10 +800,8 @@ mod tests {
             );
 
             let settings_path = pi_dir.join("settings.json");
-            let settings: serde_json::Value = serde_json::from_str(
-                &std::fs::read_to_string(&settings_path).unwrap(),
-            )
-            .unwrap();
+            let settings: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&settings_path).unwrap()).unwrap();
             let pkgs: Vec<&str> = settings
                 .get("packages")
                 .and_then(|p| p.as_array())
@@ -857,10 +847,8 @@ mod tests {
                 "settings.json should be reported as changed"
             );
 
-            let after: serde_json::Value = serde_json::from_str(
-                &std::fs::read_to_string(&settings_path).unwrap(),
-            )
-            .unwrap();
+            let after: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&settings_path).unwrap()).unwrap();
             assert!(after.get("packages").is_none());
         });
 
@@ -869,10 +857,8 @@ mod tests {
 
     #[test]
     fn install_two_pi_extensions_coexist_and_preserve_other_settings() {
-        let sandbox = std::env::temp_dir().join(format!(
-            "vstack_pi_two_install_{}",
-            std::process::id()
-        ));
+        let sandbox =
+            std::env::temp_dir().join(format!("vstack_pi_two_install_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&sandbox);
         std::fs::create_dir_all(&sandbox).unwrap();
         let bridge_src = sandbox.join("src").join("pi-session-bridge");
@@ -905,10 +891,8 @@ mod tests {
             // Re-install one to verify dedupe (no duplicate entries)
             install_pi_extension(&stat, true).unwrap().unwrap();
 
-            let settings: serde_json::Value = serde_json::from_str(
-                &std::fs::read_to_string(&settings_path).unwrap(),
-            )
-            .unwrap();
+            let settings: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&settings_path).unwrap()).unwrap();
             let pkgs: Vec<&str> = settings
                 .get("packages")
                 .and_then(|p| p.as_array())
@@ -981,18 +965,14 @@ mod tests {
             // never rewriting extension-manager user config.
             install_pi_extension(&ext, true).unwrap().unwrap();
 
-            let settings: serde_json::Value = serde_json::from_str(
-                &std::fs::read_to_string(&settings_path).unwrap(),
-            )
-            .unwrap();
+            let settings: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&settings_path).unwrap()).unwrap();
             let manager = settings
                 .get("vstack")
                 .and_then(|v| v.get("extensionManager"))
                 .expect("extension manager config should survive reinstall");
             assert_eq!(
-                manager
-                    .get("config")
-                    .and_then(|c| c.get("pi-qol")),
+                manager.get("config").and_then(|c| c.get("pi-qol")),
                 Some(&user_config),
                 "pi-qol user settings must not be clobbered by reinstall/refresh"
             );
@@ -1006,7 +986,10 @@ mod tests {
                 "other extension settings must also be preserved"
             );
             assert_eq!(
-                manager.get("disabledItems").and_then(|v| v.as_array()).map(|a| a.len()),
+                manager
+                    .get("disabledItems")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.len()),
                 Some(1)
             );
             assert_eq!(settings.get("theme").and_then(|t| t.as_str()), Some("dark"));
@@ -1031,10 +1014,8 @@ mod tests {
 
     #[test]
     fn install_dedupes_legacy_absolute_path_entry() {
-        let sandbox = std::env::temp_dir().join(format!(
-            "vstack_pi_legacy_dedupe_{}",
-            std::process::id()
-        ));
+        let sandbox =
+            std::env::temp_dir().join(format!("vstack_pi_legacy_dedupe_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&sandbox);
         std::fs::create_dir_all(&sandbox).unwrap();
         let source = sandbox.join("src").join("pi-mini");
@@ -1058,10 +1039,8 @@ mod tests {
             let ext = PiExtension::from_dir(&source).unwrap();
             install_pi_extension(&ext, true).unwrap().unwrap();
 
-            let settings: serde_json::Value = serde_json::from_str(
-                &std::fs::read_to_string(&settings_path).unwrap(),
-            )
-            .unwrap();
+            let settings: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&settings_path).unwrap()).unwrap();
             let pkgs: Vec<&str> = settings
                 .get("packages")
                 .and_then(|p| p.as_array())
@@ -1078,10 +1057,8 @@ mod tests {
 
     #[test]
     fn parse_pi_statusline_package() {
-        let dir = std::env::temp_dir().join(format!(
-            "vstack_pi_statusline_parse_{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("vstack_pi_statusline_parse_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         write_pkg(
             &dir,
@@ -1136,19 +1113,14 @@ mod tests {
         // If `pi` isn't installed, skip silently — this test exists for
         // operators who actually have Pi available.
         let pi_on_path = std::env::var_os("PATH")
-            .map(|paths| {
-                std::env::split_paths(&paths).any(|p| p.join("pi").is_file())
-            })
+            .map(|paths| std::env::split_paths(&paths).any(|p| p.join("pi").is_file()))
             .unwrap_or(false);
         if !pi_on_path {
             eprintln!("skipping pi_smoke: `pi` not on PATH");
             return;
         }
 
-        let sandbox = std::env::temp_dir().join(format!(
-            "vstack_pi_smoke_{}",
-            std::process::id()
-        ));
+        let sandbox = std::env::temp_dir().join(format!("vstack_pi_smoke_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&sandbox);
         std::fs::create_dir_all(&sandbox).unwrap();
         let pi_dir = sandbox.join("agent");

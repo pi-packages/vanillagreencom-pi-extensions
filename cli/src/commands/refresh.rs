@@ -59,15 +59,12 @@ pub fn run(global: bool) -> Result<()> {
 
     for dir in &source_dirs {
         mapping = crate::mapping::MappingConfig::load(dir);
-        all_source_agents.extend(
-            crate::agent::discover_agents(&dir.join("agents")).unwrap_or_default(),
-        );
-        all_source_skills.extend(
-            crate::skill::discover_skills(&dir.join("skills")).unwrap_or_default(),
-        );
-        all_source_hooks.extend(
-            crate::hook::discover_hooks(&dir.join("hooks")).unwrap_or_default(),
-        );
+        all_source_agents
+            .extend(crate::agent::discover_agents(&dir.join("agents")).unwrap_or_default());
+        all_source_skills
+            .extend(crate::skill::discover_skills(&dir.join("skills")).unwrap_or_default());
+        all_source_hooks
+            .extend(crate::hook::discover_hooks(&dir.join("hooks")).unwrap_or_default());
     }
 
     let installed_skills: Vec<String> = lock
@@ -117,13 +114,11 @@ pub fn run(global: bool) -> Result<()> {
         // Start from project [agent-skills] if present, else source mapping.
         // Then merge any new skills from the source mapping that aren't already
         // in the list — this ensures upstream additions propagate to projects.
-        let source_skills =
-            mapping.skills_for_agent(&agent.name, &agent.role, &installed_skills);
+        let source_skills = mapping.skills_for_agent(&agent.name, &agent.role, &installed_skills);
         let skill_names: Vec<String> =
             if let Some(project_list) = project_config.agent_skills_for(&agent.name) {
                 let mut merged = project_list.clone();
-                let existing: std::collections::HashSet<String> =
-                    merged.iter().cloned().collect();
+                let existing: std::collections::HashSet<String> = merged.iter().cloned().collect();
                 for s in &source_skills {
                     if !existing.contains(s) {
                         merged.push(s.clone());
@@ -131,7 +126,9 @@ pub fn run(global: bool) -> Result<()> {
                 }
                 if merged.len() > project_list.len() {
                     let added: Vec<String> = merged[project_list.len()..].to_vec();
-                    project_config.agent_skills.insert(agent.name.clone(), merged.clone());
+                    project_config
+                        .agent_skills
+                        .insert(agent.name.clone(), merged.clone());
                     upstream_skill_updates.insert(agent.name.clone(), (merged.clone(), added));
                 }
                 merged
@@ -139,14 +136,12 @@ pub fn run(global: bool) -> Result<()> {
                 source_skills
             };
 
-        let skill_pairs =
-            crate::resolve::resolve_skill_pairs(&skill_names, &all_source_skills);
+        let skill_pairs = crate::resolve::resolve_skill_pairs(&skill_names, &all_source_skills);
 
         // Start from project [agent-skills-optional] if present, else source mapping.
         // Then merge any new optional skills from the source mapping that aren't
         // already in the list — same principle as required skills above.
-        let source_optional =
-            mapping.optional_skills_for_agent(&agent.name, &installed_skills);
+        let source_optional = mapping.optional_skills_for_agent(&agent.name, &installed_skills);
         let optional_entries =
             if let Some(project_list) = project_config.agent_skills_optional.get(&agent.name) {
                 let mut merged = project_list.clone();
@@ -158,13 +153,14 @@ pub fn run(global: bool) -> Result<()> {
                     }
                 }
                 if merged.len() > project_list.len() {
-                    let added: Vec<String> =
-                        merged[project_list.len()..].iter().map(|e| e.skill.clone()).collect();
+                    let added: Vec<String> = merged[project_list.len()..]
+                        .iter()
+                        .map(|e| e.skill.clone())
+                        .collect();
                     project_config
                         .agent_skills_optional
                         .insert(agent.name.clone(), merged.clone());
-                    upstream_optional_updates
-                        .insert(agent.name.clone(), (merged.clone(), added));
+                    upstream_optional_updates.insert(agent.name.clone(), (merged.clone(), added));
                 }
                 merged
             } else {
@@ -183,18 +179,13 @@ pub fn run(global: bool) -> Result<()> {
                 let existing_path = harness
                     .agents_dir(global)
                     .join(harness.agent_filename(&agent.name));
-                let file_extras =
-                    crate::resolve::read_existing_extras(&existing_path, harness);
+                let file_extras = crate::resolve::read_existing_extras(&existing_path, harness);
                 project_config.save_extracted(&project_root, &agent.name, &file_extras);
             }
         }
 
-        let extras = crate::resolve::build_agent_extras(
-            &project_config,
-            &agent.name,
-            &agent.role,
-            None,
-        );
+        let extras =
+            crate::resolve::build_agent_extras(&project_config, &agent.name, &agent.role, None);
 
         for harness_id in &entry.harnesses {
             if let Some(harness) = Harness::from_id(harness_id) {
@@ -219,7 +210,11 @@ pub fn run(global: bool) -> Result<()> {
             .collect();
         crate::project_config::merge_upstream_agent_skills(&project_root, &merged_map);
         for (agent, (_, added)) in &upstream_skill_updates {
-            eprintln!("  + {} — added upstream skills: {}", agent, added.join(", "));
+            eprintln!(
+                "  + {} — added upstream skills: {}",
+                agent,
+                added.join(", ")
+            );
         }
     }
 
@@ -264,9 +259,10 @@ pub fn run(global: bool) -> Result<()> {
     // Refresh Pi extensions — re-copy from source and re-register settings
     let mut all_pi_extensions = Vec::new();
     for dir in &source_dirs {
-        all_pi_extensions
-            .extend(crate::pi_extension::discover_pi_extensions(&dir.join("pi-extensions"))
-                .unwrap_or_default());
+        all_pi_extensions.extend(
+            crate::pi_extension::discover_pi_extensions(&dir.join("pi-extensions"))
+                .unwrap_or_default(),
+        );
     }
     let pi_ext_entries: Vec<_> = lock
         .entries
@@ -336,11 +332,7 @@ fn resolve_sources(lock: &config::LockFile) -> Vec<PathBuf> {
     if sources.is_empty() {
         let reg_path = config::source_registry_path();
         if let Ok(registry) = config::SourceRegistry::load(&reg_path) {
-            for entry in registry
-                .current
-                .iter()
-                .chain(registry.entries.iter())
-            {
+            for entry in registry.current.iter().chain(registry.entries.iter()) {
                 if let Some(dir) = resolve_single_source(entry) {
                     if !sources.contains(&dir) {
                         sources.push(dir);
@@ -375,9 +367,7 @@ fn resolve_single_source(source: &str) -> Option<PathBuf> {
     }
 
     // Remote shorthand (owner/repo) — update and use cached clone
-    let cache_dir = config::global_base_dir()
-        .join(".vstack")
-        .join("cache");
+    let cache_dir = config::global_base_dir().join(".vstack").join("cache");
     let key = source.replace('/', "_");
     let cached = cache_dir.join(&key);
     if cached.join(".git").exists() {
@@ -410,4 +400,3 @@ fn update_cached_repo(repo_dir: &std::path::Path) {
         Err(_) => eprintln!("  Warning: git not available — using cached version"),
     }
 }
-

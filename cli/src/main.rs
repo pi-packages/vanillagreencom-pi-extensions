@@ -153,9 +153,7 @@ fn main() -> Result<()> {
             all,
         }) => commands::add::run(source, global, harness, agent, skill, hook, copy, yes, all),
         Some(Commands::Remove { names, global }) => commands::remove::run(&names, global),
-        Some(Commands::List { global, harness }) => {
-            commands::list::run(global, harness.as_deref())
-        }
+        Some(Commands::List { global, harness }) => commands::list::run(global, harness.as_deref()),
         Some(Commands::Check) => commands::check::run(),
         Some(Commands::Update { force }) => commands::update::run(force),
         Some(Commands::Refresh { global }) => commands::refresh::run(global),
