@@ -1,13 +1,26 @@
 # pi-extension-manager
 
+![Extension manager popup](./assets/extension-manager-popup.png)
+
 Pi extension inventory and settings manager for vstack-installed packages.
 
-Commands:
+## Commands
 
-- `/extensions` — open the full Extensions manager popup. `All` shows packages by default; selecting a package shows grouped resources/settings in the inspector. Package tabs show that package's overview plus child resources. Use Alt+R to toggle the raw resource list and Alt+A for diagnostics/audit. Tab/Shift+Tab cycles tabs.
-- `/extension-settings` — quick inline settings editor for packages that expose vstack settings. The top tab row starts with `All`, then each extension with settings; Tab/Shift+Tab cycles through them. Typing printable characters filters search; Enter toggles booleans/enums or starts editing strings/numbers/paths, then Enter saves and Esc cancels.
-- `/settings` — optional vstack settings shell alias when command shadowing is explicitly enabled.
+| Command | Action |
+| --- | --- |
+| `/extensions` | Open the package/resource browser. |
+| `/extensions enable` | Recovery command available only when the manager is disabled; re-enable it, then run `/reload`. |
+| `/extension-settings` | Open the quick settings editor for packages that expose vstack settings. |
 
-Settings are persisted under `vstack.extensionManager` in Pi `settings.json` files so they do not collide with Pi's own top-level `extensions` array.
+## UI notes
 
-Known runtime limitation: Pi does not currently expose a public API to add a native tab to its built-in `/settings` UI or to unload already-loaded extension modules. This package provides a Pi-styled settings shell and edits settings so package/provider enable-disable takes effect after `/reload` or restart where live unloading is not possible. Tool enable-disable is applied live with `pi.setActiveTools()`.
+- `/extensions` opens on the `All` tab. Selecting a package shows its overview, resources, and settings in the inspector.
+- Package tabs show one package plus its child resources.
+- `Alt+R` toggles the raw resource list; `Alt+A` opens diagnostics/audit; `Tab` and `Shift+Tab` cycle tabs.
+- `/extension-settings` starts with `All`, then one tab per package with settings. Type to filter, `Enter` to toggle/edit, `Esc` to cancel.
+
+Settings are stored under `vstack.extensionManager` in Pi `settings.json` files so they do not collide with Pi's top-level `extensions` array.
+
+## Runtime limits
+
+Pi does not currently expose APIs to add a native tab to its built-in settings UI or unload an already-loaded extension module. Package/provider enable-disable therefore takes effect after `/reload` or restart when live unloading is not possible. Tool enable-disable is applied live with `pi.setActiveTools()`.

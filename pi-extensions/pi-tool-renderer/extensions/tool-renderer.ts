@@ -7,7 +7,7 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 const INSTALL_SYMBOL = Symbol.for("vstack.pi-tool-renderer.installed");
 const USER_MESSAGE_PATCH_SYMBOL = Symbol.for("vstack.pi-tool-renderer.user-message-patch");
 const USER_MESSAGE_BOX_STATE_SYMBOL = Symbol.for("vstack.pi-tool-renderer.user-message-box-state");
-const TOOL_EXECUTION_RENDERER_PATCH_SYMBOL = Symbol.for("vstack.pi-tool-renderer.tool-execution-renderer-patch");
+const TOOL_EXECUTION_RENDERER_PATCH_SYMBOL = Symbol.for("vstack.pi-tool-renderer.tool-execution-renderer-patch.v2");
 const TOOL_CHROME_PATCH_SYMBOL = Symbol.for("vstack.pi-tool-renderer.tool-chrome-patch");
 
 const USER_MESSAGE_BG_TOKENS = new Set(["selectedBg", "userMessageBg", "customMessageBg", "toolPendingBg", "toolSuccessBg", "toolErrorBg"]);
@@ -281,9 +281,28 @@ function toolRule(theme: any, text: string): string {
 	}
 }
 
-function treeConnector(theme: any, branch: "├" | "└" | "│" = "├"): string {
-	if (branch === "│") return toolRule(theme, "  │ ");
-	return toolRule(theme, `  ${branch}─ `);
+type TreeBranch = "├" | "└" | "│";
+
+function treeStyle(cwd?: string): "unicode" | "ascii" {
+	return settingEnum("treeStyle", ["unicode", "ascii"] as const, "unicode", cwd);
+}
+
+function treeGlyph(branch: TreeBranch, cwd?: string): string {
+	if (treeStyle(cwd) === "ascii") {
+		if (branch === "│") return "|  ";
+		return branch === "└" ? "`-- " : "|-- ";
+	}
+	if (branch === "│") return "  │ ";
+	return `  ${branch}─ `;
+}
+
+function treeConnector(theme: any, branch: TreeBranch = "├", cwd?: string): string {
+	return toolRule(theme, treeGlyph(branch, cwd));
+}
+
+function treeStem(theme: any, branch: TreeBranch, cwd?: string): string {
+	if (branch === "└") return theme.fg("muted", treeStyle(cwd) === "ascii" ? "    " : "     ");
+	return treeConnector(theme, "│", cwd);
 }
 
 function toolLabel(theme: any, label: string): string {
@@ -503,6 +522,14 @@ function updateActiveAnsiStyle(code: string): string {
 	return code;
 }
 
+function diffBackgroundEnabled(cwd?: string): boolean {
+	return settingBoolean("diffBackgrounds", true, cwd);
+}
+
+function maybeBg(theme: any, token: string, text: string, enabled: boolean): string {
+	return enabled ? theme.bg(token, text) : text;
+}
+
 function styleAnsiVisibleRanges(
 	text: string,
 	ranges: Array<[number, number]>,
@@ -510,10 +537,11 @@ function styleAnsiVisibleRanges(
 	fgToken: string,
 	baseBgToken: string,
 	highlightBgToken: string,
+	useBackground = false,
 ): string {
 	if (!hasAnsi(text)) {
-		const base = (value: string) => theme.bg(baseBgToken, theme.fg(fgToken, value));
-		const highlight = (value: string) => theme.bg(highlightBgToken, theme.fg(fgToken, value));
+		const base = (value: string) => maybeBg(theme, baseBgToken, theme.fg(fgToken, value), useBackground);
+		const highlight = (value: string) => maybeBg(theme, highlightBgToken, theme.fg(fgToken, value), useBackground);
 		return styleRanges(text, ranges, base, highlight);
 	}
 
@@ -534,7 +562,7 @@ function styleAnsiVisibleRanges(
 		if (!chunk) return;
 		const bgToken = highlighted ? highlightBgToken : baseBgToken;
 		const content = activeStyle ? chunk : theme.fg(fgToken, chunk);
-		out += theme.bg(bgToken, content);
+		out += maybeBg(theme, bgToken, content, useBackground);
 		if (activeStyle) out += activeStyle;
 	}
 
@@ -686,12 +714,12 @@ function renderPathListPreview(output: string, toolName: "find" | "ls", theme: a
 		const branch = index === shown.length - 1 && shown.length === rawItems.length ? "└" : "├";
 		const icon = nerdIcon(clean, isDir, theme);
 		const label = isDir ? theme.fg("accent", theme.bold(clean)) : theme.fg("dim", clean);
-		return `${treeConnector(theme, branch as "├" | "└")}${icon} ${label}`;
+		return `${treeConnector(theme, branch as "├" | "└", cwd)}${icon} ${label}`;
 	});
 	const remaining = rawItems.length - shown.length;
 	if (remaining > 0) {
 		const noun = toolName === "ls" ? (remaining === 1 ? "entry" : "entries") : `file${remaining === 1 ? "" : "s"}`;
-		lines.push(`${treeConnector(theme, "└")}${theme.fg("muted", `… ${remaining} more ${noun}`)}`);
+		lines.push(`${treeConnector(theme, "└", cwd)}${theme.fg("muted", `… ${remaining} more ${noun}`)}`);
 	}
 	return lines.join("\n");
 }
@@ -872,13 +900,13 @@ function diffSummary(diff: StructuredDiff, theme: any, cwd?: string): string {
 	return summary;
 }
 
-function colorDiffText(line: StructuredDiffLine, text: string, theme: any, ranges: Array<[number, number]> = []): string {
+function colorDiffText(line: StructuredDiffLine, text: string, theme: any, ranges: Array<[number, number]> = [], cwd?: string): string {
 	if (line.type === "sep") return theme.fg("dim", text);
 	if (line.type === "ctx") return hasAnsi(text) ? text : theme.fg("toolDiffContext", text);
 
 	const fgToken = line.type === "add" ? "toolDiffAdded" : "toolDiffRemoved";
 	const bgToken = line.type === "add" ? DIFF_ADD_BG_TOKEN : DIFF_DEL_BG_TOKEN;
-	return styleAnsiVisibleRanges(text, ranges, theme, fgToken, bgToken, DIFF_WORD_BG_TOKEN);
+	return styleAnsiVisibleRanges(text, ranges, theme, fgToken, bgToken, DIFF_WORD_BG_TOKEN, diffBackgroundEnabled(cwd));
 }
 
 function formatNum(value: number | null, width: number): string {
@@ -913,7 +941,7 @@ function renderUnifiedLine(
 	const signToken = line.type === "add" ? "toolDiffAdded" : line.type === "del" ? "toolDiffRemoved" : "toolDiffContext";
 	const gutter = `${theme.fg("muted", `${formatNum(line.oldNum, numWidth)} ${formatNum(line.newNum, numWidth)}`)} ${theme.fg(signToken, sign)} `;
 	const contentWidth = Math.max(10, width - visibleLength(gutter));
-	return `${gutter}${truncateAnsi(colorDiffText(line, highlightedLineBody(line, theme, path, cwd), theme, ranges), contentWidth)}`;
+	return `${gutter}${truncateAnsi(colorDiffText(line, highlightedLineBody(line, theme, path, cwd), theme, ranges, cwd), contentWidth)}`;
 }
 
 function renderUnifiedDiff(diff: StructuredDiff, rows: StructuredDiffLine[], width: number, theme: any, path?: string, cwd?: string): string[] {
@@ -980,7 +1008,7 @@ function renderDiffHalf(
 	const prefix = `${formatNum(num, numWidth)} ${sign} `;
 	const raw = `${prefix}${body}`;
 	const shiftedRanges = ranges.map(([start, end]): [number, number] => [start + prefix.length, end + prefix.length]);
-	return padVisible(truncateAnsi(colorDiffText(line, raw, theme, shiftedRanges), width), width);
+	return padVisible(truncateAnsi(colorDiffText(line, raw, theme, shiftedRanges, cwd), width), width);
 }
 
 function shouldUseSplitDiff(diff: StructuredDiff, rows: StructuredDiffLine[], width: number): boolean {
@@ -1314,13 +1342,13 @@ function renderMutationCallPreview(kind: "Edit" | "Write" | "Create", targetPath
 	const perDiffLimit = Math.max(4, Math.floor(settingNumber("mutationCallPreviewLines", 16, cwd) / Math.max(1, maxShown)));
 	for (let index = 0; index < maxShown; index++) {
 		const diff = diffs[index]!;
-		if (diffs.length > 1) text += `\n${treeConnector(theme, "├")}${theme.fg("muted", `edit ${index + 1}/${diffs.length}`)} ${diffSummary(diff, theme, cwd)}`;
-		const stem = treeConnector(theme, "│");
+		if (diffs.length > 1) text += `\n${treeConnector(theme, "├", cwd)}${theme.fg("muted", `edit ${index + 1}/${diffs.length}`)} ${diffSummary(diff, theme, cwd)}`;
+		const stem = treeConnector(theme, "│", cwd);
 		const rendered = renderStructuredDiff(diff, theme, Boolean(context?.expanded), cwd, perDiffLimit, targetPath, visibleWidth(stem));
 		text += `\n${rendered.split(/\r?\n/).map((line) => `${stem}${line}`).join("\n")}`;
 	}
 	const hidden = diffs.length - maxShown;
-	if (hidden > 0) text += `\n${treeConnector(theme, "└")}${theme.fg("muted", `… ${hidden} more edit block${hidden === 1 ? "" : "s"} · Ctrl+O to expand`)}`;
+	if (hidden > 0) text += `\n${treeConnector(theme, "└", cwd)}${theme.fg("muted", `… ${hidden} more edit block${hidden === 1 ? "" : "s"} · Ctrl+O to expand`)}`;
 	return makeTruncatedLines(text);
 }
 
@@ -1431,9 +1459,9 @@ function stackItemPreview(item: StackItem, theme: any, expanded: boolean, cwd?: 
 }
 
 function renderStackItemText(item: StackItem, theme: any, expanded: boolean, cwd?: string, branch = "├"): string {
-	const isLast = branch === "└";
-	const stem = isLast ? theme.fg("muted", "     ") : treeConnector(theme, "│");
-	let text = `${treeConnector(theme, branch as "├" | "└")}${stackItemCallText(item, theme, cwd)}${theme.fg("dim", " · ")}${stackItemSummary(item, theme)}`;
+	const typedBranch = branch as TreeBranch;
+	const stem = treeStem(theme, typedBranch, cwd);
+	let text = `${treeConnector(theme, typedBranch, cwd)}${stackItemCallText(item, theme, cwd)}${theme.fg("dim", " · ")}${stackItemSummary(item, theme)}`;
 	if (expanded) {
 		const previewText = stackItemPreview(item, theme, expanded, cwd);
 		if (previewText) {
@@ -1656,8 +1684,8 @@ function renderToolBatchText(items: BatchToolItem[], theme: any, expanded: boole
 	const succeeded = items.length - failed;
 	const header =
 		stackPrefix(theme) +
-		toolLabel(theme, `Batch ran ${plural(items.length, "tool")}`) +
-		theme.fg(failed > 0 ? "warning" : "success", ` · ${succeeded}/${items.length} succeeded`) +
+		toolLabel(theme, `Batch ${succeeded}/${items.length}`) +
+		theme.fg(failed > 0 ? "warning" : "success", failed > 0 ? ` · ${failed} failed` : " · succeeded") +
 		(expanded ? "" : theme.fg("dim", " · Ctrl+O to inspect"));
 	const lines = [header];
 	items.forEach((item, index) => {
@@ -1679,12 +1707,12 @@ function toolBatchOutput(items: BatchToolItem[]): string {
 
 function renderToolBatchCallText(args: any, theme: any, cwd?: string): string {
 	const calls = normalizeBatchCalls(args?.calls);
-	const lines = [stackPrefix(theme) + toolLabel(theme, `${calls.length || 0} batched tool${calls.length === 1 ? "" : "s"} launching`)];
+	const lines = [stackPrefix(theme) + toolLabel(theme, `Batch ${calls.length || 0} tool${calls.length === 1 ? "" : "s"} launching`)];
 	calls.slice(0, 12).forEach((call, index) => {
 		const item: StackItem = { args: call.args, batchId: "call", id: String(index), isError: false, resultText: "", status: "running", toolName: call.tool, truncated: false };
-		lines.push(`${treeConnector(theme, index === calls.length - 1 ? "└" : "├")}${stackItemCallText(item, theme, cwd)}`);
+		lines.push(`${treeConnector(theme, index === calls.length - 1 ? "└" : "├", cwd)}${stackItemCallText(item, theme, cwd)}`);
 	});
-	if (calls.length > 12) lines.push(`${treeConnector(theme, "└")}${theme.fg("muted", `… +${calls.length - 12} more`)}`);
+	if (calls.length > 12) lines.push(`${treeConnector(theme, "└", cwd)}${theme.fg("muted", `… +${calls.length - 12} more`)}`);
 	return lines.join("\n");
 }
 
@@ -1877,8 +1905,8 @@ function parseApplyPatchUpdateDiff(lines: string[]): StructuredDiff {
 		const header = rawLine.match(/^@@\s*-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s*@@/);
 		if (rawLine.startsWith("@@")) {
 			if (diffLines.length > 0 && diffLines[diffLines.length - 1]?.type !== "sep") diffLines.push(hiddenDiffLine(0));
-			oldLine = header ? Number.parseInt(header[1]!, 10) : null;
-			newLine = header ? Number.parseInt(header[2]!, 10) : null;
+			oldLine = header ? Number.parseInt(header[1]!, 10) : (oldLine ?? 1);
+			newLine = header ? Number.parseInt(header[2]!, 10) : (newLine ?? 1);
 			hunk++;
 			inHunk = true;
 			continue;
@@ -1886,6 +1914,8 @@ function parseApplyPatchUpdateDiff(lines: string[]): StructuredDiff {
 		if (rawLine === "\\ No newline at end of file") continue;
 		if (!inHunk) {
 			hunk++;
+			oldLine = oldLine ?? 1;
+			newLine = newLine ?? 1;
 			inHunk = true;
 		}
 		const { content, marker } = parsePatchBodyLine(rawLine);
@@ -1969,45 +1999,89 @@ function applyPatchChangeLabel(change: ApplyPatchChange): string {
 	return `Update ${change.displayPath}`;
 }
 
-function renderApplyPatchCall(args: any, theme: any, context: any): TruncatedLines {
-	const patchText = patchTextFromArgs(args);
-	const files = extractApplyPatchFiles(patchText);
-	let summary = files.length === 0 ? theme.fg("muted", "patch") : files.length === 1 ? theme.fg("accent", files[0]!) : `${theme.fg("accent", files[0]!)}${theme.fg("muted", ` +${files.length - 1} files`)}`;
-	let text = `${genericStatusPrefix(context, theme)}${toolLabel(theme, "Apply Patch ")}${summary}`;
-	if (context?.argsComplete && patchText && settingBoolean("applyPatchPreview", true, context?.cwd)) {
-		try {
-			const changes = parseApplyPatchPreview(patchText);
-			context.state._vstackApplyPatchChanges = changes;
-			const total = summarizeApplyPatchChanges(changes);
-			text += theme.fg("dim", " · ") + diffSummary(total, theme, context?.cwd);
-			const maxShown = context?.expanded ? changes.length : Math.min(1, changes.length);
-			const rowLimit = Math.max(4, Math.floor(settingNumber("applyPatchPreviewLines", 18, context?.cwd) / Math.max(1, maxShown)));
-			for (let i = 0; i < maxShown; i++) {
-				const change = changes[i]!;
-				text += `\n${treeConnector(theme, changes.length === 1 ? "└" : "├")}${theme.fg("accent", applyPatchChangeLabel(change))}${change.line > 0 ? theme.fg("muted", ` · line ${change.line}`) : ""} ${diffSummary(change.diff, theme, context?.cwd)}`;
-				const stem = treeConnector(theme, "│");
-				text += `\n${renderStructuredDiff(change.diff, theme, Boolean(context?.expanded), context?.cwd, rowLimit, change.diff.path, visibleWidth(stem)).split(/\r?\n/).map((line) => `${stem}${line}`).join("\n")}`;
-			}
-			const hidden = changes.length - maxShown;
-			if (hidden > 0) text += `\n${treeConnector(theme, "└")}${theme.fg("muted", `… ${hidden} more file patch${hidden === 1 ? "" : "es"} · Ctrl+O to expand`)}`;
-		} catch {
-			// Leave compact header only if the patch cannot be parsed.
-		}
-	}
-	return makeTruncatedLines(text);
+function applyPatchSummaryTarget(changes: ApplyPatchChange[], theme: any): string {
+	if (changes.length === 0) return theme.fg("muted", "patch");
+	const first = changes[0]!;
+	const firstPath = first.moveTo || first.path;
+	return changes.length === 1 ? theme.fg("accent", firstPath) : `${theme.fg("accent", firstPath)}${theme.fg("muted", ` +${changes.length - 1} files`)}`;
 }
 
-function renderApplyPatchResult(result: any, { isPartial }: any, theme: any, context: any): TruncatedLines | ReturnType<typeof makeEmpty> {
-	if (isPartial) return renderPendingDetail("applying patch…", theme);
+function applyPatchKindLabel(changes: ApplyPatchChange[]): string {
+	if (changes.length !== 1) return "Apply Patch ";
+	const change = changes[0]!;
+	if (change.moveTo) return "Rename ";
+	if (change.kind === "add") return "Create ";
+	if (change.kind === "delete") return "Delete ";
+	return "Update ";
+}
+
+function applyPatchChangeStatus(change: ApplyPatchChange): string {
+	if (change.moveTo) return "renamed";
+	if (change.kind === "add") return "created";
+	if (change.kind === "delete") return "deleted";
+	return "applied";
+}
+
+function applyPatchResultSummary(changes: ApplyPatchChange[], total: StructuredDiff, theme: any, cwd?: string): string {
+	if (total.additions > 0 || total.removals > 0) return diffSummary(total, theme, cwd);
+	return theme.fg("success", changes.length === 1 ? applyPatchChangeStatus(changes[0]!) : "applied");
+}
+
+function applyPatchChangesFromContext(context: any): ApplyPatchChange[] {
+	if (Array.isArray(context?.state?._vstackApplyPatchChanges)) return context.state._vstackApplyPatchChanges as ApplyPatchChange[];
+	try {
+		return parseApplyPatchPreview(patchTextFromArgs(context?.args ?? {}));
+	} catch {
+		return [];
+	}
+}
+
+function renderApplyPatchCall(args: any, theme: any, context: any): TruncatedLines | ReturnType<typeof makeEmpty> {
+	if (context?.executionStarted && !context?.isPartial) return makeEmpty();
+	const patchText = patchTextFromArgs(args);
+	let changes: ApplyPatchChange[] = [];
+	if (context?.argsComplete && patchText) {
+		try {
+			changes = parseApplyPatchPreview(patchText);
+			if (context?.state) context.state._vstackApplyPatchChanges = changes;
+		} catch {
+			// Leave compact pending header only if patch cannot be parsed.
+		}
+	}
+	const files = changes.length > 0 ? changes.map((change) => change.moveTo || change.path) : extractApplyPatchFiles(patchText);
+	const summary = changes.length > 0 ? applyPatchSummaryTarget(changes, theme) : files.length === 0 ? theme.fg("muted", "patch") : files.length === 1 ? theme.fg("accent", files[0]!) : `${theme.fg("accent", files[0]!)}${theme.fg("muted", ` +${files.length - 1} files`)}`;
+	const total = changes.length > 0 ? `${theme.fg("dim", " · ")}${diffSummary(summarizeApplyPatchChanges(changes), theme, context?.cwd)}` : "";
+	return makeTruncatedLines(`${genericStatusPrefix(context, theme)}${toolLabel(theme, applyPatchKindLabel(changes))}${summary}${total}`);
+}
+
+function renderApplyPatchResult(result: any, { expanded, isPartial }: any, theme: any, context: any): TruncatedLines | ReturnType<typeof makeEmpty> {
+	if (isPartial) return makeEmpty();
 	clearBlink(context);
+	const changes = applyPatchChangesFromContext(context);
+	const target = applyPatchSummaryTarget(changes, theme);
+	const call = `${toolLabel(theme, applyPatchKindLabel(changes))}${target}`;
 	if (context?.isError) {
 		const first = textContent(result).split(/\r?\n/)[0] || "apply_patch failed";
-		return makeTruncatedLines(`${treeConnector(theme, "└")}${theme.fg("error", first)}`);
+		return makeTruncatedLines(`${stackPrefix(theme)}${call}${theme.fg("dim", " · ")}${theme.fg("error", first)}`);
 	}
-	const changes = Array.isArray(context?.state?._vstackApplyPatchChanges) ? context.state._vstackApplyPatchChanges as ApplyPatchChange[] : parseApplyPatchPreview(patchTextFromArgs(context?.args ?? {}));
-	if (changes.length === 0) return makeTruncatedLines(`${treeConnector(theme, "└")}${theme.fg("success", "applied")}`);
+	if (changes.length === 0) return makeTruncatedLines(`${stackPrefix(theme)}${call}${theme.fg("dim", " · ")}${theme.fg("success", "applied")}`);
 	const total = summarizeApplyPatchChanges(changes);
-	return makeTruncatedLines(`${treeConnector(theme, "└")}${theme.fg("success", "applied")} ${theme.fg("muted", `${changes.length} file${changes.length === 1 ? "" : "s"}`)} ${diffSummary(total, theme, context?.cwd)}`);
+	let text = `${stackPrefix(theme)}${call}${theme.fg("dim", " · ")}${applyPatchResultSummary(changes, total, theme, context?.cwd)}`;
+	const maxShown = expanded ? changes.length : Math.min(1, changes.length);
+	const rowLimit = maxShown > 1 ? Math.max(4, Math.floor(settingNumber("applyPatchPreviewLines", 18, context?.cwd) / Math.max(1, maxShown))) : undefined;
+	for (let i = 0; i < maxShown; i++) {
+		const change = changes[i]!;
+		const changed = change.diff.additions > 0 || change.diff.removals > 0;
+		if (!changed) {
+			if (changes.length > 1) text += `\n${theme.fg("accent", applyPatchChangeLabel(change))} ${theme.fg("success", applyPatchChangeStatus(change))}`;
+			continue;
+		}
+		if (changes.length > 1) text += `\n${theme.fg("accent", applyPatchChangeLabel(change))} ${diffSummary(change.diff, theme, context?.cwd)}`;
+		text += `\n${renderStructuredDiff(change.diff, theme, expanded, context?.cwd, rowLimit, change.diff.path)}`;
+	}
+	const hidden = changes.length - maxShown;
+	if (hidden > 0) text += `\n${theme.fg("muted", `… ${hidden} more file patch${hidden === 1 ? "" : "es"} · Ctrl+O to expand`)}`;
+	return makeTruncatedLines(text);
 }
 
 function summarizeGenericCall(name: string, args: any, theme: any): string {
@@ -2069,12 +2143,14 @@ function renderGenericToolResult(name: string, result: any, { expanded, isPartia
 	return makeTruncatedLines(text);
 }
 
-function installToolExecutionRendererPatch(): void {
+function installToolExecutionRendererPatch(pi: ExtensionAPI): void {
 	const proto = ToolExecutionComponent?.prototype as any;
-	if (!proto || proto[TOOL_EXECUTION_RENDERER_PATCH_SYMBOL]) return;
-	const originalGetCallRenderer = proto.getCallRenderer;
-	const originalGetResultRenderer = proto.getResultRenderer;
+	if (!proto) return;
+	const existing = proto[TOOL_EXECUTION_RENDERER_PATCH_SYMBOL] as { originalGetCallRenderer?: unknown; originalGetResultRenderer?: unknown } | undefined;
+	const originalGetCallRenderer = existing?.originalGetCallRenderer ?? proto.getCallRenderer;
+	const originalGetResultRenderer = existing?.originalGetResultRenderer ?? proto.getResultRenderer;
 	if (typeof originalGetCallRenderer !== "function" || typeof originalGetResultRenderer !== "function") return;
+	const state = { originalGetCallRenderer, originalGetResultRenderer };
 	proto.getCallRenderer = function patchedGetCallRenderer(this: any) {
 		const toolName = typeof this?.toolName === "string" ? this.toolName : "";
 		if (toolName === "apply_patch" && settingBoolean("applyPatchRenderer", true) && !componentDefinesRenderer(this, "renderCall")) {
@@ -2095,7 +2171,13 @@ function installToolExecutionRendererPatch(): void {
 		}
 		return originalGetResultRenderer.call(this);
 	};
-	proto[TOOL_EXECUTION_RENDERER_PATCH_SYMBOL] = true;
+	proto[TOOL_EXECUTION_RENDERER_PATCH_SYMBOL] = state;
+	pi.on("session_shutdown", () => {
+		if (proto[TOOL_EXECUTION_RENDERER_PATCH_SYMBOL] !== state) return;
+		proto.getCallRenderer = originalGetCallRenderer;
+		proto.getResultRenderer = originalGetResultRenderer;
+		delete proto[TOOL_EXECUTION_RENDERER_PATCH_SYMBOL];
+	});
 }
 
 function applyToolChromeTheme(theme: any, cwd?: string): void {
@@ -2418,7 +2500,7 @@ export default async function toolRenderer(pi: ExtensionAPI): Promise<void> {
 	if (!settingBoolean("enabled", true)) return;
 
 	registerStackEvents(pi);
-	installToolExecutionRendererPatch();
+	installToolExecutionRendererPatch(pi);
 	installToolChromePatch();
 	registerToolChromeEvents(pi);
 	installWorkingIndicator(pi);

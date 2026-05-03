@@ -1,41 +1,49 @@
 # pi-background-tasks
 
+![Background tasks dashboard](./assets/background-tasks-dashboard.gif)
+
 Pi package for explicit, non-blocking background shell tasks.
 
 ## What it provides
 
-- `bg_task` tool: spawn, list, tail logs, stop, and clear tracked tasks.
-- `bg_status` compatibility tool: list/log/stop by PID.
-- `/bg` command: manual task dashboard and task controls.
-- `Ctrl+Shift+B`: opens a padded, bordered background task dashboard in interactive Pi.
-- Persistent full log files under `${PI_BG_TASK_DIR:-$TMPDIR/vstack-pi-bg}`; log-tail tool output includes the full log path when truncated.
-- Completion wakeups: spawned tasks can notify the agent when they exit, and optionally when matching output arrives.
+- `bg_task` tool for spawning, listing, tailing logs, stopping, and clearing tracked tasks.
+- `bg_status` compatibility tool for list/log/stop by PID.
+- `/bg` dashboard and task-control command.
+- `Ctrl+Shift+B` dashboard shortcut in interactive Pi.
+- Persistent log files under `${PI_BG_TASK_DIR:-$TMPDIR/vstack-pi-bg}`; truncated log output includes the full log path.
+- Wakeups when a task exits, and optional wakeups when output matches a substring or `/regex/flags` pattern.
 
-## Examples
+## Commands
 
 ```text
-/bg run cargo test
-/bg list
-/bg log bg-1
-/bg stop bg-1
-/bg clear
+/bg                    # open the dashboard
+/bg run <command>      # spawn a background shell task
+/bg list               # show tracked tasks
+/bg log <id|pid>       # show task log tail
+/bg watch <id|pid>     # open the dashboard focused on a task
+/bg stop <id|pid>      # terminate a running task
+/bg clear              # remove finished tasks
 ```
 
-Agent tool example:
+Arguments support autocomplete, including task IDs for `log`, `watch`, and `stop`.
+
+## Tool usage
 
 ```json
 {"action":"spawn","command":"sleep 20; echo done","notifyOnExit":true}
 ```
 
-Useful spawn options:
+Useful `spawn` options:
 
-- `notifyOnExit` defaults to `true`.
-- `notifyOnOutput` defaults to `false`; set `notifyPattern` to a substring or `/regex/flags` to gate output wakeups.
-- `timeoutSeconds` defaults to `0` (no expiry); set a positive value to enforce a timeout.
+- `notifyOnExit`: defaults to `true`.
+- `notifyOnOutput`: defaults to `false`.
+- `notifyPattern`: substring or `/regex/flags` gate for output wakeups.
+- `timeoutSeconds`: defaults to `0` (no timeout).
+- `title`: optional display label.
 
 ## Notes
 
-Tasks are scoped to the current Pi runtime and are stopped on session shutdown. Shells are started in their own process group on Unix so `/bg stop` and shutdown terminate child processes as well as the shell.
+Tasks are scoped to the current Pi runtime and are stopped on session shutdown. On Unix, shells start in their own process group so `/bg stop` and shutdown terminate child processes as well as the shell.
 
 ## Attribution
 

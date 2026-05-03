@@ -1,20 +1,50 @@
 # pi-task-panel
 
+![Task panel workflow](./assets/task-panel-workflow.gif)
+
 Persistent structured task panel above the Pi status line/editor.
 
-Human-facing commands are intentionally small:
+## Human commands
 
-- `/tasks` or `/tasks manage` opens the interactive manager.
-- `/tasks add <task>` adds one task. Use `Phase :: task` to assign a phase.
-- `/tasks edit` bulk-edits tasks as plain text.
-- `/tasks hide` and `/tasks show` control panel visibility.
+| Command | Action |
+| --- | --- |
+| `/tasks` or `/tasks manage` | Open the interactive manager. |
+| `/tasks add <task>` | Add one task; use `Phase :: task` to assign a phase. |
+| `/tasks edit` | Bulk-edit tasks as plain text. |
+| `/tasks start <task>` | Set a task active. |
+| `/tasks done <task>` | Mark a task completed. |
+| `/tasks drop <task>` | Mark a task abandoned. |
+| `/tasks remove <task>` | Remove a task. |
+| `/tasks hide` | Hide the panel. |
+| `/tasks show` | Show the compact panel. |
+| `/tasks show-all` | Show the expanded panel. |
+| `/tasks clear-completed` | Remove completed tasks. |
+| `/tasks export <path>` | Write tasks to a markdown file. |
+| `/tasks import <path>` | Load tasks from a markdown file. |
 
-The manager handles focused task actions: select with `↑↓`, `enter`/`s` starts, `d` marks done, `x` drops/abandons, `r` removes, `c` clears completed tasks, and `e` opens bulk edit. Compatibility slash aliases such as `start`, `done`, `drop`, `rm`, `clear-completed`, `show-all`, `compact`, `expand`, `export`, and `import` are still accepted but are not shown as the primary command surface.
+Arguments support autocomplete, including task names for focused actions.
 
-`/tasks edit` uses plain text (`- task name`) with optional readable status suffixes: `(active)`, `(done)`, or `(dropped)`.
+## Manager keys
 
-The model can update tasks with the `tasks_write` tool. Tool results render as compact inline status rows like `● Task "name" completed` by default; set `compactToolOutput=false` to use Pi's normal padded tool box. The panel keeps one active task highlighted, automatically advances to the next pending task when the active task is completed/dropped, hides when all tasks are complete, and reappears when pending work is added. Tasks can include a `phase` field; expanded mode renders phases as grouped sections.
+Select with `↑/↓`. `Enter`/`s` starts, `d` marks done, `x` drops/abandons, `r` removes, `c` clears completed tasks, and `e` opens bulk edit.
 
-State stores task snapshots in `tasks_write` result details, with project/session custom entries as an extra restore path. `tasks_write` runs sequentially so multiple task transitions in one assistant response cannot race. When tasks remain, `showWorkflowReminder` adds a model-facing system reminder plus hidden current task context so the agent sees the active task, remaining tasks, and explicit reconciliation rules before it answers.
+`/tasks edit` uses plain text (`- task name`) with optional status suffixes: `(active)`, `(done)`, or `(dropped)`.
 
-Keyboard conflict: Pi uses `Ctrl+T` for thinking visibility. This package always registers the alternate shortcut from settings (`Alt+T` by default). The shortcut cycles `hidden → show 4 → show all`. It registers `Ctrl+T` only when `takeoverCtrlT` is enabled in the extension manager and Pi is reloaded.
+## Agent tool
+
+The model updates tasks with `tasks_write`. Tool results render as compact inline status rows by default; set `compactToolOutput=false` to use Pi's normal padded tool box.
+
+Panel behavior:
+
+- Keeps one active task highlighted.
+- Automatically advances to the next pending task when the active task is completed/dropped.
+- Hides when all tasks are complete and reappears when pending work is added.
+- Groups tasks by `phase` in expanded mode.
+- `tasks_write` runs sequentially so multiple transitions in one assistant response cannot race.
+- When tasks remain, `showWorkflowReminder` adds hidden task context plus a model-facing reconciliation reminder.
+
+State stores snapshots in `tasks_write` result details, with project/session custom entries as an extra restore path.
+
+## Shortcut
+
+Pi uses `Ctrl+T` for thinking visibility. This package always registers the alternate shortcut from settings (`Alt+T` by default), which cycles `hidden → show 4 → show all`. It registers `Ctrl+T` only when `takeoverCtrlT` is enabled in the extension manager and Pi is reloaded.

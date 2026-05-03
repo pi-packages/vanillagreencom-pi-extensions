@@ -1,17 +1,19 @@
 # pi-session-manager
 
-Polished session manager overlay for Pi. It complements Pi's built-in `/resume` picker with vstack-style package settings, inline management actions, and guarded rendering for long or control-character-heavy session text.
+![Session manager browser](./assets/session-manager-browser.gif)
 
-## Features
+Polished session manager overlay for Pi. It complements Pi's built-in `/resume` picker with vstack settings, inline management actions, and guarded rendering for long or control-character-heavy session text.
+
+## What it provides
 
 - Browse current-project sessions or all sessions.
-- Search by fuzzy tokens, quoted phrases, or `re:<regex>` across session titles, IDs, paths, cwd, and transcript text.
-- Threaded lineage view that follows Pi `parentSession` relationships when there is no active search.
-- Resume via the current `ctx.switchSession()` lifecycle API.
-- Rename any session using `SessionManager` session-info entries; current-session renames go through `pi.setSessionName()`.
-- Delete with inline confirmation, current-session protection, and optional `trash` CLI fallback before permanent unlink.
-- Clean one-line rendering for names/prompts/paths to prevent multiline or control text from breaking the TUI.
-- Status badge for named current sessions.
+- Search by fuzzy tokens, quoted phrases, or `re:<regex>` across titles, IDs, paths, cwd, and transcript text.
+- Threaded lineage view using Pi `parentSession` relationships when there is no active search.
+- Resume through `ctx.switchSession()`.
+- Rename sessions using Pi session-info entries; current-session renames go through `pi.setSessionName()`.
+- Delete with confirmation, current-session protection, and optional `trash` CLI fallback.
+- Clean one-line rendering for names, prompts, and paths.
+- Footer/status badge for named current sessions.
 
 No SQLite, FTS, or native runtime dependencies are used; Pi's `SessionManager.list()` / `listAll()` APIs provide the index data.
 
@@ -23,6 +25,8 @@ No SQLite, FTS, or native runtime dependencies are used; Pi's `SessionManager.li
 | `/sessions current` | Open current-project sessions. |
 | `/sessions all` | Open all sessions. |
 
+Arguments support autocomplete.
+
 ## Keys
 
 | Key | Action |
@@ -31,15 +35,15 @@ No SQLite, FTS, or native runtime dependencies are used; Pi's `SessionManager.li
 | `PageUp` / `PageDown` | Page the list. |
 | `Home` / `End` | Jump to first/last result. |
 | `Enter` | Resume selected session. |
-| `Ctrl+R` or `r` with an empty search | Rename selected session inline. |
-| `Ctrl+D` or `d` with an empty search | Delete selected session after confirmation. |
+| `Ctrl+R` or `r` with empty search | Rename selected session inline. |
+| `Ctrl+D` or `d` with empty search | Delete selected session after confirmation. |
 | `Tab` | Toggle current/all scope. |
 | `Ctrl+S` | Cycle threaded/recent/relevance sort. |
 | `Ctrl+N` | Toggle named-only filter. |
 | `Ctrl+P` | Toggle full session path in row metadata. |
 | `Esc` / `Ctrl+C` | Clear search, cancel rename/delete, or close. |
 
-The global shortcut defaults to `Ctrl+Shift+R` and can be disabled by setting `shortcutKey` to `none`.
+The global shortcut defaults to `Ctrl+Shift+R`; set `shortcutKey` to `none` to disable it.
 
 ## Settings
 
@@ -58,6 +62,6 @@ Settings are exposed through `pi-extension-manager` under `vstack.extensionManag
 
 ## Notes
 
-- Session titles intentionally mirror Pi `/resume`: explicit session name first, then first user message, then the session filename.
-- If `sessionDir` or `PI_CODING_AGENT_SESSION_DIR` is configured, the manager respects it. Current scope filters that shared directory by session `cwd`; all scope shows every session in that directory.
+- Session titles mirror Pi `/resume`: explicit session name, first user message, then filename.
+- If `sessionDir` or `PI_CODING_AGENT_SESSION_DIR` is configured, current scope filters by session `cwd`; all scope shows every session in that directory.
 - Pi's built-in `/resume`, `/tree`, `/fork`, `/clone`, and `/name` remain available.

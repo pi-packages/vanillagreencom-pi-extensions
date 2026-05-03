@@ -25,5 +25,5 @@
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*"
   },
-  "files": ["extensions/", "README.md", "package.json"]
+  "files": ["extensions/", "assets/", "README.md", "package.json"]
 }

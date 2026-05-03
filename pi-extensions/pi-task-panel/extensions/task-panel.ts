@@ -559,8 +559,16 @@ const TASK_COMMAND_COMPLETIONS: AutocompleteItem[] = [
 	{ value: "add ", label: "add <task>", description: "Add a task. Use Phase :: task to assign a phase." },
 	{ value: "edit", label: "edit", description: "Bulk edit tasks as plain text." },
 	{ value: "manage", label: "manage", description: "Open the interactive task manager." },
+	{ value: "start ", label: "start <task>", description: "Set a task as active." },
+	{ value: "done ", label: "done <task>", description: "Mark a task completed." },
+	{ value: "drop ", label: "drop <task>", description: "Mark a task abandoned." },
+	{ value: "remove ", label: "remove <task>", description: "Remove a task." },
+	{ value: "clear-completed", label: "clear-completed", description: "Remove completed tasks." },
 	{ value: "hide", label: "hide", description: "Hide the task panel." },
-	{ value: "show", label: "show", description: "Show the task panel." },
+	{ value: "show", label: "show", description: "Show the compact task panel." },
+	{ value: "show-all", label: "show-all", description: "Show the expanded task panel." },
+	{ value: "export ", label: "export <path>", description: "Write tasks to a markdown file." },
+	{ value: "import ", label: "import <path>", description: "Load tasks from a markdown file." },
 ];
 
 function commandArgumentCompletions(prefix: string, state: TaskPanelState): AutocompleteItem[] | null {
@@ -568,7 +576,7 @@ function commandArgumentCompletions(prefix: string, state: TaskPanelState): Auto
 	const firstSpace = raw.search(/\s/);
 	const command = firstSpace === -1 ? raw : raw.slice(0, firstSpace);
 	const rest = firstSpace === -1 ? "" : raw.slice(firstSpace + 1).trim().toLowerCase();
-	const taskCommands = new Set(["start", "done", "drop", "rm"]);
+	const taskCommands = new Set(["start", "done", "drop", "remove"]);
 	if (firstSpace !== -1 && taskCommands.has(command)) {
 		const items = sortTasks(state.tasks)
 			.filter((task) => !rest || task.content.toLowerCase().includes(rest))
@@ -783,26 +791,21 @@ export default function taskPanel(pi: ExtensionAPI): void {
 			case "start": message = mutate(ctx, () => startTask(state, rest, ctx.cwd)?.content ?? `No task matched: ${rest}`); break;
 			case "done": message = mutate(ctx, () => markStatus(state, rest, "completed", ctx.cwd)?.content ?? `No task matched: ${rest}`); break;
 			case "drop": message = mutate(ctx, () => markStatus(state, rest, "abandoned", ctx.cwd)?.content ?? `No task matched: ${rest}`); break;
-			case "rm": message = mutate(ctx, () => removeTask(state, rest, ctx.cwd) ? `Removed ${rest}` : `No task matched: ${rest}`); break;
+			case "remove": message = mutate(ctx, () => removeTask(state, rest, ctx.cwd) ? `Removed ${rest}` : `No task matched: ${rest}`); break;
 			case "clear-completed": message = mutate(ctx, () => { const before = state.tasks.length; state.tasks = state.tasks.filter((task) => task.status !== "completed"); updatePanelAfterTaskChange(state, ctx.cwd); return `Removed ${before - state.tasks.length} completed task(s)`; }); break;
 			case "hide": message = mutate(ctx, () => { state.panel = "hidden"; return "Task panel hidden"; }); break;
-			case "show":
-			case "show4":
-			case "show-4":
-			case "compact": message = mutate(ctx, () => { state.panel = "compact"; return `Task panel showing ${Math.max(1, Math.floor(settingNumber("maxCompactTasks", 4, ctx.cwd)))} task(s)`; }); break;
-			case "all":
-			case "show-all":
-			case "expand": message = mutate(ctx, () => { state.panel = "expanded"; return "Task panel showing all tasks"; }); break;
+			case "show": message = mutate(ctx, () => { state.panel = "compact"; return `Task panel showing ${Math.max(1, Math.floor(settingNumber("maxCompactTasks", 4, ctx.cwd)))} task(s)`; }); break;
+			case "show-all": message = mutate(ctx, () => { state.panel = "expanded"; return "Task panel showing all tasks"; }); break;
 			case "export": { const out = rest || join(ctx.cwd, ".pi", "tasks.md"); writeFileSafe(resolve(ctx.cwd, out), toEditableText(state)); message = `Exported tasks to ${out}`; break; }
 			case "import": { const input = resolve(ctx.cwd, rest || join(".pi", "tasks.md")); state = parseEditableText(readFileSync(input, "utf8"), ctx.cwd); message = mutate(ctx, () => `Imported ${state.tasks.length} task(s)`); break; }
 			case "edit": return editTasks(ctx);
-			default: message = "Unknown /tasks action. Try add, edit, manage, hide, or show.";
+			default: message = "Unknown /tasks action. Try add, edit, manage, start, done, drop, remove, hide, show, or show-all.";
 		}
 		ctx.ui.notify(message, message.startsWith("No task") || message.startsWith("Unknown") ? "warning" : "info");
 	}
 
 	pi.registerCommand("tasks", {
-		description: "Manage tasks: add <task> · edit · manage · hide/show",
+		description: "Persistent task panel and task list manager.",
 		getArgumentCompletions: (prefix: string) => commandArgumentCompletions(prefix, state),
 		handler: async (args, ctx) => handleTasksCommand(args, ctx),
 	});

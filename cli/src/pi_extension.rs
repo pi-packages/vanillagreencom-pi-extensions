@@ -364,6 +364,11 @@ fn entry_matches_package(
 /// Add a relative `./packages/<name>` entry to the `packages` array of Pi's
 /// `settings.json` for the scope, preserving every other entry.
 ///
+/// This must never write package default settings into
+/// `vstack.extensionManager.config` or otherwise modify extension-manager user
+/// configuration. Users own those settings; install/refresh/update only owns
+/// package files plus the `packages` registration entry.
+///
 /// Dedupe also recognizes the absolute-path form previously written by
 /// vstack so re-installs don't leave a stale duplicate behind.
 fn register_in_pi_settings(name: &str, dest: &Path, global: bool) -> Result<()> {
@@ -900,6 +905,102 @@ mod tests {
                 "expected pi-statusline once, got {pkgs:?}"
             );
             assert_eq!(settings.get("theme").and_then(|t| t.as_str()), Some("dark"));
+        });
+
+        let _ = std::fs::remove_dir_all(&sandbox);
+    }
+
+    #[test]
+    fn reinstall_preserves_extension_manager_user_config() {
+        let sandbox = std::env::temp_dir().join(format!(
+            "vstack_pi_preserve_ext_config_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&sandbox);
+        std::fs::create_dir_all(&sandbox).unwrap();
+        let source = sandbox.join("src").join("pi-qol");
+        write_mini_source(&source, "pi-qol");
+        let pi_dir = sandbox.join("agent");
+
+        with_pi_dir(&pi_dir, || {
+            let settings_path = pi_dir.join("settings.json");
+            std::fs::create_dir_all(&pi_dir).unwrap();
+            let user_config = serde_json::json!({
+                "newlineOnShiftEnter": false,
+                "newlineFallbackKey": "none",
+                "permissionGate.enabled": false,
+                "customUserSetting": "must-survive-refresh"
+            });
+            std::fs::write(
+                &settings_path,
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "theme": "dark",
+                    "packages": ["npm:@foo/bar"],
+                    "vstack": {
+                        "extensionManager": {
+                            "config": {
+                                "pi-qol": user_config,
+                                "pi-statusline": { "compactPrompt": false }
+                            },
+                            "disabledItems": ["tool:example"],
+                            "disabledProviders": ["provider:example"]
+                        }
+                    }
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+
+            let ext = PiExtension::from_dir(&source).unwrap();
+            install_pi_extension(&ext, true).unwrap().unwrap();
+            // vstack refresh/update re-enters the same install path; verify a
+            // second install only re-copies package files and de-dupes packages,
+            // never rewriting extension-manager user config.
+            install_pi_extension(&ext, true).unwrap().unwrap();
+
+            let settings: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(&settings_path).unwrap(),
+            )
+            .unwrap();
+            let manager = settings
+                .get("vstack")
+                .and_then(|v| v.get("extensionManager"))
+                .expect("extension manager config should survive reinstall");
+            assert_eq!(
+                manager
+                    .get("config")
+                    .and_then(|c| c.get("pi-qol")),
+                Some(&user_config),
+                "pi-qol user settings must not be clobbered by reinstall/refresh"
+            );
+            assert_eq!(
+                manager
+                    .get("config")
+                    .and_then(|c| c.get("pi-statusline"))
+                    .and_then(|c| c.get("compactPrompt"))
+                    .and_then(|v| v.as_bool()),
+                Some(false),
+                "other extension settings must also be preserved"
+            );
+            assert_eq!(
+                manager.get("disabledItems").and_then(|v| v.as_array()).map(|a| a.len()),
+                Some(1)
+            );
+            assert_eq!(settings.get("theme").and_then(|t| t.as_str()), Some("dark"));
+
+            let pkgs: Vec<&str> = settings
+                .get("packages")
+                .and_then(|p| p.as_array())
+                .unwrap()
+                .iter()
+                .filter_map(|e| e.as_str())
+                .collect();
+            assert!(pkgs.contains(&"npm:@foo/bar"));
+            assert_eq!(
+                pkgs.iter().filter(|s| **s == "./packages/pi-qol").count(),
+                1,
+                "reinstall should not duplicate package entries: {pkgs:?}"
+            );
         });
 
         let _ = std::fs::remove_dir_all(&sandbox);

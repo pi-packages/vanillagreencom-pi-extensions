@@ -111,6 +111,7 @@
   },
   "files": [
     "extensions/",
+    "assets/",
     "README.md",
     "package.json"
   ]

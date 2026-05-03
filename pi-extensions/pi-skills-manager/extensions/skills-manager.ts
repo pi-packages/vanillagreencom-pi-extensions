@@ -1535,11 +1535,23 @@ export default function skillsManager(pi: ExtensionAPI): void {
 	let terminalInputUnsubscribe: (() => void) | undefined;
 	let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
 	const pendingSkillContexts: PendingSkillContext[] = [];
-
 	const enabledAtLoad = settingBoolean("enabled", true);
+
+	const skillsArgumentCompletions = (prefix: string) => {
+		const query = prefix.trimStart().toLowerCase();
+		const items = enabledAtLoad
+			? [
+				{ value: "enable", label: "enable", description: "Confirm the skills manager is enabled" },
+				{ value: "disable", label: "disable", description: "Disable the skills manager after reload" },
+			]
+			: [{ value: "enable", label: "enable", description: "Re-enable the skills manager" }];
+		const filtered = items.filter((item) => item.value.startsWith(query));
+		return filtered.length > 0 ? filtered : null;
+	};
 	if (!enabledAtLoad) {
 		pi.registerCommand("skills", {
-			description: "Skills Manager is disabled. Use /skills enable to re-enable it.",
+			description: "Skills manager recovery command.",
+			getArgumentCompletions: skillsArgumentCompletions,
 			handler: async (args, ctx) => {
 				if (args.trim().toLowerCase() !== "enable") {
 					ctx.ui.notify("Skills Manager is disabled. Run /skills enable, then /reload.", "warning");
@@ -1608,7 +1620,8 @@ export default function skillsManager(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("skills", {
-		description: "Browse, insert, create, edit, rename, delete, and enable/disable Pi skills",
+		description: "Pi skills browser and editor.",
+		getArgumentCompletions: skillsArgumentCompletions,
 		handler: async (args, ctx) => {
 			const trimmed = args.trim().toLowerCase();
 			if (trimmed === "enable") {

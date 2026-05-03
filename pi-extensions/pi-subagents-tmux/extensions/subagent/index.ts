@@ -38,7 +38,7 @@ const INSTALL_SYMBOL = Symbol.for("vstack.pi-subagents-tmux.installed");
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
 const COLLAPSED_ITEM_COUNT = 10;
-const PANE_LAUNCHER_VERSION = 6;
+const PANE_LAUNCHER_VERSION = 8;
 const FIRST_AGENT_COLUMN_ROWS = 3;
 const NEXT_AGENT_COLUMN_ROWS = 4;
 const DETAIL_STRING_MAX_CHARS = 8 * 1024;
@@ -66,7 +66,12 @@ function sessionIdForContext(ctx: ExtensionContext): string {
 }
 
 function runtimeSessionId(ctx: ExtensionContext): string {
-	return process.env.PI_SUBAGENT_PARENT_SESSION_ID?.trim() || sessionIdForContext(ctx);
+	const parentSessionId = process.env.PI_SUBAGENT_PARENT_SESSION_ID?.trim();
+	// Only child pane processes should inherit the parent runtime scope. If a normal
+	// parent Pi process has this environment variable accidentally set, using it
+	// would make pane registries and bridge targeting bleed across sessions.
+	if (process.env.PI_SUBAGENT_CHILD_AGENT && parentSessionId) return parentSessionId;
+	return sessionIdForContext(ctx);
 }
 
 function sessionRuntimeDir(sessionId: string): string {
@@ -129,6 +134,44 @@ function formatTokens(count: number): string {
 function oneLinePreview(text: string | undefined, maxChars: number): string {
 	const compact = (text ?? "").replace(/\s+/g, " ").trim();
 	return compact.length > maxChars ? `${compact.slice(0, Math.max(0, maxChars - 1))}…` : compact;
+}
+
+function compactPath(filePath: string | undefined, options?: { baseDir?: string; maxChars?: number }): string {
+	const raw = filePath?.trim();
+	if (!raw) return "";
+	const home = os.homedir();
+	let compact = raw.startsWith(home) ? `~${raw.slice(home.length)}` : raw;
+	if (options?.baseDir) {
+		const relative = path.relative(options.baseDir, raw);
+		if (relative && !relative.startsWith("..") && !path.isAbsolute(relative)) compact = relative;
+	}
+	return oneLinePreview(compact, options?.maxChars ?? 96);
+}
+
+function shortTaskId(taskId: string | undefined, maxChars = 36): string {
+	return oneLinePreview(taskId, maxChars);
+}
+
+function subagentTreeStyle(cwd?: string): "unicode" | "ascii" {
+	const value = readVstackConfig(cwd).treeStyle;
+	return value === "ascii" || value === "unicode" ? value : "unicode";
+}
+
+function subagentBranch(theme: Theme, branch: "├" | "└" | "│", cwd?: string): string {
+	if (subagentTreeStyle(cwd) === "ascii") {
+		if (branch === "│") return theme.fg("muted", "|  ");
+		return theme.fg("muted", branch === "└" ? "`-- " : "|-- ");
+	}
+	if (branch === "│") return theme.fg("muted", "  │ ");
+	return theme.fg("muted", `  ${branch}─ `);
+}
+
+function subagentStem(theme: Theme, isLast: boolean, cwd?: string): string {
+	return isLast ? theme.fg("muted", subagentTreeStyle(cwd) === "ascii" ? "    " : "     ") : subagentBranch(theme, "│", cwd);
+}
+
+function padAnsi(text: string, width: number): string {
+	return `${text}${" ".repeat(Math.max(0, width - visibleWidth(text)))}`;
 }
 
 function formatUsageStats(
@@ -646,15 +689,17 @@ function formatToolCall(
 	args: Record<string, unknown>,
 	themeFg: (color: any, text: string) => string,
 ): string {
-	const shortenPath = (p: string) => {
-		const home = os.homedir();
-		return p.startsWith(home) ? `~${p.slice(home.length)}` : p;
-	};
+	const shortenPath = (p: string) => compactPath(p, { maxChars: 72 });
 
 	switch (toolName) {
 		case "bash": {
 			const command = (args.command as string) || "...";
-			const preview = command.length > 60 ? `${command.slice(0, 60)}...` : command;
+			const compactCommand = command.replace(/\s+/g, " ").trim();
+			const preview = /pi-subagents-tmux\/sessions\/.*\/outbox\//.test(compactCommand)
+				? "complete_subagent (legacy shell completion)"
+				: /^sleep\s+\d+\b/.test(compactCommand)
+					? compactCommand.replace(/^sleep\s+/, "wait ")
+					: oneLinePreview(compactCommand, 60);
 			return themeFg("muted", "$ ") + themeFg("toolOutput", preview);
 		}
 		case "read": {
@@ -728,6 +773,11 @@ interface SingleResult {
 	stderr: string;
 	usage: UsageStats;
 	model?: string;
+	taskId?: string;
+	paneId?: string;
+	queuedTaskFile?: string;
+	queuedOutboxFile?: string;
+	transcriptPath?: string;
 	stopReason?: string;
 	errorMessage?: string;
 	fullOutputError?: string;
@@ -771,6 +821,100 @@ function getDisplayItems(messages: Message[]): DisplayItem[] {
 		}
 	}
 	return items;
+}
+
+function normalizeEchoText(value: string): string {
+	return value
+		.toLowerCase()
+		.replace(/\x1b\[[0-9;]*m/g, "")
+		.replace(/[`*_#>]/g, " ")
+		.replace(/^\s*(?:[-*•]|\d+[.)]|→)\s+/, "")
+		.replace(/\s+/g, " ")
+		.trim();
+}
+
+function addEchoToken(tokens: Set<string>, value: unknown): void {
+	if (typeof value !== "string") return;
+	const raw = value.trim();
+	if (!raw || raw === "." || raw === "*" || raw === "/") return;
+	const normalized = normalizeEchoText(raw);
+	if (normalized.length >= 3) tokens.add(normalized);
+	const home = os.homedir();
+	if (raw.startsWith(home)) {
+		const shortened = normalizeEchoText(`~${raw.slice(home.length)}`);
+		if (shortened.length >= 3) tokens.add(shortened);
+	}
+	const base = path.basename(raw);
+	if (base && base !== raw) {
+		const normalizedBase = normalizeEchoText(base);
+		if (normalizedBase.length >= 6) tokens.add(normalizedBase);
+	}
+}
+
+function extractToolEchoTokens(items: DisplayItem[]): Set<string> {
+	const tokens = new Set<string>();
+	for (const item of items) {
+		if (item.type !== "toolCall") continue;
+		const args = item.args ?? {};
+		switch (item.name) {
+			case "read":
+			case "write":
+			case "edit":
+				addEchoToken(tokens, args.file_path ?? args.path);
+				break;
+			case "ls":
+				addEchoToken(tokens, args.path ?? ".");
+				break;
+			case "grep":
+				addEchoToken(tokens, args.pattern);
+				addEchoToken(tokens, args.path);
+				addEchoToken(tokens, args.glob);
+				break;
+			case "find":
+				addEchoToken(tokens, args.pattern);
+				addEchoToken(tokens, args.path);
+				break;
+			case "bash": {
+				const command = typeof args.command === "string" ? args.command.replace(/\s+/g, " ").trim() : "";
+				addEchoToken(tokens, command.length > 90 ? command.slice(0, 90) : command);
+				break;
+			}
+		}
+	}
+	return tokens;
+}
+
+function finalOutputLooksLikeToolEcho(finalOutput: string, toolCalls: DisplayItem[]): boolean {
+	if (!finalOutput.trim() || toolCalls.length === 0) return false;
+	if (/```/.test(finalOutput)) return false;
+	const tokens = extractToolEchoTokens(toolCalls);
+	if (tokens.size === 0) return false;
+	const lines = finalOutput
+		.split(/\r?\n/)
+		.map((line) => normalizeEchoText(line))
+		.filter(Boolean);
+	if (lines.length === 0) return false;
+
+	const proseMarkers = /\b(finding|findings|warning|warn|conclusion|recommendation|because|therefore|issue|bug|risk|observed|validated|failed|failure|passed|note|summary)\b/i;
+	const proseLines = lines.filter((line) => proseMarkers.test(line)).length;
+	if (proseLines >= 2) return false;
+
+	let matchingLines = 0;
+	for (const line of lines) {
+		for (const token of tokens) {
+			if (line.includes(token)) {
+				matchingLines++;
+				break;
+			}
+		}
+	}
+	const ratio = matchingLines / lines.length;
+	if (matchingLines >= 5 && ratio >= 0.65) return true;
+	return lines.length <= 25 && matchingLines >= 3 && ratio >= 0.8;
+}
+
+function finalResponseSuppressedLine(theme: Theme): string {
+	return theme.fg("dim", "(final response repeated the tool activity list; hidden)");
 }
 
 async function mapWithConcurrencyLimit<TIn, TOut>(
@@ -835,19 +979,62 @@ interface PaneRegistryEntry {
 	launcherVersion?: number;
 	layoutGroup?: number;
 	primaryPaneId?: string;
+	bridgePid?: string;
+	bridgeSocket?: string;
 }
+
+type PaneTaskStatus = "queued" | "running" | "completed" | "blocked" | "failed" | "unknown";
 
 interface PaneCompletion {
 	agent?: string;
 	taskId?: string;
-	status?: "completed" | "blocked" | "failed";
+	status?: PaneTaskStatus;
 	summary?: string;
 	filesChanged?: string[];
 	validation?: string[];
 	notes?: string;
 }
 
+interface PaneCompletionDetails {
+	agent: string;
+	taskId: string;
+	status: PaneTaskStatus;
+	summary: string;
+	filesChanged: string[];
+	validation: string[];
+	notes?: string;
+	sourcePath: string;
+	archivePath?: string;
+	transcriptPath?: string;
+	completedAt: string;
+}
+
+interface PaneCompletionMessageDetails {
+	completions: PaneCompletionDetails[];
+	partial?: boolean;
+}
+
+interface PaneTaskRecord {
+	taskId: string;
+	agent: string;
+	task: string;
+	status: PaneTaskStatus;
+	paneId?: string;
+	inboxFile?: string;
+	outboxFile?: string;
+	completionSourcePath?: string;
+	completionArchivePath?: string;
+	transcriptPath?: string;
+	summary?: string;
+	filesChanged?: string[];
+	validation?: string[];
+	notes?: string;
+	createdAt: string;
+	completedAt?: string;
+}
+
 type PaneRegistry = Record<string, PaneRegistryEntry>;
+type PaneTaskRegistry = Record<string, PaneTaskRecord>;
 
 function safeFileName(value: string): string {
 	return value.replace(/[^\w.-]+/g, "_");
@@ -1070,6 +1257,18 @@ function registryPath(runtimeRoot: string): string {
 	return path.join(runtimeRoot, "panes.json");
 }
 
+function taskRegistryPath(runtimeRoot: string): string {
+	return path.join(runtimeRoot, "tasks.json");
+}
+
+function transcriptDir(runtimeRoot: string): string {
+	return path.join(runtimeRoot, "transcripts");
+}
+
+function oneShotTranscriptPath(runtimeRoot: string, agentName: string, label: string): string {
+	return path.join(transcriptDir(runtimeRoot), safeFileName(agentName || "subagent"), `${Date.now()}-${safeFileName(label || "oneshot")}.jsonl`);
+}
+
 function outboxRoot(runtimeRoot: string): string {
 	return path.join(runtimeRoot, "outbox");
 }
@@ -1143,7 +1342,16 @@ function buildDelegation(agent: AgentConfig, task: string, outboxFile: string, t
 		validation: ["command/result or empty"],
 		notes: "optional",
 	});
-	return `DELEGATION for ${agent.name}. Task ID: ${taskId}. Task: ${compactTask}. Completion protocol mandatory: when the delegation is complete, write exactly one JSON object to ${outboxFile} using this schema ${schema}. Then print one brief final message in your pane and go idle. Do not write the completion file before the work is actually done.`;
+	return [
+		`Task for ${agent.name}`,
+		`Task ID: ${taskId}`,
+		"",
+		compactTask,
+		"",
+		"When done, call complete_subagent with status, summary, filesChanged, validation, and optional notes, then print one brief final message and go idle.",
+		`If complete_subagent is unavailable, write exactly one JSON object to ${outboxFile} using this schema: ${schema}`,
+		"Do not complete before the work is actually done.",
+	].join("\n");
 }
 
 async function execCapture(command: string, args: string[], options?: { cwd?: string }): Promise<{ code: number; stdout: string; stderr: string }> {
@@ -1173,7 +1381,41 @@ async function paneExists(paneId: string): Promise<boolean> {
 	return result.code === 0 && result.stdout.trim() === paneId;
 }
 
+async function parentPid(pid: number): Promise<number | undefined> {
+	const result = await execCapture("ps", ["-o", "ppid=", "-p", String(pid)]);
+	const parsed = Number.parseInt(result.stdout.trim(), 10);
+	return result.code === 0 && Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+async function processHasAncestor(pid: number, ancestorPid: number): Promise<boolean> {
+	let current: number | undefined = pid;
+	const seen = new Set<number>();
+	for (let depth = 0; current && depth < 64 && !seen.has(current); depth += 1) {
+		if (current === ancestorPid) return true;
+		seen.add(current);
+		current = await parentPid(current);
+	}
+	return false;
+}
+
+async function paneContainingProcess(pid: number): Promise<string | undefined> {
+	const result = await tmux(["list-panes", "-a", "-F", "#{pane_id}\t#{pane_pid}"]);
+	if (result.code !== 0) return undefined;
+	for (const line of result.stdout.split(/\r?\n/)) {
+		const [paneId, panePidText] = line.split("\t");
+		const panePid = Number.parseInt(panePidText ?? "", 10);
+		if (!paneId || !Number.isInteger(panePid) || panePid <= 0) continue;
+		if (await processHasAncestor(pid, panePid)) return paneId;
+	}
+	return undefined;
+}
+
 async function getPrimaryPaneId(): Promise<string> {
+	// Prefer the pane that actually contains this Pi process. TMUX_PANE can be
+	// stale after session/tab reuse and can point at another tmux tab, which would
+	// make subagent panes split into and steer from the wrong place.
+	const currentPane = await paneContainingProcess(process.pid);
+	if (currentPane && (await paneExists(currentPane))) return currentPane;
 	if (process.env.TMUX_PANE && (await paneExists(process.env.TMUX_PANE))) return process.env.TMUX_PANE;
 	const result = await tmux(["display-message", "-p", "#{pane_id}"]);
 	if (result.code === 0 && result.stdout.trim()) return result.stdout.trim();
@@ -1286,6 +1528,183 @@ async function writePaneRegistry(runtimeRoot: string, registry: PaneRegistry): P
 	});
 }
 
+async function readTaskRegistry(runtimeRoot: string): Promise<PaneTaskRegistry> {
+	try {
+		const content = await fs.promises.readFile(taskRegistryPath(runtimeRoot), "utf-8");
+		const parsed = JSON.parse(content);
+		if (Array.isArray(parsed)) {
+			return Object.fromEntries(parsed.filter((record) => record?.taskId).map((record) => [record.taskId, record])) as PaneTaskRegistry;
+		}
+		return parsed && typeof parsed === "object" ? (parsed as PaneTaskRegistry) : {};
+	} catch {
+		return {};
+	}
+}
+
+async function writeTaskRegistry(runtimeRoot: string, records: PaneTaskRegistry): Promise<void> {
+	const filePath = taskRegistryPath(runtimeRoot);
+	await withFileMutationQueue(filePath, async () => {
+		await fs.promises.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
+		await fs.promises.writeFile(filePath, `${JSON.stringify(records, null, "\t")}\n`, { encoding: "utf-8", mode: 0o600 });
+	});
+}
+
+async function updateTaskRegistry(runtimeRoot: string, mutator: (records: PaneTaskRegistry) => void): Promise<PaneTaskRegistry> {
+	const filePath = taskRegistryPath(runtimeRoot);
+	let records: PaneTaskRegistry = {};
+	await withFileMutationQueue(filePath, async () => {
+		try {
+			const content = await fs.promises.readFile(filePath, "utf-8");
+			const parsed = JSON.parse(content);
+			records = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as PaneTaskRegistry) : {};
+		} catch {
+			records = {};
+		}
+		mutator(records);
+		await fs.promises.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
+		await fs.promises.writeFile(filePath, `${JSON.stringify(records, null, "\t")}\n`, { encoding: "utf-8", mode: 0o600 });
+	});
+	return records;
+}
+
+async function upsertTaskRecord(runtimeRoot: string, record: PaneTaskRecord): Promise<void> {
+	await updateTaskRegistry(runtimeRoot, (records) => {
+		records[record.taskId] = { ...records[record.taskId], ...record };
+	});
+}
+
+function normalizePaneTaskStatus(status: unknown): PaneTaskStatus {
+	return status === "queued" || status === "running" || status === "completed" || status === "blocked" || status === "failed"
+		? status
+		: "unknown";
+}
+
+function latestTaskRecord(records: PaneTaskRegistry, agent?: string): PaneTaskRecord | undefined {
+	return Object.values(records)
+		.filter((record) => !agent || record.agent === agent)
+		.sort((a, b) => (b.completedAt ?? b.createdAt).localeCompare(a.completedAt ?? a.createdAt))[0];
+}
+
+function delay(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function emitSubagentEvent(pi: ExtensionAPI, event: string, payload: Record<string, unknown>): void {
+	try {
+		const bus = (pi as unknown as { events?: { emit?: (name: string, payload: unknown) => void } }).events;
+		bus?.emit?.(event, {
+			package: "pi-subagents-tmux",
+			...payload,
+			timestamp: new Date().toISOString(),
+		});
+	} catch {
+		// Lifecycle events are best-effort extension integration signals.
+	}
+}
+
+function resolveSessionBridgeExtension(cwd?: string): string | undefined {
+	const projectPackagesDir = path.join(path.dirname(projectSettingsPath(cwd ?? process.cwd())), "packages");
+	const candidates = [
+		process.env.PI_SESSION_BRIDGE_EXTENSION,
+		path.join(piUserDir(), "packages", "pi-session-bridge", "extensions", "session-bridge.ts"),
+		path.join(projectPackagesDir, "pi-session-bridge", "extensions", "session-bridge.ts"),
+		path.resolve(cwd ?? process.cwd(), "pi-extensions", "session-bridge", "extensions", "session-bridge.ts"),
+	].filter((candidate): candidate is string => Boolean(candidate));
+	return candidates.find((candidate) => fs.existsSync(candidate));
+}
+
+async function resolvePiBridgeBin(): Promise<string | undefined> {
+	const projectBinDir = path.join(path.dirname(projectSettingsPath(process.cwd())), "bin");
+	const projectPackagesDir = path.join(path.dirname(projectSettingsPath(process.cwd())), "packages");
+	const candidates = [
+		process.env.PI_BRIDGE_BIN,
+		path.join(piUserDir(), "bin", "pi-bridge"),
+		path.join(piUserDir(), "packages", "pi-session-bridge", "bin", "pi-bridge.js"),
+		path.join(projectBinDir, "pi-bridge"),
+		path.join(projectPackagesDir, "pi-session-bridge", "bin", "pi-bridge.js"),
+	].filter((candidate): candidate is string => Boolean(candidate));
+	for (const candidate of candidates) {
+		if (fs.existsSync(candidate)) return candidate;
+	}
+	const result = await execCapture("bash", ["-lc", "command -v pi-bridge || true"]);
+	const found = result.stdout.trim().split(/\r?\n/)[0];
+	return found || undefined;
+}
+
+interface BridgeMetadata {
+	pid?: string;
+	sessionFile?: string;
+	socket?: string;
+}
+
+function normalizedPath(value: string): string {
+	return path.normalize(path.resolve(value));
+}
+
+function samePath(left: string | undefined, right: string | undefined): boolean {
+	return Boolean(left && right && normalizedPath(left) === normalizedPath(right));
+}
+
+function pathWithin(parentDir: string, childPath: string): boolean {
+	const parent = normalizedPath(parentDir);
+	const child = normalizedPath(childPath);
+	const relative = path.relative(parent, child);
+	return relative === "" || Boolean(relative && !relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function paneSessionBelongsToRuntime(runtimeRoot: string, entry: PaneRegistryEntry): boolean {
+	return pathWithin(path.join(runtimeRoot, "sessions"), entry.sessionFile);
+}
+
+async function discoverBridgeMetadataForPane(entry: PaneRegistryEntry, timeoutMs = 0): Promise<BridgeMetadata | undefined> {
+	const bin = await resolvePiBridgeBin();
+	if (!bin) return undefined;
+	const deadline = Date.now() + Math.max(0, timeoutMs);
+	do {
+		const result = await execCapture(bin, ["list", "--json"]);
+		if (result.code === 0 && result.stdout.trim()) {
+			try {
+				const instances = (JSON.parse(result.stdout) as Array<Record<string, unknown>>)
+					.filter((info) => info && info.stale !== true)
+					.sort((a, b) => String(a.startedAt ?? "").localeCompare(String(b.startedAt ?? "")));
+				const match = instances.filter((info) => {
+					const sessionFile = typeof info.sessionFile === "string" ? info.sessionFile : "";
+					return samePath(sessionFile, entry.sessionFile);
+				}).at(-1);
+				if (match) {
+					const pid = match.pid == null ? undefined : String(match.pid);
+					const socket = typeof match.socketPath === "string" ? match.socketPath : undefined;
+					const sessionFile = typeof match.sessionFile === "string" ? match.sessionFile : undefined;
+					if (pid || socket) return { pid, sessionFile, socket };
+				}
+			} catch {
+				// Keep polling until timeout; bridge list output may be transiently incomplete.
+			}
+		}
+		if (Date.now() >= deadline) break;
+		await delay(500);
+	} while (true);
+	return undefined;
+}
+
+async function ensurePaneBridgeMetadata(runtimeRoot: string, entry: PaneRegistryEntry): Promise<BridgeMetadata | undefined> {
+	if (!paneSessionBelongsToRuntime(runtimeRoot, entry)) return undefined;
+	// Always re-discover by exact child session file. Do not trust stored pid/socket
+	// and never fall back to cwd: multiple Pi sessions commonly share the same cwd.
+	const metadata = await discoverBridgeMetadataForPane(entry, 2000);
+	if ((!metadata?.pid && !metadata?.socket) || !samePath(metadata.sessionFile, entry.sessionFile)) return undefined;
+	const registry = await readPaneRegistry(runtimeRoot);
+	const current = registry[entry.agent];
+	if (current && samePath(current.sessionFile, entry.sessionFile)) {
+		current.bridgePid = metadata.pid;
+		current.bridgeSocket = metadata.socket;
+		await writePaneRegistry(runtimeRoot, registry);
+	}
+	entry.bridgePid = metadata.pid;
+	entry.bridgeSocket = metadata.socket;
+	return metadata;
+}
+
 async function writeLauncher(
 	runtimeRoot: string,
 	parentSessionId: string,
@@ -1312,9 +1731,11 @@ async function writeLauncher(
 	});
 
 	const args = ["--session", sessionFile, "--append-system-prompt", promptFile];
+	const bridgeExtension = settingBoolean("forceSessionBridgeForPanes", true, cwd) ? resolveSessionBridgeExtension(cwd) : undefined;
+	if (bridgeExtension) args.push("-e", bridgeExtension);
 	if (model) args.push("--model", model);
 	if (thinkingLevel && thinkingLevel !== "off") args.push("--thinking", thinkingLevel);
-	if (agent.tools && agent.tools.length > 0) args.push("--tools", agent.tools.join(","));
+	if (agent.tools && agent.tools.length > 0) args.push("--tools", [...new Set([...agent.tools, "complete_subagent"])].join(","));
 
 	const invocation = getPiInvocation(args);
 	const command = [invocation.command, ...invocation.args].map(shellQuote).join(" ");
@@ -1381,7 +1802,7 @@ async function ensurePersistentPane(
 		"-t",
 		paneId,
 		"pane-border-format",
-		"#{?pane_active,#[bold fg=colour39],#[fg=colour245]} #T #[default]",
+		"#{?pane_active,#[bold],} #T #[default]",
 	]);
 
 	const entry: PaneRegistryEntry = {
@@ -1399,6 +1820,9 @@ async function ensurePersistentPane(
 		layoutGroup,
 		primaryPaneId,
 	};
+	const bridge = await discoverBridgeMetadataForPane(entry, 5000);
+	if (bridge?.pid) entry.bridgePid = bridge.pid;
+	if (bridge?.socket) entry.bridgeSocket = bridge.socket;
 	registry[agent.name] = entry;
 	await rebalanceColumn([...(groupedPaneEntries(registry).get(layoutGroup) ?? [])]);
 	await rebalanceColumns(registry, primaryPaneId);
@@ -1406,54 +1830,89 @@ async function ensurePersistentPane(
 	return entry;
 }
 
-async function archiveCompletion(runtimeRoot: string, agentName: string, filePath: string): Promise<void> {
+async function archiveCompletion(runtimeRoot: string, agentName: string, filePath: string): Promise<string> {
 	const archiveDir = completionArchiveDir(runtimeRoot, agentName);
 	await fs.promises.mkdir(archiveDir, { recursive: true, mode: 0o700 });
 	const archivedPath = path.join(archiveDir, `${Date.now()}-${path.basename(filePath)}`);
 	await fs.promises.rename(filePath, archivedPath);
+	return archivedPath;
 }
 
-function formatCompletion(completion: PaneCompletion, filePath: string): string {
-	const files = completion.filesChanged?.length ? completion.filesChanged.map((file) => `- ${file}`).join("\n") : "None reported";
-	const validation = completion.validation?.length
-		? completion.validation.map((item) => `- ${item}`).join("\n")
-		: "None reported";
+function paneCompletionDetailsFromCompletion(
+	completion: PaneCompletion,
+	agentDirName: string,
+	filePath: string,
+	archivePath: string | undefined,
+	registry: PaneRegistry,
+	tasks: PaneTaskRegistry,
+): PaneCompletionDetails {
+	const agent = completion.agent || agentDirName;
+	const taskId = completion.taskId || path.basename(filePath, path.extname(filePath));
+	const record = tasks[taskId];
+	return {
+		agent,
+		taskId,
+		status: normalizePaneTaskStatus(completion.status),
+		summary: completion.summary || "No summary provided.",
+		filesChanged: Array.isArray(completion.filesChanged) ? completion.filesChanged : [],
+		validation: Array.isArray(completion.validation) ? completion.validation : [],
+		notes: completion.notes,
+		sourcePath: filePath,
+		archivePath,
+		transcriptPath: record?.transcriptPath ?? registry[agent]?.sessionFile,
+		completedAt: new Date().toISOString(),
+	};
+}
+
+function formatCompletionDetails(detail: PaneCompletionDetails): string {
+	const files = detail.filesChanged.length ? detail.filesChanged.map((file) => `- ${file}`).join("\n") : "None reported";
+	const validation = detail.validation.length ? detail.validation.map((item) => `- ${item}`).join("\n") : "None reported";
 	return [
-		`# Subagent completion: ${completion.agent ?? "unknown"}`,
-		`Task ID: ${completion.taskId ?? "unknown"}`,
-		`Status: ${completion.status ?? "unknown"}`,
-		`Source: ${filePath}`,
+		`# Subagent completion: ${detail.agent}`,
+		`Task ID: ${detail.taskId}`,
+		`Status: ${detail.status}`,
+		`Source: ${detail.sourcePath}`,
+		detail.archivePath ? `Archive: ${detail.archivePath}` : "",
+		detail.transcriptPath ? `Transcript: ${detail.transcriptPath}` : "",
 		"",
 		"## Summary",
-		completion.summary ?? "No summary provided.",
+		detail.summary,
 		"",
 		"## Files Changed",
 		files,
 		"",
 		"## Validation",
 		validation,
-		completion.notes ? `\n## Notes\n${completion.notes}` : "",
+		detail.notes ? `\n## Notes\n${detail.notes}` : "",
 	]
 		.filter(Boolean)
 		.join("\n");
 }
 
+function formatCompletionGroup(completions: PaneCompletionDetails[]): string {
+	if (completions.length === 1) return formatCompletionDetails(completions[0]);
+	return [`# Subagent completions (${completions.length})`, "", ...completions.map(formatCompletionDetails)].join("\n\n---\n\n");
+}
+
 async function pollPaneCompletions(runtimeRoot: string, pi: ExtensionAPI, triggerTurn = true): Promise<number> {
-	let collected = 0;
 	const root = outboxRoot(runtimeRoot);
 	let agentDirs: fs.Dirent[];
 	try {
 		agentDirs = await fs.promises.readdir(root, { withFileTypes: true });
 	} catch {
-		return collected;
+		return 0;
 	}
+
+	const registry = await readPaneRegistry(runtimeRoot);
+	let tasks = await readTaskRegistry(runtimeRoot);
+	const completions: PaneCompletionDetails[] = [];
 
 	for (const agentDir of agentDirs) {
 		if (!agentDir.isDirectory()) continue;
 		const dir = path.join(root, agentDir.name);
 		let files: string[];
 		try {
-			files = (await fs.promises.readdir(dir)).filter((file) => file.endsWith(".json"));
+			files = (await fs.promises.readdir(dir)).filter((file) => file.endsWith(".json")).sort();
 		} catch {
 			continue;
 		}
@@ -1462,19 +1921,124 @@ async function pollPaneCompletions(runtimeRoot: string, pi: ExtensionAPI, trigge
 			const filePath = path.join(dir, file);
 			try {
 				const completion = JSON.parse(await fs.promises.readFile(filePath, "utf-8")) as PaneCompletion;
-				const content = formatCompletion(completion, filePath);
-				pi.sendMessage(
-					{ customType: "subagent-completion", content, display: true },
-					triggerTurn ? { triggerTurn: true, deliverAs: "followUp" } : undefined,
-				);
-				await archiveCompletion(runtimeRoot, completion.agent ?? agentDir.name, filePath);
-				collected++;
+				const agentName = completion.agent || agentDir.name;
+				const archivePath = await archiveCompletion(runtimeRoot, agentName, filePath);
+				const detail = paneCompletionDetailsFromCompletion(completion, agentDir.name, filePath, archivePath, registry, tasks);
+				completions.push(detail);
+				tasks = await updateTaskRegistry(runtimeRoot, (records) => {
+					const existing = records[detail.taskId];
+					records[detail.taskId] = {
+						...existing,
+						taskId: detail.taskId,
+						agent: detail.agent,
+						task: existing?.task ?? "",
+						createdAt: existing?.createdAt ?? detail.completedAt,
+						status: detail.status,
+						completionSourcePath: detail.sourcePath,
+						completionArchivePath: detail.archivePath,
+						transcriptPath: detail.transcriptPath,
+						summary: detail.summary,
+						filesChanged: detail.filesChanged,
+						validation: detail.validation,
+						notes: detail.notes,
+						completedAt: detail.completedAt,
+					};
+				});
+				emitSubagentEvent(pi, detail.status === "completed" ? "subagents:completed" : "subagents:failed", {
+					mode: "pane",
+					agent: detail.agent,
+					taskId: detail.taskId,
+					status: detail.status,
+					runtimeRoot,
+					transcriptPath: detail.transcriptPath,
+					completionPath: detail.archivePath ?? detail.sourcePath,
+				});
 			} catch {
 				// Leave malformed or concurrently-written files in place for the agent/user to fix.
 			}
 		}
 	}
-	return collected;
+
+	if (completions.length > 0) {
+		const content = formatCompletionGroup(completions);
+		pi.sendMessage(
+			{ customType: "subagent-completion", content, details: { completions } as PaneCompletionMessageDetails, display: true },
+			triggerTurn ? { triggerTurn: true, deliverAs: "followUp" } : undefined,
+		);
+	}
+	return completions.length;
+}
+
+interface QueuedPaneTask {
+	pane: PaneRegistryEntry;
+	taskId: string;
+	outboxFile: string;
+	taskFile: string;
+}
+
+async function queuePersistentPaneTask(
+	runtimeRoot: string,
+	parentSessionId: string,
+	defaultCwd: string,
+	agent: AgentConfig,
+	task: string,
+	cwd: string | undefined,
+	parentModel: string | undefined,
+	parentThinkingLevel: string | undefined,
+	pi: ExtensionAPI,
+): Promise<QueuedPaneTask> {
+	const effectiveCwd = cwd ?? defaultCwd;
+	const existingRegistry = await readPaneRegistry(runtimeRoot);
+	const existing = existingRegistry[agent.name];
+	const hadLivePane = Boolean(existing && (await paneExists(existing.paneId)));
+	const pane = await ensurePersistentPane(runtimeRoot, parentSessionId, effectiveCwd, agent, parentModel, parentThinkingLevel);
+	if (!hadLivePane) {
+		emitSubagentEvent(pi, "subagents:created", {
+			mode: "pane",
+			agent: agent.name,
+			paneId: pane.paneId,
+			runtimeRoot,
+			transcriptPath: pane.sessionFile,
+		});
+	}
+
+	const taskId = createTaskId(agent.name);
+	const outboxFile = completionPath(runtimeRoot, agent.name, taskId);
+	await fs.promises.mkdir(path.dirname(outboxFile), { recursive: true, mode: 0o700 });
+	const delegation = buildDelegation(agent, task, outboxFile, taskId);
+	const taskFile = path.join(inboxDir(runtimeRoot, agent.name), `${safeFileName(taskId)}.md`);
+	await fs.promises.mkdir(path.dirname(taskFile), { recursive: true, mode: 0o700 });
+	await fs.promises.writeFile(taskFile, delegation, { encoding: "utf-8", mode: 0o600 });
+	const now = new Date().toISOString();
+	const registry = await readPaneRegistry(runtimeRoot);
+	if (registry[agent.name]) {
+		registry[agent.name].lastTaskAt = now;
+		registry[agent.name].lastTaskId = taskId;
+		await writePaneRegistry(runtimeRoot, registry);
+	}
+	await upsertTaskRecord(runtimeRoot, {
+		taskId,
+		agent: agent.name,
+		task,
+		status: "queued",
+		paneId: pane.paneId,
+		inboxFile: taskFile,
+		outboxFile,
+		transcriptPath: pane.sessionFile,
+		createdAt: now,
+	});
+	emitSubagentEvent(pi, "subagents:queued", {
+		mode: "pane",
+		agent: agent.name,
+		taskId,
+		task,
+		status: "queued",
+		paneId: pane.paneId,
+		runtimeRoot,
+		transcriptPath: pane.sessionFile,
+		completionPath: outboxFile,
+	});
+	return { pane, taskId, outboxFile, taskFile };
 }
 
 async function runPersistentPaneAgent(
@@ -1488,6 +2052,7 @@ async function runPersistentPaneAgent(
 	parentModel: string | undefined,
 	parentThinkingLevel: string | undefined,
 	step: number | undefined,
+	pi: ExtensionAPI,
 ): Promise<SingleResult> {
 	const agent = agents.find((a) => a.name === agentName);
 	if (!agent) {
@@ -1504,23 +2069,8 @@ async function runPersistentPaneAgent(
 		};
 	}
 
-	const effectiveCwd = cwd ?? defaultCwd;
-	const pane = await ensurePersistentPane(runtimeRoot, parentSessionId, effectiveCwd, agent, parentModel, parentThinkingLevel);
-	const taskId = createTaskId(agent.name);
-	const outboxFile = completionPath(runtimeRoot, agent.name, taskId);
-	await fs.promises.mkdir(path.dirname(outboxFile), { recursive: true, mode: 0o700 });
-	const delegation = buildDelegation(agent, task, outboxFile, taskId);
-	const taskFile = path.join(inboxDir(runtimeRoot, agent.name), `${safeFileName(taskId)}.md`);
-	await fs.promises.mkdir(path.dirname(taskFile), { recursive: true, mode: 0o700 });
-	await fs.promises.writeFile(taskFile, delegation, { encoding: "utf-8", mode: 0o600 });
-	const registry = await readPaneRegistry(runtimeRoot);
-	if (registry[agent.name]) {
-		registry[agent.name].lastTaskAt = new Date().toISOString();
-		registry[agent.name].lastTaskId = taskId;
-		await writePaneRegistry(runtimeRoot, registry);
-	}
-
-	const text = `Queued task ${taskId} for persistent tmux pane ${pane.paneId} (${pane.windowName}). Inbox file: ${taskFile}. Completion file: ${outboxFile}`;
+	const queued = await queuePersistentPaneTask(runtimeRoot, parentSessionId, defaultCwd, agent, task, cwd, parentModel, parentThinkingLevel, pi);
+	const text = `Queued ${agent.name} task ${queued.taskId} in pane ${queued.pane.paneId}.`;
 	return {
 		agent: agent.name,
 		agentSource: agent.source,
@@ -1529,7 +2079,12 @@ async function runPersistentPaneAgent(
 		messages: [{ role: "assistant", content: [{ type: "text", text }], timestamp: Date.now() } as Message],
 		stderr: "",
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
-		model: pane.model,
+		model: queued.pane.model,
+		taskId: queued.taskId,
+		paneId: queued.pane.paneId,
+		queuedTaskFile: queued.taskFile,
+		queuedOutboxFile: queued.outboxFile,
+		transcriptPath: queued.pane.sessionFile,
 		step,
 	};
 }
@@ -1538,6 +2093,7 @@ type OnUpdateCallback = (partial: AgentToolResult<SubagentDetails>) => void;
 
 async function runSingleAgent(
 	defaultCwd: string,
+	runtimeRoot: string,
 	agents: AgentConfig[],
 	agentName: string,
 	task: string,
@@ -1545,6 +2101,7 @@ async function runSingleAgent(
 	parentModel: string | undefined,
 	parentThinkingLevel: string | undefined,
 	step: number | undefined,
+	pi: ExtensionAPI,
 	signal: AbortSignal | undefined,
 	onUpdate: OnUpdateCallback | undefined,
 	makeDetails: (results: SingleResult[]) => SubagentDetails,
@@ -1573,6 +2130,17 @@ async function runSingleAgent(
 
 	let tmpPromptDir: string | null = null;
 	let tmpPromptPath: string | null = null;
+	const oneShotTaskId = createTaskId(agent.name);
+	const transcriptPath = oneShotTranscriptPath(runtimeRoot, agent.name, oneShotTaskId);
+	const transcriptWrites: Promise<unknown>[] = [];
+
+	const appendTranscript = (record: Record<string, unknown>) => {
+		transcriptWrites.push(
+			fs.promises
+				.appendFile(transcriptPath, `${JSON.stringify({ ts: new Date().toISOString(), ...record })}\n`, { encoding: "utf-8" })
+				.catch(() => undefined),
+		);
+	};
 
 	const currentResult: SingleResult = {
 		agent: agentName,
@@ -1583,6 +2151,8 @@ async function runSingleAgent(
 		stderr: "",
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
 		model: selectedModel,
+		taskId: oneShotTaskId,
+		transcriptPath,
 		step,
 	};
 
@@ -1602,6 +2172,18 @@ async function runSingleAgent(
 	};
 
 	try {
+		await fs.promises.mkdir(path.dirname(transcriptPath), { recursive: true, mode: 0o700 });
+		await fs.promises.writeFile(transcriptPath, "", { encoding: "utf-8", mode: 0o600 });
+		emitSubagentEvent(pi, "subagents:started", {
+			mode: "oneshot",
+			agent: agent.name,
+			taskId: oneShotTaskId,
+			task,
+			runtimeRoot,
+			transcriptPath,
+		});
+		appendTranscript({ type: "start", agent: agent.name, taskId: oneShotTaskId, task, cwd: cwd ?? defaultCwd });
+
 		if (agent.systemPrompt.trim()) {
 			const tmp = await writePromptToTempFile(agent.name, agent.systemPrompt);
 			tmpPromptDir = tmp.dir;
@@ -1626,7 +2208,9 @@ async function runSingleAgent(
 				let event: any;
 				try {
 					event = JSON.parse(line);
+					appendTranscript({ stream: "stdout", raw: line, event });
 				} catch {
+					appendTranscript({ stream: "stdout", raw: line, parseError: true });
 					return;
 				}
 
@@ -1667,16 +2251,21 @@ async function runSingleAgent(
 			});
 
 			proc.stderr.on("data", (data) => {
-				currentResult.stderr += data.toString();
+				const text = data.toString();
+				currentResult.stderr += text;
+				appendTranscript({ stream: "stderr", text });
 			});
 
 			proc.on("close", (code) => {
 				if (buffer.trim()) processLine(buffer);
-				resolve(code ?? 0);
+				appendTranscript({ type: "exit", code: code ?? 0 });
+				Promise.allSettled(transcriptWrites).finally(() => resolve(code ?? 0));
 			});
 
-			proc.on("error", () => {
-				resolve(1);
+			proc.on("error", (error) => {
+				currentResult.errorMessage = stringifyError(error);
+				appendTranscript({ type: "process_error", error: stringifyError(error) });
+				Promise.allSettled(transcriptWrites).finally(() => resolve(1));
 			});
 
 			if (signal) {
@@ -1693,9 +2282,35 @@ async function runSingleAgent(
 		});
 
 		currentResult.exitCode = exitCode;
-		if (wasAborted) throw new Error("Subagent was aborted");
+		if (wasAborted) {
+			currentResult.stopReason = "aborted";
+			currentResult.errorMessage = "Subagent was aborted";
+			emitSubagentEvent(pi, "subagents:failed", {
+				mode: "oneshot",
+				agent: agent.name,
+				taskId: oneShotTaskId,
+				task,
+				status: "aborted",
+				runtimeRoot,
+				transcriptPath,
+			});
+			throw new Error("Subagent was aborted");
+		}
+		const failed = exitCode !== 0 || currentResult.stopReason === "error" || currentResult.stopReason === "aborted";
+		emitSubagentEvent(pi, failed ? "subagents:failed" : "subagents:completed", {
+			mode: "oneshot",
+			agent: agent.name,
+			taskId: oneShotTaskId,
+			task,
+			status: failed ? "failed" : "completed",
+			runtimeRoot,
+			transcriptPath,
+			usage: currentResult.usage,
+			error: failed ? currentResult.errorMessage || currentResult.stderr || undefined : undefined,
+		});
 		return currentResult;
 	} finally {
+		await Promise.allSettled(transcriptWrites);
 		if (tmpPromptPath)
 			try {
 				fs.unlinkSync(tmpPromptPath);
@@ -1740,6 +2355,203 @@ const SubagentParams = Type.Object({
 	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process (single mode)" })),
 });
 
+const GetSubagentResultParams = Type.Object({
+	taskId: Type.Optional(Type.String({ description: "Persistent pane task ID to retrieve" })),
+	agent: Type.Optional(Type.String({ description: "Persistent pane agent name; selects that agent's latest task when taskId is omitted" })),
+	wait: Type.Optional(Type.Boolean({ description: "Poll for completion until timeout before returning", default: false })),
+	timeoutMs: Type.Optional(Type.Number({ description: "Maximum wait time when wait=true", default: 30000 })),
+	verbose: Type.Optional(Type.Boolean({ description: "Include registry and artifact paths", default: false })),
+});
+
+const SteerSubagentParams = Type.Object({
+	agent: Type.Optional(Type.String({ description: "Persistent pane agent name" })),
+	taskId: Type.Optional(Type.String({ description: "Task ID whose agent should be steered" })),
+	message: Type.String({ description: "Steering message to send" }),
+	deliverAs: Type.Optional(StringEnum(["steer", "send", "follow-up"] as const, { description: "Bridge delivery mode", default: "steer" })),
+});
+
+const CompleteSubagentParams = Type.Object({
+	status: StringEnum(["completed", "blocked", "failed"] as const, { description: "Final task status" }),
+	summary: Type.String({ description: "1-3 sentence result summary" }),
+	filesChanged: Type.Optional(Type.Array(Type.String(), { description: "Changed files, or empty if none" })),
+	validation: Type.Optional(Type.Array(Type.String(), { description: "Validation performed, or empty if none" })),
+	notes: Type.Optional(Type.String({ description: "Optional concise notes" })),
+});
+
+function paneCompletionIcon(status: PaneTaskStatus, theme: Theme): string {
+	if (status === "completed") return theme.fg("success", "✓");
+	if (status === "blocked") return theme.fg("warning", "◐");
+	if (status === "failed") return theme.fg("error", "✗");
+	return theme.fg("muted", "•");
+}
+
+function paneCompletionStatus(status: PaneTaskStatus, theme: Theme): string {
+	if (status === "completed") return theme.fg("success", status);
+	if (status === "blocked") return theme.fg("warning", status);
+	if (status === "failed") return theme.fg("error", status);
+	return theme.fg("muted", status);
+}
+
+function renderPaneCompletionMessage(message: { content: string; details?: unknown }, options: { expanded?: boolean } | undefined, theme: Theme) {
+	const details = message.details as PaneCompletionMessageDetails | undefined;
+	const completions = details?.completions ?? [];
+	if (completions.length === 0) return new Text(message.content, 0, 0);
+	const expanded = Boolean(options?.expanded);
+	if (!expanded) {
+		const lines: string[] = [];
+		for (const detail of completions) {
+			lines.push(
+				`${paneCompletionIcon(detail.status, theme)} ${theme.fg("accent", theme.bold(detail.agent))} ${paneCompletionStatus(detail.status, theme)} ${theme.fg("dim", `${shortTaskId(detail.taskId)} · Ctrl+O`)}`,
+			);
+			lines.push(`${subagentBranch(theme, "└")}${theme.fg("toolOutput", oneLinePreview(detail.summary, 120) || "No summary provided.")}`);
+		}
+		return new Text(lines.join("\n"), 0, 0);
+	}
+
+	const container = new Container();
+	container.addChild(new Text(theme.fg("toolTitle", theme.bold(`Subagent completion${completions.length === 1 ? "" : "s"} (${completions.length})`)), 0, 0));
+	for (const [index, detail] of completions.entries()) {
+		if (index > 0) container.addChild(new Spacer(1));
+		container.addChild(
+			new Text(
+				`${paneCompletionIcon(detail.status, theme)} ${theme.fg("accent", theme.bold(detail.agent))} ${theme.fg("muted", detail.taskId)} ${paneCompletionStatus(detail.status, theme)}`,
+				0,
+				0,
+			),
+		);
+		container.addChild(new Text(theme.fg("muted", "─── Summary ───"), 0, 0));
+		container.addChild(new Text(detail.summary || "No summary provided.", 0, 0));
+		container.addChild(new Text(theme.fg("muted", "─── Files Changed ───"), 0, 0));
+		container.addChild(new Text(detail.filesChanged.length ? detail.filesChanged.map((file) => `- ${file}`).join("\n") : "None reported", 0, 0));
+		container.addChild(new Text(theme.fg("muted", "─── Validation ───"), 0, 0));
+		container.addChild(new Text(detail.validation.length ? detail.validation.map((item) => `- ${item}`).join("\n") : "None reported", 0, 0));
+		if (detail.notes) {
+			container.addChild(new Text(theme.fg("muted", "─── Notes ───"), 0, 0));
+			container.addChild(new Text(detail.notes, 0, 0));
+		}
+		container.addChild(new Text(theme.fg("muted", "─── Artifacts ───"), 0, 0));
+		container.addChild(
+			new Text(
+				[
+					`Source: ${compactPath(detail.sourcePath)}`,
+					detail.archivePath ? `Archive: ${compactPath(detail.archivePath)}` : "",
+					detail.transcriptPath ? `Transcript: ${compactPath(detail.transcriptPath)}` : "",
+				]
+					.filter(Boolean)
+					.map((line) => theme.fg("dim", line))
+					.join("\n"),
+				0,
+				0,
+			),
+		);
+	}
+	return container;
+}
+
+function formatTaskRecordResult(record: PaneTaskRecord, verbose = false): string {
+	const files = record.filesChanged?.length ? record.filesChanged.map((file) => `- ${file}`).join("\n") : "None reported";
+	const validation = record.validation?.length ? record.validation.map((item) => `- ${item}`).join("\n") : "None reported";
+	const lines = [
+		`# Subagent result: ${record.agent}`,
+		"",
+		`| Field | Value |`,
+		`| --- | --- |`,
+		`| Status | ${record.status} |`,
+		`| Task ID | \`${record.taskId}\` |`,
+		record.paneId ? `| Pane | \`${record.paneId}\` |` : "",
+		`| Created | ${record.createdAt} |`,
+		record.completedAt ? `| Completed | ${record.completedAt} |` : "",
+		"",
+		"## Task",
+		record.task || "(task text unavailable)",
+		"",
+		"## Summary",
+		record.summary || "No summary yet.",
+		"",
+		"## Files Changed",
+		files,
+		"",
+		"## Validation",
+		validation,
+		record.notes ? `\n## Notes\n${record.notes}` : "",
+	];
+	const artifactLines = [
+		record.outboxFile ? `Expected completion file: ${verbose ? record.outboxFile : compactPath(record.outboxFile)}` : "",
+		record.completionSourcePath ? `Completion source: ${verbose ? record.completionSourcePath : compactPath(record.completionSourcePath)}` : "",
+		record.completionArchivePath ? `Completion archive: ${verbose ? record.completionArchivePath : compactPath(record.completionArchivePath)}` : "",
+		record.transcriptPath ? `Transcript: ${verbose ? record.transcriptPath : compactPath(record.transcriptPath)}` : "",
+		record.inboxFile ? `Inbox file: ${verbose ? record.inboxFile : compactPath(record.inboxFile)}` : "",
+	].filter(Boolean);
+	if (artifactLines.length > 0) lines.push("", verbose ? "## Artifacts" : "## Artifact paths", ...artifactLines);
+	return lines.filter(Boolean).join("\n");
+}
+
+interface GetSubagentResultDetails {
+	agent?: string;
+	paneId?: string;
+	summary?: string;
+	status?: PaneTaskStatus;
+	taskId?: string;
+	notes?: string;
+}
+
+interface SteerSubagentDetails {
+	agent: string;
+	bridge: boolean;
+	bridgePid?: string;
+	bridgeSocket?: string;
+	deliverAs: string;
+	fallbackFile?: string;
+	paneId: string;
+	runtimeRoot: string;
+	sessionFile: string;
+	taskId?: string;
+}
+
+function bridgeTargetArgs(metadata: BridgeMetadata): string[] {
+	if (metadata.socket) return ["--socket", metadata.socket];
+	if (metadata.pid) return ["--pid", metadata.pid];
+	return [];
+}
+
+function renderToolTarget(value: string | undefined, theme: Theme, fallback = "target"): string {
+	return theme.fg("accent", value && value.trim() ? value : fallback);
+}
+
+function getSubagentTargetLabel(args: { agent?: string; taskId?: string }): string {
+	if (args.agent) return `${args.agent} result`;
+	if (args.taskId) return `task ${oneLinePreview(args.taskId, 28)} result`;
+	return "subagent result";
+}
+
+function steerDiagnostics(details: SteerSubagentDetails): string[] {
+	return [
+		`Target agent: ${details.agent}`,
+		details.taskId ? `Task ID: ${details.taskId}` : "Task ID: (not specified)",
+		`Pane: ${details.paneId}`,
+		`Delivery: ${details.deliverAs}`,
+		`Bridge: ${details.bridge ? "exact child session" : "not used"}`,
+		details.bridgePid ? `Bridge PID: ${details.bridgePid}` : "Bridge PID: (none)",
+		details.bridgeSocket ? `Bridge socket: ${details.bridgeSocket}` : "Bridge socket: (none)",
+		`Child session file: ${details.sessionFile}`,
+		`Runtime root: ${details.runtimeRoot}`,
+		details.fallbackFile ? `Inbox fallback: ${details.fallbackFile}` : "",
+	].filter(Boolean);
+}
+
+async function queueSteeringFallback(runtimeRoot: string, agentName: string, message: string): Promise<string> {
+	const steeringId = createTaskId(`${agentName}-steer`);
+	const filePath = path.join(inboxDir(runtimeRoot, agentName), `${safeFileName(steeringId)}.md`);
+	const content = formatSteeringForChild(agentName, message, false);
+	await fs.promises.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
+	await fs.promises.writeFile(filePath, content, { encoding: "utf-8", mode: 0o600 });
+	return filePath;
+}
+
+function formatSteeringForChild(agentName: string, message: string, liveBridge: boolean): string {
+	return [`Steering update for ${agentName}${liveBridge ? " (live bridge)" : " (queued fallback)"}:`, "", message.trim()].join("\n");
+}
+
 export default function (pi: ExtensionAPI) {
 	const guard = pi as unknown as Record<PropertyKey, unknown>;
 	if (guard[INSTALL_SYMBOL]) return;
@@ -1753,16 +2565,109 @@ export default function (pi: ExtensionAPI) {
 	let childTitlePoller: ReturnType<typeof setInterval> | undefined;
 	let childPollInFlight = false;
 	let childCurrentTaskFile: string | undefined;
+	let agentCommandCompletions: Array<{ value: string; label: string; description: string; pane: boolean }> = [];
+
+	const refreshAgentCommandCompletions = (ctx: ExtensionContext) => {
+		try {
+			agentCommandCompletions = discoverAgents(ctx.cwd, "both").agents.map((agent) => ({
+				value: agent.name,
+				label: agent.name,
+				description: `${agent.source}${agent.pane ? " · pane" : ""}${agent.description ? ` · ${agent.description}` : ""}`,
+				pane: agent.pane === true,
+			}));
+		} catch {
+			agentCommandCompletions = [];
+		}
+	};
+
+	const agentsArgumentCompletions = (prefix: string) => {
+		const raw = prefix.trimStart();
+		const parts = raw.split(/\s+/).filter(Boolean);
+		const first = parts[0]?.toLowerCase() ?? "";
+		if (parts.length <= 1 && !raw.endsWith(" ")) {
+			const topLevel = [
+				{ value: "show ", label: "show <name>", description: "Inspect an agent" },
+				{ value: "start ", label: "start <name>", description: "Start or reuse a persistent pane" },
+				{ value: "send ", label: "send <name> <task>", description: "Queue a task for a persistent pane" },
+				{ value: "attach ", label: "attach <name>", description: "Focus an existing agent pane" },
+				{ value: "stop ", label: "stop <name>", description: "Stop an agent pane" },
+				{ value: "status", label: "status", description: "Show persistent pane status" },
+				{ value: "collect", label: "collect", description: "Collect completed pane results" },
+				{ value: "user", label: "user", description: "Browse user-level agents" },
+				{ value: "project", label: "project", description: "Browse project agents" },
+				{ value: "both", label: "both", description: "Browse user and project agents" },
+			];
+			const filtered = topLevel.filter((item) => item.value.trim().startsWith(first) || item.label.startsWith(first));
+			return filtered.length > 0 ? filtered : null;
+		}
+		if (["show", "start", "send", "attach", "stop"].includes(first)) {
+			if (parts.length > 2 || (parts.length === 2 && raw.endsWith(" "))) return null;
+			const rest = parts[1]?.toLowerCase() ?? "";
+			const needsPane = first !== "show";
+			const suffix = first === "send" ? " " : "";
+			const filtered = agentCommandCompletions
+				.filter((agent) => (!needsPane || agent.pane) && (!rest || agent.value.toLowerCase().startsWith(rest)))
+				.slice(0, 20)
+				.map((agent) => ({ value: `${first} ${agent.value}${suffix}`, label: agent.label, description: agent.description }));
+			return filtered.length > 0 ? filtered : null;
+		}
+		return null;
+	};
 
 	pi.registerMessageRenderer("subagent-agents", (message, _options, _theme) => {
 		return new Text(message.content, 0, 0);
 	});
 
-	pi.registerMessageRenderer("subagent-completion", (message, _options, _theme) => {
-		return new Text(message.content, 0, 0);
+	pi.registerMessageRenderer("subagent-completion", (message, options, theme) => {
+		return renderPaneCompletionMessage(message as { content: string; details?: unknown }, options as { expanded?: boolean } | undefined, theme);
+	});
+
+	pi.registerTool({
+		renderShell: "self",
+		name: "complete_subagent",
+		label: "Complete Subagent Task",
+		description: "Child-pane-only helper that writes the persistent subagent completion record without exposing outbox JSON mechanics in the visible pane.",
+		parameters: CompleteSubagentParams,
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			if (!childAgentName) return { content: [{ type: "text", text: "complete_subagent is only available inside a persistent subagent pane." }], isError: true };
+			if (!childCurrentTaskFile) return { content: [{ type: "text", text: "No active subagent task file is being processed." }], isError: true };
+			const taskId = path.basename(childCurrentTaskFile, path.extname(childCurrentTaskFile));
+			const runtimeRoot = runtimeDirForContext(ctx);
+			const outboxFile = completionPath(runtimeRoot, childAgentName, taskId);
+			const completion = {
+				agent: childAgentName,
+				taskId,
+				status: params.status,
+				summary: params.summary,
+				filesChanged: params.filesChanged ?? [],
+				validation: params.validation ?? [],
+				...(params.notes ? { notes: params.notes } : {}),
+			};
+			await fs.promises.mkdir(path.dirname(outboxFile), { recursive: true, mode: 0o700 });
+			await fs.promises.writeFile(outboxFile, JSON.stringify(completion, null, 2), { encoding: "utf-8", mode: 0o600 });
+			return {
+				content: [{ type: "text", text: `Completed ${childAgentName} task ${taskId} (${params.status}).` }],
+				details: { agent: childAgentName, taskId, status: params.status, outboxFile },
+			};
+		},
+		renderCall(args, theme, context) {
+			const status = args?.status ?? "completed";
+			const prefix = !context?.executionStarted || context?.isPartial ? theme.fg("accent", "● ") : theme.fg(context?.isError ? "error" : "success", "● ");
+			return new Text(`${prefix}${theme.fg("toolTitle", theme.bold("Complete subagent"))}${theme.fg("muted", ` · ${status}`)}`, 0, 0);
+		},
+		renderResult(result, { expanded }, theme, context) {
+			const raw = result.content?.find?.((part: any) => part?.type === "text")?.text ?? "";
+			const details = result.details as { agent?: string; taskId?: string; status?: string; outboxFile?: string } | undefined;
+			if (context?.isError) return new Text(`${theme.fg("error", "✗")} ${theme.fg("toolTitle", "Subagent completion failed")}\n${theme.fg("muted", raw)}`, 0, 0);
+			if (expanded && details?.outboxFile) return new Text(`${theme.fg("success", "✓")} ${theme.fg("toolTitle", theme.bold("Subagent completion written"))}\n${theme.fg("dim", `Outbox: ${compactPath(details.outboxFile)}`)}`, 0, 0);
+			const agent = details?.agent ? ` ${details.agent}` : "";
+			const task = details?.taskId ? theme.fg("dim", ` · ${shortTaskId(details.taskId)}`) : "";
+			return new Text(`${theme.fg("success", "✓")} ${theme.fg("toolTitle", theme.bold(`completed${agent}`))}${task}`, 0, 0);
+		},
 	});
 
 	pi.on("session_start", async (_event, ctx) => {
+		refreshAgentCommandCompletions(ctx);
 		if (completionPoller) clearInterval(completionPoller);
 		if (childInboxPoller) clearInterval(childInboxPoller);
 		if (childTitlePoller) clearInterval(childTitlePoller);
@@ -1847,7 +2752,8 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("agents", {
-		description: "List/show/manage subagents. Usage: /agents, /agents show <name>, /agents start|send|attach|stop|status|collect ...",
+		description: "Subagent browser and persistent pane manager.",
+		getArgumentCompletions: agentsArgumentCompletions,
 		handler: async (args, ctx) => {
 			const parts = args.trim().split(/\s+/).filter(Boolean);
 			const scopes = new Set<AgentScope>(["user", "project", "both"]);
@@ -1867,7 +2773,19 @@ export default function (pi: ExtensionAPI) {
 					const agent = findAgent(parts[1]);
 					if (!agent) throw new Error(`Unknown agent: ${parts[1] ?? "(missing)"}`);
 					if (!agent.pane) throw new Error(`Agent ${agent.name} is not configured for persistent panes. Add \`pane: true\` to its frontmatter to enable.`);
+					const beforeRegistry = await readPaneRegistry(runtimeRoot);
+					const before = beforeRegistry[agent.name];
+					const hadLivePane = Boolean(before && (await paneExists(before.paneId)));
 					const pane = await ensurePersistentPane(runtimeRoot, parentSessionId, ctx.cwd, agent, parentModel, parentThinkingLevel);
+					if (!hadLivePane) {
+						emitSubagentEvent(pi, "subagents:created", {
+							mode: "pane",
+							agent: agent.name,
+							paneId: pane.paneId,
+							runtimeRoot,
+							transcriptPath: pane.sessionFile,
+						});
+					}
 					content = `Started/reused ${agent.name} in ${pane.paneId} (${pane.windowName}).\nSession: ${pane.sessionFile}`;
 				} else if (command === "send") {
 					const agent = findAgent(parts[1]);
@@ -1875,23 +2793,8 @@ export default function (pi: ExtensionAPI) {
 					if (!agent.pane) throw new Error(`Agent ${agent.name} is not configured for persistent panes. Add \`pane: true\` to its frontmatter to enable.`);
 					const task = parts.slice(2).join(" ").trim();
 					if (!task) throw new Error("Usage: /agents send <name> <task>");
-					const pane = await ensurePersistentPane(runtimeRoot, parentSessionId, ctx.cwd, agent, parentModel, parentThinkingLevel);
-					const taskId = createTaskId(agent.name);
-					const outboxFile = completionPath(runtimeRoot, agent.name, taskId);
-					await fs.promises.mkdir(path.dirname(outboxFile), { recursive: true, mode: 0o700 });
-					const taskFile = path.join(inboxDir(runtimeRoot, agent.name), `${safeFileName(taskId)}.md`);
-					await fs.promises.mkdir(path.dirname(taskFile), { recursive: true, mode: 0o700 });
-					await fs.promises.writeFile(taskFile, buildDelegation(agent, task, outboxFile, taskId), {
-						encoding: "utf-8",
-						mode: 0o600,
-					});
-					const registry = await readPaneRegistry(runtimeRoot);
-					if (registry[agent.name]) {
-						registry[agent.name].lastTaskAt = new Date().toISOString();
-						registry[agent.name].lastTaskId = taskId;
-						await writePaneRegistry(runtimeRoot, registry);
-					}
-					content = `Queued task ${taskId} for ${agent.name} in ${pane.paneId} (${pane.windowName}).\nInbox file: ${taskFile}\nCompletion file: ${outboxFile}`;
+					const queued = await queuePersistentPaneTask(runtimeRoot, parentSessionId, ctx.cwd, agent, task, undefined, parentModel, parentThinkingLevel, pi);
+					content = `Queued ${agent.name} task ${queued.taskId} in pane ${queued.pane.paneId}.\nArtifacts: inbox=${compactPath(queued.taskFile)} completion=${compactPath(queued.outboxFile)} transcript=${compactPath(queued.pane.sessionFile)}`;
 				} else if (command === "attach") {
 					const registry = await readPaneRegistry(runtimeRoot);
 					const entry = registry[parts[1] ?? ""];
@@ -1927,7 +2830,7 @@ export default function (pi: ExtensionAPI) {
 					} else if (scopes.has(command as AgentScope)) {
 						scope = command as AgentScope;
 					} else if (command) {
-						showName = command;
+						throw new Error(`Unknown /agents action: ${command}`);
 					}
 
 					if (ctx.hasUI) {
@@ -1984,6 +2887,186 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
+	pi.registerTool({
+		renderShell: "self",
+		name: "get_subagent_result",
+		label: "Get Subagent Result",
+		description: "Retrieve status/results for persistent pane subagent tasks by taskId or latest agent task. This is a recovery/status tool for pane tasks and does not change Flightdeck or Orchestration ownership.",
+		parameters: GetSubagentResultParams,
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			if (!params.taskId && !params.agent) {
+				return {
+					content: [{ type: "text", text: "Provide either taskId or agent." }],
+					details: {} satisfies GetSubagentResultDetails,
+					isError: true,
+				};
+			}
+			const runtimeRoot = sessionRuntimeDir(runtimeSessionId(ctx));
+			const deadline = Date.now() + Math.max(0, Math.floor(params.timeoutMs ?? 30000));
+			let record: PaneTaskRecord | undefined;
+			do {
+				await pollPaneCompletions(runtimeRoot, pi, false);
+				const records = await readTaskRegistry(runtimeRoot);
+				record = params.taskId ? records[params.taskId] : latestTaskRecord(records, params.agent);
+				if (!params.wait || (record && ["completed", "blocked", "failed"].includes(record.status))) break;
+				if (Date.now() >= deadline) break;
+				await delay(500);
+			} while (true);
+
+			if (!record) {
+				const selector = params.taskId ? `taskId ${params.taskId}` : `agent ${params.agent}`;
+				return { content: [{ type: "text", text: `No persistent subagent task record found for ${selector}.` }], details: { agent: params.agent, taskId: params.taskId } satisfies GetSubagentResultDetails, isError: true };
+			}
+			return {
+				content: [{ type: "text", text: formatTaskRecordResult(record, params.verbose ?? false) }],
+				details: { agent: record.agent, paneId: record.paneId, summary: record.summary, status: record.status, taskId: record.taskId, notes: record.notes } satisfies GetSubagentResultDetails,
+			};
+		},
+		renderCall(args, theme, context) {
+			const label = getSubagentTargetLabel(args ?? {});
+			const wait = args?.wait ? theme.fg("muted", " · waiting") : "";
+			const prefix = !context?.executionStarted || context?.isPartial ? theme.fg("accent", "● ") : theme.fg(context?.isError ? "error" : "success", "● ");
+			return new Text(`${prefix}${theme.fg("toolTitle", theme.bold("Get "))}${renderToolTarget(label, theme)}${wait}`, 0, 0);
+		},
+		renderResult(result, { expanded }, theme, context) {
+			const raw = result.content?.find?.((part: any) => part?.type === "text")?.text ?? "";
+			const details = result.details as GetSubagentResultDetails | undefined;
+			const status = details?.status ? theme.fg(details.status === "completed" ? "success" : details.status === "failed" ? "error" : "warning", details.status) : undefined;
+			if (context?.isError) return new Text(`${theme.fg("error", "✗")} ${theme.fg("toolTitle", "Subagent result lookup failed")}\n${theme.fg("muted", raw)}`, 0, 0);
+			if (expanded && raw.trim()) return new Markdown(raw, 0, 0, getMarkdownTheme());
+			const target = details?.agent ? details.agent : "subagent";
+			const suffix = [status, details?.paneId ? theme.fg("dim", `pane ${details.paneId}`) : "", details?.taskId ? theme.fg("dim", shortTaskId(details.taskId)) : ""].filter(Boolean).join(" · ");
+			const lines = [`${theme.fg("success", "✓")} ${theme.fg("toolTitle", theme.bold(target))}${suffix ? ` ${theme.fg("dim", "·")} ${suffix}` : ""}`];
+			if (details?.summary) lines.push(`  ${theme.fg("toolOutput", oneLinePreview(details.summary, 120))}`);
+			if (details?.notes) {
+				const marker = details.notes.split(/\r?\n/).find((line) => /(?:PANE_|STEER_|_OK\b)/.test(line));
+				if (marker) lines.push(`  ${theme.fg("toolOutput", oneLinePreview(marker, 120))}`);
+			}
+			return new Text(lines.join("\n"), 0, 0);
+		},
+	});
+
+	pi.registerTool({
+		renderShell: "self",
+		name: "steer_subagent",
+		label: "Steer Subagent",
+		description: "Send a steering message to a persistent pane subagent via pi-session-bridge. Bridge targeting is limited to an exact child session-file match under this parent session runtime; otherwise an explicit inbox fallback is queued instead of targeting by cwd.",
+		parameters: SteerSubagentParams,
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const runtimeRoot = sessionRuntimeDir(runtimeSessionId(ctx));
+			const records = await readTaskRegistry(runtimeRoot);
+			let agentName = params.agent;
+			let record: PaneTaskRecord | undefined;
+			if (params.taskId) {
+				record = records[params.taskId];
+				if (!record && !agentName) return { content: [{ type: "text", text: `No task record found for ${params.taskId}; provide agent to steer directly.` }], isError: true };
+				agentName = agentName ?? record?.agent;
+			}
+			if (!agentName) return { content: [{ type: "text", text: "Provide either agent or taskId." }], isError: true };
+
+			const registry = await readPaneRegistry(runtimeRoot);
+			const entry = registry[agentName];
+			if (!entry) return { content: [{ type: "text", text: `No persistent pane registry entry for ${agentName} in runtime ${runtimeRoot}.` }], isError: true };
+			if (!paneSessionBelongsToRuntime(runtimeRoot, entry)) return { content: [{ type: "text", text: `Refusing to steer ${agentName}: pane session file is outside this runtime. Session: ${entry.sessionFile}. Runtime: ${runtimeRoot}` }], isError: true };
+			if (!(await paneExists(entry.paneId))) return { content: [{ type: "text", text: `Pane ${entry.paneId} for ${agentName} is not live.` }], isError: true };
+
+			const deliverAs = params.deliverAs ?? "steer";
+			const metadata = await ensurePaneBridgeMetadata(runtimeRoot, entry);
+			const bridgeBin = metadata ? await resolvePiBridgeBin() : undefined;
+			const targetArgs = metadata ? bridgeTargetArgs(metadata) : [];
+			const baseDetails = {
+				agent: agentName,
+				bridge: Boolean(bridgeBin && targetArgs.length > 0),
+				bridgePid: metadata?.pid,
+				bridgeSocket: metadata?.socket,
+				deliverAs,
+				paneId: entry.paneId,
+				runtimeRoot,
+				sessionFile: entry.sessionFile,
+				taskId: params.taskId ?? record?.taskId,
+			} satisfies SteerSubagentDetails;
+
+			if (bridgeBin && targetArgs.length > 0) {
+				const command = deliverAs === "follow-up" ? "follow-up" : deliverAs === "send" ? "send" : "steer";
+				const args = [command, ...targetArgs];
+				if (command === "send") args.push("--auto");
+				args.push(formatSteeringForChild(agentName, params.message, true));
+				const result = await execCapture(bridgeBin, args, { cwd: entry.cwd });
+				if (result.code === 0) {
+					emitSubagentEvent(pi, "subagents:steered", {
+						mode: "pane",
+						agent: agentName,
+						taskId: params.taskId ?? record?.taskId,
+						paneId: entry.paneId,
+						bridge: true,
+						bridgePid: metadata?.pid,
+						bridgeSocket: metadata?.socket,
+						deliverAs,
+						runtimeRoot,
+						transcriptPath: entry.sessionFile,
+					});
+					return {
+						content: [{ type: "text", text: [`Steered ${agentName} via exact child pi-session-bridge (${deliverAs}).`, ...steerDiagnostics(baseDetails)].join("\n") }],
+						details: baseDetails,
+					};
+				}
+				const fallbackFile = await queueSteeringFallback(runtimeRoot, agentName, params.message);
+				const details = { ...baseDetails, bridge: false, fallbackFile } satisfies SteerSubagentDetails;
+				emitSubagentEvent(pi, "subagents:steered", {
+					mode: "pane",
+					agent: agentName,
+					taskId: params.taskId ?? record?.taskId,
+					paneId: entry.paneId,
+					bridge: false,
+					deliverAs,
+					runtimeRoot,
+					transcriptPath: entry.sessionFile,
+				});
+				return {
+					content: [{ type: "text", text: [`Exact child bridge was found for ${agentName}, but pi-bridge ${command} failed (exit ${result.code}); queued inbox fallback instead.`, result.stderr || result.stdout ? `Bridge output: ${(result.stderr || result.stdout).trim()}` : "", ...steerDiagnostics(details)].filter(Boolean).join("\n") }],
+					details,
+				};
+			}
+
+			const fallbackFile = await queueSteeringFallback(runtimeRoot, agentName, params.message);
+			const details = { ...baseDetails, bridge: false, fallbackFile } satisfies SteerSubagentDetails;
+			emitSubagentEvent(pi, "subagents:steered", {
+				mode: "pane",
+				agent: agentName,
+				taskId: params.taskId ?? record?.taskId,
+				paneId: entry.paneId,
+				bridge: false,
+				deliverAs,
+				runtimeRoot,
+				transcriptPath: entry.sessionFile,
+			});
+			return {
+				content: [
+					{
+						type: "text",
+						text: [`Exact child bridge not found for ${agentName}; no bridge message was sent. Queued inbox fallback instead, which is not true mid-run steering and will be read when the pane is idle.`, ...steerDiagnostics(details)].join("\n"),
+					},
+				],
+				details,
+			};
+		},
+		renderCall(args, theme, context) {
+			const agent = args?.agent ?? (args?.taskId ? `task ${oneLinePreview(args.taskId, 28)}` : "subagent");
+			const mode = args?.deliverAs ?? "steer";
+			const prefix = !context?.executionStarted || context?.isPartial ? theme.fg("accent", "● ") : theme.fg(context?.isError ? "error" : "success", "● ");
+			return new Text(`${prefix}${theme.fg("toolTitle", theme.bold("Steer "))}${renderToolTarget(agent, theme)}${theme.fg("muted", ` · ${mode}`)}`, 0, 0);
+		},
+		renderResult(result, { expanded }, theme, context) {
+			const raw = result.content?.find?.((part: any) => part?.type === "text")?.text ?? "";
+			const details = result.details as SteerSubagentDetails | undefined;
+			if (context?.isError) return new Text(`${theme.fg("error", "✗")} ${theme.fg("toolTitle", "Steer subagent failed")}\n${theme.fg("muted", raw)}`, 0, 0);
+			if (!details) return new Text(raw, 0, 0);
+			if (expanded) return new Text(raw, 0, 0);
+			const status = details.bridge ? theme.fg("success", "exact child bridge") : theme.fg("warning", "inbox fallback");
+			return new Text(`${theme.fg(details.bridge ? "success" : "warning", details.bridge ? "✓" : "◐")} ${theme.fg("toolTitle", theme.bold(`steered ${details.agent}`))} via ${status}${theme.fg("dim", ` · pane ${details.paneId}`)}`, 0, 0);
+		},
+	});
+
 	pi.on("before_agent_start", (event, ctx) => {
 		if (!pi.getActiveTools().includes("subagent")) return;
 
@@ -2000,7 +3083,7 @@ export default function (pi: ExtensionAPI) {
 			.join("\n");
 
 		return {
-			systemPrompt: `${event.systemPrompt}\n\n## Project Subagents\nUse the \`subagent\` tool when isolated context, specialist review, reconnaissance, planning, or parallel read-only investigation would help. Project-local agents are loaded from .pi/agents, with .claude/agents as a compatibility source. Agents with \`pane=true\` run in persistent tmux panes and can also be managed with \`/agents start|send|attach|stop|status\`. Available project subagents:\n${agentLines}\n\nDefault \`agentScope\` is \"project\". Use \"both\" only when user-level agents are explicitly needed.`,
+			systemPrompt: `${event.systemPrompt}\n\n## Project Subagents\nUse the \`subagent\` tool when isolated context, specialist review, reconnaissance, planning, or parallel read-only investigation would help. Project-local agents are loaded from .pi/agents, with .claude/agents as a compatibility source. Agents with \`pane=true\` run in persistent tmux panes and can also be managed with \`/agents start|send|attach|stop|status\`. For persistent panes, save the returned taskId, use \`get_subagent_result\` to recover missed completions, and use \`steer_subagent\` only for mid-run correction. Available project subagents:\n${agentLines}\n\nDefault \`agentScope\` is \"project\". Use \"both\" only when user-level agents are explicitly needed.`,
 		};
 	});
 
@@ -2125,9 +3208,11 @@ export default function (pi: ExtensionAPI) {
 								parentModel,
 								parentThinkingLevel,
 								i + 1,
+								pi,
 							)
 						: await runSingleAgent(
 								ctx.cwd,
+								runtimeRoot,
 								agents,
 								step.agent,
 								taskWithContext,
@@ -2135,6 +3220,7 @@ export default function (pi: ExtensionAPI) {
 								parentModel,
 								parentThinkingLevel,
 								i + 1,
+								pi,
 								signal,
 								chainUpdate,
 								makeDetails("chain"),
@@ -2251,9 +3337,11 @@ export default function (pi: ExtensionAPI) {
 								parentModel,
 								parentThinkingLevel,
 								undefined,
+								pi,
 							)
 						: await runSingleAgent(
 								ctx.cwd,
+								runtimeRoot,
 								agents,
 								t.agent,
 								t.task,
@@ -2261,6 +3349,7 @@ export default function (pi: ExtensionAPI) {
 								parentModel,
 								parentThinkingLevel,
 								undefined,
+								pi,
 								signal,
 								// Per-task update callback
 								(partial) => {
@@ -2320,9 +3409,11 @@ export default function (pi: ExtensionAPI) {
 							parentModel,
 							parentThinkingLevel,
 							undefined,
+							pi,
 						)
 					: await runSingleAgent(
 							ctx.cwd,
+							runtimeRoot,
 							agents,
 							params.agent,
 							params.task,
@@ -2330,6 +3421,7 @@ export default function (pi: ExtensionAPI) {
 							parentModel,
 							parentThinkingLevel,
 							undefined,
+							pi,
 							signal,
 							onUpdate,
 							makeDetails("single"),
@@ -2362,10 +3454,11 @@ export default function (pi: ExtensionAPI) {
 			};
 		},
 
-		renderCall(args, theme, _context) {
-			const scope: AgentScope = args.agentScope ?? "user";
+		renderCall(args, theme, context) {
+			const cwd = context?.cwd;
+			const scope: AgentScope = args.agentScope ?? "project";
 			const treeLine = (prefix: "├" | "└", name: string, task?: string) =>
-				`${theme.fg("muted", `  ${prefix} `)}${theme.fg("accent", theme.bold(name))}${task ? theme.fg("text", ` (${oneLinePreview(task, 72)})`) : ""}`;
+				`${subagentBranch(theme, prefix, cwd)}${theme.fg("accent", theme.bold(name))}${task ? theme.fg("dim", ` · ${oneLinePreview(task, 48)}`) : ""}`;
 			if (args.chain && args.chain.length > 0) {
 				let text =
 					theme.fg("toolTitle", theme.bold("subagent ")) +
@@ -2396,11 +3489,11 @@ export default function (pi: ExtensionAPI) {
 				for (const [index, task] of shown.entries()) {
 					text += `\n${treeLine(index === shown.length - 1 && tasks.length <= shown.length ? "└" : "├", task.agent, task.task)}`;
 				}
-				if (tasks.length > shown.length) text += `\n${theme.fg("muted", `  └ … +${tasks.length - shown.length} more`)}`;
+				if (tasks.length > shown.length) text += `\n${subagentBranch(theme, "└", cwd)}${theme.fg("muted", `… +${tasks.length - shown.length} more`)}`;
 				return new Text(text, 0, 0);
 			}
 			const agentName = args.agent || "...";
-			const preview = args.task ? (args.task.length > 60 ? `${args.task.slice(0, 60)}...` : args.task) : "...";
+			const preview = args.task ? oneLinePreview(args.task, 56) : "...";
 			let text =
 				theme.fg("toolTitle", theme.bold("subagent ")) +
 				theme.fg("accent", agentName) +
@@ -2410,6 +3503,7 @@ export default function (pi: ExtensionAPI) {
 		},
 
 		renderResult(result, { expanded }, theme, context) {
+			const cwd = context?.cwd;
 			const collapsedItemCount = Math.max(1, Math.floor(settingNumber("collapsedItemCount", COLLAPSED_ITEM_COUNT, context?.cwd)));
 			const details = result.details as SubagentDetails | undefined;
 			if (!details || details.results.length === 0) {
@@ -2421,22 +3515,46 @@ export default function (pi: ExtensionAPI) {
 			const truncationBadge = (r: SingleResult) => (r.truncation?.truncated ? theme.fg("warning", " · truncated") : "");
 			const fullOutputLine = (r: SingleResult) =>
 				r.fullOutputPath
-					? theme.fg("dim", `Full output: ${r.fullOutputPath}`)
+					? theme.fg("dim", `Full output: ${compactPath(r.fullOutputPath)}`)
 					: r.fullOutputError
 						? theme.fg("warning", `Full output unavailable: ${r.fullOutputError}`)
 						: "";
+			const transcriptLine = (r: SingleResult) => (r.transcriptPath ? theme.fg("dim", `Transcript: ${compactPath(r.transcriptPath)}`) : "");
+			const queuedPaneLine = (r: SingleResult) => {
+				if (!r.taskId || !r.paneId) return "";
+				return `${theme.fg("success", "✓")} ${theme.fg("toolTitle", theme.bold(`queued ${r.agent}`))}${theme.fg("dim", ` → pane ${r.paneId} · ${shortTaskId(r.taskId)} · Ctrl+O`)}`;
+			};
+			const finalOutputPreview = (r: SingleResult, maxChars = 96) => {
+				const finalOutput = getFinalOutput(r.messages).trim();
+				if (r.taskId && r.paneId) return theme.fg("dim", `queued → pane ${r.paneId} · ${shortTaskId(r.taskId)}`);
+				return finalOutput ? theme.fg("toolOutput", oneLinePreview(finalOutput, maxChars)) : theme.fg("muted", "(no final response)");
+			};
+			const addFinalResponseMarkdown = (container: Container, finalOutput: string, toolCalls: DisplayItem[]) => {
+				if (!finalOutput.trim()) {
+					container.addChild(new Text(theme.fg("muted", "(no final response)"), 0, 0));
+					return;
+				}
+				if (finalOutputLooksLikeToolEcho(finalOutput, toolCalls)) {
+					container.addChild(new Text(finalResponseSuppressedLine(theme), 0, 0));
+					return;
+				}
+				container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
+			};
 
 			const renderDisplayItems = (items: DisplayItem[], limit?: number) => {
 				const toShow = limit ? items.slice(-limit) : items;
 				const skipped = limit && items.length > limit ? items.length - limit : 0;
 				let text = "";
 				if (skipped > 0) text += theme.fg("muted", `... ${skipped} earlier items\n`);
-				for (const item of toShow) {
+				for (const [index, item] of toShow.entries()) {
+					const branch = subagentBranch(theme, index === toShow.length - 1 ? "└" : "├", cwd);
 					if (item.type === "text") {
 						const preview = expanded ? item.text : item.text.split("\n").slice(0, 3).join("\n");
-						text += `${theme.fg("toolOutput", preview)}\n`;
+						const lines = preview.split(/\r?\n/);
+						text += `${branch}${theme.fg("toolOutput", lines[0] ?? "")}\n`;
+						for (const line of lines.slice(1)) text += `${subagentBranch(theme, "│", cwd)}${theme.fg("toolOutput", line)}\n`;
 					} else {
-						text += `${theme.fg("muted", "→ ") + formatToolCall(item.name, item.args, theme.fg.bind(theme))}\n`;
+						text += `${branch}${formatToolCall(item.name, item.args, theme.fg.bind(theme))}\n`;
 					}
 				}
 				return text.trimEnd();
@@ -2461,28 +3579,24 @@ export default function (pi: ExtensionAPI) {
 					container.addChild(new Text(theme.fg("muted", "─── Task ───"), 0, 0));
 					container.addChild(new Text(theme.fg("dim", r.task), 0, 0));
 					container.addChild(new Spacer(1));
-					container.addChild(new Text(theme.fg("muted", "─── Output ───"), 0, 0));
-					if (displayItems.length === 0 && !finalOutput) {
-						container.addChild(new Text(theme.fg("muted", "(no output)"), 0, 0));
-					} else {
-						for (const item of displayItems) {
-							if (item.type === "toolCall")
-								container.addChild(
-									new Text(
-										theme.fg("muted", "→ ") + formatToolCall(item.name, item.args, theme.fg.bind(theme)),
-										0,
-										0,
-									),
-								);
-						}
-						if (finalOutput) {
-							container.addChild(new Spacer(1));
-							container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
+					const toolCalls = displayItems.filter((item) => item.type === "toolCall");
+					container.addChild(new Text(theme.fg("muted", "─── Tools used ───"), 0, 0));
+					if (toolCalls.length === 0) container.addChild(new Text(theme.fg("muted", "(none)"), 0, 0));
+					else {
+						for (const item of toolCalls) {
+							container.addChild(
+								new Text(theme.fg("muted", "→ ") + formatToolCall(item.name, item.args, theme.fg.bind(theme)), 0, 0),
+							);
 						}
 					}
+					container.addChild(new Spacer(1));
+					container.addChild(new Text(theme.fg("muted", "─── Final response ───"), 0, 0));
+					addFinalResponseMarkdown(container, finalOutput, toolCalls);
 					const outputPath = fullOutputLine(r);
 					if (outputPath) container.addChild(new Text(outputPath, 0, 0));
-					const usageStr = formatUsageStats(r.usage, r.model);
+					const transcript = transcriptLine(r);
+					if (transcript) container.addChild(new Text(transcript, 0, 0));
+					const usageStr = queued ? "" : formatUsageStats(r.usage, r.model);
 					if (usageStr) {
 						container.addChild(new Spacer(1));
 						container.addChild(new Text(theme.fg("dim", usageStr), 0, 0));
@@ -2490,16 +3604,18 @@ export default function (pi: ExtensionAPI) {
 					return container;
 				}
 
-				let text = `${icon} ${theme.fg("toolTitle", theme.bold(r.agent))}${theme.fg("muted", ` (${r.agentSource})`)}`;
+				const queued = queuedPaneLine(r);
+				let text = queued || `${icon} ${theme.fg("toolTitle", theme.bold(r.agent))}${theme.fg("muted", ` (${r.agentSource})`)}`;
 				if (isError && r.stopReason) text += ` ${theme.fg("error", `[${r.stopReason}]`)}`;
 				text += truncationBadge(r);
-				if (isError && r.errorMessage) text += `\n${theme.fg("error", `Error: ${r.errorMessage}`)}`;
+				if (queued) text += `\n${subagentBranch(theme, "└", cwd)}${theme.fg("dim", "artifacts available in expanded view")}`;
+				else if (isError && r.errorMessage) text += `\n${theme.fg("error", `Error: ${r.errorMessage}`)}`;
 				else if (displayItems.length === 0) text += `\n${theme.fg("muted", "(no output)")}`;
 				else {
 					text += `\n${renderDisplayItems(displayItems, collapsedItemCount)}`;
 					if (displayItems.length > collapsedItemCount) text += `\n${theme.fg("muted", "(Ctrl+O to expand)")}`;
 				}
-				const outputPath = fullOutputLine(r);
+				const outputPath = queued ? "" : fullOutputLine(r);
 				if (outputPath) text += `\n${outputPath}`;
 				const usageStr = formatUsageStats(r.usage, r.model);
 				if (usageStr) text += `\n${theme.fg("dim", usageStr)}`;
@@ -2550,28 +3666,24 @@ export default function (pi: ExtensionAPI) {
 							),
 						);
 						container.addChild(new Text(theme.fg("muted", "Task: ") + theme.fg("dim", r.task), 0, 0));
-
-						// Show tool calls
-						for (const item of displayItems) {
-							if (item.type === "toolCall") {
+						const toolCalls = displayItems.filter((item) => item.type === "toolCall");
+						container.addChild(new Text(theme.fg("muted", "Tools used:"), 0, 0));
+						if (toolCalls.length === 0) container.addChild(new Text(theme.fg("muted", "(none)"), 0, 0));
+						else {
+							for (const item of toolCalls) {
 								container.addChild(
-									new Text(
-										theme.fg("muted", "→ ") + formatToolCall(item.name, item.args, theme.fg.bind(theme)),
-										0,
-										0,
-									),
+									new Text(theme.fg("muted", "→ ") + formatToolCall(item.name, item.args, theme.fg.bind(theme)), 0, 0),
 								);
 							}
 						}
 
-						// Show final output as markdown
-						if (finalOutput) {
-							container.addChild(new Spacer(1));
-							container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
-						}
+						container.addChild(new Text(theme.fg("muted", "Final response:"), 0, 0));
+						addFinalResponseMarkdown(container, finalOutput, toolCalls);
 
 						const outputPath = fullOutputLine(r);
 						if (outputPath) container.addChild(new Text(outputPath, 0, 0));
+						const transcript = transcriptLine(r);
+						if (transcript) container.addChild(new Text(transcript, 0, 0));
 						const stepUsage = formatUsageStats(r.usage, r.model);
 						if (stepUsage) container.addChild(new Text(theme.fg("dim", stepUsage), 0, 0));
 					}
@@ -2598,6 +3710,8 @@ export default function (pi: ExtensionAPI) {
 					else text += `\n${renderDisplayItems(displayItems, 5)}`;
 					const outputPath = fullOutputLine(r);
 					if (outputPath) text += `\n${outputPath}`;
+					const transcript = transcriptLine(r);
+					if (transcript) text += `\n${transcript}`;
 				}
 				const usageStr = formatUsageStats(aggregateUsage(details.results));
 				if (usageStr) text += `\n\n${theme.fg("dim", `Total: ${usageStr}`)}`;
@@ -2622,11 +3736,12 @@ export default function (pi: ExtensionAPI) {
 					(expanded ? "" : theme.fg("muted", " (Ctrl+O to inspect)"));
 				const rowIcon = (r: SingleResult) =>
 					r.exitCode === -1 ? theme.fg("warning", "⏳ ") : r.exitCode === 0 ? theme.fg("success", "✓ ") : theme.fg("error", "✗ ");
+				const nameWidth = Math.min(28, Math.max(0, ...details.results.map((r) => visibleWidth(r.agent))));
 				const treeText = details.results
 					.map((r, index) => {
 						const prefix = index === details.results.length - 1 ? "└" : "├";
-						const task = oneLinePreview(r.task, 72);
-						return `${theme.fg("muted", `  ${prefix} `)}${rowIcon(r)}${theme.fg("accent", theme.bold(r.agent))}${task ? theme.fg("text", ` (${task})`) : ""}${truncationBadge(r)}`;
+						const name = padAnsi(theme.fg("accent", theme.bold(r.agent)), nameWidth);
+						return `${subagentBranch(theme, prefix, cwd)}${rowIcon(r)}${name}  ${finalOutputPreview(r, 100)}${truncationBadge(r)}`;
 					})
 					.join("\n");
 
@@ -2635,24 +3750,32 @@ export default function (pi: ExtensionAPI) {
 					for (const [index, r] of details.results.entries()) {
 						const isLast = index === details.results.length - 1;
 						const branch = isLast ? "└" : "├";
-						const stem = theme.fg("muted", isLast ? "     " : "  │  ");
+						const stem = subagentStem(theme, isLast, cwd);
 						const task = oneLinePreview(r.task, 140);
 						const displayItems = getDisplayItems(r.messages);
 						const toolCalls = displayItems.filter((item) => item.type === "toolCall");
 						const finalOutput = getFinalOutput(r.messages).trim();
 
 						lines.push(
-							`${theme.fg("muted", `  ${branch} `)}${rowIcon(r)}${theme.fg("accent", theme.bold(r.agent))}${task ? theme.fg("text", ` (${task})`) : ""}${truncationBadge(r)}`,
+							`${subagentBranch(theme, branch, cwd)}${rowIcon(r)}${theme.fg("accent", theme.bold(r.agent))}${task ? theme.fg("dim", ` · ${task}`) : ""}${truncationBadge(r)}`,
 						);
+						lines.push(`${stem}${theme.fg("muted", "Tools")}`);
 						if (toolCalls.length > 0) {
-							for (const item of toolCalls) lines.push(`${stem}${theme.fg("muted", "→ ")}${formatToolCall(item.name, item.args, theme.fg.bind(theme))}`);
+							for (const item of toolCalls) lines.push(`${stem}${formatToolCall(item.name, item.args, theme.fg.bind(theme))}`);
+						} else {
+							lines.push(`${stem}${theme.fg("muted", "(none)")}`);
 						}
+						lines.push(`${stem}${theme.fg("muted", "Final")}`);
 						if (finalOutput) {
-							if (toolCalls.length > 0) lines.push(stem);
-							for (const line of finalOutput.split(/\r?\n/)) lines.push(`${stem}${line}`);
+							if (finalOutputLooksLikeToolEcho(finalOutput, toolCalls)) lines.push(`${stem}${finalResponseSuppressedLine(theme)}`);
+							else for (const line of finalOutput.split(/\r?\n/)) lines.push(`${stem}${line}`);
+						} else {
+							lines.push(`${stem}${theme.fg("muted", "(no final response)")}`);
 						}
 						const outputPath = fullOutputLine(r);
 						if (outputPath) lines.push(`${stem}${outputPath}`);
+						const transcript = transcriptLine(r);
+						if (transcript) lines.push(`${stem}${transcript}`);
 						const taskUsage = formatUsageStats(r.usage, r.model);
 						if (taskUsage) lines.push(`${stem}${theme.fg("dim", taskUsage)}`);
 					}
@@ -2674,4 +3797,6 @@ export default function (pi: ExtensionAPI) {
 			return new Text(text?.type === "text" ? text.text : "(no output)", 0, 0);
 		},
 	});
+
+	emitSubagentEvent(pi, "subagents:ready", { mode: "extension" });
 }

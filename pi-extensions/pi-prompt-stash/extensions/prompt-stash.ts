@@ -3,7 +3,7 @@ import {
 	type ExtensionContext,
 	type Theme,
 } from "@mariozechner/pi-coding-agent";
-import { matchesKey, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import { Input, matchesKey, truncateToWidth, visibleWidth, type Focusable } from "@mariozechner/pi-tui";
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -16,8 +16,8 @@ const STORE_VERSION = 1;
 const POPUP_WIDTH = 92;
 const POPUP_MAX_HEIGHT = "80%";
 const LIST_ROWS = 10;
-const PADDING_X = 4;
-const PADDING_Y = 2;
+const PADDING_X = 2;
+const PADDING_Y = 1;
 // Keep the legacy symbol so stale prompt-stash installs and the renamed
 // pi-prompt-stash package do not double-register the same command/shortcut.
 const INSTALL_SYMBOL = Symbol.for("vstack.prompt-stash.installed");
@@ -244,10 +244,6 @@ function searchable(text: string): string {
 	return text.toLowerCase();
 }
 
-function isPrintable(data: string): boolean {
-	return data.length === 1 && data >= " " && data !== "\x7f";
-}
-
 function panelLine(content: string, width: number): string {
 	return padAnsi(content, width);
 }
@@ -277,16 +273,11 @@ function framePopup(lines: string[], width: number, theme: Theme): string[] {
 	return framed.map((line) => truncateToWidth(line, width, ""));
 }
 
-function renderSearchInput(query: string, cursor: number, width: number, theme: Theme): string {
-	const safeWidth = Math.max(1, width);
-	const safeCursor = Math.max(0, Math.min(cursor, query.length));
-	const visibleQuery = query.length === 0 ? theme.fg("dim", "Search") : query;
-	const before = query.length === 0 ? "" : query.slice(0, safeCursor);
-	const cursorChar = query.length === 0 || safeCursor >= query.length ? "▌" : query[safeCursor];
-	const after = query.length === 0 ? visibleQuery : safeCursor < query.length ? query.slice(safeCursor + 1) : "";
-	const cursorGlyph = theme.fg("accent", cursorChar);
-	const raw = `${theme.fg("borderMuted", "▏ ")}${before}${cursorGlyph}${after}`;
-	return theme.bg("toolSuccessBg", padAnsi(raw, safeWidth));
+function renderSearchLine(searchInput: Input, width: number, theme: Theme): string {
+	const label = `${theme.fg("accent", "Search")}: `;
+	const inputWidth = Math.max(1, width - visibleWidth(label));
+	const input = searchInput.render(inputWidth)[0] ?? "";
+	return truncateToWidth(`${label}${input}`, width, "");
 }
 
 function filterItems(items: StashItem[], query: string): StashItem[] {
@@ -310,15 +301,15 @@ async function openStashPopup(ctx: ExtensionContext): Promise<void> {
 	const releaseModalLock = acquireVstackModalLock();
 	let popped: string | null = null;
 	try {
-	popped = await ctx.ui.custom<string | null>(
+		popped = await ctx.ui.custom<string | null>(
 		(tui, theme, _keybindings, done) => {
-			let query = "";
-			let searchCursor = 0;
+			const searchInput = new Input();
+			searchInput.focused = true;
 			let selected = 0;
 			let scroll = 0;
 			let confirmDeleteAll = false;
 
-			const filtered = () => filterItems(items, query);
+			const filtered = () => filterItems(items, searchInput.getValue());
 			const clampSelection = () => {
 				const count = filtered().length;
 				if (count === 0) {
@@ -369,7 +360,7 @@ async function openStashPopup(ctx: ExtensionContext): Promise<void> {
 				lines.push(panelLine(`${title}${" ".repeat(titleGap)}${esc}`, innerWidth));
 				lines.push(panelLine(theme.fg("dim", "Type to search · ↑↓/jk select · enter pop · ctrl+d delete · ctrl+x delete all"), innerWidth));
 				lines.push(panelLine("", innerWidth));
-				lines.push(panelLine(renderSearchInput(query, searchCursor, innerWidth, theme), innerWidth));
+				lines.push(panelLine(renderSearchLine(searchInput, innerWidth, theme), innerWidth));
 				lines.push(panelLine("", innerWidth));
 
 				if (results.length === 0) {
@@ -404,7 +395,13 @@ async function openStashPopup(ctx: ExtensionContext): Promise<void> {
 				return framePopup(lines, width, theme);
 			};
 
-			return {
+			const component: Focusable & { handleInput(data: string): void; invalidate(): void; render(width: number): string[] } = {
+				get focused(): boolean {
+					return searchInput.focused;
+				},
+				set focused(value: boolean) {
+					searchInput.focused = value;
+				},
 				handleInput(data: string) {
 					if (confirmDeleteAll) {
 						if (data === "y" || data === "Y") {
@@ -459,55 +456,28 @@ async function openStashPopup(ctx: ExtensionContext): Promise<void> {
 						tui.requestRender();
 						return;
 					}
-					if (matchesKey(data, "left")) {
-						searchCursor = Math.max(0, searchCursor - 1);
-						tui.requestRender();
-						return;
-					}
-					if (matchesKey(data, "right")) {
-						searchCursor = Math.min(query.length, searchCursor + 1);
-						tui.requestRender();
-						return;
-					}
-					if (matchesKey(data, "home") || matchesKey(data, "ctrl+a")) {
-						searchCursor = 0;
-						tui.requestRender();
-						return;
-					}
-					if (matchesKey(data, "end") || matchesKey(data, "ctrl+e")) {
-						searchCursor = query.length;
-						tui.requestRender();
-						return;
-					}
-					if (matchesKey(data, "backspace")) {
-						if (searchCursor > 0) {
-							query = `${query.slice(0, searchCursor - 1)}${query.slice(searchCursor)}`;
-							searchCursor -= 1;
-							selected = 0;
-							clampSelection();
-							tui.requestRender();
-						}
-						return;
-					}
 					if (matchesKey(data, "ctrl+u")) {
-						query = "";
-						searchCursor = 0;
+						searchInput.setValue("");
 						selected = 0;
 						clampSelection();
 						tui.requestRender();
 						return;
 					}
-					if (isPrintable(data)) {
-						query = `${query.slice(0, searchCursor)}${data}${query.slice(searchCursor)}`;
-						searchCursor += data.length;
+
+					const before = searchInput.getValue();
+					searchInput.handleInput(data);
+					if (searchInput.getValue() !== before) {
 						selected = 0;
 						clampSelection();
-						tui.requestRender();
 					}
+					tui.requestRender();
 				},
-				invalidate() {},
+				invalidate() {
+					searchInput.invalidate();
+				},
 				render,
 			};
+			return component;
 		},
 		{
 			overlay: true,
@@ -517,7 +487,7 @@ async function openStashPopup(ctx: ExtensionContext): Promise<void> {
 				width: Math.max(40, Math.floor(settingNumber("popupWidth", POPUP_WIDTH, ctx.cwd))),
 			},
 		},
-	);
+		);
 	} finally {
 		releaseModalLock();
 	}

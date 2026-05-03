@@ -32,12 +32,35 @@ const DEFAULT_COMPACTION_MAX_TOKENS = 8192;
 const DEFAULT_IDLE_COMPACTION_THRESHOLD_TOKENS = 200000;
 const DEFAULT_IDLE_COMPACTION_SECONDS = 300;
 const DEFAULT_PERMISSION_GATE_COMMANDS = "rm -Rf";
+const DEFAULT_PERMISSION_GATE_PREVIEW_LINES = 12;
+const DEFAULT_PERMISSION_GATE_PREVIEW_CHARS = 1200;
+const DEFAULT_PERMISSION_GATE_PREVIEW_LINE_WIDTH = 120;
 const DEFAULT_SESSION_SEARCH_LIMIT = 40;
 const DEFAULT_SESSION_SEARCH_PREVIEW_SNIPPETS = 6;
 const DEFAULT_SESSION_SEARCH_SHORTCUT = "f3";
 const DEFAULT_SESSION_SEARCH_SUMMARY_INPUT_CHARS = 180_000;
 const DEFAULT_SESSION_SEARCH_SUMMARY_MAX_TOKENS = 4096;
 const DEFAULT_SESSION_SEARCH_CACHE_TTL_SECONDS = 45;
+const DEFAULT_AUTO_RENAME_MODEL = "openai-codex/gpt-5.4-mini";
+const DEFAULT_AUTO_RENAME_FALLBACK_MODEL = "current";
+const DEFAULT_AUTO_RENAME_INPUT_CHARS = 2000;
+const DEFAULT_AUTO_RENAME_NAME_CHARS = 80;
+const DEFAULT_AUTO_RENAME_MAX_TOKENS = 96;
+const DEFAULT_AUTO_RENAME_TIMEOUT_MS = 12_000;
+
+const AUTO_RENAME_SYSTEM_PROMPT = "You create short, descriptive session names for coding-agent chats. Use 2-6 words in Title Case. Respond with only the name, no quotes, explanations, markdown, emoji, or trailing punctuation.";
+
+const DEFAULT_AUTO_RENAME_PROMPT = `Generate a short, descriptive title for this Pi coding-agent session based on the first user message.
+
+Rules:
+- Use 2-6 words
+- Use Title Case
+- Be specific about the user's task or topic
+- Do not mention Pi unless Pi itself is the task
+- Return only the title
+
+First user message:
+{{message}}`;
 
 const HANDOFF_SYSTEM_PROMPT = `You are a context transfer assistant. Given a conversation history and the user's goal for a new thread, generate a focused prompt that:
 
@@ -122,6 +145,11 @@ function settingStringAllowEmpty(key: string, fallback: string, cwd?: string): s
 	return typeof value === "string" ? value.trim() : fallback;
 }
 
+function newlineFallbackKey(cwd?: string): "ctrl+j" | "none" {
+	const configured = settingString("newlineFallbackKey", "ctrl+j", cwd).toLowerCase();
+	return configured === "none" ? "none" : "ctrl+j";
+}
+
 function settingNumber(key: string, fallback: number, cwd?: string): number {
 	const value = readVstackConfig(cwd)[key];
 	const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
@@ -175,6 +203,40 @@ function installAutocompleteHintStyling(ctx: ExtensionContext): void {
 			return current.shouldTriggerFileCompletion?.(lines, cursorLine, cursorCol) ?? true;
 		},
 	}));
+}
+
+const QOL_ARGUMENT_COMPLETIONS: AutocompleteItem[] = [
+	{ value: "status", label: "status", description: "Show QOL status and current settings" },
+	{ value: "rename", label: "rename", description: "Generate a session name from the first user message" },
+	{ value: "attachments", label: "attachments", description: "List image placeholders and paths in the current draft" },
+	{ value: "collapse", label: "collapse", description: "Collapse image paths in the editor to [Image #N] aliases" },
+	{ value: "notify-test", label: "notify-test", description: "Send a test QOL notification" },
+	{ value: "reset", label: "reset", description: "Clear QOL attachment status and tmux window mark" },
+];
+
+const QOL_RENAME_ARGUMENT_COMPLETIONS: AutocompleteItem[] = [
+	{ value: "rename status", label: "rename status", description: "Show auto-rename status and model settings" },
+	{ value: "rename full", label: "rename full", description: "Generate a session name from the full conversation" },
+];
+
+function getQolArgumentCompletions(prefix: string): AutocompleteItem[] | null {
+	const query = prefix.trimStart().toLowerCase();
+	const items = query.startsWith("rename ") ? QOL_RENAME_ARGUMENT_COMPLETIONS : QOL_ARGUMENT_COMPLETIONS;
+	const filtered = items.filter((item) => item.value.toLowerCase().startsWith(query));
+	return filtered.length > 0 ? filtered : null;
+}
+
+const SESSION_SEARCH_ARGUMENT_COMPLETIONS: AutocompleteItem[] = [
+	{ value: "refresh", label: "refresh", description: "Refresh the session search index" },
+	{ value: "stats", label: "stats", description: "Show session search cache stats" },
+	{ value: "resume ", label: "resume <sessionPath>", description: "Resume a session by path" },
+];
+
+function getSessionSearchArgumentCompletions(prefix: string): AutocompleteItem[] | null {
+	const query = prefix.trimStart().toLowerCase();
+	if (query.startsWith("resume ")) return null;
+	const filtered = SESSION_SEARCH_ARGUMENT_COMPLETIONS.filter((item) => item.value.toLowerCase().startsWith(query) || (item.label ?? item.value).toLowerCase().startsWith(query));
+	return filtered.length > 0 ? filtered : null;
 }
 
 type QolNotificationKind = "ready" | "direction" | "question" | "task-complete" | "critical" | "test";
@@ -267,6 +329,86 @@ function permissionGateMatch(command: string, cwd?: string): string | undefined 
 		if (matcher.pattern.test(command)) return matcher.label;
 	}
 	return undefined;
+}
+
+function boundedSettingNumber(key: string, fallback: number, min: number, max: number, cwd?: string): number {
+	return Math.max(min, Math.min(max, Math.floor(settingNumber(key, fallback, cwd))));
+}
+
+function formatCount(count: number, label: string): string {
+	return `${count.toLocaleString()} ${label}${count === 1 ? "" : "s"}`;
+}
+
+function sanitizePermissionGatePreview(command: string): string {
+	return stripAnsi(command)
+		.replace(/\r\n/g, "\n")
+		.replace(/\r/g, "\n")
+		.replace(/\t/g, "    ")
+		.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "�");
+}
+
+function permissionGateCommandPreview(command: string, cwd?: string): { text: string; totalChars: number; totalLines: number; truncated: boolean } {
+	const maxLines = boundedSettingNumber("permissionGate.previewLines", DEFAULT_PERMISSION_GATE_PREVIEW_LINES, 4, 40, cwd);
+	const maxChars = boundedSettingNumber("permissionGate.previewChars", DEFAULT_PERMISSION_GATE_PREVIEW_CHARS, 200, 5000, cwd);
+	const maxLineWidth = boundedSettingNumber("permissionGate.previewLineWidth", DEFAULT_PERMISSION_GATE_PREVIEW_LINE_WIDTH, 40, 240, cwd);
+	const safeCommand = sanitizePermissionGatePreview(command);
+	const commandLines = safeCommand.split("\n");
+	let selectedLines = commandLines;
+	let omittedLines = 0;
+
+	if (commandLines.length > maxLines) {
+		const headCount = Math.max(1, Math.ceil((maxLines - 1) * 0.65));
+		const tailCount = Math.max(1, maxLines - headCount - 1);
+		omittedLines = Math.max(0, commandLines.length - headCount - tailCount);
+		selectedLines = [
+			...commandLines.slice(0, headCount),
+			`… ${formatCount(omittedLines, "line")} omitted …`,
+			...commandLines.slice(-tailCount),
+		];
+	}
+
+	let widthTruncated = false;
+	const previewLines = selectedLines.map((line) => {
+		if (/^… \d[\d,]* lines? omitted …$/.test(line)) return line;
+		if (visibleWidth(line) > maxLineWidth) widthTruncated = true;
+		return truncateToWidth(line, maxLineWidth, "…");
+	});
+
+	let text = previewLines.join("\n").trimEnd();
+	let charTruncated = false;
+	if (text.length > maxChars) {
+		const marker = `\n… preview clipped to ${formatCount(maxChars, "char")} …\n`;
+		const budget = Math.max(0, maxChars - marker.length);
+		const headChars = Math.ceil(budget * 0.6);
+		const tailChars = Math.max(0, budget - headChars);
+		const tail = tailChars > 0 ? text.slice(-tailChars).trimStart() : "";
+		text = `${text.slice(0, headChars).trimEnd()}${marker}${tail}`;
+		charTruncated = true;
+	}
+
+	return {
+		text: text || "(empty command)",
+		totalChars: command.length,
+		totalLines: commandLines.length,
+		truncated: omittedLines > 0 || widthTruncated || charTruncated,
+	};
+}
+
+function permissionGatePrompt(matched: string, command: string, cwd?: string): string {
+	const preview = permissionGateCommandPreview(command, cwd);
+	const matchedLabel = truncateToWidth(sanitizePermissionGatePreview(matched).replace(/\n+/g, " ").trim() || "configured pattern", DEFAULT_PERMISSION_GATE_PREVIEW_LINE_WIDTH, "…");
+	const commandStats = `${formatCount(preview.totalLines, "line")}, ${formatCount(preview.totalChars, "char")}`;
+	return [
+		`⚠️ Permission gate matched: ${matchedLabel}`,
+		"",
+		`Bash command (${commandStats}${preview.truncated ? "; compact preview" : ""}):`,
+		"```sh",
+		preview.text,
+		"```",
+		...(preview.truncated ? ["Full command is unchanged; only this approval preview was shortened."] : []),
+		"",
+		"Allow this bash command?",
+	].join("\n");
 }
 
 const lastNotificationAt = new Map<string, number>();
@@ -825,7 +967,7 @@ class QolEditor extends CustomEditor {
 	}
 
 	handleInput(data: string): void {
-		const fallback = settingString("newlineFallbackKey", "ctrl+j", this.ctx.cwd);
+		const fallback = newlineFallbackKey(this.ctx.cwd);
 		const newlineEnabled = settingBoolean("newlineOnShiftEnter", true, this.ctx.cwd);
 		const isShiftEnter = matchesKey(data, "shift+enter") || matchesKey(data, "shift+return");
 		const isFallback = fallback !== "none" && matchesKey(data, fallback);
@@ -1309,10 +1451,11 @@ function statusMessage(ctx: ExtensionContext): string {
 	return [
 		"Pi QOL status",
 		`Shift+Enter newline: ${settingBoolean("newlineOnShiftEnter", true, ctx.cwd) ? "enabled" : "disabled"}`,
-		`Fallback newline key: ${settingString("newlineFallbackKey", "ctrl+j", ctx.cwd)}`,
+		`Fallback newline key: ${newlineFallbackKey(ctx.cwd)}`,
 		`Image chips: ${settingBoolean("showImageChips", true, ctx.cwd) ? "filled (placeholders and existing image paths)" : "off"}`,
 		`Image placeholders/paths in draft: ${labels.length ? labels.join(", ") : "none"}`,
 		`Session-name command: ${settingBoolean("enableSessionNameCommand", true, ctx.cwd) ? "enabled" : "disabled"}`,
+		`Auto session rename: ${autoRenameEnabled(ctx.cwd) ? `enabled (${settingString("sessionAutoRename.model", DEFAULT_AUTO_RENAME_MODEL, ctx.cwd)})` : "disabled"}`,
 		`Handoff command: ${settingBoolean("enableHandoffCommand", true, ctx.cwd) ? "enabled" : "disabled"}`,
 		`Handoff prompt review: ${settingBoolean("handoffReviewPrompt", true, ctx.cwd) ? "enabled" : "disabled"}`,
 		`Session search: ${settingBoolean("sessionSearch.enabled", true, ctx.cwd) ? `enabled (/search${searchShortcut ? `, ${searchShortcut}` : ""})` : "disabled"}`,
@@ -1320,7 +1463,7 @@ function statusMessage(ctx: ExtensionContext): string {
 		`Idle compaction: ${settingBoolean("compaction.idleEnabled", false, ctx.cwd) ? `enabled after ${Math.max(1, Math.floor(settingNumber("compaction.idleTimeoutSeconds", DEFAULT_IDLE_COMPACTION_SECONDS, ctx.cwd)))}s idle` : "disabled"}`,
 		`Branch summary override: ${settingBoolean("compaction.branchSummaryEnabled", false, ctx.cwd) ? "enabled" : "disabled"}`,
 		`Notifications: ${settingBoolean("notification.enabled", true, ctx.cwd) ? `enabled (bell=${settingBoolean("notification.bell", true, ctx.cwd)}, native=${settingBoolean("notification.native", true, ctx.cwd)}, tmuxClientTty=${settingBoolean("notification.tmuxNativeClientTty", true, ctx.cwd)}, tmuxMessage=${settingBoolean("notification.tmux", false, ctx.cwd)})` : "disabled"}`,
-		`Permission gate: ${settingBoolean("permissionGate.enabled", true, ctx.cwd) ? `enabled (${permissionGateCommands(ctx.cwd).join(", ") || "none configured"})` : "disabled"}`,
+		`Permission gate: ${settingBoolean("permissionGate.enabled", false, ctx.cwd) ? `enabled (${permissionGateCommands(ctx.cwd).join(", ") || "none configured"}; preview ${boundedSettingNumber("permissionGate.previewLines", DEFAULT_PERMISSION_GATE_PREVIEW_LINES, 4, 40, ctx.cwd)} lines/${boundedSettingNumber("permissionGate.previewChars", DEFAULT_PERMISSION_GATE_PREVIEW_CHARS, 200, 5000, ctx.cwd)} chars)` : "disabled"}`,
 		`Thinking timer: ${settingBoolean("thinkingTimer.enabled", true, ctx.cwd) ? "enabled" : "disabled"}`,
 		"If Shift+Enter still submits, configure your terminal/tmux to send a distinct Shift+Enter sequence or use the fallback key.",
 	].join("\n");
@@ -1531,6 +1674,297 @@ function oneLine(text: string): string {
 		.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, " ")
 		.replace(/\s+/g, " ")
 		.trim();
+}
+
+type AutoRenameFallbackMode = "none" | "truncate" | "words";
+
+interface AutoRenameAuth {
+	apiKey?: string;
+	headers?: Record<string, string>;
+	label: string;
+	model: any;
+	source: string;
+}
+
+function autoRenameEnabled(cwd?: string): boolean {
+	return settingBoolean("sessionAutoRename.enabled", true, cwd);
+}
+
+function autoRenameDebug(ctx: ExtensionContext, message: string, level: "info" | "warning" | "error" = "info"): void {
+	if (ctx.hasUI && settingBoolean("sessionAutoRename.debug", false, ctx.cwd)) ctx.ui.notify(`[auto-rename] ${message}`, level);
+}
+
+function autoRenameNotify(ctx: ExtensionContext, message: string, level: "info" | "warning" | "error" = "info", force = false): void {
+	if (!ctx.hasUI) return;
+	if (force || settingBoolean("sessionAutoRename.notify", false, ctx.cwd) || settingBoolean("sessionAutoRename.debug", false, ctx.cwd)) ctx.ui.notify(`[auto-rename] ${message}`, level);
+}
+
+function firstUserMessageText(branch: SessionEntry[]): string | undefined {
+	for (const entry of branch) {
+		if (entry.type !== "message" || entry.message?.role !== "user") continue;
+		const text = textFromContent(entry.message.content).trim();
+		if (text) return text;
+	}
+	return undefined;
+}
+
+function conversationTranscriptText(branch: SessionEntry[], maxChars: number): string | undefined {
+	const lines: string[] = [];
+	for (const entry of branch) {
+		if (entry.type !== "message") continue;
+		const role = entry.message?.role;
+		if (role !== "user" && role !== "assistant") continue;
+		const text = textFromContent(entry.message.content).trim();
+		if (!text) continue;
+		lines.push(`${role === "user" ? "User" : "Assistant"}: ${text}`);
+	}
+	const transcript = lines.join("\n\n").trim();
+	return transcript ? truncateMiddle(transcript, maxChars) : undefined;
+}
+
+function truncateMiddle(text: string, maxChars: number): string {
+	const max = Math.max(200, Math.floor(maxChars));
+	if (text.length <= max) return text;
+	const marker = "\n[...truncated...]\n";
+	const budget = max - marker.length;
+	if (budget <= 0) return text.slice(0, max);
+	const headBudget = Math.ceil(budget * 0.6);
+	const tailBudget = budget - headBudget;
+	let head = text.slice(0, headBudget);
+	const headSpace = head.lastIndexOf(" ");
+	if (headSpace > headBudget * 0.6) head = head.slice(0, headSpace);
+	let tail = text.slice(text.length - tailBudget);
+	const tailSpace = tail.indexOf(" ");
+	if (tailSpace >= 0 && tailSpace < tailBudget * 0.4) tail = tail.slice(tailSpace + 1);
+	return `${head}${marker}${tail}`;
+}
+
+function clampAutoRenameName(name: string, maxChars: number): string {
+	const max = Math.max(20, Math.floor(maxChars));
+	let cleaned = oneLine(name).replace(/[.!?:;,]+$/g, "").trim();
+	if (cleaned.length <= max) return cleaned;
+	const truncated = cleaned.slice(0, max).trimEnd();
+	const lastSpace = truncated.lastIndexOf(" ");
+	cleaned = lastSpace > max * 0.45 ? truncated.slice(0, lastSpace) : truncated;
+	return cleaned.replace(/[,;:\s]+$/g, "").trim();
+}
+
+function stripAutoRenameThinkTags(text: string): string {
+	return text
+		.replace(/<think>[\s\S]*?<\/think>/gi, "")
+		.replace(/<thinking>[\s\S]*?<\/thinking>/gi, "")
+		.replace(/<think>[\s\S]*/gi, "")
+		.replace(/<thinking>[\s\S]*/gi, "")
+		.trim();
+}
+
+function normalizeAutoRenameCandidate(line: string): string {
+	return line
+		.replace(/<[^>]+>/g, " ")
+		.replace(/^\s*(?:final\s+)?(?:title|name|session\s+name)\s*[:\-]\s*/i, "")
+		.replace(/^[\s\-*>#•]+/, "")
+		.replace(/^\d+[.)]\s*/, "")
+		.replace(/\*\*/g, "")
+		.replace(/`/g, "")
+		.replace(/^["'“”‘’]+|["'“”‘’]+$/g, "")
+		.replace(/\s+/g, " ")
+		.trim();
+}
+
+function looksLikeAutoRenameReasoning(line: string): boolean {
+	if (!line) return true;
+	if (/\b(here'?s|i would|best title|candidate|option|reasoning|analysis|thinking)\b/i.test(line)) return true;
+	if (/[{}<>|]/.test(line)) return true;
+	const words = line.split(/\s+/).filter(Boolean);
+	return words.length === 0 || words.length > 12;
+}
+
+function autoRenameResponseText(response: any): string {
+	const blocks = Array.isArray(response?.content) ? response.content : [];
+	const text = blocks
+		.filter((block: any) => block?.type === "text" && typeof block.text === "string")
+		.map((block: any) => block.text)
+		.join("\n")
+		.trim();
+	if (text) return text;
+	return blocks
+		.filter((block: any) => block?.type === "thinking" && typeof block.thinking === "string")
+		.map((block: any) => block.thinking)
+		.join("\n")
+		.trim();
+}
+
+function sanitizeAutoRenameName(raw: string, maxChars: number): string | undefined {
+	const stripped = stripAutoRenameThinkTags(raw);
+	const lines = stripped
+		.split(/\r?\n/)
+		.map(normalizeAutoRenameCandidate)
+		.filter(Boolean);
+	let name = "";
+	for (let index = lines.length - 1; index >= 0; index -= 1) {
+		if (!looksLikeAutoRenameReasoning(lines[index]!)) {
+			name = lines[index]!;
+			break;
+		}
+	}
+	if (!name && lines.length > 0) name = [...lines].sort((a, b) => a.length - b.length)[0]!;
+	name = clampAutoRenameName(name, maxChars);
+	return name && !looksLikeAutoRenameReasoning(name) ? name : undefined;
+}
+
+function titleCaseWord(word: string): string {
+	return word ? `${word.charAt(0).toUpperCase()}${word.slice(1).toLowerCase()}` : word;
+}
+
+function autoRenameFallbackMode(cwd?: string): AutoRenameFallbackMode {
+	const configured = settingString("sessionAutoRename.fallback", "words", cwd).toLowerCase();
+	return configured === "none" || configured === "truncate" ? configured : "words";
+}
+
+function deterministicAutoRenameName(query: string, cwd?: string): string | undefined {
+	const mode = autoRenameFallbackMode(cwd);
+	if (mode === "none") return undefined;
+	const maxChars = settingNumber("sessionAutoRename.maxNameChars", DEFAULT_AUTO_RENAME_NAME_CHARS, cwd);
+	const cleaned = oneLine(query)
+		.replace(/[`"'“”‘’]/g, "")
+		.replace(/[^\w\s./-]/g, " ")
+		.replace(/\s+/g, " ")
+		.trim();
+	if (!cleaned) return undefined;
+	if (mode === "truncate") return clampAutoRenameName(cleaned, Math.min(maxChars, 50));
+	const words = cleaned.split(/\s+/).filter(Boolean).slice(0, 6).map(titleCaseWord);
+	return clampAutoRenameName(words.join(" "), maxChars);
+}
+
+function autoRenamePrompt(query: string, cwd?: string): string {
+	const maxChars = Math.max(200, Math.floor(settingNumber("sessionAutoRename.maxInputChars", DEFAULT_AUTO_RENAME_INPUT_CHARS, cwd)));
+	const message = truncateMiddle(query, maxChars);
+	const configured = settingStringAllowEmpty("sessionAutoRename.prompt", "", cwd);
+	const template = configured || DEFAULT_AUTO_RENAME_PROMPT;
+	if (template.includes("{{message}}")) return template.split("{{message}}").join(message);
+	return `${template.trim()}\n\nFirst user message:\n${message}`.trim();
+}
+
+function disabledModelSetting(value: string): boolean {
+	const normalized = value.trim().toLowerCase();
+	return !normalized || normalized === "none" || normalized === "off" || normalized === "disabled";
+}
+
+function autoRenameModelSettings(cwd?: string): string[] {
+	const primary = settingString("sessionAutoRename.model", DEFAULT_AUTO_RENAME_MODEL, cwd);
+	const fallback = settingStringAllowEmpty("sessionAutoRename.fallbackModel", DEFAULT_AUTO_RENAME_FALLBACK_MODEL, cwd);
+	const candidates = [primary];
+	if (primary === DEFAULT_AUTO_RENAME_MODEL) candidates.push("openai-codex/gpt-5.3-codex-spark");
+	candidates.push(fallback);
+	return candidates
+		.map((value) => value.trim())
+		.filter((value) => !disabledModelSetting(value))
+		.filter((value, index, all) => all.findIndex((candidate) => candidate.toLowerCase() === value.toLowerCase()) === index);
+}
+
+function headerRecord(headers: unknown): Record<string, string> | undefined {
+	if (!headers || typeof headers !== "object" || Array.isArray(headers)) return undefined;
+	const entries = Object.entries(headers as Record<string, unknown>)
+		.filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].length > 0);
+	return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+function modelCost(model: any): number {
+	const cost = model?.cost;
+	return Number(cost?.input ?? 0) + Number(cost?.output ?? 0);
+}
+
+async function cheapestAvailableAutoRenameModel(ctx: ExtensionContext): Promise<AutoRenameAuth | undefined> {
+	const registry = ctx.modelRegistry as any;
+	const rawModels = typeof registry.getAvailable === "function" ? registry.getAvailable() : typeof registry.getAll === "function" ? registry.getAll() : [];
+	const models = Array.isArray(rawModels) ? rawModels.filter((model) => model?.input?.includes?.("text") ?? true) : [];
+	models.sort((a, b) => modelCost(a) - modelCost(b) || modelLabel(a).localeCompare(modelLabel(b)));
+	for (const model of models) {
+		try {
+			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+			const headers = headerRecord(auth.headers);
+			if (auth.ok && (auth.apiKey || headers)) return { apiKey: auth.apiKey, headers, label: modelLabel(model), model, source: "cheapest" };
+		} catch {
+			// Try the next available model.
+		}
+	}
+	return undefined;
+}
+
+async function resolveAutoRenameModel(ctx: ExtensionContext, configured: string): Promise<AutoRenameAuth | undefined> {
+	if (configured.trim().toLowerCase() === "cheapest") return cheapestAvailableAutoRenameModel(ctx);
+	const model = resolveConfiguredModel(ctx, configured);
+	if (!model) {
+		autoRenameDebug(ctx, `model not found: ${configured}`, "warning");
+		return undefined;
+	}
+	try {
+		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+		const headers = headerRecord(auth.headers);
+		if (!auth.ok) {
+			autoRenameDebug(ctx, `auth unavailable for ${modelLabel(model)}: ${auth.error}`, "warning");
+			return undefined;
+		}
+		if (!auth.apiKey && !headers) {
+			autoRenameDebug(ctx, `no auth for ${modelLabel(model)}; use /login or models.json`, "warning");
+			return undefined;
+		}
+		return { apiKey: auth.apiKey, headers, label: modelLabel(model), model, source: configured };
+	} catch (error) {
+		autoRenameDebug(ctx, `auth failed for ${modelLabel(model)}: ${stringifyError(error)}`, "warning");
+		return undefined;
+	}
+}
+
+async function generateAutoRenameName(query: string, ctx: ExtensionContext, fullConversation = false): Promise<{ name?: string; source: string }> {
+	const maxNameChars = Math.max(20, Math.floor(settingNumber("sessionAutoRename.maxNameChars", DEFAULT_AUTO_RENAME_NAME_CHARS, ctx.cwd)));
+	const maxTokens = Math.max(16, Math.floor(settingNumber("sessionAutoRename.maxTokens", DEFAULT_AUTO_RENAME_MAX_TOKENS, ctx.cwd)));
+	const prompt = fullConversation
+		? `${AUTO_RENAME_SYSTEM_PROMPT}\n\nName this session using the conversation transcript below. Return only the title.\n\n${query}`
+		: autoRenamePrompt(query, ctx.cwd);
+	const message: Message = {
+		content: [{ text: prompt, type: "text" }],
+		role: "user",
+		timestamp: Date.now(),
+	};
+
+	for (const configured of autoRenameModelSettings(ctx.cwd)) {
+		const resolved = await resolveAutoRenameModel(ctx, configured);
+		if (!resolved) continue;
+		try {
+			const controller = new AbortController();
+			const timeoutMs = Math.max(1000, Math.floor(settingNumber("sessionAutoRename.timeoutMs", DEFAULT_AUTO_RENAME_TIMEOUT_MS, ctx.cwd)));
+			const timeout = setTimeout(() => controller.abort(), timeoutMs);
+			timeout.unref?.();
+			try {
+				const response = await complete(
+					resolved.model,
+					{ messages: [message], systemPrompt: AUTO_RENAME_SYSTEM_PROMPT },
+					{ apiKey: resolved.apiKey, headers: resolved.headers, maxTokens, signal: controller.signal },
+				);
+				if (response.stopReason === "error") {
+					autoRenameDebug(ctx, `${resolved.label} failed: ${response.errorMessage ?? "unknown error"}`, "warning");
+					continue;
+				}
+				const name = sanitizeAutoRenameName(autoRenameResponseText(response), maxNameChars);
+				if (name) return { name, source: resolved.label };
+				autoRenameDebug(ctx, `${resolved.label} returned no usable title`, "warning");
+			} finally {
+				clearTimeout(timeout);
+			}
+		} catch (error) {
+			autoRenameDebug(ctx, `${resolved.label} failed: ${stringifyError(error)}`, "warning");
+		}
+	}
+
+	const deterministic = deterministicAutoRenameName(query, ctx.cwd);
+	return deterministic ? { name: deterministic, source: `fallback:${autoRenameFallbackMode(ctx.cwd)}` } : { source: "none" };
+}
+
+function withAutoRenamePrefix(name: string, cwd?: string): string {
+	const maxNameChars = Math.max(20, Math.floor(settingNumber("sessionAutoRename.maxNameChars", DEFAULT_AUTO_RENAME_NAME_CHARS, cwd)));
+	const prefix = clampAutoRenameName(settingStringAllowEmpty("sessionAutoRename.prefix", "", cwd), 40);
+	return clampAutoRenameName(prefix ? `${prefix}: ${name}` : name, maxNameChars);
 }
 
 function sessionDisplayName(session: QolSessionSearchSession): string {
@@ -2494,6 +2928,47 @@ export default function qol(pi: ExtensionAPI): void {
 	let questionUnsubscribe: (() => void) | undefined;
 	let lastPolledDraft = "";
 	let lastTaskStats: { completed: number; remaining: number; total: number } | undefined;
+	let autoRenameAttempted = false;
+	let autoRenameInProgress = false;
+	let autoRenameGeneration = 0;
+
+	const resetAutoRename = () => {
+		autoRenameAttempted = false;
+		autoRenameInProgress = false;
+		autoRenameGeneration += 1;
+	};
+
+	const attemptAutoRename = async (ctx: ExtensionContext, options: { force?: boolean; fullConversation?: boolean; notify?: boolean } = {}) => {
+		const force = options.force === true;
+		if (!force && !autoRenameEnabled(ctx.cwd)) return;
+		if (autoRenameInProgress) return;
+		if (!force && (autoRenameAttempted || pi.getSessionName())) return;
+		const branch = ctx.sessionManager.getBranch?.() ?? [];
+		const maxInputChars = Math.max(200, Math.floor(settingNumber("sessionAutoRename.maxInputChars", DEFAULT_AUTO_RENAME_INPUT_CHARS, ctx.cwd)));
+		const sourceText = options.fullConversation ? conversationTranscriptText(branch, maxInputChars) : firstUserMessageText(branch);
+		if (!sourceText) {
+			if (force) autoRenameNotify(ctx, "No user message found to name this session.", "warning", true);
+			return;
+		}
+		const generation = autoRenameGeneration;
+		if (!force) autoRenameAttempted = true;
+		autoRenameInProgress = true;
+		try {
+			const result = await generateAutoRenameName(sourceText, ctx, options.fullConversation === true);
+			if (generation !== autoRenameGeneration) return;
+			if (!result.name) {
+				autoRenameNotify(ctx, "No session name generated.", "warning", options.notify === true || force);
+				return;
+			}
+			if (!force && pi.getSessionName()) return;
+			const name = withAutoRenamePrefix(result.name, ctx.cwd);
+			if (!name) return;
+			pi.setSessionName(name);
+			autoRenameNotify(ctx, `Session named: ${name} (${result.source})`, "info", options.notify === true || force);
+		} finally {
+			if (generation === autoRenameGeneration) autoRenameInProgress = false;
+		}
+	};
 
 	const stopThinkingTimerTicker = () => {
 		if (thinkingTimerTicker) clearInterval(thinkingTimerTicker);
@@ -2629,6 +3104,7 @@ export default function qol(pi: ExtensionAPI): void {
 
 	pi.on("session_start", (event, ctx) => {
 		currentCtx = ctx;
+		resetAutoRename();
 		resetThinkingTimer(ctx);
 		void consumePendingSessionSearchContext(pi, ctx, event.reason);
 		installAutocompleteHintStyling(ctx);
@@ -2648,11 +3124,12 @@ export default function qol(pi: ExtensionAPI): void {
 			}, 250);
 			editorPollTimer.unref?.();
 		}
-		const fallback = settingString("newlineFallbackKey", "ctrl+j", ctx.cwd);
+		const fallback = newlineFallbackKey(ctx.cwd);
 		if (ctx.hasUI && fallback !== "none") {
 			ctx.ui.notify(`QOL multiline input active. Shift+Enter inserts newline when your terminal reports it; fallback: ${fallback}.`, "info");
 		}
 		startQuestionSubscription(ctx);
+		void attemptAutoRename(ctx);
 		if (settingBoolean("sessionSearch.enabled", true, ctx.cwd)) {
 			if (sessionSearchWarmupTimer) clearTimeout(sessionSearchWarmupTimer);
 			sessionSearchWarmupTimer = setTimeout(() => {
@@ -2664,6 +3141,7 @@ export default function qol(pi: ExtensionAPI): void {
 	});
 
 	pi.on("session_shutdown", (_event, ctx) => {
+		resetAutoRename();
 		if (editorPollTimer) clearInterval(editorPollTimer);
 		editorPollTimer = undefined;
 		clearIdleCompactionTimer();
@@ -2716,6 +3194,7 @@ export default function qol(pi: ExtensionAPI): void {
 	});
 	pi.on("agent_end", (event, ctx) => {
 		scheduleIdleCompaction(ctx);
+		void attemptAutoRename(ctx);
 		const text = lastAssistantTextFromAgentEnd(event, ctx);
 		const critical = criticalInfo(text);
 		if (critical) {
@@ -2743,14 +3222,14 @@ export default function qol(pi: ExtensionAPI): void {
 			notifyQuestionOpened(ctx, { requestId: event.input?.id ?? event.toolCallId, request: event.input, source: "tool_call" }, "question");
 			return undefined;
 		}
-		if (!settingBoolean("permissionGate.enabled", true, ctx.cwd)) return undefined;
+		if (!settingBoolean("permissionGate.enabled", false, ctx.cwd)) return undefined;
 		if (event?.toolName !== "bash") return undefined;
 		const command = typeof event.input?.command === "string" ? event.input.command : "";
 		if (!command) return undefined;
 		const matched = permissionGateMatch(command, ctx.cwd);
 		if (!matched) return undefined;
 		if (!ctx.hasUI) return { block: true, reason: `Command matched permission gate (${matched}) and no UI is available for confirmation` };
-		const choice = await ctx.ui.select(`⚠️ Permission gate matched: ${matched}\n\n${command}\n\nAllow this bash command?`, ["Allow once", "Block"]);
+		const choice = await ctx.ui.select(permissionGatePrompt(matched, command, ctx.cwd), ["Allow once", "Block"]);
 		if (choice !== "Allow once") return { block: true, reason: `Blocked by QOL permission gate (${matched})` };
 		return undefined;
 	});
@@ -2770,7 +3249,7 @@ export default function qol(pi: ExtensionAPI): void {
 
 	if (settingBoolean("enableSessionNameCommand", true)) {
 		pi.registerCommand("session-name", {
-			description: "Set or show session name (usage: /session-name [new name])",
+			description: "Current session friendly-name editor.",
 			handler: async (args, ctx) => {
 				const name = args.trim();
 				if (name) {
@@ -2787,7 +3266,7 @@ export default function qol(pi: ExtensionAPI): void {
 
 	if (settingBoolean("enableHandoffCommand", true)) {
 		pi.registerCommand("handoff", {
-			description: "Transfer context to a new focused session (usage: /handoff <goal>)",
+			description: "Focused context handoff to a new session.",
 			handler: async (args, ctx) => runHandoff(args, ctx),
 		});
 	}
@@ -2811,7 +3290,7 @@ export default function qol(pi: ExtensionAPI): void {
 				}
 				return;
 			}
-			if (trimmed === "reindex" || trimmed === "refresh") {
+			if (trimmed === "refresh") {
 				try {
 					const sessions = await refreshQolSessionSearchCache(ctx, { force: true });
 					ctx.ui.notify(`Session search refreshed: ${sessions.length} session(s)`, "info");
@@ -2830,7 +3309,8 @@ export default function qol(pi: ExtensionAPI): void {
 		};
 
 		pi.registerCommand("search", {
-			description: "Search, preview, resume, and import context from previous Pi sessions",
+			description: "Previous-session search and context import.",
+			getArgumentCompletions: getSessionSearchArgumentCompletions,
 			handler: handleSearchCommand,
 		});
 		const shortcut = sessionSearchShortcut();
@@ -2843,11 +3323,32 @@ export default function qol(pi: ExtensionAPI): void {
 	}
 
 	pi.registerCommand("qol", {
-		description: "QOL status, notification, and attachment helpers: /qol status, /qol notify-test, /qol attachments, /qol reset.",
+		description: "QOL helpers and settings.",
+		getArgumentCompletions: getQolArgumentCompletions,
 		handler: async (args, ctx) => {
-			const sub = args.trim().toLowerCase() || "status";
+			const trimmed = args.trim();
+			const firstSpace = trimmed.search(/\s/);
+			const sub = (firstSpace < 0 ? trimmed : trimmed.slice(0, firstSpace)).toLowerCase() || "status";
+			const rest = firstSpace < 0 ? "" : trimmed.slice(firstSpace + 1).trim();
+			const restLower = rest.toLowerCase();
 			if (sub === "status") {
 				ctx.ui.notify(statusMessage(ctx), "info");
+				return;
+			}
+			if (sub === "rename") {
+				if (!restLower) {
+					await attemptAutoRename(ctx, { force: true, notify: true });
+					return;
+				}
+				if (restLower === "status") {
+					ctx.ui.notify(`Auto rename: ${autoRenameEnabled(ctx.cwd) ? "enabled" : "disabled"}\nModel: ${settingString("sessionAutoRename.model", DEFAULT_AUTO_RENAME_MODEL, ctx.cwd)}\nFallback model: ${settingStringAllowEmpty("sessionAutoRename.fallbackModel", DEFAULT_AUTO_RENAME_FALLBACK_MODEL, ctx.cwd) || "none"}\nDeterministic fallback: ${autoRenameFallbackMode(ctx.cwd)}\nCurrent session name: ${pi.getSessionName() || "(none)"}`, "info");
+					return;
+				}
+				if (restLower === "full") {
+					await attemptAutoRename(ctx, { force: true, fullConversation: true, notify: true });
+					return;
+				}
+				ctx.ui.notify("Unknown /qol rename mode. Try /qol rename, /qol rename status, or /qol rename full.", "warning");
 				return;
 			}
 			if (sub === "attachments") {
@@ -2870,7 +3371,7 @@ export default function qol(pi: ExtensionAPI): void {
 				ctx.ui.notify("Cleared QOL attachment status. Pi-owned pending images are unchanged.", "info");
 				return;
 			}
-			ctx.ui.notify("Unknown /qol action. Try /qol status, /qol notify-test, /qol attachments, /qol collapse, or /qol reset.", "warning");
+			ctx.ui.notify("Unknown /qol action. Try /qol status, /qol rename, /qol rename status, /qol rename full, /qol notify-test, /qol attachments, /qol collapse, or /qol reset.", "warning");
 		},
 	});
 }

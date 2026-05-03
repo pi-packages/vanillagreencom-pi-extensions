@@ -1,7 +1,7 @@
 {
   "name": "pi-qol",
   "version": "0.1.0",
-  "description": "Pi quality-of-life extension: reliable multiline input, styled pasted-image chips, session naming, session search/context import, handoff, permission prompts, notifications, custom compaction, and a collapsed-thinking timer.",
+  "description": "Pi quality-of-life extension: reliable multiline input, styled pasted-image chips, manual/auto session naming, session search/context import, handoff, permission prompts, notifications, custom compaction, and a collapsed-thinking timer.",
   "license": "MIT",
   "keywords": [
     "pi-package",
@@ -32,9 +32,9 @@
         {
           "key": "permissionGate.enabled",
           "label": "Prompt before risky bash commands",
-          "description": "Ask for confirmation before bash tool calls matching the configured command list. In non-interactive mode, matches are blocked.",
+          "description": "Ask for confirmation before bash tool calls matching the configured command list. Off by default; enable explicitly if you want this extra prompt.",
           "type": "boolean",
-          "default": true,
+          "default": false,
           "category": "Permission Gate",
           "apply": "live"
         },
@@ -44,6 +44,24 @@
           "description": "Comma-separated command fragments to confirm before running. Literal entries are case-insensitive and whitespace-tolerant; regex entries may use /pattern/flags. Default prompts only for rm -Rf.",
           "type": "string",
           "default": "rm -Rf",
+          "category": "Permission Gate",
+          "apply": "live"
+        },
+        {
+          "key": "permissionGate.previewLines",
+          "label": "Approval preview lines",
+          "description": "Maximum command lines rendered in the permission approval prompt. Longer commands show a head/tail preview with an omitted-line marker.",
+          "type": "number",
+          "default": 12,
+          "category": "Permission Gate",
+          "apply": "live"
+        },
+        {
+          "key": "permissionGate.previewChars",
+          "label": "Approval preview characters",
+          "description": "Maximum command preview characters rendered in the permission approval prompt to avoid flooding or flickering the terminal.",
+          "type": "number",
+          "default": 1200,
           "category": "Permission Gate",
           "apply": "live"
         },
@@ -60,11 +78,10 @@
         {
           "key": "newlineFallbackKey",
           "label": "Fallback newline key",
-          "description": "Alternate newline key for terminals that cannot distinguish Shift+Enter. Examples: ctrl+j, alt+enter, none.",
+          "description": "Alternate newline key for terminals that cannot distinguish Shift+Enter. Alt+Enter is reserved for Pi follow-up messages.",
           "type": "enum",
           "enumValues": [
             "ctrl+j",
-            "alt+enter",
             "none"
           ],
           "default": "ctrl+j",
@@ -93,7 +110,7 @@
         {
           "key": "enableSessionNameCommand",
           "label": "Enable /session-name command",
-          "description": "Register /session-name [name] to set or show the current session's friendly name in Pi's session selector.",
+          "description": "Register the session-name command for the current session's friendly name in Pi's session selector.",
           "type": "boolean",
           "default": true,
           "category": "Session",
@@ -101,9 +118,122 @@
           "requiresReload": true
         },
         {
+          "key": "sessionAutoRename.enabled",
+          "label": "Auto-name new sessions",
+          "description": "Automatically generate a friendly session name from the first user prompt when the session does not already have a name.",
+          "type": "boolean",
+          "default": true,
+          "category": "Session Auto-Rename",
+          "apply": "live"
+        },
+        {
+          "key": "sessionAutoRename.model",
+          "label": "Auto-rename model",
+          "description": "Model used for title generation. Use provider/model, current, or cheapest. Default is a fast OpenAI Codex model that supports ChatGPT OAuth via /login openai-codex.",
+          "type": "string",
+          "default": "openai-codex/gpt-5.4-mini",
+          "category": "Session Auto-Rename",
+          "apply": "live"
+        },
+        {
+          "key": "sessionAutoRename.fallbackModel",
+          "label": "Auto-rename fallback model",
+          "description": "Model to try if the primary model is unavailable. Use current, provider/model, cheapest, none, or off.",
+          "type": "string",
+          "default": "current",
+          "category": "Session Auto-Rename",
+          "apply": "live"
+        },
+        {
+          "key": "sessionAutoRename.fallback",
+          "label": "Deterministic fallback",
+          "description": "Fallback naming strategy if all model calls fail: title-case words from the first prompt, a truncated prompt, or none.",
+          "type": "enum",
+          "enumValues": [
+            "words",
+            "truncate",
+            "none"
+          ],
+          "default": "words",
+          "category": "Session Auto-Rename",
+          "apply": "live"
+        },
+        {
+          "key": "sessionAutoRename.prefix",
+          "label": "Auto-rename prefix",
+          "description": "Optional static prefix added before generated names, e.g. a project label. Leave empty for no prefix.",
+          "type": "string",
+          "default": "",
+          "category": "Session Auto-Rename",
+          "apply": "live"
+        },
+        {
+          "key": "sessionAutoRename.maxInputChars",
+          "label": "Auto-rename input cap",
+          "description": "Maximum first-prompt characters sent to the naming model. Long prompts keep the beginning and end.",
+          "type": "number",
+          "default": 2000,
+          "category": "Session Auto-Rename",
+          "apply": "live"
+        },
+        {
+          "key": "sessionAutoRename.maxNameChars",
+          "label": "Auto-rename title length",
+          "description": "Maximum characters for generated session names, including any prefix.",
+          "type": "number",
+          "default": 80,
+          "category": "Session Auto-Rename",
+          "apply": "live"
+        },
+        {
+          "key": "sessionAutoRename.maxTokens",
+          "label": "Auto-rename output tokens",
+          "description": "Maximum output tokens requested from the naming model.",
+          "type": "number",
+          "default": 96,
+          "category": "Session Auto-Rename",
+          "apply": "live"
+        },
+        {
+          "key": "sessionAutoRename.timeoutMs",
+          "label": "Auto-rename timeout",
+          "description": "Per-model timeout in milliseconds before falling back to the next model or deterministic title.",
+          "type": "number",
+          "default": 12000,
+          "category": "Session Auto-Rename",
+          "apply": "live"
+        },
+        {
+          "key": "sessionAutoRename.prompt",
+          "label": "Auto-rename prompt override",
+          "description": "Optional prompt template. Use {{message}} for the first user prompt; when empty, QOL uses its built-in concise title prompt.",
+          "type": "string",
+          "default": "",
+          "category": "Session Auto-Rename Advanced",
+          "apply": "live"
+        },
+        {
+          "key": "sessionAutoRename.notify",
+          "label": "Notify on auto-rename",
+          "description": "Show a Pi UI notification when QOL auto-generates a session name. Manual /qol rename always notifies.",
+          "type": "boolean",
+          "default": false,
+          "category": "Session Auto-Rename Advanced",
+          "apply": "live"
+        },
+        {
+          "key": "sessionAutoRename.debug",
+          "label": "Debug auto-rename",
+          "description": "Show model/auth/fallback diagnostics for automatic session naming.",
+          "type": "boolean",
+          "default": false,
+          "category": "Session Auto-Rename Advanced",
+          "apply": "live"
+        },
+        {
           "key": "enableHandoffCommand",
           "label": "Enable /handoff command",
-          "description": "Register /handoff <goal> to generate a focused prompt and create a new session with the prompt as a draft.",
+          "description": "Register the handoff command to generate a focused prompt and create a new session with the prompt as a draft.",
           "type": "boolean",
           "default": true,
           "category": "Session",
@@ -200,7 +330,7 @@
         {
           "key": "sessionSearch.cacheTtlSeconds",
           "label": "Session cache TTL",
-          "description": "Seconds before the in-memory session list is refreshed. Use /search refresh or /search reindex to force a refresh.",
+          "description": "Seconds before the in-memory session list is refreshed. Use /search refresh to force a refresh.",
           "type": "number",
           "default": 45,
           "category": "Session Search",
@@ -597,6 +727,7 @@
   },
   "files": [
     "extensions/",
+    "assets/",
     "README.md",
     "package.json"
   ]

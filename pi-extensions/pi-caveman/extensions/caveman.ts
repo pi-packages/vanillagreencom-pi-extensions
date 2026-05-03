@@ -11,7 +11,6 @@ type Mode = "off" | "lite" | "full" | "ultra" | "micro";
 type VstackConfig = Record<string, unknown>;
 
 const MODE_VALUES: readonly Mode[] = ["off", "lite", "full", "ultra", "micro"];
-const STOP_ALIASES = new Set(["stop", "quit"]);
 const COMMAND_COMPLETIONS = [
 	{ value: "lite", label: "lite", description: "Professional, no fluff" },
 	{ value: "full", label: "full", description: "Classic caveman" },
@@ -19,8 +18,6 @@ const COMMAND_COMPLETIONS = [
 	{ value: "micro", label: "micro", description: "Prompt-minimized compression" },
 	{ value: "toggle", label: "toggle", description: "Toggle caveman mode on/off" },
 	{ value: "off", label: "off", description: "Disable caveman mode" },
-	{ value: "stop", label: "stop", description: "Disable caveman mode" },
-	{ value: "quit", label: "quit", description: "Disable caveman mode" },
 	{ value: "status", label: "status", description: "Show current caveman mode" },
 ] as const;
 
@@ -80,7 +77,6 @@ function settingString(key: string, fallback: string, cwd?: string): string {
 
 function normalizeMode(input: string | undefined): Mode | undefined {
 	const mode = (input ?? "").trim().toLowerCase();
-	if (STOP_ALIASES.has(mode)) return "off";
 	if (MODE_VALUES.includes(mode as Mode)) return mode as Mode;
 	return undefined;
 }
@@ -188,7 +184,7 @@ export default function caveman(pi: ExtensionAPI): void {
 	pi.on("session_shutdown", (_event, ctx) => ctx.ui.setStatus(STATUS_KEY, undefined));
 
 	pi.registerCommand("caveman", {
-		description: "Control caveman mode: /caveman [lite|full|ultra|micro|toggle|off|status]",
+		description: "Token-efficient caveman response mode.",
 		getArgumentCompletions: (prefix: string) => {
 			const normalized = prefix.trim().toLowerCase();
 			const items = COMMAND_COMPLETIONS.filter((item) => item.value.startsWith(normalized));
@@ -207,7 +203,7 @@ export default function caveman(pi: ExtensionAPI): void {
 			}
 			const mode = arg === "toggle" ? (state.mode === "off" ? defaultMode(ctx.cwd) : "off") : normalizeMode(arg || defaultMode(ctx.cwd));
 			if (!mode) {
-				ctx.ui.notify("Unknown caveman mode. Use off/stop/quit, lite, full, ultra, micro, toggle, or status.", "warning");
+				ctx.ui.notify("Unknown caveman mode. Try lite, full, ultra, micro, toggle, off, or status.", "warning");
 				return;
 			}
 			if (!settingBoolean("sessionOverrideAllowed", true, ctx.cwd)) {

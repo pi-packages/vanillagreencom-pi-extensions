@@ -1,13 +1,19 @@
 # pi-output-policy
 
+![Output policy truncation](./assets/output-policy-truncation.png)
+
 OMP-style large-output policy for Pi tool results.
 
-- Preserves full oversized output under `~/.pi/agent/vstack/pi-output-policy/sessions/<session-id>/artifacts/` when possible, never in the project `.pi/` directory.
-- Uses head truncation for search/listing tools and tail truncation for command/log tools.
-- Leaves file `read` tool results unmodified by default; enable `truncateReadOutputs` to apply head truncation to reads.
-- Leaves edit/write tool results and diff details unmodified by default; enable `truncateMutationOutputs` to apply truncation to file mutations.
-- Adds explicit truncation notices with size, line, direction, and artifact path details.
-- Keeps shell-output minimization disabled by default; enable `shellMinimizer.enabled` to compress noisy command logs.
-- Keeps details payload sanitization disabled by default so extension state, subagent details, and diffs are preserved; enable `sanitizeDetails` for stricter UI safety caps.
+## What it does
 
-Limit: Pi's built-in tools may already truncate before `tool_result`; this extension can only preserve the result text it receives. Custom tools that return full large text benefit most from spill preservation.
+- Preserves oversized output under `~/.pi/agent/vstack/pi-output-policy/sessions/<session-id>/artifacts/` when possible; never under the project `.pi/` directory.
+- Uses head truncation for search/listing tools and tail truncation for command/log tools.
+- Adds explicit truncation notices with size, line count, direction, and artifact path.
+- Leaves file `read` results unmodified by default; enable `truncateReadOutputs` to cap reads.
+- Leaves edit/write results and diff details unmodified by default; enable `truncateMutationOutputs` to cap file mutations.
+- Leaves details payloads intact by default so extension state, subagent details, and diffs are preserved; enable `sanitizeDetails` for stricter UI safety caps.
+- Keeps shell-output minimization off by default; enable `shellMinimizer.enabled` to compress noisy command logs before truncation.
+
+## Limit
+
+Pi's built-in tools may already truncate before `tool_result`. This extension can only preserve the text it receives, so custom tools that return full large text benefit most from spill preservation.

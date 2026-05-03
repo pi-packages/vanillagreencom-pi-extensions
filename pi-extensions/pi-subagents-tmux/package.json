@@ -59,6 +59,19 @@
           "apply": "live"
         },
         {
+          "key": "treeStyle",
+          "label": "Tree connector style",
+          "description": "Connector glyphs for subagent result rows. Unicode is prettier; ASCII uses |--/`-- for maximum terminal compatibility.",
+          "type": "enum",
+          "enumValues": [
+            "unicode",
+            "ascii"
+          ],
+          "default": "unicode",
+          "category": "Rendering",
+          "apply": "live"
+        },
+        {
           "key": "collapsedItemCount",
           "label": "Collapsed item count",
           "description": "Number of recent text/tool items shown in collapsed subagent results.",
@@ -122,6 +135,16 @@
           "category": "Persistent panes",
           "apply": "reload",
           "requiresReload": true
+        },
+        {
+          "key": "forceSessionBridgeForPanes",
+          "label": "Force session bridge for panes",
+          "description": "Explicitly load pi-session-bridge in new persistent pane launchers so steer_subagent can target panes even when settings drift.",
+          "type": "boolean",
+          "default": true,
+          "category": "Persistent panes",
+          "apply": "reload",
+          "requiresReload": true
         }
       ],
       "resources": [
@@ -129,6 +152,16 @@
           "kind": "tool",
           "name": "subagent",
           "description": "Delegate tasks to isolated Pi subagents."
+        },
+        {
+          "kind": "tool",
+          "name": "get_subagent_result",
+          "description": "Retrieve persistent pane subagent task results by taskId or latest agent task."
+        },
+        {
+          "kind": "tool",
+          "name": "steer_subagent",
+          "description": "Steer a live persistent pane subagent through pi-session-bridge or queue a fallback steering note."
         },
         {
           "kind": "command",

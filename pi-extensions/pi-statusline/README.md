@@ -1,61 +1,40 @@
 # pi-statusline
 
-Pi package that replaces the default footer/editor chrome with a compact Claude-style status line and single-line prompt.
+![Statusline prompt](./assets/statusline-prompt.png)
+
+Compact Claude-style status line and single-line prompt for interactive Pi.
 
 ## What it does
 
+- Replaces the default footer/editor chrome with a status line above the prompt.
 - Shows project/repo name, branch/worktree badge, model, thinking level, context-window size, and remaining context percent.
 - Uses a compact prompt prefixed with `π` and wraps long input cleanly.
-- Reuses `pi-qol` image-chip behavior when rendering image placeholders in the compact prompt.
+- Reuses `pi-qol` image-chip behavior when rendering `[Image #N]` placeholders.
 - Keeps autocomplete visible under the prompt.
-- Hides Pi's default footer because the status line lives directly above the prompt.
 
-## Install via vstack
+## Install
+
+Via vstack:
 
 ```bash
 vstack add --agent pi
 ```
 
-The vstack TUI surfaces this package under the **Pi Extensions** tab. Selecting it copies the package into the Pi packages directory and registers it in Pi's `settings.json` `packages` array.
+The vstack TUI lists this package under **Pi Extensions** and registers it in Pi's `settings.json` `packages` array.
 
-For a manual install instead:
+Manual install:
 
 ```bash
 pi install /path/to/pi-extensions/pi-statusline       # global
 pi install -l /path/to/pi-extensions/pi-statusline    # project
 ```
 
-## Updating
+## Updating a vstack checkout
 
-Edit files under `pi-extensions/pi-statusline/` in the vstack repo, then run `vstack refresh` (or `vstack add` again) so installed Pi scopes pick up the change.
-
-## Package shape
-
-```text
-pi-statusline/
-├── package.json
-├── extensions/
-│   └── statusline.ts
-└── README.md
-```
-
-`package.json` declares:
-
-```json
-{
-  "keywords": ["pi-package"],
-  "pi": {
-    "extensions": ["./extensions/statusline.ts"]
-  },
-  "peerDependencies": {
-    "@mariozechner/pi-coding-agent": "*",
-    "@mariozechner/pi-tui": "*"
-  }
-}
-```
+After editing files under `pi-extensions/pi-statusline/`, run `vstack refresh` or `vstack add` again so installed Pi scopes pick up the change.
 
 ## Mode behavior
 
-- This extension is meaningful only in interactive Pi TUI mode.
-- In RPC/JSON/print modes, the TUI-specific UI methods are no-ops or degrade silently — the package is safe to leave installed.
-- Git metadata is best-effort and intentionally degrades to the current directory name if Git commands fail.
+- Meaningful only in interactive Pi TUI mode.
+- Safe to leave installed in RPC/JSON/print modes; TUI-specific calls no-op or degrade silently.
+- Git metadata is best-effort and falls back to the current directory name if Git commands fail.

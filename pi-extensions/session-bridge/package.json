@@ -27,6 +27,7 @@
   "files": [
     "bin/",
     "extensions/",
+    "assets/",
     "README.md",
     "package.json"
   ],

@@ -1101,9 +1101,19 @@ async function openManager(ctx: ExtensionCommandContext, pi: ExtensionAPI, initi
 
 function initialScopeFromArgs(args: string, cwd: string): Scope | undefined {
 	const first = args.trim().split(/\s+/, 1)[0]?.toLowerCase();
-	if (first === "all" || first === "--all") return "all";
-	if (first === "current" || first === "--current") return "current";
+	if (first === "all") return "all";
+	if (first === "current") return "current";
 	return settingScope(cwd);
+}
+
+function sessionArgumentCompletions(prefix: string) {
+	const query = prefix.trimStart().toLowerCase();
+	const items = [
+		{ value: "current", label: "current", description: "Show sessions for the current project" },
+		{ value: "all", label: "all", description: "Show sessions from every project" },
+	];
+	const filtered = items.filter((item) => item.value.startsWith(query));
+	return filtered.length > 0 ? filtered : null;
 }
 
 async function handleSessionsCommand(args: string, ctx: ExtensionCommandContext, pi: ExtensionAPI): Promise<void> {
@@ -1141,7 +1151,8 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("sessions", {
-		description: "Browse, search, resume, rename, and delete Pi sessions",
+		description: "Pi session browser and resume manager.",
+		getArgumentCompletions: sessionArgumentCompletions,
 		handler: async (args, ctx) => handleSessionsCommand(args, ctx, pi),
 	});
 

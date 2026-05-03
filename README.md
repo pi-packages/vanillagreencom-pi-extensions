@@ -39,10 +39,8 @@ This makes `vstack` closer to a package manager than a static dotfiles repo.
 - **Dependency resolution**: skills declare required/optional dependencies in `SKILL.md`; required deps are auto-included transitively.
 - **Config-driven attribution**: `vstack.toml` maps extra skills to agents, role-wide skills to agent roles, and hook events to roles.
 - **Project customization**: per-agent guidance, instructions, custom skills, per-skill instructions, and custom hooks via project-level `vstack.toml` — survives upstream updates.
-- **AGENTS.md auto-rebuild**: skills with `rules/` directories get their AGENTS.md rebuilt from individual rule files on every install and refresh. Header, footer, and table of contents are auto-generated.
-- **Project rules**: add project-specific rules as `.md` files in a skill's `project-rules/` directory. They're preserved across updates and assembled into a "Project Rules" section of the skill's AGENTS.md on refresh.
 - **Reconciliation**: installed agents and skills regenerate when packages change, preserving user edits.
-- **`vstack refresh`**: regenerate all agent files, re-inject skill instructions, and rebuild AGENTS.md from rule files.
+- **`vstack refresh`**: regenerate all agent files and re-inject project skill instructions after editing `vstack.toml`.
 - **Version-based update check**: notifies when the CLI version changes, not on every repo push. `vstack update --force` to rebuild from source.
 - **Source registry**: previously used package repos are remembered and reusable from the TUI.
 - **Fast terminal UX**: native Rust TUI with mouse support, built with `ratatui` and `crossterm`.
@@ -107,6 +105,7 @@ Two config files live at the project root:
 - `agents/*.md`: canonical agent definitions
 - `skills/*/SKILL.md`: canonical skills, rules, scripts, workflows
 - `hooks/*.sh`: canonical safety hooks
+- `pi-extensions/*/package.json`: optional npm-shaped Pi extension packages
 - `vstack.toml`: mapping and attribution rules
 
 At install time, the CLI discovers those packages, lets the user choose what to install, then emits harness-specific files in the correct destination.
@@ -177,15 +176,9 @@ agents = "all"     # "all", a role ("engineer"), or a list ["rust", "iced"]
 
 If you edit a generated agent or skill file directly (e.g., add an "Additional Instructions" section), vstack extracts your edits and saves them to `vstack.toml` before the next regeneration — so both approaches work.
 
-### Project Rules
+### Skill Instructions
 
-Skills with a `rules/` directory get their AGENTS.md rebuilt from individual rule files on every install and refresh. To add project-specific rules without modifying the source skill:
-
-1. Create a `project-rules/` directory inside the installed skill (e.g., `.agents/skills/rust-conventions/project-rules/`)
-2. Add `.md` files following the rule template format (YAML frontmatter with title/impact + body)
-3. Run `vstack refresh` — your rules appear in a "Project Rules" section of the skill's AGENTS.md
-
-Project rules are preserved across upstream updates. They're backed up before re-copying and restored after.
+Project-specific skill guidance lives in the project root `vstack.toml` under `[skill-instructions]`. vstack injects that text into the installed `SKILL.md` during `vstack add` and `vstack refresh`, so project guidance survives upstream package updates without editing source skills directly.
 
 ### Architecture
 
@@ -324,6 +317,7 @@ Windows note:
 | `iced-shadcn` | shadcn Base UI component planning, family decomposition, and parity audits for Iced. | — |
 | `price-handling` | Price rounding, epsilon comparison, and market-price handling. | — |
 | `trading-design` | Dense, professional trading-style interface design guidance. | — |
+| `tui-screenshot` | Terminal/TUI static screenshots and animated GIF capture from tmux panes, windows, popups, and modal overlays. | <ul><li><code>/tui-screenshot static|gif|record [target] [output]</code></li></ul> |
 
 #### Workflow / Platform
 
@@ -357,7 +351,7 @@ All vstack Pi packages declare `vstack.extensionManager.settings` metadata, incl
 #### `pi-extension-manager`
 
 - **Purpose:** Pi-styled extension inventory, full settings shell, and quick inline settings editor.
-- **Commands:** `/extensions` for the full popup, `/extension-settings` for quick inline edits, and a best-effort `/settings` wrapper when explicitly enabled.
+- **Commands:** `/extensions` for the full popup and `/extension-settings` for quick inline edits.
 - **Notes:** Pi has no public native API for third-party `/settings` tabs or live module unloads; package/module toggles apply after `/reload` or restart.
 - **More:** [pi-extensions/pi-extension-manager/README.md](pi-extensions/pi-extension-manager/README.md).
 
@@ -372,7 +366,7 @@ All vstack Pi packages declare `vstack.extensionManager.settings` metadata, incl
 
 - **Purpose:** Adds explicit non-blocking shell task management to Pi so long-running commands do not block the current turn.
 - **Tools:** `bg_task` for spawn/list/log/stop/clear; `bg_status` compatibility tool for PID-based status/log/stop.
-- **Commands:** `/bg`, `/bg run <cmd>`, `/bg list`, `/bg log <id>`, `/bg stop <id>`, `/bg clear`.
+- **Commands:** `/bg`, `/bg run <cmd>`, `/bg list`, `/bg log <id>`, `/bg watch <id>`, `/bg stop <id>`, `/bg clear`.
 - **UI:** configurable dashboard shortcut opens a task overlay; a compact task widget appears while tasks are tracked.
 - **Settings:** timeout, output caps, wakeup tail size, widget placement, dashboard shortcut, log directory.
 - **More:** [pi-extensions/pi-background-tasks/README.md](pi-extensions/pi-background-tasks/README.md).
@@ -380,7 +374,7 @@ All vstack Pi packages declare `vstack.extensionManager.settings` metadata, incl
 #### `pi-questions`
 
 - **Purpose:** Structured multi-tab popup questions for the model and bridge-driven replies.
-- **Tools/commands:** `question`, `/question-demo`.
+- **Tools/commands:** `question` tool.
 - **Settings:** popup dimensions, visible option rows, default header, bridge reply enablement; large free-form answers are truncated with temp-file preservation.
 - **More:** [pi-extensions/pi-questions/README.md](pi-extensions/pi-questions/README.md).
 
@@ -395,8 +389,9 @@ All vstack Pi packages declare `vstack.extensionManager.settings` metadata, incl
 #### `pi-subagents-tmux`
 
 - **Purpose:** Delegates work to `.pi/agents`, `.claude/agents`, and user agents with isolated Pi context; supports persistent tmux panes.
-- **Tools/commands:** `subagent`, `/agents`.
-- **Settings:** parallel task limit, concurrency, collapsed result size, result truncation/full-output preservation, pane polling intervals.
+- **Tools/commands:** `subagent`, `get_subagent_result`, `steer_subagent`, `/agents`.
+- **Behavior:** persistent pane tasks keep a durable task registry; `steer_subagent` only sends through `pi-session-bridge` when it can target the exact child pane session file, otherwise it queues an explicit inbox fallback rather than matching by cwd.
+- **Settings:** parallel task limit, concurrency, collapsed result size, result truncation/full-output preservation, pane polling intervals, forced session-bridge loading for panes.
 - **More:** [pi-extensions/pi-subagents-tmux/README.md](pi-extensions/pi-subagents-tmux/README.md).
 
 #### `pi-statusline`
@@ -415,9 +410,9 @@ All vstack Pi packages declare `vstack.extensionManager.settings` metadata, incl
 
 #### `pi-qol`
 
-- **Purpose:** Reliable multiline input, styled image placeholder chips, session handoff/name helpers, terminal/tmux notifications, custom compaction, and hidden-thinking placeholder settings contract.
-- **Commands:** `/qol status`, `/qol notify-test`, `/qol attachments`, `/qol reset`, `/session-name`, `/handoff`.
-- **Settings:** Shift+Enter handling, fallback newline key, image chips/status, session commands, notification triggers/channels, custom/remote/idle compaction, branch summary override, hidden-thinking placeholder preference.
+- **Purpose:** Reliable multiline input, styled image placeholder chips, manual/auto session naming, session search/context import, handoff, permission prompts, terminal/tmux notifications, custom compaction, and collapsed-thinking timer.
+- **Commands:** `/qol status`, `/qol rename`, `/qol rename status`, `/qol rename full`, `/qol notify-test`, `/qol attachments`, `/qol collapse`, `/qol reset`, `/session-name`, `/search`, `/handoff`.
+- **Settings:** Shift+Enter handling, fallback newline key, image chips/status, auto session rename, session search/import, handoff, permission gate, notification triggers/channels, custom/remote/idle compaction, branch summary override, thinking timer.
 - **More:** [pi-extensions/pi-qol/README.md](pi-extensions/pi-qol/README.md).
 
 #### `pi-session-manager`
@@ -437,19 +432,19 @@ All vstack Pi packages declare `vstack.extensionManager.settings` metadata, incl
 
 - **Purpose:** Compact Claude/opencode-style built-in tool renderers while preserving original tool execution.
 - **Behavior:** individual `read`/`bash`/search calls render as compact bullet rows with no padded box; mutation tools show stats and bounded expanded previews via Pi's normal `Ctrl+O` model; `tool_batch` is preferred for independent read/search/list/diagnostic bash calls as one compact renderable unit.
-- **Settings:** preview line counts, command preview width, batch tool toggle/limit, renderer line width.
+- **Settings:** read/search/bash/MCP output modes, mutation renderer toggles, diff preview budgets, batch tool toggle/limit, global tool chrome, working indicator, renderer safety caps.
 - **More:** [pi-extensions/pi-tool-renderer/README.md](pi-extensions/pi-tool-renderer/README.md).
 
 #### `pi-task-panel`
 
-- **Purpose:** Persistent structured task panel above the status line/editor plus `/todo` commands and `todo_write` tool.
-- **Settings:** default panel state, Ctrl+T takeover opt-in, Alt+T tri-state toggle, compact count, auto-advance/hide, notes, sequential task updates, model-facing workflow context/reminders.
+- **Purpose:** Persistent structured task panel above the status line/editor plus `/tasks` commands and `tasks_write` tool.
+- **Settings:** default panel state, Ctrl+T takeover opt-in, Alt+T tri-state toggle, compact count, auto-show/hide, compact tool output, sequential task updates, model-facing workflow context/reminders.
 - **More:** [pi-extensions/pi-task-panel/README.md](pi-extensions/pi-task-panel/README.md).
 
 #### `pi-caveman`
 
 - **Purpose:** Native Pi caveman communication mode via `before_agent_start` prompt injection.
-- **Commands:** `/caveman [mode|off|status]`.
+- **Commands:** `/caveman [lite|full|ultra|micro|toggle|off|status]`.
 - **Settings:** enable/default mode, status badge, clarity escape, session override, code/commit/review boundaries.
 - **More:** [pi-extensions/pi-caveman/README.md](pi-extensions/pi-caveman/README.md).
 

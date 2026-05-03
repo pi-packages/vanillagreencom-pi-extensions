@@ -50,15 +50,6 @@
           "default": "project",
           "category": "Persistence",
           "apply": "live"
-        },
-        {
-          "key": "allowSettingsCommandShadow",
-          "label": "Register /settings wrapper",
-          "description": "Opt in to a /settings wrapper on Pi versions that allow extension commands to shadow built-ins. /extensions always remains available.",
-          "type": "boolean",
-          "default": false,
-          "category": "Commands",
-          "apply": "restart"
         }
       ]
     }
@@ -68,6 +59,7 @@
     "@mariozechner/pi-tui": "*"
   },
   "files": [
+    "assets/",
     "extensions/",
     "README.md",
     "package.json"

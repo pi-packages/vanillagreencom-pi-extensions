@@ -1,23 +1,58 @@
 # pi-tool-renderer
 
-Compact renderers for built-in Pi tools.
+![Tool renderer compact tools](./assets/tool-renderer-compact-tools.png)
 
-By default this package renders individual non-mutating tool calls (`read`, `bash`, and, when available, `grep`/`find`/`ls`) as compact self-rendered bullet rows and registers `tool_batch` for clean combined output. It re-registers built-in tools with the same names and delegates execution to the original Pi implementations. Legacy stacking for separate native tool calls is available with `stackToolCalls=true`, but it is disabled by default because Pi still reserves layout space for hidden sibling tool entries. Stack rows use dark muted tree connectors, blinking pending bullets, dynamic bash line counts, and Nerd Font file icons for expanded `find`/`ls` previews. Rows are width-truncated instead of wrapped to keep ASCII trees compact. It changes only `renderCall`/`renderResult` so `Ctrl+O` remains Pi's expand/collapse mechanism.
+Compact renderers for Pi tools, plus an optional `tool_batch` composite tool.
 
-It does **not** override Pi's built-in `edit`/`write` renderers by default, so standard diff/edit rendering is preserved. Disable `stackToolCalls` to keep the compact renderers inside Pi's normal tool boxes, or disable `enabled` to return fully to Pi defaults.
+## Defaults
 
-It also patches Pi's user-message cards when `compactUserMessages=true` (default): top/bottom padding is removed and the background uses `userMessageBackground` (default `customMessageBg`). Set `compactUserMessages=false` to restore Pi's default padded user cards.
+- Re-registers `read`, `bash`, and available `grep`/`find`/`ls` with compact self-rendered rows while delegating execution to Pi's original tools.
+- Registers `tool_batch` so multiple independent read/search/list/diagnostic bash calls can render as one combined result.
+- Leaves `edit` and `write` on Pi's built-in renderers by default so standard diff/edit UI is preserved.
+- Compacts user-message cards by default (`compactUserMessages=true`).
+- Keeps Pi's normal expand/collapse keybinding (`Ctrl+O`).
 
-When `stackToolCalls=true`, current Pi still reserves vertical space for each native tool entry even when a renderer returns zero lines. `stackChildDisplay` controls the tradeoff:
+## `tool_batch`
 
-- `rows`: child tools render as separate compact `├`/`└` rows.
-- `headline`: child rows are hidden and the anchor headline shows the list only when expanded.
-- `anchor-list`: child rows are hidden and the anchor headline shows the compact `├`/`└` list by default.
+`tool_batch` accepts calls for `read`, `grep`, `find`, `ls`, and diagnostic `bash`.
 
-`hideStackChildRows=true` is kept as a legacy alias for `stackChildDisplay="headline"` when `stackChildDisplay` is unset.
+```json
+{
+  "calls": [
+    { "tool": "read", "path": "README.md" },
+    { "tool": "grep", "pattern": "registerCommand", "path": "pi-extensions" }
+  ]
+}
+```
 
-Known limitation: Pi currently reserves spacer rows for hidden tool entries, and hidden `Thinking...` labels cannot be fully removed from an extension; fixing those requires Pi core renderer changes.
+Prefer it for independent inspection calls. Do **not** use it for mutating commands, order-dependent commands, streaming output, or commands that should be inspected separately.
 
-`tool_batch` is an optional composite tool registered by this package and preferred for multiple independent read/search/list/diagnostic bash operations. It runs `read`/`grep`/`find`/`ls`/diagnostic `bash` calls through Pi's original built-ins but returns one renderable tool result, avoiding the hidden-sibling spacer problem for calls the model chooses to batch. Per-call arguments prefer `{ tool, args }`, but flat calls such as `{ tool: "read", path: "README.md" }` are accepted and normalized. Avoid mutating or order-dependent bash commands in `tool_batch`; keep those as separate `bash` calls.
+Per-call arguments can be flat, as above, or `{ "tool": "read", "args": { "path": "README.md" } }`.
 
-Set `renderMutationTools=true` to opt into compact `edit`/`write` renderers. When enabled, edits/writes get rich red/green diff summaries and split side-by-side previews on wide terminals (`splitDiffs=true`). Collapsed rows show a default diff preview (`diffPreviewLines`, default 24) and expanded rows show much more (`diffExpandedLines`, default 4000; set 0 for no extension cap). This only affects UI rendering; the underlying tool result text/truncation behavior is not changed.
+## Optional renderers
+
+Enable through `pi-extension-manager` settings:
+
+- `renderMutationTools=true`: compact `edit`/`write` renderers with rich red/green diff summaries, hunk counts, syntax highlighting, and optional side-by-side previews (`splitDiffs`).
+- `renderBashDiffs=true`: render unified/git diffs found in bash output with the same diff preview.
+- `applyPatchRenderer` / `applyPatchPreview`: render `apply_patch` calls/results with parsed file patch previews.
+- Generic OpenAI-style tool renderers for names such as `web_search`, `webfetch`, `fetch_content`, `Agent`, and `Task*`.
+- MCP-looking tool renderers (`mcp`, `mcp__server__tool`, etc.) with `mcpOutputMode`.
+- `workingIndicator`: optionally use a compact pulse or hide Pi's streaming indicator.
+- `toolChrome`: optional global container chrome (`off`, `transparent`, or `outlines`).
+
+Output modes can be tuned live with `readOutputMode`, `searchOutputMode`, `bashOutputMode`, and `mcpOutputMode`.
+
+## Legacy stacking
+
+`stackToolCalls=true` enables legacy stacking for separate native tool calls. It is disabled by default because current Pi still reserves spacer rows for hidden sibling tool entries. `stackChildDisplay` controls the tradeoff:
+
+- `rows`: render child tools as separate compact `├`/`└` rows.
+- `headline`: hide child rows and show the list only when expanded.
+- `anchor-list`: hide child rows and show the compact list in the headline by default.
+
+`hideStackChildRows` remains as a legacy alias for `stackChildDisplay="headline"` when `stackChildDisplay` is unset.
+
+## Limits
+
+This package changes rendering, not underlying tool execution or tool-result truncation. Hidden `Thinking...` labels and reserved spacer rows require Pi core renderer changes to remove completely.

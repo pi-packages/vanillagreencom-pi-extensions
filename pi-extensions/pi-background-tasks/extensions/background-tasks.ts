@@ -1084,36 +1084,41 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand(BG_COMMAND, {
-		description: "Manage background shell tasks: /bg, /bg run <cmd>, /bg log <id>, /bg stop <id>, /bg clear.",
+		description: "Background shell task dashboard and controls.",
 		getArgumentCompletions(prefix) {
 			const trimmed = prefix.trimStart();
 			const parts = trimmed.split(/\s+/).filter(Boolean);
-			if (parts.length <= 1) {
+			if (parts.length === 0 || (parts.length === 1 && !trimmed.endsWith(" "))) {
 				return [
-					{ label: "dashboard", value: "dashboard", description: "Open the task dashboard" },
 					{ label: "list", value: "list", description: "Show tracked tasks" },
 					{ label: "run", value: "run ", description: "Spawn a background shell task" },
 					{ label: "log", value: "log ", description: "Show task log tail" },
+					{ label: "watch", value: "watch ", description: "Open the dashboard focused on a task" },
 					{ label: "stop", value: "stop ", description: "Terminate a running task" },
 					{ label: "clear", value: "clear", description: "Remove finished tasks" },
 				].filter((option) => option.value.trim().startsWith(trimmed.toLowerCase()));
 			}
 			const [subcommand] = parts;
 			if (!(subcommand === "log" || subcommand === "stop" || subcommand === "watch")) return null;
-			return sortedTasks().map((task) => ({
-				description: `${summarizeTaskStatus(task.status, task.exitCode)} · ${task.command}`,
-				label: task.id,
-				value: task.id,
-			}));
+			if (parts.length > 2 || (parts.length === 2 && trimmed.endsWith(" "))) return null;
+			const taskQuery = parts[1]?.toLowerCase() ?? "";
+			const taskItems = sortedTasks()
+				.filter((task) => !taskQuery || task.id.toLowerCase().startsWith(taskQuery) || String(task.pid).startsWith(taskQuery))
+				.map((task) => ({
+					description: `${summarizeTaskStatus(task.status, task.exitCode)} · ${task.command}`,
+					label: task.id,
+					value: `${subcommand} ${task.id}`,
+				}));
+			return taskItems.length > 0 ? taskItems : null;
 		},
 		handler: async (args, ctx) => {
 			activeCtx = ctx;
 			const trimmed = args.trim();
-			if (!trimmed || trimmed === "dashboard") {
+			if (!trimmed) {
 				await openDashboard(ctx);
 				return;
 			}
-			if (trimmed === "list" || trimmed === "status") {
+			if (trimmed === "list") {
 				ctx.ui.notify(formatTaskListText(), "info");
 				return;
 			}
@@ -1143,7 +1148,7 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 				return;
 			}
 			ctx.ui.notify(
-				`Unknown /${BG_COMMAND} action. Try /${BG_COMMAND}, /${BG_COMMAND} run <command>, /${BG_COMMAND} log <id>, /${BG_COMMAND} stop <id>, or /${BG_COMMAND} clear.`,
+				`Unknown /${BG_COMMAND} action. Try run <command>, list, log <id>, watch <id>, stop <id>, or clear.`,
 				"warning",
 			);
 		},

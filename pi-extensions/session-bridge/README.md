@@ -1,16 +1,20 @@
 # pi-session-bridge
 
-Pi package that keeps normal interactive Pi TUI sessions visible while exposing a structured Unix-domain JSONL side channel for external controllers. This is intentionally **not** Pi `--mode rpc`; it keeps the live TUI and borrows compatible JSONL command/response conventions where they fit.
+![Session bridge CLI flow](./assets/session-bridge-cli.png)
 
-## Install via vstack
+Pi package that keeps the normal interactive Pi TUI visible while exposing a structured Unix-domain JSONL side channel for external controllers. It is **not** Pi `--mode rpc`; it keeps the live TUI and borrows compatible JSONL command/response conventions where useful.
+
+## Install
+
+Via vstack:
 
 ```bash
 vstack add --agent pi
 ```
 
-The vstack TUI surfaces this package under the **Pi Extensions** tab. Selecting it copies the package into the Pi packages directory and registers it in Pi's `settings.json`.
+The vstack TUI lists this package under **Pi Extensions** and registers it in Pi's `settings.json`.
 
-For a manual install instead:
+Manual install:
 
 ```bash
 pi install /path/to/pi-extensions/session-bridge      # global
@@ -20,10 +24,10 @@ pi install -l /path/to/pi-extensions/session-bridge   # project
 ## What it provides
 
 - Normal Pi TUI stays in the terminal.
-- External clients discover active Pi processes via registry files.
-- External clients send prompts/steering/follow-ups/abort without tmux key injection.
-- External clients subscribe to live structured Pi events without pane scraping.
-- When `pi-questions` is also loaded, external clients can list/reply/reject pending structured questions.
+- External clients discover active Pi processes from registry files.
+- External clients send prompts, steering, follow-ups, and aborts without tmux key injection.
+- External clients subscribe to structured live Pi events without pane scraping.
+- When `pi-questions` is also loaded, external clients can list, answer, and reject pending structured questions.
 
 ## Discovery
 
@@ -42,38 +46,49 @@ export PI_BRIDGE_DIR=/some/private/dir
 
 The bridge directory is created `0700`; instance files are `0600`.
 
-## CLI
+## Pi slash commands
+
+```text
+/bridge-status        # show socket and registry paths
+/bridge-ping [text]   # emit a bridge_pong event; default text is "pong"
+```
+
+## `pi-bridge` CLI
 
 ```bash
 pi-bridge list
 pi-bridge state --pid <pid>
 pi-bridge commands --pid <pid>
 pi-bridge stream --pid <pid>
+pi-bridge history --pid <pid> 20
 pi-bridge send --pid <pid> "message for the agent"
 pi-bridge steer --pid <pid> "steer current work"
 pi-bridge follow-up --pid <pid> "after you finish, do this"
 pi-bridge questions --pid <pid>
 pi-bridge answer --pid <pid> --request-id que_... --answers '[["Stop here"]]'
-# For pi-questions tabs with allowCustom=true, the answer string may be free-form text.
-pi-bridge answer --pid <pid> --request-id que_... --answers '[["Use CC-1234 and continue"]]'
 pi-bridge reject --pid <pid> --request-id que_...
+pi-bridge emit --pid <pid> "hello"
 pi-bridge request --pid <pid> '{"type":"get_state"}'
-printf '{"type":"history","limit":5}\n' | pi-bridge request --pid <pid> -
 ```
 
-If exactly one active bridge exists, target flags are optional.
+If exactly one active bridge exists, target flags are optional. Target filters include `--pid`, `--socket`, `--session`, `--name`, and `--cwd`.
 
-When installed via vstack as a local-path Pi package, the `pi-bridge` binary is **not** automatically placed on `PATH` (Pi local installs do not expose npm `bin` entries). Either:
+For `pi-questions` tabs with `allowCustom=true`, answer strings may be free-form text.
 
-- Run the script directly: `node /path/to/pi-extensions/session-bridge/bin/pi-bridge.js list`
-- Or symlink it once: `ln -sf /path/to/pi-extensions/session-bridge/bin/pi-bridge.js ~/.local/bin/pi-bridge`
-- Or use the raw socket protocol described below from any language
+When installed via vstack as a local-path Pi package, the `pi-bridge` binary is **not** automatically placed on `PATH` because Pi local installs do not expose npm `bin` entries. Use one of:
+
+```bash
+node /path/to/pi-extensions/session-bridge/bin/pi-bridge.js list
+ln -sf /path/to/pi-extensions/session-bridge/bin/pi-bridge.js ~/.local/bin/pi-bridge
+```
+
+Or use the raw socket protocol below from any language.
 
 ## Raw protocol
 
-Connect to the advertised Unix socket and exchange LF-delimited JSON. Framing follows Pi RPC convention: one strict JSON object per LF-delimited record, optional `id` for response correlation, and `type:"response"` responses.
+Connect to the advertised Unix socket and exchange one strict JSON object per LF-delimited record. Requests may include `id`; responses use `type:"response"` with the same `id`.
 
-Commands:
+Common requests:
 
 ```json
 {"id":"1","type":"get_state"}
@@ -87,40 +102,29 @@ Commands:
 {"id":"9","type":"get_commands"}
 {"id":"10","type":"questions"}
 {"id":"11","type":"answer","requestId":"que_example","answers":[["Stop here"]]}
-{"id":"12","type":"answer","requestId":"que_example","answers":[["free-form text for an allowCustom tab"]]}
-{"id":"13","type":"reject","requestId":"que_example"}
+{"id":"12","type":"reject","requestId":"que_example"}
 ```
 
-Responses:
+Responses and events:
 
 ```json
 {"type":"response","id":"1","command":"get_state","success":true,"data":{}}
-```
-
-Broadcast events:
-
-```json
 {"type":"event","event":"message_update","timestamp":"...","data":{}}
-{"type":"event","event":"tool_execution_start","timestamp":"...","data":{}}
 {"type":"event","event":"question","timestamp":"...","data":{"action":"opened","requestId":"que_example"}}
 ```
 
-The client receives events by default. Send `subscribe` with `enabled:false` to suppress live events on that connection.
+Clients receive events by default. Send `subscribe` with `enabled:false` to suppress live events on that connection.
 
 ## No-LLM checks
 
 ```bash
 pi-bridge state --pid <pid>
 pi-bridge emit --pid <pid> "hello"
-pi-bridge history --pid <pid> 20
-```
-
-Use `send /bridge-ping ...` to verify bridge input injection without calling a model. The extension handles this specific input and emits `bridge_pong`:
-
-```bash
 pi-bridge send --pid <pid> "/bridge-ping hello"
 pi-bridge history --pid <pid> 20
 ```
+
+`/bridge-ping` is handled by the extension and emits `bridge_pong` without calling a model.
 
 ## Security
 

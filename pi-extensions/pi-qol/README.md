@@ -1,88 +1,92 @@
 # pi-qol
 
+![QOL session search workflow](./assets/qol-session-search.gif)
+
 Quality-of-life extension for Pi.
 
-Features:
+## What it provides
 
-- Intercepts distinguishable `Shift+Enter` / `Shift+Return` in the prompt editor and inserts a newline.
-- Provides a configurable fallback newline key (`ctrl+j` by default) for terminals/tmux setups that collapse modified Enter into plain Enter. If a terminal reports Shift+Enter as Alt+Enter, move `app.message.followUp` to another key and bind `alt+enter` to `tui.input.newLine` in Pi keybindings.
-- Styles `[Image #1]`, `[Image #2]`, ... placeholders as compact filled chips in the editor using the active theme's `accent` color.
-- Collapses existing pasted image file paths to `[Image #N]` aliases and attaches those images on submit.
-- Adds `/session-name [name]` to set or show the current session's friendly name in Pi's session selector (toggle with `enableSessionNameCommand`, default on).
-- Adds `/search` plus optional `F3` overlay to search previous Pi sessions, preview snippets, resume a session, inject a summary into the current context, or start a new session with summarized context.
-- Adds `/handoff <goal>` to generate a focused handoff prompt, optionally review it, and open a new session with that prompt as a draft. Handoff preserves the latest compaction summary plus retained branch entries so compacted sessions transfer useful context instead of only post-compaction messages (toggle with `enableHandoffCommand`, default on; review with `handoffReviewPrompt`, default on).
-- Prompts before configured bash command fragments run through the agent `bash` tool. Default prompt list is `rm -Rf` only.
-- Sends external terminal/tmux notifications when Pi is ready for input, asks a structured question, appears to need direction, completes a full task list, or reports critical/blocked information. Channels include BEL, OSC 777/OSC 99, Windows Terminal toast, and optional tmux `display-message`.
-- Optionally overrides Pi compaction summaries with a custom summarizer modeled after Pi's `custom-compaction.ts` example. It can use a configured model (default `google/gemini-2.5-flash`) or a remote HTTP endpoint, supports concise/balanced/exhaustive summary profiles, and can also override requested `/tree` branch summaries.
-- Optionally triggers idle compaction after a configurable idle delay and token threshold, inspired by oh-my-pi's idle compaction settings. Pi's built-in compaction settings still control normal automatic overflow/threshold compaction.
-- Shows a live elapsed timer next to collapsed `Thinking...` labels and leaves the final duration when thinking ends (toggle with `thinkingTimer.enabled`, default on). This uses a defensive internal renderer patch and fails back to Pi's default label if Pi internals change.
+- Reliable multiline input: `Shift+Enter` / `Shift+Return` inserts a newline when the terminal reports it distinctly; `ctrl+j` is the default fallback newline key. `Alt+Enter` is reserved for Pi follow-up messages.
+- Compact image placeholders: existing pasted image paths can collapse to `[Image #N]` aliases and are attached on submit.
+- Session naming: `/session-name [name]` sets or shows the friendly session name; automatic first-prompt naming is enabled by default.
+- Previous-session search: `/search` and optional `F3` overlay search prior sessions, preview snippets, resume, inject summarized context, or start a new session with summarized context.
+- Handoff: `/handoff <goal>` drafts a focused prompt for a new session, preserving the latest compaction summary plus retained branch entries.
+- Optional permission gate: when enabled, prompts before configured `bash` tool command fragments run; default match is `rm -Rf`.
+- Notifications: terminal/tmux/native notifications for ready-for-input, questions, direction needed, task completion, and critical/blocked states.
+- Optional custom compaction and idle compaction; disabled by default so Pi's compaction behavior is unchanged until enabled.
+- Thinking timer next to collapsed `Thinking...` labels; enabled by default and falls back to Pi defaults if internals change.
 
-Commands:
+## Commands
 
-- `/qol status`
-- `/qol notify-test`
-- `/qol attachments`
-- `/qol collapse`
-- `/qol reset`
-- `/session-name [name]`
-- `/search [query]`
-- `/search resume <sessionPath>`
-- `/search refresh` / `/search reindex`
-- `/search stats`
-- `/handoff <goal>`
+| Command | Action |
+| --- | --- |
+| `/qol status` | Show QOL status and key settings. |
+| `/qol notify-test` | Send a test notification. |
+| `/qol attachments` | List image placeholders and existing image paths in the current draft. |
+| `/qol collapse` | Collapse existing image paths in the editor to `[Image #N]` aliases. |
+| `/qol reset` | Clear QOL attachment status and tmux window mark. |
+| `/qol rename` | Regenerate the current session name from the first user prompt. |
+| `/qol rename status` | Show auto-rename settings and current session name. |
+| `/qol rename full` | Regenerate the session name from the full conversation. |
+| `/session-name [name]` | Set or show the current session's friendly name. |
+| `/search [query]` | Open previous-session search, optionally prefilled with a query. |
+| `/search resume <sessionPath>` | Resume a session by path. |
+| `/search refresh` | Refresh the session search cache. |
+| `/search stats` | Show session search cache stats. |
+| `/handoff <goal>` | Draft a focused handoff prompt for a new session. |
 
-## Session search settings
+`/qol` and `/search` arguments support autocomplete.
 
-Session search lists session files first. Each row uses the same primary title idea as `/resume` (explicit session name, otherwise first user prompt), shows the project/path, and shows the latest user prompt or search match. Press Enter to browse all user prompts from that session as one-line, scrollable rows; press Enter on a prompt to resume, copy it into the editor, inject a focused summary, or start a new session with focused context.
+## Settings
 
-All are exposed through `pi-extension-manager` under **QOL**:
+Settings are exposed through `pi-extension-manager` under **QOL**.
 
-- `sessionSearch.enabled`: register the `/search` command and session search overlay.
-- `sessionSearch.shortcutKey`: shortcut to open search. Default `f3`; set to `none` to disable. (`Ctrl+F` and `Alt+F` are Pi editor bindings.)
+### Session auto-rename
+
+- `sessionAutoRename.enabled`: automatically name unnamed sessions after the first prompt/agent turn; default on.
+- `sessionAutoRename.model`: naming model (`provider/model`, `current`, or `cheapest`); default `openai-codex/gpt-5.4-mini`.
+- `sessionAutoRename.fallbackModel`: fallback model; default `current`, or `none`/`off` to skip.
+- `sessionAutoRename.fallback`: deterministic fallback when model naming fails: `words`, `truncate`, or `none`.
+- Advanced knobs: `prefix`, `maxInputChars`, `maxNameChars`, `maxTokens`, `timeoutMs`, `prompt`, `notify`, and `debug`.
+
+### Session search
+
+- `sessionSearch.enabled`: register `/search` and the overlay.
+- `sessionSearch.shortcutKey`: shortcut to open search; default `f3`, set `none` to disable.
 - `sessionSearch.sortMode`: `relevance` or `recent`.
-- `sessionSearch.resultLimit`, `sessionSearch.maxVisible`, `sessionSearch.messageMaxVisible`, `sessionSearch.previewSnippets`, `sessionSearch.overlayWidth`, `sessionSearch.cacheTtlSeconds`.
-- `sessionSearch.summaryModel`: summarizer model (`current`, `provider/model`, or bare model id). Default `current` avoids extra provider setup.
-- `sessionSearch.summaryMaxTokens`: max output tokens for imported-session summaries.
-- `sessionSearch.summaryInputMaxChars`: cap for previous-session transcript text sent to the QOL summarizer.
+- Result/layout knobs: `resultLimit`, `maxVisible`, `messageMaxVisible`, `previewSnippets`, `overlayWidth`, `cacheTtlSeconds`.
+- Summary knobs: `summaryModel`, `summaryMaxTokens`, `summaryInputMaxChars`.
 
-Implementation note: this intentionally uses Pi's current `SessionManager.list/listAll`, `session_start` replacement lifecycle, and `ctx.newSession(..., { withSession })` APIs instead of `pi-session-search`'s older hardcoded `~/.pi/agent/sessions` scan, native SQLite dependency, nonexistent `session_switch` hook, and OpenRouter-specific secret file.
+Search rows use Pi's `/resume`-style title: explicit session name, otherwise first user prompt, otherwise filename.
 
-## Notification settings
+### Notifications
 
-All are exposed through `pi-extension-manager` under **QOL**:
-
-- `notification.enabled`: master toggle.
-- Trigger toggles: `notification.onAgentReady`, `notification.onDirectionNeeded`, `notification.onQuestion`, `notification.onTaskComplete`, `notification.onCritical`.
-- Channel toggles: `notification.bell`, `notification.bellWhenActive`, `notification.native`, `notification.tmuxNativeClientTty`, `notification.tmuxWindowMark`, `notification.tmux`, `notification.tmuxPassthrough`, `notification.piUi`.
-- Terminal protocol: `notification.oscProtocol` (`auto`, `osc777`, `osc99`, `off`). `auto` uses Kitty OSC 99 when available, otherwise OSC 777; Windows Terminal/WSL uses a toast via PowerShell.
-- tmux notes: BEL resolves `$TMUX_PANE` to `#{pane_tty}` and writes raw `\a` to that source pane, matching Claude-style tmux bell hooks so tmux can apply your normal `window_bell_flag` styling. BEL and optional tmux window marking are skipped when the source tmux window is already active unless `notification.bellWhenActive` is enabled, reducing noise while you are looking at Pi. OSC terminal notifications default to direct writes to attached tmux client TTYs (`notification.tmuxNativeClientTty`) so Ghostty/system notifications can appear even when the source Pi window is inactive; passthrough remains a fallback. `pi-questions` notifies before the prompt takes over input; task-complete notifications are deferred until the agent turn ends so they fire after the final assistant message. Tool execution failures (`isError` tool results, including failed `bash`/`edit`/`write`) are intentionally not external-notification triggers. Optional `tmuxWindowMark` can additionally prefix the source window name (default off); clear happens on next input/agent start/reset, or by `notification.tmuxWindowMarkDurationMs` if nonzero.
-- Tuning: `notification.cooldownSeconds`, `notification.title`, `notification.readyMessage`, `notification.bodyMaxChars`, `notification.tmuxMessageDurationMs`, `notification.tmuxWindowMarkText`, `notification.tmuxWindowMarkDurationMs`.
+- Master and trigger toggles: `notification.enabled`, `onAgentReady`, `onDirectionNeeded`, `onQuestion`, `onTaskComplete`, `onCritical`.
+- Channels: BEL, native terminal notifications, tmux client TTY writes, tmux messages, optional tmux window marking, and Pi UI notifications.
+- `notification.oscProtocol`: `auto`, `osc777`, `osc99`, or `off`; `auto` uses Kitty OSC 99 when available, otherwise OSC 777.
+- Tuning: `cooldownSeconds`, `title`, `readyMessage`, `bodyMaxChars`, `tmuxMessageDurationMs`, and tmux mark text/duration.
 
 Use `/qol notify-test` to verify your terminal/tmux notification path.
 
-## Permission gate settings
+### Permission gate
 
-All are exposed through `pi-extension-manager` under **QOL**:
+- `permissionGate.enabled`: ask before matching `bash` tool calls; default off. When enabled, non-interactive matches are blocked.
+- `permissionGate.commands`: comma-separated literal fragments or `/pattern/flags` regexes; default `rm -Rf`.
+- `permissionGate.previewLines` / `permissionGate.previewChars`: cap the approval prompt preview; long commands show a compact head/tail preview while the full command still runs only if approved.
 
-- `permissionGate.enabled`: ask before matching bash tool calls. In non-interactive mode, matches are blocked.
-- `permissionGate.commands`: comma-separated command fragments to confirm before running. Default: `rm -Rf`. Literal entries are case-insensitive and whitespace-tolerant; regex entries may use `/pattern/flags`.
+### Compaction
 
-## Thinking settings
-
-All are exposed through `pi-extension-manager` under **QOL**:
-
-- `thinkingTimer.enabled`: show live elapsed time next to collapsed `Thinking...` labels. Requires thinking blocks to be collapsed (`hideThinkingBlock` / Ctrl+T) and a model/thinking level that emits thinking blocks. Default on.
-
-## Compaction settings
-
-All are exposed through `pi-extension-manager` under **QOL**:
-
-- `compaction.customEnabled`: use QOL custom summary generation for Pi compaction events. Default off, so Pi behavior is unchanged until enabled.
-- `compaction.model`: summarizer model (`provider/model`, bare model id, or `current`). Default: `google/gemini-2.5-flash`.
-- `compaction.profile`: `concise`, `balanced`, or `exhaustive` summary detail.
-- `compaction.maxTokens`, `compaction.includePreviousSummary`, `compaction.fallbackToDefault`, `compaction.notify`.
-- `compaction.remoteEnabled` / `compaction.remoteEndpoint`: POST `{ systemPrompt, prompt, maxTokens }`; expects `{ summary }`.
+- `compaction.customEnabled`: use QOL custom summaries for Pi compaction events; default off.
+- `compaction.model`: summarizer model; default `google/gemini-2.5-flash`.
+- `compaction.profile`: `concise`, `balanced`, or `exhaustive`.
+- `compaction.remoteEnabled` / `compaction.remoteEndpoint`: call a remote summarizer with `{ systemPrompt, prompt, maxTokens }` and expect `{ summary }`.
 - `compaction.branchSummaryEnabled`: use the same summarizer for requested `/tree` branch summaries.
-- `compaction.idleEnabled`, `compaction.idleThresholdTokens`, `compaction.idleTimeoutSeconds`, `compaction.thresholdTokens`, `compaction.thresholdPercent`: extension-managed idle compaction trigger inspired by oh-my-pi.
+- `compaction.idleEnabled` and related thresholds: extension-managed idle compaction trigger.
 
-Known limitation: Pi owns native pending image attachment state and does not expose it to extensions. This package can attach image paths it collapses itself, but native Pi paste/drag attachments remain Pi-owned.
+### Thinking timer
+
+- `thinkingTimer.enabled`: show elapsed time next to collapsed `Thinking...` labels when the model emits thinking blocks.
+
+## Notes
+
+Pi owns native pending image attachment state and does not expose it to extensions. QOL can attach image paths it collapses itself; native Pi paste/drag attachments remain Pi-owned.

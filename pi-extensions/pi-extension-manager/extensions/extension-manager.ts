@@ -3,8 +3,8 @@
  *
  * Provides a Pi-styled settings shell with package tabs. Pi does not yet
  * expose a public API for third-party extensions to inject native built-in
- * /settings tabs, so this extension registers /extensions plus a best-effort
- * /settings wrapper when extension command priority allows it.
+ * /settings tabs, so this extension exposes its own /extensions and
+ * /extension-settings entrypoints.
  */
 
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, Theme } from "@mariozechner/pi-coding-agent";
@@ -1981,7 +1981,11 @@ export default function extensionManager(pi: ExtensionAPI): void {
 
 	if (loadConfig.config[MANAGER_ID]?.enabled === false) {
 		pi.registerCommand("extensions", {
-			description: "Extension manager is disabled. Use /extensions enable to re-enable it.",
+			description: "Extension manager recovery command.",
+			getArgumentCompletions: (prefix) => {
+				const query = prefix.trimStart().toLowerCase();
+				return "enable".startsWith(query) ? [{ value: "enable", label: "enable", description: "Re-enable the extension manager UI" }] : null;
+			},
 			handler: async (args, ctx) => {
 				if (args.trim().toLowerCase() !== "enable") {
 					ctx.ui.notify("Extension manager UI is disabled. Run /extensions enable, then /reload, to restore it.", "warning");
@@ -2009,18 +2013,6 @@ export default function extensionManager(pi: ExtensionAPI): void {
 		handler: async (_args, ctx) => openManager(pi, ctx, TAB_ALL),
 	});
 
-	// Best-effort /settings integration. Pi's public extension API has no native
-	// settings-tab registration yet. Newer Pi versions warn when extensions
-	// register commands that collide with built-ins, so keep this opt-in and use
-	// /extensions as the stable shortcut by default.
-	if (loadConfig.config[MANAGER_ID]?.allowSettingsCommandShadow === true) {
-		pi.registerCommand("settings", {
-			description: "vstack settings shell; use /settings extensions to jump to extension management.",
-			handler: async (_args, ctx) => {
-				await openManager(pi, ctx, TAB_ALL);
-			},
-		});
-	}
 
 	pi.on("session_start", (_event, ctx) => {
 		const inventory = buildInventory(pi, ctx);

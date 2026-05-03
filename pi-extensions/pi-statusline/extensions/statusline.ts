@@ -11,8 +11,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
-const DIM = "\x1b[38;5;8m";
-const RESET = "\x1b[0m";
 const DEFAULT_INPUT_BOTTOM_PADDING_LINES = 0;
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff", ".heic", ".heif"]);
 const IMAGE_PATH_PATTERN = /(^|[\s(\[{<"'`])(@?(?:~|\.\.?|\/)[^\s)\]}>"'`]+?\.(?:png|jpe?g|gif|webp|bmp|tiff?|heic|heif))(?=$|[\s)\]}>"'`,.;:!?])/gi;
@@ -96,6 +94,11 @@ function qolSettingBoolean(key: string, fallback: boolean, cwd?: string): boolea
 function qolSettingString(key: string, fallback: string, cwd?: string): string {
 	const value = readExtensionConfig("pi-qol", cwd)[key];
 	return typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback;
+}
+
+function qolNewlineFallbackKey(cwd?: string): "ctrl+j" | "none" {
+	const configured = qolSettingString("newlineFallbackKey", "ctrl+j", cwd).toLowerCase();
+	return configured === "none" ? "none" : "ctrl+j";
 }
 
 function styleAutocompleteHintItem(item: AutocompleteItem, theme: Theme): AutocompleteItem {
@@ -335,7 +338,7 @@ function attachmentLabels(text: string, cwd = process.cwd()): string[] {
 function chip(label: string, theme?: Theme): string {
 	const text = ` ${label} `;
 	if (theme) return theme.fg("accent", theme.inverse(text));
-	return `\x1b[7m${text}${RESET}`;
+	return `[${label}]`;
 }
 
 function imageChipReplacements(visibleText: string, cwd: string, theme?: Theme): VisibleReplacement[] {
@@ -464,7 +467,7 @@ class ClaudePromptEditor extends CustomEditor {
 	}
 
 	handleInput(data: string): void {
-		const fallback = qolSettingString("newlineFallbackKey", "ctrl+j", this.ctx.cwd);
+		const fallback = qolNewlineFallbackKey(this.ctx.cwd);
 		const newlineEnabled = qolSettingBoolean("newlineOnShiftEnter", true, this.ctx.cwd);
 		const isShiftEnter = matchesKey(data, "shift+enter") || matchesKey(data, "shift+return");
 		const isFallback = fallback !== "none" && matchesKey(data, fallback);
@@ -512,7 +515,7 @@ class ClaudePromptEditor extends CustomEditor {
 
 		// Keep autocomplete visible below the wrapped prompt.
 		for (const line of completionLines) {
-			lines.push(truncateToWidth(`${DIM}${continuationPrefix}${RESET}${line}`, width, ""));
+			lines.push(truncateToWidth(`${this.ctx.ui.theme.fg("dim", continuationPrefix)}${line}`, width, ""));
 		}
 		return lines;
 	}
