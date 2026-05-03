@@ -918,7 +918,11 @@ enum InspectorRow {
     },
 }
 
-fn build_inspector_rows(item: &SelectItem, inner_w: usize) -> Vec<InspectorRow> {
+fn build_inspector_rows(
+    item: &SelectItem,
+    inner_w: usize,
+    scope_global: bool,
+) -> Vec<InspectorRow> {
     let mut rows: Vec<InspectorRow> = Vec::new();
 
     // Title
@@ -1026,7 +1030,7 @@ fn build_inspector_rows(item: &SelectItem, inner_w: usize) -> Vec<InspectorRow> 
     )]));
 
     // Action buttons with a blank row between each
-    let buttons = inspector_buttons(item);
+    let buttons = inspector_buttons(item, scope_global);
     for (i, btn) in buttons.into_iter().enumerate() {
         if i > 0 {
             rows.push(InspectorRow::Empty);
@@ -1054,8 +1058,9 @@ fn draw_inspector(frame: &mut Frame, area: Rect, select: &mut TabbedSelect) {
     select.inspector_scroll_down_area = Rect::default();
 
     let inner_w = inner.width as usize;
+    let scope_global = select.scope_global;
     let rows = match select.cursor_item() {
-        Some(item) => build_inspector_rows(item, inner_w),
+        Some(item) => build_inspector_rows(item, inner_w, scope_global),
         None => {
             select.inspector_total_rows = 0;
             select.inspector_visible_rows = inner.height;
@@ -1197,10 +1202,11 @@ impl InspectorButton {
         }
     }
 
-    fn install() -> Self {
+    fn install(scope_global: bool) -> Self {
         // Install matches "installed" badge color (STATUS_OK / Green).
+        let scope_word = if scope_global { "global" } else { "project" };
         Self {
-            label: "Install this".into(),
+            label: format!("Install {scope_word}"),
             action: ActionButton::InspectorInstall,
             bg: theme::STATUS_OK,
             fg: theme::ON_DARK,
@@ -1260,7 +1266,7 @@ impl InspectorButton {
     }
 }
 
-fn inspector_buttons(item: &SelectItem) -> Vec<InspectorButton> {
+fn inspector_buttons(item: &SelectItem, scope_global: bool) -> Vec<InspectorButton> {
     let mut out = vec![InspectorButton::select(item.selected)];
 
     if item.is_duplicate() {
@@ -1273,7 +1279,7 @@ fn inspector_buttons(item: &SelectItem) -> Vec<InspectorButton> {
     } else if item.installed {
         out.push(InspectorButton::remove());
     } else {
-        out.push(InspectorButton::install());
+        out.push(InspectorButton::install(scope_global));
     }
     out
 }
@@ -1347,8 +1353,9 @@ fn draw_action_bar(frame: &mut Frame, area: Rect, select: &mut TabbedSelect) {
     // — primary buttons get bold colored fills; secondary get a softer style.
     let mut buttons: Vec<(String, ActionButton, Color, Color, bool)> = Vec::new();
     if install_n > 0 {
+        let scope_word = if select.scope_global { "global" } else { "project" };
         buttons.push((
-            format!(" Install ({install_n}) "),
+            format!(" Install {scope_word} ({install_n}) "),
             ActionButton::BatchInstall,
             theme::ON_DARK,
             theme::STATUS_OK,
