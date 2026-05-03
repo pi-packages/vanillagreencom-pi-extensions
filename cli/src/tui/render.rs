@@ -1,473 +1,877 @@
-use super::multiselect::TabbedSelect;
+use super::multiselect::{ActionButton, ButtonHit, SelectItem, TabKind, TabbedSelect};
+use crate::config::InstallMethod;
+use crate::harness::Harness;
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Padding, Paragraph, Tabs};
+use ratatui::widgets::{
+    Block, BorderType, Borders, Clear, List, ListItem, Padding, Paragraph, Tabs,
+};
+
+const INSPECTOR_MIN_TERMINAL_WIDTH: u16 = 100;
+const INSPECTOR_WIDTH: u16 = 40;
+/// Width of the clickable checkbox column at the left edge of each list
+/// row, in cells. Mirrors the rendered checkbox span (`"[✓] "` or
+/// `"[ ] "` — 4 cells including the trailing gap). The mouse handler
+/// imports this to decide whether a click was on the checkbox vs. the
+/// row body. Renderer and click handler MUST stay in sync via this
+/// constant — drift here makes checkboxes silently un-clickable.
+pub(super) const LIST_CHECKBOX_HIT_WIDTH: u16 = 4;
+/// Cells the List widget's Block padding eats off the left of each row.
+/// `Padding::new(1, 1, 0, 0)` in `draw_list` ⇒ 1.
+pub(super) const LIST_INNER_PAD_LEFT: u16 = 1;
+/// Minimum total main-area height before the stacked (vertical) inspector
+/// is hidden. Below this the list takes the entire main area.
+const INSPECTOR_STACKED_MIN_HEIGHT: u16 = 18;
+/// Height reserved for the stacked inspector when shown below the list.
+const INSPECTOR_STACKED_HEIGHT: u16 = 12;
+
+/// Theme palette built from named ANSI colors so the user's terminal theme
+/// (Tokyo Night, Catppuccin, Solarized, etc.) drives the actual rendering.
+/// Avoid `Color::Indexed(N)` for N >= 16 because those are fixed RGB values
+/// that bypass the user's palette.
+pub(super) mod theme {
+    use ratatui::style::Color;
+
+    pub const ACCENT: Color = Color::Cyan; // primary accent (focus, links, primary buttons)
+    pub const MARK: Color = Color::Magenta; // user-marked items
+    /// Background fill for the focused row inside a dialog list. The
+    /// repo dialog uses this for "cursor here" — distinct from the
+    /// main TUI's cursor (a `▸` arrow + accent color) so dialogs feel
+    /// like a separate visual context. Yellow keeps it off every
+    /// action-color hue.
+    pub const DIALOG_CURSOR_BG: Color = Color::Yellow;
+    /// Scope-identity tokens. Used both for the header's project/global
+    /// toggle bg and for the inline "project"/"global" word in list-item
+    /// badges, so a row's scope at a glance matches the header chip color.
+    /// SCOPE_GLOBAL = `Color::White`, which in ratatui maps to ANSI 15
+    /// (bright white) — inside the standard 16-color palette so it stays
+    /// theme-aware, and renders distinctly from every other action color
+    /// (blue project, magenta mark, red danger, green ok, yellow warn,
+    /// cyan accent). Always paired with ON_DARK (Black) fg, never used
+    /// as a foreground color (white-on-default-bg is invisible on light
+    /// terminal themes).
+    pub const SCOPE_PROJECT: Color = Color::Blue;
+    pub const SCOPE_GLOBAL: Color = Color::White;
+    pub const STATUS_OK: Color = Color::Green; // installed / install action
+    pub const STATUS_WARN: Color = Color::Yellow; // outdated / update / duplicate
+    pub const STATUS_DANGER: Color = Color::Red; // remove / dangerous
+
+    /// Primary text color for body content. Uses `Color::Reset` so the
+    /// terminal's default foreground is honored — `Color::White` is unsafe
+    /// here because most light terminal themes render it as bright white,
+    /// which becomes invisible on a light background. With `Reset`, dark
+    /// terminals get their normal light foreground and light terminals get
+    /// their normal dark foreground.
+    pub const TEXT_PRIMARY: Color = Color::Reset;
+    pub const TEXT_SECONDARY: Color = Color::Gray;
+    pub const TEXT_MUTED: Color = Color::DarkGray;
+    pub const SEP: Color = Color::DarkGray;
+    /// Muted bg for the settings panel. ANSI Black is theme-mapped — most
+    /// terminals draw it as a hue close to the default background (e.g.,
+    /// #073642 in Solarized Dark, #282828 in Gruvbox), giving a subtle
+    /// "elevated panel" feel without the bright slab DarkGray creates.
+    pub const SETTINGS_BG: Color = Color::Black;
+    /// Scroll-arrow button bg. Intentionally distinct from every action
+    /// color (ACCENT, STATUS_OK, STATUS_WARN, STATUS_DANGER, MARK,
+    /// SCOPE_PROJECT, SCOPE_GLOBAL) so arrows read as a separate visual
+    /// class even when overlapping a regular action button.
+    pub const SCROLL_BG: Color = Color::LightYellow;
+
+    pub const ON_DARK: Color = Color::Black; // fg when bg is a colored fill
+    /// Foreground when bg is the danger color. Black on red works across both
+    /// dark "true red" themes and lighter "salmon red" themes; white tends to
+    /// blend on the latter.
+    pub const ON_DANGER: Color = Color::Black;
+}
 
 pub fn draw_tabbed_select(frame: &mut Frame, select: &mut TabbedSelect) {
     let area = frame.area();
-
     frame.render_widget(
-        Block::default().style(Style::default().bg(Color::Black)),
+        Block::default().style(Style::default().bg(Color::Reset)),
         area,
     );
 
+    select.button_hits.clear();
+
+    // ── Vertical layout ───────────────────────────────
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // title
-            Constraint::Length(1), // steps
-            Constraint::Length(2), // separator above tabs
+            Constraint::Length(1), // title
+            Constraint::Length(1), // separator under title
+            Constraint::Length(1), // settings panel (single content row, bg fills it)
+            Constraint::Length(1), // (blank)
             Constraint::Length(1), // tabs
-            Constraint::Length(1), // separator below tabs
-            Constraint::Min(5),    // list
-            Constraint::Length(2), // status
-            Constraint::Length(3), // help (wraps on narrow terminals)
+            Constraint::Length(1), // separator
+            Constraint::Min(5),    // main (list + inspector)
+            Constraint::Length(1), // separator
+            Constraint::Length(1), // action bar
+            Constraint::Length(1), // (blank or filter)
+            Constraint::Length(1), // help
         ])
         .split(area);
 
-    // Store layout areas for mouse hit testing
-    select.layout_tab_bar = chunks[3];
-    select.layout_list = chunks[5];
-    select.source_chip_area = Rect::default();
+    select.layout_tab_bar = chunks[4];
 
-    draw_header(
-        frame, chunks[0], chunks[1], chunks[2], chunks[3], chunks[4], select,
-    );
-    draw_list(frame, chunks[5], select);
-    draw_status(frame, chunks[6], select);
-    draw_help(frame, chunks[7], select);
+    draw_title(frame, chunks[0], select);
+    draw_sep(frame, chunks[1]);
+    draw_settings_chips(frame, chunks[2], select);
+    // chunks[3]: blank
+    draw_tab_bar(frame, chunks[4], select);
+    draw_sep(frame, chunks[5]);
+    draw_main_area(frame, chunks[6], select);
+    draw_sep(frame, chunks[7]);
+    draw_action_bar(frame, chunks[8], select);
+    draw_filter_line(frame, chunks[9], select);
+    draw_help_bar(frame, chunks[10], select);
 
-    // Confirm dialog overlay
-    if let Some((message, _)) = select.confirm_dialog.clone() {
-        draw_confirm_dialog(frame, select, &message);
+    // Overlays
+    if let Some(dialog) = select.confirm_dialog.as_ref() {
+        let snapshot = ConfirmRender {
+            title: dialog.title.clone(),
+            body: dialog.body.clone(),
+            accept_label: dialog.accept_label.clone(),
+            scroll: dialog.scroll,
+            accent: dialog.accent,
+            require_typed: dialog.require_typed.clone(),
+            typed_input: dialog.typed_input.clone(),
+        };
+        draw_confirm_dialog(frame, select, &snapshot);
     } else if select.repo_dialog.is_some() {
         draw_repo_dialog(frame, select);
+    } else if select.method_dialog.is_some() {
+        draw_method_dialog(frame, select);
+    } else if select.harness_dialog.is_some() {
+        draw_harness_dialog(frame, select);
+    } else {
+        // Reset dialog outer rects when no dialog is open so backdrop click
+        // detection doesn't false-fire on stale rects.
+        select.confirm_dialog_outer = Rect::default();
+        select.repo_dialog_outer = Rect::default();
+        select.method_dialog_outer = Rect::default();
+        select.harness_dialog_outer = Rect::default();
+    }
+
+    if select.help_overlay {
+        draw_help_overlay(frame, select);
+    } else {
+        select.help_overlay_outer = Rect::default();
     }
 }
 
-fn build_tab_titles(select: &TabbedSelect) -> Vec<Line<'static>> {
-    select
+fn draw_sep(frame: &mut Frame, area: Rect) {
+    let sep =
+        Paragraph::new("─".repeat(area.width as usize)).style(Style::default().fg(theme::SEP));
+    frame.render_widget(sep, area);
+}
+
+// ── Title row ──────────────────────────────────────────────
+
+fn draw_title(frame: &mut Frame, area: Rect, select: &mut TabbedSelect) {
+    // Reset the source-chip hit rect at the top of the frame so a
+    // tighter terminal viewport (where the chip no longer renders)
+    // doesn't leave a previous frame's rect live as a phantom click
+    // target. The other chips dispatch via `button_hits` (cleared each
+    // frame in `draw_tabbed_select`) so they need no per-field reset.
+    select.source_chip_area = Rect::default();
+
+    let left_spans = vec![
+        Span::styled(
+            " vstack ",
+            Style::default().fg(Color::Black).bg(theme::ACCENT).bold(),
+        ),
+        Span::styled(
+            format!("  {}", select.title),
+            Style::default().fg(theme::TEXT_PRIMARY).bold(),
+        ),
+    ];
+    // Selection counter lives only in the action bar; the header doesn't
+    // duplicate it.
+    let left_width = Line::from(left_spans.clone()).width() as u16;
+    frame.render_widget(
+        Paragraph::new(Line::from(left_spans)),
+        Rect {
+            x: area.x,
+            y: area.y,
+            width: left_width.min(area.width),
+            height: 1,
+        },
+    );
+
+    let mut right_x = area.right();
+
+    // Version
+    let ver = format!(" v{} ", env!("CARGO_PKG_VERSION"));
+    let ver_w = ver.chars().count() as u16;
+    if ver_w + 2 < area.width {
+        right_x = right_x.saturating_sub(ver_w + 1);
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                ver,
+                Style::default().fg(theme::TEXT_MUTED),
+            ))),
+            Rect {
+                x: right_x,
+                y: area.y,
+                width: ver_w,
+                height: 1,
+            },
+        );
+    }
+
+    // Repo chip
+    if let Some(ref source_label) = select.source_label {
+        let raw = format!(" repo: {} ▾ ", source_label);
+        let max_inner = area.width.saturating_sub(left_width + ver_w + 4) as usize;
+        let display = if raw.chars().count() > max_inner && max_inner > 8 {
+            let keep = max_inner.saturating_sub(10);
+            let short: String = source_label.chars().take(keep).collect();
+            format!(" repo: {}… ▾ ", short)
+        } else {
+            raw
+        };
+        let chip_w = display.chars().count() as u16;
+        if chip_w + 1 < right_x.saturating_sub(area.x) {
+            right_x = right_x.saturating_sub(chip_w + 1);
+            select.source_chip_area = Rect {
+                x: right_x,
+                y: area.y,
+                width: chip_w,
+                height: 1,
+            };
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    display,
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(theme::TEXT_MUTED)
+                        .bold(),
+                ))),
+                select.source_chip_area,
+            );
+        }
+    } else {
+        select.source_chip_area = Rect::default();
+    }
+
+    // ? help button — dispatched via button_hits, no standalone field.
+    let help_chip = " ? help ";
+    let help_w = help_chip.chars().count() as u16;
+    if help_w + 1 < right_x.saturating_sub(area.x) {
+        right_x = right_x.saturating_sub(help_w + 1);
+        let help_rect = Rect {
+            x: right_x,
+            y: area.y,
+            width: help_w,
+            height: 1,
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                help_chip,
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(theme::TEXT_MUTED)
+                    .bold(),
+            ))),
+            help_rect,
+        );
+        select.button_hits.push(ButtonHit {
+            rect: help_rect,
+            action: ActionButton::OpenHelp,
+            enabled: true,
+        });
+    }
+}
+
+// ── Settings chip line ──────────────────────────────────────
+
+fn draw_settings_chips(frame: &mut Frame, area: Rect, select: &mut TabbedSelect) {
+    // All settings chips dispatch via `button_hits` (cleared each frame
+    // by the caller), so there's nothing to reset per-field here.
+
+    // Fill the panel with a muted bg across all 3 rows so the area reads as
+    // a settings card with breathing room top and bottom. Content lives on
+    // the middle row; outer rows are intentional padding. Vertical dividers
+    // between sections span the full panel height.
+    frame.render_widget(
+        Block::default().style(Style::default().bg(theme::SETTINGS_BG)),
+        area,
+    );
+
+    let content_y = area.y;
+    let chip_h = area.height; // hit areas span the whole panel for forgiving clicks
+    let label_bg = Style::default()
+        .fg(theme::TEXT_SECONDARY)
+        .bg(theme::SETTINGS_BG);
+    let bg_only = Style::default().bg(theme::SETTINGS_BG);
+    let max_x = area.right();
+
+    let mut x = area.x;
+
+    // Section title.
+    let title = " Install Methods: ";
+    let title_w = title.chars().count() as u16;
+    if x + title_w < max_x {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                title,
+                Style::default()
+                    .fg(theme::TEXT_PRIMARY)
+                    .bg(theme::SETTINGS_BG)
+                    .bold(),
+            ))),
+            Rect {
+                x,
+                y: content_y,
+                width: title_w,
+                height: 1,
+            },
+        );
+        x = x.saturating_add(title_w);
+    }
+
+    // Gap after the title.
+    x = x.saturating_add(2);
+
+    // Scope label + buttons
+    let scope_label = " scope: ";
+    let scope_label_w = scope_label.chars().count() as u16;
+    if x + scope_label_w < max_x {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(scope_label, label_bg))),
+            Rect {
+                x,
+                y: content_y,
+                width: scope_label_w,
+                height: 1,
+            },
+        );
+        x = x.saturating_add(scope_label_w);
+    }
+
+    let project_active = !select.scope_global;
+    let global_active = select.scope_global;
+    let scope_buttons = [
+        (
+            " project ",
+            ActionButton::ScopeProject,
+            project_active,
+            theme::SCOPE_PROJECT,
+        ),
+        (
+            " global ",
+            ActionButton::ScopeGlobal,
+            global_active,
+            theme::SCOPE_GLOBAL,
+        ),
+    ];
+    for (label, action, active, active_bg) in scope_buttons {
+        let w = label.chars().count() as u16;
+        if x + w >= max_x {
+            break;
+        }
+        let style = if active {
+            Style::default().fg(theme::ON_DARK).bg(active_bg).bold()
+        } else {
+            Style::default().fg(theme::TEXT_SECONDARY).bg(theme::SEP)
+        };
+        // Render the chip on the content row.
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(label, style))),
+            Rect {
+                x,
+                y: content_y,
+                width: w,
+                height: 1,
+            },
+        );
+        // Hit area spans the full panel height so clicks anywhere in the
+        // chip's column register, including the padding rows.
+        let hit_rect = Rect {
+            x,
+            y: area.y,
+            width: w,
+            height: chip_h,
+        };
+        select.button_hits.push(ButtonHit {
+            rect: hit_rect,
+            action,
+            enabled: !active,
+        });
+        x = x.saturating_add(w);
+    }
+
+    // Spacer (settings bg) before next divider.
+    let spacer = Rect {
+        x,
+        y: content_y,
+        width: 1.min(max_x.saturating_sub(x)),
+        height: 1,
+    };
+    if spacer.width > 0 {
+        frame.render_widget(Paragraph::new(" ").style(bg_only), spacer);
+    }
+    x = x.saturating_add(1);
+
+    // Gap before next section.
+    x = x.saturating_add(2);
+
+    // Method label + buttons
+    let method_label = " method: ";
+    let method_label_w = method_label.chars().count() as u16;
+    if x + method_label_w < max_x {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(method_label, label_bg))),
+            Rect {
+                x,
+                y: content_y,
+                width: method_label_w,
+                height: 1,
+            },
+        );
+        x = x.saturating_add(method_label_w);
+    }
+
+    let sym_active = select.install_method == InstallMethod::Symlink;
+    let copy_active = select.install_method == InstallMethod::Copy;
+    let method_buttons = [
+        (" symlink ", ActionButton::MethodSymlink, sym_active),
+        (" copy ", ActionButton::MethodCopy, copy_active),
+    ];
+    for (label, action, active) in method_buttons {
+        let w = label.chars().count() as u16;
+        if x + w >= max_x {
+            break;
+        }
+        let style = if active {
+            Style::default()
+                .fg(theme::ON_DARK)
+                .bg(theme::STATUS_OK)
+                .bold()
+        } else {
+            Style::default().fg(theme::TEXT_SECONDARY).bg(theme::SEP)
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(label, style))),
+            Rect {
+                x,
+                y: content_y,
+                width: w,
+                height: 1,
+            },
+        );
+        let hit_rect = Rect {
+            x,
+            y: area.y,
+            width: w,
+            height: chip_h,
+        };
+        select.button_hits.push(ButtonHit {
+            rect: hit_rect,
+            action,
+            enabled: !active,
+        });
+        x = x.saturating_add(w);
+    }
+
+    let spacer = Rect {
+        x,
+        y: content_y,
+        width: 1.min(max_x.saturating_sub(x)),
+        height: 1,
+    };
+    if spacer.width > 0 {
+        frame.render_widget(Paragraph::new(" ").style(bg_only), spacer);
+    }
+    x = x.saturating_add(1);
+
+    // Gap before next section.
+    x = x.saturating_add(2);
+
+    // Harness chip — single button that opens the dialog
+    let active_harnesses: Vec<&str> = Harness::ALL
+        .iter()
+        .filter(|h| {
+            select
+                .harness_selection
+                .get(h.id())
+                .copied()
+                .unwrap_or(false)
+        })
+        .map(|h| h.name())
+        .collect();
+    let h_label = if active_harnesses.is_empty() {
+        " harness: (none) ▾ ".to_string()
+    } else {
+        let joined = active_harnesses.join(",");
+        let max_inner = max_x.saturating_sub(x).saturating_sub(14) as usize;
+        if joined.chars().count() > max_inner && max_inner > 6 {
+            let keep = max_inner.saturating_sub(2);
+            let short: String = joined.chars().take(keep).collect();
+            format!(" harness: {short}… ▾ ")
+        } else {
+            format!(" harness: {} ▾ ", joined)
+        }
+    };
+    let h_w = h_label.chars().count() as u16;
+    if x + h_w < max_x {
+        let bg = if active_harnesses.is_empty() {
+            theme::STATUS_DANGER
+        } else {
+            theme::STATUS_OK
+        };
+        // Visual chip on content row only.
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                h_label,
+                Style::default().fg(Color::Black).bg(bg).bold(),
+            ))),
+            Rect {
+                x,
+                y: content_y,
+                width: h_w,
+                height: 1,
+            },
+        );
+        // Hit area spans the full panel height.
+        let hit_rect = Rect {
+            x,
+            y: area.y,
+            width: h_w,
+            height: chip_h,
+        };
+        select.button_hits.push(ButtonHit {
+            rect: hit_rect,
+            action: ActionButton::HarnessOpen,
+            enabled: true,
+        });
+    }
+}
+
+// ── Tab bar ──────────────────────────────────────────────
+
+fn draw_tab_bar(frame: &mut Frame, area: Rect, select: &mut TabbedSelect) {
+    select.tab_hit_areas.clear();
+    if select.tabs.len() <= 1 {
+        return;
+    }
+
+    let titles: Vec<Line<'static>> = select
         .tabs
         .iter()
         .enumerate()
         .map(|(i, tab)| {
             let is_active = i == select.active_tab;
-            let count: usize = tab
+            let count_in_tab: usize = tab
                 .groups
                 .iter()
                 .flat_map(|g| &g.items)
                 .filter(|item| item.selected)
                 .count();
 
-            let name_style = if is_active {
-                Style::default().fg(Color::Cyan).bold()
+            let name_color = if is_active {
+                Color::Cyan
             } else {
-                Style::default().fg(Color::DarkGray)
-            };
-
-            if tab.name.starts_with("Updates") {
-                let base = tab.name.split('(').next().unwrap_or(&tab.name).trim();
-                let n: usize = tab.groups.iter().flat_map(|g| &g.items).count();
-                let mut spans = vec![Span::styled(format!(" {base} "), name_style)];
-                spans.push(Span::styled(
-                    format!("({n})"),
-                    Style::default().fg(Color::Yellow),
-                ));
-                if count > 0 {
-                    spans.push(Span::styled(
-                        format!(" +{count}"),
-                        Style::default().fg(Color::Magenta),
-                    ));
+                match tab.kind {
+                    TabKind::Duplicates => Color::Yellow,
+                    TabKind::Updates => theme::STATUS_WARN,
+                    _ => Color::DarkGray,
                 }
-                spans.push(Span::raw(" "));
-                return Line::from(spans);
-            }
-
-            if count > 0 {
-                Line::from(vec![
-                    Span::styled(format!(" {} ", tab.name), name_style),
-                    Span::styled(format!("({count})"), Style::default().fg(Color::Magenta)),
-                    Span::raw(" "),
-                ])
-            } else {
-                Line::from(Span::styled(format!(" {} ", tab.name), name_style))
-            }
-        })
-        .collect()
-}
-
-fn draw_header(
-    frame: &mut Frame,
-    title_area: Rect,
-    step_area: Rect,
-    sep_area: Rect,
-    tab_area: Rect,
-    sep2_area: Rect,
-    select: &mut TabbedSelect,
-) {
-    select.step_hit_areas.clear();
-
-    // Title line
-    let title_spans = vec![
-        Span::styled(
-            " vstack ",
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Indexed(45))
-                .bold(),
-        ),
-        Span::styled(
-            format!("  {}", select.title),
-            Style::default().fg(Color::White).bold(),
-        ),
-    ];
-    let default_step_labels = ["Packages", "Scope", "Harnesses", "Method", "Install"];
-
-    let top_y = title_area.y.saturating_add(1);
-    let brand_title_width = Line::from(title_spans.clone()).width() as u16;
-    frame.render_widget(
-        Paragraph::new(Line::from(title_spans)),
-        Rect {
-            x: title_area.x,
-            y: top_y,
-            width: brand_title_width.min(title_area.width),
-            height: 1,
-        },
-    );
-
-    if let Some(ref source_label) = select.source_label {
-        let raw = format!(" repo: {} ▾ ", source_label);
-        let max_inner = title_area.width.saturating_sub(4) as usize;
-        let clipped = if raw.chars().count() > max_inner && max_inner > 3 {
-            let keep = max_inner.saturating_sub(4);
-            let short: String = source_label.chars().take(keep).collect();
-            format!(" repo: {}… ▾ ", short)
-        } else {
-            raw
-        };
-        let chip_width = clipped.chars().count() as u16;
-        if chip_width < title_area.width {
-            let chip_x = title_area.right().saturating_sub(chip_width + 1);
-            select.source_chip_area = Rect {
-                x: chip_x,
-                y: top_y,
-                width: chip_width,
-                height: 1,
             };
-            frame.render_widget(
-                Paragraph::new(Line::from(vec![Span::styled(
-                    clipped,
-                    Style::default()
-                        .fg(Color::Black)
-                        .bg(Color::Indexed(240))
-                        .bold(),
-                )])),
-                select.source_chip_area,
-            );
-        }
-    }
-
-    // Version label right-aligned on the step line (below repo chip)
-    {
-        let ver = format!(" v{} ", env!("CARGO_PKG_VERSION"));
-        let ver_width = ver.chars().count() as u16;
-        if ver_width < step_area.width {
-            let ver_x = step_area.right().saturating_sub(ver_width + 1);
-            frame.render_widget(
-                Paragraph::new(Line::from(vec![Span::styled(
-                    ver,
-                    Style::default().fg(Color::Indexed(240)),
-                )])),
-                Rect {
-                    x: ver_x,
-                    y: step_area.y,
-                    width: ver_width,
-                    height: 1,
-                },
-            );
-        }
-    }
-
-    let step_prefix_art = " ╰─ ";
-    let step_prefix_label = "Flow ";
-    let mut step_spans = vec![
-        Span::styled(
-            step_prefix_art,
-            Style::default().fg(Color::Indexed(45)).bold(),
-        ),
-        Span::styled(
-            step_prefix_label,
-            Style::default().fg(Color::Indexed(240)).italic(),
-        ),
-    ];
-    let mut step_x = step_area.x.saturating_add(
-        (step_prefix_art.chars().count() + step_prefix_label.chars().count()) as u16,
-    );
-    let step_y = step_area.y;
-    if let Some(ref step) = select.step
-        && let Some((cur_s, tot_s)) = step.split_once('/')
-        && let (Ok(cur), Ok(tot)) = (cur_s.parse::<usize>(), tot_s.parse::<usize>())
-    {
-        for i in 1..=tot {
-            if i > 1 {
-                let dash_style = if i <= cur {
-                    Style::default().fg(Color::Indexed(45))
+            let prefix = match tab.kind {
+                TabKind::Duplicates => "⚠ ",
+                _ => "",
+            };
+            let mut spans = Vec::new();
+            spans.push(Span::styled(
+                format!(" {prefix}{}", tab.name),
+                Style::default().fg(name_color).add_modifier(if is_active {
+                    Modifier::BOLD
                 } else {
-                    Style::default().fg(Color::Indexed(236))
-                };
-                step_spans.push(Span::styled(" ── ", dash_style));
-                step_x = step_x.saturating_add(4);
+                    Modifier::empty()
+                }),
+            ));
+            if count_in_tab > 0 {
+                spans.push(Span::styled(
+                    format!(" +{count_in_tab}"),
+                    Style::default().fg(Color::Magenta),
+                ));
             }
-            let label = select
-                .step_labels
-                .get(i - 1)
-                .cloned()
-                .or_else(|| {
-                    default_step_labels
-                        .get(i - 1)
-                        .map(|label| label.to_string())
-                })
-                .unwrap_or_else(|| i.to_string());
-            let (badge, style) = if i < cur {
-                (
-                    format!("◆ {label}"),
-                    Style::default().fg(Color::Indexed(45)).bold(),
-                )
-            } else if i == cur {
-                (
-                    format!("▌ {label} ▐"),
-                    Style::default().fg(Color::Black).bg(Color::Yellow).bold(),
-                )
-            } else {
-                (
-                    format!("◇ {label}"),
-                    Style::default().fg(Color::Indexed(240)),
-                )
-            };
-            let badge_width = badge.chars().count() as u16;
-            step_spans.push(Span::styled(badge.clone(), style));
-            select.step_hit_areas.push(Rect {
-                x: step_x,
-                y: step_y,
-                width: badge_width,
+            spans.push(Span::raw(" "));
+            Line::from(spans)
+        })
+        .collect();
+
+    // Align the tab row with the title and settings rows: each title's
+    // first visible character should land at the same column as the 'v' of
+    // vstack and the 's' of scope. Tab labels carry a leading space, so we
+    // start drawing at area.x with no extra block padding.
+    let divider_width = 3u16;
+    let mut x = area.x;
+    let inner_right = area.right();
+
+    // Each rendered tab spans exactly title.width() columns (the leading
+    // space inside each title supplies the visual gutter; the Tabs widget
+    // adds no extra padding because we set padding("", "")). Drift between
+    // hit areas and the rendered tabs accumulates per tab if these don't
+    // match, so changing one without the other will silently break clicks
+    // on later tabs.
+    for (i, title) in titles.iter().enumerate() {
+        let width = title.width() as u16;
+        if x >= inner_right {
+            break;
+        }
+        let clamped = width.min(inner_right.saturating_sub(x));
+        if clamped > 0 {
+            select.tab_hit_areas.push(Rect {
+                x,
+                y: area.y,
+                width: clamped,
                 height: 1,
             });
-            step_x = step_x.saturating_add(badge_width);
+        }
+        x = x.saturating_add(width);
+        if i + 1 < titles.len() {
+            x = x.saturating_add(divider_width);
         }
     }
-    frame.render_widget(Paragraph::new(Line::from(step_spans)), step_area);
 
-    // Full-width separator
-    let sep = Paragraph::new("─".repeat(sep_area.width as usize))
-        .style(Style::default().fg(Color::Indexed(236)));
-    frame.render_widget(
-        sep,
-        Rect {
-            x: sep_area.x,
-            y: sep_area.y + sep_area.height.saturating_sub(1),
-            width: sep_area.width,
-            height: 1,
-        },
-    );
+    let tabs = Tabs::new(titles)
+        .select(select.active_tab)
+        .style(Style::default().fg(Color::DarkGray))
+        .highlight_style(Style::default())
+        .divider(Span::styled(" │ ", Style::default().fg(theme::SEP)))
+        .padding("", "");
 
-    // Tab bar
-    select.tab_hit_areas.clear();
-    if select.tabs.len() > 1 {
-        let tab_titles = build_tab_titles(select);
-        let divider_width = 3u16;
-        let horizontal_padding = 1u16;
-        let mut x = tab_area.x.saturating_add(horizontal_padding);
-        let inner_right = tab_area.right().saturating_sub(horizontal_padding);
+    frame.render_widget(tabs, area);
+}
 
-        for (i, title) in tab_titles.iter().enumerate() {
-            let width = (title.width() as u16).saturating_add(2);
-            if x >= inner_right {
-                break;
-            }
+// ── Main area: list + (optional) inspector ──────────────────
 
-            let clamped_width = width.min(inner_right.saturating_sub(x));
-            if clamped_width > 0 {
-                select.tab_hit_areas.push(Rect {
-                    x,
-                    y: tab_area.y,
-                    width: clamped_width,
-                    height: 1,
-                });
-            }
+fn draw_main_area(frame: &mut Frame, area: Rect, select: &mut TabbedSelect) {
+    // Three layouts depending on viewport:
+    //   wide  → list | sep | inspector  (side-by-side)
+    //   narrow + tall enough → list / sep / inspector (stacked vertically)
+    //   narrow + short → list only (inspector content shows on cursor move
+    //                    once the user makes more room)
+    let wide_enough = area.width >= INSPECTOR_MIN_TERMINAL_WIDTH;
+    let tall_enough = area.height >= INSPECTOR_STACKED_MIN_HEIGHT;
 
-            x = x.saturating_add(width);
-            if i + 1 < tab_titles.len() {
-                x = x.saturating_add(divider_width);
-            }
-        }
+    if wide_enough {
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Min(40),
+                Constraint::Length(1), // vertical separator
+                Constraint::Length(INSPECTOR_WIDTH),
+            ])
+            .split(area);
 
-        let tabs = Tabs::new(tab_titles)
-            .select(select.active_tab)
-            .style(Style::default().fg(Color::DarkGray))
-            .highlight_style(Style::default()) // no override — styled per-span above
-            .divider(Span::styled(
-                " │ ",
-                Style::default().fg(Color::Indexed(236)),
-            ))
-            .padding(" ", " ");
+        select.layout_list = chunks[0];
+        select.layout_inspector = chunks[2];
 
+        draw_list(frame, chunks[0], select);
+        draw_vertical_sep(frame, chunks[1]);
+        draw_inspector(frame, chunks[2], select);
+    } else if tall_enough {
+        // Stack vertically: list on top, horizontal sep, inspector below.
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(5),
+                Constraint::Length(1), // horizontal separator
+                Constraint::Length(INSPECTOR_STACKED_HEIGHT),
+            ])
+            .split(area);
+
+        select.layout_list = chunks[0];
+        select.layout_inspector = chunks[2];
+
+        draw_list(frame, chunks[0], select);
+        draw_sep(frame, chunks[1]);
+        draw_inspector(frame, chunks[2], select);
+    } else {
+        select.layout_list = area;
+        select.layout_inspector = Rect::default();
+        draw_list(frame, area, select);
+    }
+}
+
+fn draw_vertical_sep(frame: &mut Frame, area: Rect) {
+    let bar = "│";
+    for y in area.y..area.bottom() {
         frame.render_widget(
-            tabs.block(Block::default().padding(Padding::horizontal(1))),
-            tab_area,
+            Paragraph::new(Span::styled(bar, Style::default().fg(theme::SEP))),
+            Rect {
+                x: area.x,
+                y,
+                width: 1,
+                height: 1,
+            },
         );
     }
+}
 
-    // Separator below tabs
-    let sep2 = Paragraph::new("─".repeat(sep2_area.width as usize))
-        .style(Style::default().fg(Color::Indexed(236)));
-    frame.render_widget(sep2, sep2_area);
+/// Color a scope word with the matching scope-identity token. "both"
+/// blends the two token colors via a Cyan compromise so it stands out
+/// from either single-scope option.
+fn scope_span(scope: super::multiselect::Scope) -> Span<'static> {
+    use super::multiselect::Scope;
+    let color = match scope {
+        Scope::Project => theme::SCOPE_PROJECT,
+        Scope::Global => theme::SCOPE_GLOBAL,
+        Scope::Both => Color::Cyan,
+    };
+    Span::styled(scope.label(), Style::default().fg(color).bold())
 }
 
 fn draw_list(frame: &mut Frame, area: Rect, select: &mut TabbedSelect) {
     select.set_visible_height(area.height as usize);
-    let visible = area.height as usize;
-    let tab = &select.tabs[select.active_tab];
-    let on_installed_tab = tab.name == "Installed";
-    let is_final_step = matches!(select.step_position(), Some((cur, tot)) if cur == tot);
-    let button_label = " Install (i) ";
-    let button_width = button_label.chars().count() as u16;
-    select.action_button_area = Rect::default();
-    let content_width = area.width.saturating_sub(2) as usize; // padding
+    let visible_area = area.height as usize;
+    let content_width = area.width.saturating_sub(2) as usize;
 
-    // Build all rows first, then slice for scroll window
+    let visible_indices = select.visible_indices();
+    let tab = &select.tabs[select.active_tab];
+
     let mut all_rows: Vec<ListItem> = Vec::new();
     let mut row_items: Vec<Option<usize>> = Vec::new();
-    let mut flat_idx = 0usize;
 
-    // Render plain-text install summary (no selectable items)
-    if is_final_step && !select.install_summary.is_empty() {
-        for line in &select.install_summary {
-            all_rows.push(ListItem::new(Line::from(vec![
-                Span::raw("  "),
-                Span::styled(line.clone(), Style::default().fg(Color::DarkGray)),
-            ])));
-            row_items.push(None);
-        }
+    if visible_indices.is_empty() {
+        let msg = if select.filter.is_some() {
+            "  No items match filter"
+        } else {
+            "  (empty)"
+        };
+        all_rows.push(ListItem::new(Line::from(Span::styled(
+            msg,
+            Style::default().fg(theme::TEXT_MUTED),
+        ))));
+        row_items.push(None);
     }
 
+    let mut visible_idx = 0usize;
+    let mut last_group: Option<usize> = None;
+
     for (gi, group) in tab.groups.iter().enumerate() {
+        let group_visible: Vec<usize> = visible_indices
+            .iter()
+            .filter(|(g, _)| *g == gi)
+            .map(|(_, i)| *i)
+            .collect();
+        if group_visible.is_empty() {
+            continue;
+        }
+
         if !group.label.is_empty() && tab.groups.len() > 1 {
-            // Blank line between sections (not before first)
-            if gi > 0 {
+            if last_group.is_some() {
                 all_rows.push(ListItem::new(Line::from("")));
                 row_items.push(None);
             }
-            let header_style = Style::default().fg(Color::DarkGray).bold();
+            // Headers align with the row content's left edge — no extra
+            // indent — and use TEXT_PRIMARY so the label reads as normal
+            // body text rather than a muted secondary element.
+            let header_style = Style::default().fg(theme::TEXT_PRIMARY).bold();
+            let prefix = format!("{} ", group.label);
+            let prefix_w = prefix.chars().count();
             all_rows.push(ListItem::new(Line::from(vec![
-                Span::styled(format!("  {} ", group.label), header_style),
+                Span::styled(prefix, header_style),
                 Span::styled(
-                    "─".repeat(content_width.saturating_sub(group.label.len() + 4)),
-                    Style::default().fg(Color::Indexed(236)),
+                    "─".repeat(content_width.saturating_sub(prefix_w + 1)),
+                    Style::default().fg(theme::SEP),
                 ),
             ])));
             row_items.push(None);
+            last_group = Some(gi);
         }
 
-        for item in &group.items {
-            let is_cursor = flat_idx == select.cursor && !select.action_button_focused;
+        for ii in group_visible {
+            let item = &group.items[ii];
+            let is_cursor = visible_idx == select.cursor;
 
-            let check = if select.multi {
-                if item.locked && item.selected {
-                    Span::styled(" ✓ ", Style::default().fg(Color::Cyan))
-                } else if item.selected {
-                    Span::styled(" ✓ ", Style::default().fg(Color::Magenta).bold())
-                } else if item.outdated {
-                    Span::styled(" ● ", Style::default().fg(Color::Yellow))
-                } else if item.installed {
-                    Span::styled(" ● ", Style::default().fg(Color::Green))
-                } else {
-                    Span::styled(" ◇ ", Style::default().fg(Color::Indexed(240)))
-                }
+            // Checkbox: a clickable selection indicator at the leftmost
+            // column. Decoupled from install status so each glyph means
+            // exactly one thing — the checkbox shows whether the user
+            // has marked this row, and `status_span` (next) shows
+            // whether it's installed.
+            let checkbox_span = if item.locked && item.selected {
+                // Auto-locked dependency — accent color signals "selected
+                // because something else needs it" instead of MARK.
+                Span::styled("[✓] ", Style::default().fg(theme::ACCENT))
             } else if item.selected {
-                Span::styled(" ● ", Style::default().fg(Color::Cyan))
+                Span::styled("[✓] ", Style::default().fg(theme::MARK).bold())
             } else {
-                Span::styled(" ○ ", Style::default().fg(Color::Indexed(240)))
+                Span::styled("[ ] ", Style::default().fg(theme::TEXT_MUTED))
             };
 
-            let cursor_span = if is_cursor {
-                Span::styled("▸ ", Style::default().fg(Color::Cyan))
+            // Install status (separate from selection now that the
+            // checkbox owns "selected"). Yellow for outdated, green for
+            // installed, muted diamond for not installed.
+            let status_span = if item.outdated {
+                Span::styled("● ", Style::default().fg(theme::STATUS_WARN))
+            } else if item.installed {
+                Span::styled("● ", Style::default().fg(theme::STATUS_OK))
             } else {
-                Span::raw("  ")
+                Span::styled("◇ ", Style::default().fg(theme::TEXT_MUTED))
             };
 
+            // Cursor row signaled by bold-accent label.
             let label_style = if is_cursor {
-                Style::default().fg(Color::Cyan).bold()
+                Style::default().fg(theme::ACCENT).bold()
             } else if item.locked {
-                Style::default().fg(Color::Indexed(248))
+                Style::default().fg(theme::TEXT_SECONDARY)
             } else if item.selected {
-                Style::default().fg(Color::White)
+                Style::default().fg(theme::MARK).bold()
             } else {
-                Style::default().fg(Color::Gray)
+                Style::default().fg(theme::TEXT_SECONDARY)
             };
 
-            let mut spans = vec![cursor_span, check, Span::styled(&item.label, label_style)];
+            let mut spans = vec![
+                checkbox_span,
+                status_span,
+                Span::styled(&item.label, label_style),
+            ];
 
-            // Inline suffix + installed for all items (cursor and non-cursor)
             if let Some(ref suffix) = item.suffix {
                 spans.push(Span::styled(
                     format!("  {suffix}"),
-                    Style::default().fg(Color::Indexed(240)).italic(),
+                    Style::default().fg(theme::TEXT_MUTED).italic(),
                 ));
             }
-            if item.outdated {
+            // Row trailing info. The "outdated" / "installed" words are
+            // gone — that state is encoded in the leading dot color
+            // (yellow=outdated, green=installed, muted=not installed)
+            // and the help-bar legend explains what each means. We
+            // keep the duplicate warning (it's a hazard, not a status)
+            // and the scope word ("project" / "global" / "both")
+            // rendered in the matching scope-identity color.
+            //
+            // Scope is suppressed inside the Installed and Duplicates
+            // tabs because the group header already conveys it
+            // ("Project / Agents", "Global / Skills", etc.).
+            let show_scope_inline = !matches!(tab.kind, TabKind::Installed | TabKind::Duplicates);
+            if item.is_duplicate() {
                 spans.push(Span::styled(
-                    "  outdated",
-                    Style::default().fg(Color::Yellow),
+                    "  ⚠ duplicate",
+                    Style::default().fg(theme::STATUS_WARN).bold(),
                 ));
-            } else if item.installed && !on_installed_tab {
-                let installed_label = match item.installed_scope.as_deref() {
-                    Some(scope) if !scope.is_empty() => format!("  installed · {scope}"),
-                    _ => "  installed".into(),
-                };
-                spans.push(Span::styled(
-                    installed_label,
-                    Style::default().fg(Color::Green),
-                ));
-            } else if item.selected && select.multi {
-                spans.push(Span::styled(
-                    "  selected",
-                    Style::default().fg(Color::Magenta),
-                ));
+            } else if show_scope_inline && let Some(scope) = item.installed_scope {
+                spans.push(Span::raw("  "));
+                spans.push(scope_span(scope));
             }
 
             all_rows.push(ListItem::new(Line::from(spans)));
-            row_items.push(Some(flat_idx));
+            row_items.push(Some(visible_idx));
 
-            // Description on separate line below cursor item
-            if is_cursor {
-                let mut detail_parts: Vec<String> = Vec::new();
-                if !item.description.is_empty() {
-                    detail_parts.push(item.description.clone());
-                }
-                if !detail_parts.is_empty() {
-                    let detail = detail_parts.join("  ·  ");
-                    let indent = "       ";
-                    let wrap_width = content_width.saturating_sub(indent.len());
-                    for line in wrap_text(&detail, wrap_width) {
-                        all_rows.push(ListItem::new(Line::from(vec![
-                            Span::raw(indent),
-                            Span::styled(line, Style::default().fg(Color::DarkGray)),
-                        ])));
-                        row_items.push(Some(flat_idx));
-                    }
-                }
-            }
-
-            flat_idx += 1;
+            visible_idx += 1;
         }
     }
 
-    let total_rows = all_rows.len();
-    select.rendered_total_rows = total_rows;
-    let max_scroll = total_rows.saturating_sub(visible);
+    let total = all_rows.len();
+    select.rendered_total_rows = total;
+    let max_scroll = total.saturating_sub(visible_area);
     let scroll = select.scroll.min(max_scroll);
     select.scroll = scroll;
+    let end = (scroll + visible_area).min(total);
 
-    let end = (scroll + visible).min(total_rows);
     select.rendered_list_rows = row_items
         .iter()
         .skip(scroll)
@@ -483,43 +887,1316 @@ fn draw_list(frame: &mut Frame, area: Rect, select: &mut TabbedSelect) {
     let list = List::new(visible_rows).block(Block::default().padding(Padding::new(1, 1, 0, 0)));
     frame.render_widget(list, area);
 
-    if is_final_step {
-        let button_y = area.y.saturating_add(total_rows as u16 + 1);
-        if button_y < area.bottom() && area.width > button_width + 2 {
-            select.action_button_area = Rect {
-                x: area.x + 2,
-                y: button_y,
-                width: button_width,
+    // Scroll-arrow buttons at the right edge of the list, mirroring the
+    // inspector pattern. Hidden when not scrollable.
+    let max_scroll_u16 = (total.saturating_sub(visible_area)) as u16;
+    let scroll_u16 = scroll as u16;
+    let (up, down) = draw_scroll_arrows(frame, area, scroll_u16, max_scroll_u16);
+    select.list_scroll_up_area = up;
+    select.list_scroll_down_area = down;
+}
+
+// ── Inspector panel ──────────────────────────────────────────
+
+/// One inspector row, in logical (pre-scroll) order.
+enum InspectorRow {
+    Empty,
+    Text(Vec<Span<'static>>),
+    Button {
+        label: String,
+        action: ActionButton,
+        /// Background color for the button fill. Each verb maps to the
+        /// same color used for the matching state badge elsewhere in the
+        /// UI (Install→OK green, Update→warn yellow, Remove→danger red,
+        /// Select→mark magenta, Drop project→project blue, Drop global→
+        /// global magenta). The renderer pairs this with `fg` below.
+        bg: Color,
+        /// Foreground color. Almost always ON_DARK (Black on a colored
+        /// fill), except Remove which uses ON_DANGER for legibility on
+        /// the red fill across both dark and light salmon-red themes.
+        fg: Color,
+    },
+}
+
+fn build_inspector_rows(item: &SelectItem, inner_w: usize) -> Vec<InspectorRow> {
+    let mut rows: Vec<InspectorRow> = Vec::new();
+
+    // Title
+    let mut title_spans = vec![Span::styled(
+        item.label.clone(),
+        Style::default().fg(theme::TEXT_PRIMARY).bold(),
+    )];
+    if let Some(kind) = item.kind {
+        let label = match kind {
+            crate::config::ItemKind::Agent => "agent",
+            crate::config::ItemKind::Skill => "skill",
+            crate::config::ItemKind::Hook => "hook",
+            crate::config::ItemKind::PiExtension => "pi-pkg",
+        };
+        title_spans.push(Span::styled(
+            format!("  {label}"),
+            Style::default().fg(theme::TEXT_SECONDARY),
+        ));
+    }
+    rows.push(InspectorRow::Text(title_spans));
+
+    // Status badges. Match the main list rows: colored fg only, no
+    // filled-bg buttons. The list and the inspector should describe the
+    // same item with the same visual language.
+    let mut badges: Vec<Span<'static>> = Vec::new();
+    if item.is_duplicate() {
+        badges.push(Span::styled(
+            "⚠ duplicate",
+            Style::default().fg(theme::STATUS_WARN).bold(),
+        ));
+        badges.push(Span::raw("  "));
+    }
+    if item.outdated {
+        badges.push(Span::styled(
+            "outdated",
+            Style::default().fg(theme::STATUS_WARN),
+        ));
+        badges.push(Span::raw("  "));
+    }
+    if item.installed && !item.is_duplicate() {
+        badges.push(Span::styled(
+            "installed",
+            Style::default().fg(theme::STATUS_OK),
+        ));
+        badges.push(Span::raw("  "));
+    }
+    if !item.installed {
+        badges.push(Span::styled(
+            "not installed",
+            Style::default()
+                .fg(theme::TEXT_MUTED)
+                .add_modifier(Modifier::DIM),
+        ));
+        badges.push(Span::raw("  "));
+    }
+    if item.selected {
+        badges.push(Span::styled(
+            "✓ selected",
+            Style::default().fg(theme::MARK).bold(),
+        ));
+    }
+    if !badges.is_empty() {
+        rows.push(InspectorRow::Text(badges));
+    }
+
+    rows.push(InspectorRow::Empty);
+
+    // Description
+    if !item.description.is_empty() {
+        for line in wrap_text(&item.description, inner_w) {
+            rows.push(InspectorRow::Text(vec![Span::styled(
+                line,
+                Style::default().fg(theme::TEXT_SECONDARY),
+            )]));
+        }
+        rows.push(InspectorRow::Empty);
+    }
+
+    // Metadata
+    if let Some(scope) = item.installed_scope {
+        rows.push(InspectorRow::Text(vec![
+            Span::styled("Installed at: ", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled(scope.label(), Style::default().fg(theme::TEXT_PRIMARY)),
+        ]));
+    }
+    if let Some(suffix) = item.suffix.as_deref()
+        && !suffix.is_empty()
+    {
+        for line in wrap_text(suffix, inner_w) {
+            rows.push(InspectorRow::Text(vec![Span::styled(
+                line,
+                Style::default().fg(theme::TEXT_SECONDARY).italic(),
+            )]));
+        }
+    }
+
+    rows.push(InspectorRow::Empty);
+
+    // Actions section header — same primary text color as the main list
+    // group headers ("Rust", "Workflow", etc.) so all section labels
+    // read with the same weight throughout the TUI.
+    rows.push(InspectorRow::Text(vec![Span::styled(
+        "Actions",
+        Style::default().fg(theme::TEXT_PRIMARY).bold(),
+    )]));
+
+    // Action buttons with a blank row between each
+    let buttons = inspector_buttons(item);
+    for (i, btn) in buttons.into_iter().enumerate() {
+        if i > 0 {
+            rows.push(InspectorRow::Empty);
+        }
+        rows.push(InspectorRow::Button {
+            label: btn.label,
+            action: btn.action,
+            bg: btn.bg,
+            fg: btn.fg,
+        });
+    }
+
+    rows
+}
+
+fn draw_inspector(frame: &mut Frame, area: Rect, select: &mut TabbedSelect) {
+    let pad = Padding::new(2, 2, 1, 1);
+    let block = Block::default()
+        .padding(pad)
+        .style(Style::default().bg(Color::Reset));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    select.inspector_scroll_up_area = Rect::default();
+    select.inspector_scroll_down_area = Rect::default();
+
+    let inner_w = inner.width as usize;
+    let rows = match select.cursor_item() {
+        Some(item) => build_inspector_rows(item, inner_w),
+        None => {
+            select.inspector_total_rows = 0;
+            select.inspector_visible_rows = inner.height;
+            let line = Line::from(Span::styled(
+                "No item selected.",
+                Style::default().fg(theme::TEXT_MUTED).italic(),
+            ));
+            frame.render_widget(Paragraph::new(line), inner);
+            return;
+        }
+    };
+    let total = rows.len() as u16;
+    let visible = inner.height;
+    let max_scroll = total.saturating_sub(visible);
+    let scroll = select.inspector_scroll.min(max_scroll);
+    select.inspector_scroll = scroll;
+    select.inspector_total_rows = total;
+    select.inspector_visible_rows = visible;
+
+    let start = scroll as usize;
+    let end = (scroll + visible).min(total) as usize;
+
+    let mut y = inner.y;
+    for row in &rows[start..end] {
+        if y >= inner.bottom() {
+            break;
+        }
+        let rect = Rect {
+            x: inner.x,
+            y,
+            width: inner.width,
+            height: 1,
+        };
+        match row {
+            InspectorRow::Empty => {}
+            InspectorRow::Text(spans) => {
+                frame.render_widget(Paragraph::new(Line::from(spans.clone())), rect);
+            }
+            InspectorRow::Button {
+                label,
+                action,
+                bg,
+                fg,
+            } => {
+                // Match the action-bar button shape: " Label " with single
+                // padding spaces, sized to the text instead of stretched
+                // full-width across the inspector.
+                let style = Style::default().fg(*fg).bg(*bg).bold();
+                let display = format!(" {label} ");
+                let btn_w = (display.chars().count() as u16).min(inner.width);
+                let btn_rect = Rect {
+                    x: inner.x,
+                    y: rect.y,
+                    width: btn_w,
+                    height: 1,
+                };
+                frame.render_widget(
+                    Paragraph::new(Line::from(Span::styled(display, style))),
+                    btn_rect,
+                );
+                select.button_hits.push(ButtonHit {
+                    rect: btn_rect,
+                    action: *action,
+                    enabled: true,
+                });
+            }
+        }
+        y += 1;
+    }
+
+    // Anchor scroll arrows on the outer `area` (not `inner`) so they line up
+    // with the list panel's arrows on the same horizontal rows — both panels
+    // place arrows just inside the surrounding separator lines instead of
+    // floating above them.
+    let (up, down) = draw_scroll_arrows(frame, area, scroll, max_scroll);
+    select.inspector_scroll_up_area = up;
+    select.inspector_scroll_down_area = down;
+}
+
+/// Render scroll-indicator buttons at the right edge of `area`. Returns
+/// (up_rect, down_rect) — either may be Rect::default() when not shown.
+fn draw_scroll_arrows(frame: &mut Frame, area: Rect, scroll: u16, max_scroll: u16) -> (Rect, Rect) {
+    if area.height == 0 || area.width < 4 {
+        return (Rect::default(), Rect::default());
+    }
+    let btn_w = 3u16;
+    let style = Style::default()
+        .fg(theme::ON_DARK)
+        .bg(theme::SCROLL_BG)
+        .bold();
+    let up_rect = if scroll > 0 {
+        let r = Rect {
+            x: area.right().saturating_sub(btn_w),
+            y: area.y,
+            width: btn_w,
+            height: 1,
+        };
+        frame.render_widget(Paragraph::new(Line::from(Span::styled(" ▲ ", style))), r);
+        r
+    } else {
+        Rect::default()
+    };
+    let down_rect = if scroll < max_scroll {
+        let r = Rect {
+            x: area.right().saturating_sub(btn_w),
+            y: area.bottom().saturating_sub(1),
+            width: btn_w,
+            height: 1,
+        };
+        frame.render_widget(Paragraph::new(Line::from(Span::styled(" ▼ ", style))), r);
+        r
+    } else {
+        Rect::default()
+    };
+    (up_rect, down_rect)
+}
+
+/// One inspector action button, with colors that mirror the matching
+/// state badge or action-bar verb so the inspector reads like the rest
+/// of the UI.
+struct InspectorButton {
+    label: String,
+    action: ActionButton,
+    bg: Color,
+    fg: Color,
+}
+
+impl InspectorButton {
+    fn select(item_selected: bool) -> Self {
+        let label = if item_selected { "Deselect" } else { "Select" };
+        // Selection uses MARK (Magenta) — the same color shown on the
+        // checkmark and "✓ selected" badge, so the verb visually matches
+        // the state it produces.
+        Self {
+            label: label.into(),
+            action: ActionButton::InspectorMarkToggle,
+            bg: theme::MARK,
+            fg: theme::ON_DARK,
+        }
+    }
+
+    fn install() -> Self {
+        // Install matches "installed" badge color (STATUS_OK / Green).
+        Self {
+            label: "Install this".into(),
+            action: ActionButton::InspectorInstall,
+            bg: theme::STATUS_OK,
+            fg: theme::ON_DARK,
+        }
+    }
+
+    fn update() -> Self {
+        // Update matches "outdated" badge color (STATUS_WARN / Yellow).
+        Self {
+            label: "Update".into(),
+            action: ActionButton::InspectorUpdate,
+            bg: theme::STATUS_WARN,
+            fg: theme::ON_DARK,
+        }
+    }
+
+    fn remove() -> Self {
+        // Remove uses STATUS_DANGER (Red) — same as the destructive
+        // action-bar Remove and the only verb in this UI that deletes.
+        Self {
+            label: "Remove".into(),
+            action: ActionButton::InspectorRemove,
+            bg: theme::STATUS_DANGER,
+            fg: theme::ON_DANGER,
+        }
+    }
+
+    fn drop_project() -> Self {
+        // Scope-colored: the bg is the project identity color so the
+        // user can see which scope is being affected at a glance. The
+        // word "Drop" in the label conveys that it's destructive.
+        Self {
+            label: "Drop project copy".into(),
+            action: ActionButton::InspectorDropProject,
+            bg: theme::SCOPE_PROJECT,
+            fg: theme::ON_DARK,
+        }
+    }
+
+    fn drop_global() -> Self {
+        Self {
+            label: "Drop global copy".into(),
+            action: ActionButton::InspectorDropGlobal,
+            bg: theme::SCOPE_GLOBAL,
+            fg: theme::ON_DARK,
+        }
+    }
+
+    fn dismiss() -> Self {
+        // Dismiss is a neutral, non-destructive action — accent (Cyan).
+        Self {
+            label: "Dismiss flag".into(),
+            action: ActionButton::InspectorDismiss,
+            bg: theme::ACCENT,
+            fg: theme::ON_DARK,
+        }
+    }
+}
+
+fn inspector_buttons(item: &SelectItem) -> Vec<InspectorButton> {
+    let mut out = vec![InspectorButton::select(item.selected)];
+
+    if item.is_duplicate() {
+        out.push(InspectorButton::drop_project());
+        out.push(InspectorButton::drop_global());
+        out.push(InspectorButton::dismiss());
+    } else if item.outdated {
+        out.push(InspectorButton::update());
+        out.push(InspectorButton::remove());
+    } else if item.installed {
+        out.push(InspectorButton::remove());
+    } else {
+        out.push(InspectorButton::install());
+    }
+    out
+}
+
+// ── Action bar ──────────────────────────────────────────
+
+fn draw_action_bar(frame: &mut Frame, area: Rect, select: &mut TabbedSelect) {
+    // Counts: an item can belong to multiple buckets simultaneously (an
+    // outdated item is also removable). Each verb-button surfaces the count
+    // of items the verb can act on; the user picks which verb to run.
+    let mut install_n = 0usize;
+    let mut update_n = 0usize;
+    let mut remove_n = 0usize;
+    // Move counts are direction-specific. project-only selected items can
+    // move to global; global-only selected items can move to project. Mixed
+    // selections surface both buttons so the user picks one direction at a
+    // time without the header scope toggle being load-bearing.
+    let mut move_to_global_n = 0usize;
+    let mut move_to_project_n = 0usize;
+    for item in select.marked_items() {
+        if !item.installed {
+            install_n += 1;
+        }
+        if item.outdated {
+            update_n += 1;
+        }
+        if item.installed {
+            remove_n += 1;
+        }
+        if item.installed
+            && let Some(scope) = item.installed_scope
+        {
+            use super::multiselect::Scope;
+            match scope {
+                Scope::Project => move_to_global_n += 1,
+                Scope::Global => move_to_project_n += 1,
+                Scope::Both => {}
+            }
+        }
+    }
+
+    let mark_count = select.total_marked();
+    let summary_style = if mark_count == 0 {
+        Style::default().fg(theme::TEXT_SECONDARY)
+    } else {
+        Style::default().fg(theme::MARK).bold()
+    };
+    let summary = if mark_count == 0 {
+        "  none selected".to_string()
+    } else {
+        format!("  {mark_count} selected")
+    };
+
+    // Left summary
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(summary, summary_style))),
+        Rect {
+            x: area.x,
+            y: area.y,
+            width: 18.min(area.width),
+            height: 1,
+        },
+    );
+
+    // Right-aligned buttons. Hide buttons that have nothing to act on so
+    // the bar reads as a list of currently-actionable choices, not a row of
+    // half-blank rectangles. Mark-all is always shown; Clear only when there
+    // is something to clear.
+    //
+    // Tuple: (label, action, fg, bg, primary)
+    // — primary buttons get bold colored fills; secondary get a softer style.
+    let mut buttons: Vec<(String, ActionButton, Color, Color, bool)> = Vec::new();
+    if install_n > 0 {
+        buttons.push((
+            format!(" Install ({install_n}) "),
+            ActionButton::BatchInstall,
+            theme::ON_DARK,
+            theme::STATUS_OK,
+            true,
+        ));
+    }
+    if update_n > 0 {
+        buttons.push((
+            format!(" Update ({update_n}) "),
+            ActionButton::BatchUpdate,
+            theme::ON_DARK,
+            theme::STATUS_WARN,
+            true,
+        ));
+    }
+    if remove_n > 0 {
+        buttons.push((
+            format!(" Remove ({remove_n}) "),
+            ActionButton::BatchRemove,
+            theme::ON_DANGER,
+            theme::STATUS_DANGER,
+            true,
+        ));
+    }
+    // Move buttons inherit the destination scope's identity color so a
+    // user can recognize the target at a glance — same Blue as the
+    // "project" chip / scope word, same LightMagenta as the "global"
+    // chip / scope word. Action verbs map to identity colors elsewhere
+    // (Update→warn, Remove→danger, Install→ok), and Move follows suit.
+    if move_to_global_n > 0 {
+        buttons.push((
+            format!(" Move to global ({move_to_global_n}) "),
+            ActionButton::BatchMoveToGlobal,
+            theme::ON_DARK,
+            theme::SCOPE_GLOBAL,
+            true,
+        ));
+    }
+    if move_to_project_n > 0 {
+        buttons.push((
+            format!(" Move to project ({move_to_project_n}) "),
+            ActionButton::BatchMoveToProject,
+            theme::ON_DARK,
+            theme::SCOPE_PROJECT,
+            true,
+        ));
+    }
+    // Select all: always offered, rendered as a secondary (outline-style)
+    // button so the colored primary actions stand out when present.
+    buttons.push((
+        " Select all ".into(),
+        ActionButton::MarkAllVisible,
+        theme::ACCENT,
+        Color::Reset,
+        false,
+    ));
+    if mark_count > 0 {
+        buttons.push((
+            " Clear ".into(),
+            ActionButton::ClearMarks,
+            theme::TEXT_SECONDARY,
+            Color::Reset,
+            false,
+        ));
+    }
+
+    let total_w: u16 = buttons
+        .iter()
+        .map(|(l, _, _, _, _)| l.chars().count() as u16 + 1)
+        .sum();
+    let mut x = area.right().saturating_sub(total_w + 1);
+    if x < area.x + 18 {
+        x = area.x + 18;
+    }
+
+    for (label, action, fg, bg, primary) in buttons {
+        let w = label.chars().count() as u16;
+        if x + w >= area.right() {
+            break;
+        }
+        let style = if primary {
+            Style::default().fg(fg).bg(bg).bold()
+        } else {
+            // Secondary: outline-feel — bracketed accent text on terminal bg.
+            Style::default().fg(fg).bold()
+        };
+        let rect = Rect {
+            x,
+            y: area.y,
+            width: w,
+            height: 1,
+        };
+        frame.render_widget(Paragraph::new(Line::from(Span::styled(label, style))), rect);
+        select.button_hits.push(ButtonHit {
+            rect,
+            action,
+            enabled: true,
+        });
+        x = x.saturating_add(w + 1);
+    }
+}
+
+// ── Filter line + help ──────────────────────────────────────
+
+fn draw_filter_line(frame: &mut Frame, area: Rect, select: &TabbedSelect) {
+    if select.filter.is_none() {
+        return;
+    }
+    let filter_text = select.filter.as_deref().unwrap_or("");
+    let trailing = if select.filter_input_mode { "_" } else { "" };
+    let line = Line::from(vec![
+        Span::styled("  /", Style::default().fg(Color::Cyan).bold()),
+        Span::styled(
+            filter_text.to_string(),
+            Style::default().fg(theme::TEXT_PRIMARY),
+        ),
+        Span::styled(trailing, Style::default().fg(Color::Cyan)),
+        Span::styled(
+            "    enter accept · esc clear",
+            Style::default().fg(theme::TEXT_MUTED),
+        ),
+    ]);
+    frame.render_widget(Paragraph::new(line), area);
+}
+
+fn draw_help_bar(frame: &mut Frame, area: Rect, select: &TabbedSelect) {
+    if let Some(ref msg) = select.flash_message {
+        // Flash takes the whole bar — legend hides until the message
+        // clears, since the message is more important.
+        let line = Line::from(vec![
+            Span::raw("  "),
+            Span::styled(msg.clone(), Style::default().fg(Color::Yellow)),
+        ]);
+        frame.render_widget(Paragraph::new(line), area);
+        return;
+    }
+
+    let keys: &[(&str, &str)] = &[
+        ("space", "select"),
+        ("a", "all"),
+        ("/", "filter"),
+        ("?", "help"),
+        ("esc", "quit"),
+    ];
+
+    // Legend: dot color → install state. The leading row dot now
+    // carries that state on its own (no "outdated" / "installed" word
+    // following the package name) so the user needs a key to read it.
+    let legend_spans: Vec<Span> = vec![
+        Span::styled("●", Style::default().fg(theme::STATUS_WARN)),
+        Span::styled(" outdated   ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled("●", Style::default().fg(theme::STATUS_OK)),
+        Span::styled(" installed   ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled("◇", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(" not installed", Style::default().fg(theme::TEXT_MUTED)),
+    ];
+    let legend_w: u16 = legend_spans
+        .iter()
+        .map(|s| s.content.chars().count() as u16)
+        .sum();
+
+    let avail = area.width.saturating_sub(2); // 1-cell padding on each side
+    // Reserve a 4-cell gap between keys and legend so they don't visually
+    // collide. If the bar is too narrow to fit both, the legend yields.
+    let legend_fits = legend_w + 4 <= avail;
+
+    if legend_fits {
+        let legend_x = area.right().saturating_sub(legend_w + 1);
+        frame.render_widget(
+            Paragraph::new(Line::from(legend_spans)),
+            Rect {
+                x: legend_x,
+                y: area.y,
+                width: legend_w,
                 height: 1,
-            };
-            let button_style = if select.action_button_focused {
-                Style::default().fg(Color::Black).bg(Color::Yellow).bold()
-            } else {
-                Style::default().fg(Color::Black).bg(Color::Green).bold()
-            };
+            },
+        );
+    }
+
+    let key_avail = if legend_fits {
+        avail.saturating_sub(legend_w + 4) as usize
+    } else {
+        avail as usize
+    };
+
+    let mut current: Vec<Span> = Vec::new();
+    let mut width = 0usize;
+    for (idx, (k, d)) in keys.iter().enumerate() {
+        let entry_w = 1 + k.len() + 1 + d.len();
+        let sep_w = if idx < keys.len() - 1 { 2 } else { 0 };
+        if !current.is_empty() && width + entry_w + sep_w > key_avail {
+            break;
+        }
+        current.push(Span::styled(
+            format!(" {k}"),
+            Style::default().fg(Color::Cyan),
+        ));
+        current.push(Span::styled(
+            format!(" {d}"),
+            Style::default().fg(Color::DarkGray),
+        ));
+        width += entry_w;
+        if idx < keys.len() - 1 {
+            current.push(Span::styled("  ", Style::default().fg(theme::SEP)));
+            width += sep_w;
+        }
+    }
+
+    let help =
+        Paragraph::new(Line::from(current)).block(Block::default().padding(Padding::horizontal(1)));
+    frame.render_widget(help, area);
+}
+
+// ── Confirm dialog ──────────────────────────────────────────
+
+struct ConfirmRender {
+    title: String,
+    body: Vec<String>,
+    accept_label: String,
+    scroll: usize,
+    accent: Color,
+    require_typed: Option<String>,
+    typed_input: String,
+}
+
+fn draw_confirm_dialog(frame: &mut Frame, select: &mut TabbedSelect, d: &ConfirmRender) {
+    let dialog_w = 84u16.min(frame.area().width.saturating_sub(4));
+    let inner_w = dialog_w.saturating_sub(6) as usize;
+    let body_lines: Vec<String> = d.body.iter().flat_map(|l| wrap_text(l, inner_w)).collect();
+    // body + blank-above-buttons + button-row + optional typed-confirm row.
+    let typed_extra: u16 = if d.require_typed.is_some() { 1 } else { 0 };
+    let content_h = body_lines.len() as u16 + 2 + typed_extra;
+    let (inner, dialog_area) = draw_dialog_chrome(frame, &d.title, d.accent, content_h, dialog_w);
+    select.confirm_dialog_outer = dialog_area;
+
+    // Reserve trailing rows: 1 for the typed input (when required) + 1
+    // for the blank above the buttons + 1 for the button row itself.
+    let typed_h: u16 = if d.require_typed.is_some() { 1 } else { 0 };
+    let trailing_h = typed_h + 2;
+    let body_h = inner.height.saturating_sub(trailing_h);
+    let max_scroll = body_lines.len().saturating_sub(body_h as usize);
+    let scroll = d.scroll.min(max_scroll);
+
+    let lines: Vec<Line> = body_lines
+        .iter()
+        .map(|l| {
+            Line::from(Span::styled(
+                l.clone(),
+                Style::default().fg(theme::TEXT_PRIMARY),
+            ))
+        })
+        .collect();
+    let body_rect = Rect::new(inner.x, inner.y, inner.width, body_h);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .scroll((scroll as u16, 0))
+            .style(Style::default().bg(Color::Reset)),
+        body_rect,
+    );
+
+    let mut next_y = inner.y + body_h;
+
+    if let Some(want) = d.require_typed.as_ref() {
+        let prompt = Line::from(vec![
+            Span::styled(
+                format!("Type \"{want}\": "),
+                Style::default().fg(Color::Yellow),
+            ),
+            Span::styled(
+                format!("{}_", d.typed_input),
+                Style::default().fg(theme::TEXT_PRIMARY).bold(),
+            ),
+        ]);
+        frame.render_widget(
+            Paragraph::new(prompt),
+            Rect::new(inner.x, next_y, inner.width, 1),
+        );
+        next_y += typed_h;
+    }
+
+    // Blank row of breathing room above the action buttons — keeps them
+    // from sitting flush against the body / typed-input.
+    next_y += 1;
+
+    // Bottom button row + scroll hint. Capture each button's rect for
+    // mouse hits.
+    let accept_label_text = format!(" {} ", d.accept_label);
+    let cancel_label_text = " Cancel ";
+    let accept_w = accept_label_text.chars().count() as u16;
+    let cancel_w = cancel_label_text.chars().count() as u16;
+
+    let accept_style = Style::default().fg(theme::ON_DARK).bg(d.accent).bold();
+    let cancel_style = Style::default()
+        .fg(theme::TEXT_SECONDARY)
+        .add_modifier(Modifier::BOLD);
+
+    let mut x = inner.x;
+    let row_y = next_y;
+
+    let accept_rect = Rect::new(x, row_y, accept_w, 1);
+    select.confirm_dialog_accept_area = accept_rect;
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(accept_label_text, accept_style))),
+        accept_rect,
+    );
+    x = x.saturating_add(accept_w + 2);
+
+    let cancel_rect = Rect::new(x, row_y, cancel_w, 1);
+    select.confirm_dialog_cancel_area = cancel_rect;
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(cancel_label_text, cancel_style))),
+        cancel_rect,
+    );
+    x = x.saturating_add(cancel_w + 4);
+
+    let hint = Line::from(vec![Span::styled(
+        "enter / esc / ↑↓ scroll",
+        Style::default().fg(theme::TEXT_MUTED),
+    )]);
+    if x < inner.right() {
+        frame.render_widget(
+            Paragraph::new(hint),
+            Rect::new(x, row_y, inner.right().saturating_sub(x), 1),
+        );
+    }
+}
+
+// ── Help overlay ──────────────────────────────────────────
+
+fn draw_help_overlay(frame: &mut Frame, select: &mut TabbedSelect) {
+    let entries: &[(&str, &[(&str, &str)])] = &[
+        (
+            "Navigate",
+            &[
+                ("↑↓", "Move cursor"),
+                ("Home/End", "Top / bottom"),
+                ("tab / shift-tab", "Next / prev tab"),
+                ("1-9", "Jump to tab N"),
+                ("/", "Filter items in tab"),
+            ],
+        ),
+        (
+            "Select",
+            &[
+                ("space / enter", "Toggle selection on cursor"),
+                ("a", "Toggle selection on all visible"),
+                ("c", "Clear selection"),
+            ],
+        ),
+        (
+            "Settings",
+            &[
+                ("s", "Toggle scope (project ↔ global)"),
+                ("m", "Pick install method (symlink / copy)"),
+                ("h", "Pick harnesses"),
+                ("r", "Switch / add package source"),
+            ],
+        ),
+        (
+            "Act",
+            &[
+                ("i", "Install selected"),
+                ("u / U", "Update selected / all outdated"),
+                ("d / D", "Remove selected / ALL installed"),
+                ("v", "Move selected to other scope"),
+                ("p / g", "Drop project / global (dups)"),
+                ("x", "Dismiss selected duplicates"),
+            ],
+        ),
+    ];
+
+    let content_h: u16 = entries
+        .iter()
+        .map(|(_, keys)| 1 + keys.len() as u16 + 1)
+        .sum::<u16>()
+        + 1;
+
+    let (inner, dialog_area) = draw_dialog_chrome(
+        frame,
+        "Help — Keyboard reference",
+        theme::ACCENT,
+        content_h,
+        80,
+    );
+    select.help_overlay_outer = dialog_area;
+
+    let mut lines: Vec<Line> = Vec::new();
+    for (section, keys) in entries {
+        lines.push(Line::from(Span::styled(
+            section.to_string(),
+            Style::default().fg(Color::Yellow).bold(),
+        )));
+        for (k, d) in *keys {
+            lines.push(Line::from(vec![
+                Span::styled(format!("  {:<18}", k), Style::default().fg(Color::Cyan)),
+                Span::styled(d.to_string(), Style::default().fg(theme::TEXT_PRIMARY)),
+            ]));
+        }
+        lines.push(Line::from(""));
+    }
+    lines.push(Line::from(Span::styled(
+        "Press ? or esc to close",
+        Style::default().fg(theme::TEXT_MUTED).italic(),
+    )));
+
+    frame.render_widget(
+        Paragraph::new(lines).style(Style::default().bg(Color::Reset)),
+        inner,
+    );
+}
+
+// ── Method dialog ──────────────────────────────────────────
+
+fn draw_method_dialog(frame: &mut Frame, select: &mut TabbedSelect) {
+    let cursor = match select.method_dialog.as_ref() {
+        Some(d) => d.cursor,
+        None => return,
+    };
+    let dialog_w = 56u16.min(frame.area().width.saturating_sub(4));
+    let inner_w = dialog_w.saturating_sub(6) as usize;
+    let wrap_w = inner_w.saturating_sub(4);
+    let descs = [
+        "Single source of truth — recommended",
+        "Duplicate files to each harness",
+    ];
+    let content_h: u16 = descs
+        .iter()
+        .map(|d| 1 + wrap_text(d, wrap_w).len() as u16 + 1)
+        .sum::<u16>()
+        + 1;
+    let (inner, dialog_area) =
+        draw_dialog_chrome(frame, "Install method", theme::ACCENT, content_h, dialog_w);
+    select.method_dialog_outer = dialog_area;
+
+    let options = [
+        ("Symlink", "Single source of truth — recommended"),
+        ("Copy", "Duplicate files to each harness"),
+    ];
+
+    select.method_dialog_option_areas.clear();
+    let wrap_w = inner.width.saturating_sub(4) as usize;
+    let mut y = inner.y;
+    let max_y = inner.bottom();
+
+    for (i, (label, desc)) in options.iter().enumerate() {
+        let is_cur = i == cursor;
+        let prefix = if is_cur { "▸ " } else { "  " };
+        let label_style = if is_cur {
+            Style::default().fg(theme::ACCENT).bold()
+        } else {
+            Style::default().fg(theme::TEXT_PRIMARY)
+        };
+
+        // The whole option row group (label + wrapped desc) is one click target.
+        let desc_lines = wrap_text(desc, wrap_w);
+        let group_h = (1 + desc_lines.len() as u16).min(max_y.saturating_sub(y));
+        let group_rect = Rect::new(inner.x, y, inner.width, group_h);
+        select.method_dialog_option_areas.push(group_rect);
+
+        if y < max_y {
             frame.render_widget(
-                Paragraph::new(Line::from(vec![Span::styled(button_label, button_style)])),
-                select.action_button_area,
+                Paragraph::new(Line::from(vec![
+                    Span::styled(prefix, Style::default().fg(theme::ACCENT)),
+                    Span::styled(label.to_string(), label_style),
+                ])),
+                Rect::new(inner.x, y, inner.width, 1),
+            );
+            y += 1;
+        }
+        for line in desc_lines {
+            if y >= max_y {
+                break;
+            }
+            frame.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::raw("    "),
+                    Span::styled(line, Style::default().fg(theme::TEXT_SECONDARY)),
+                ])),
+                Rect::new(inner.x, y, inner.width, 1),
+            );
+            y += 1;
+        }
+        if y < max_y {
+            y += 1;
+        }
+    }
+
+    // Select button + keyboard hint
+    if y < max_y {
+        let select_label = " Select ";
+        let select_w = select_label.chars().count() as u16;
+        let select_rect = Rect::new(inner.x, y, select_w, 1);
+        select.method_dialog_select_area = select_rect;
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                select_label,
+                Style::default().fg(theme::ON_DARK).bg(theme::ACCENT).bold(),
+            ))),
+            select_rect,
+        );
+        let hint_x = inner.x.saturating_add(select_w + 2);
+        if hint_x < inner.right() {
+            frame.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled("enter", Style::default().fg(theme::ACCENT)),
+                    Span::styled(" select  ", Style::default().fg(theme::TEXT_MUTED)),
+                    Span::styled("esc", Style::default().fg(theme::ACCENT)),
+                    Span::styled(" cancel", Style::default().fg(theme::TEXT_MUTED)),
+                ])),
+                Rect::new(hint_x, y, inner.right().saturating_sub(hint_x), 1),
             );
         }
     }
+}
+
+// ── Harness dialog ──────────────────────────────────────────
+
+fn draw_harness_dialog(frame: &mut Frame, select: &mut TabbedSelect) {
+    // Snapshot fields we need so we don't keep an immutable borrow of `select`
+    // while writing back hit areas.
+    let (cursor, entries) = match select.harness_dialog.as_ref() {
+        Some(d) => (
+            d.cursor,
+            d.entries
+                .iter()
+                .map(|e| {
+                    (
+                        e.label.clone(),
+                        e.enabled,
+                        e.disabled_reason.clone(),
+                        e.detected,
+                        e.previously_used,
+                    )
+                })
+                .collect::<Vec<_>>(),
+        ),
+        None => return,
+    };
+    // N entry rows + 1 spacer + 1 button row.
+    let content_h = entries.len() as u16 + 2;
+    let (inner, dialog_area) = draw_dialog_chrome(frame, "Harnesses", theme::ACCENT, content_h, 64);
+    select.harness_dialog_outer = dialog_area;
+
+    select.harness_dialog_entry_areas.clear();
+    let mut y = inner.y;
+    let max_y = inner.bottom();
+
+    for (i, (label, enabled, disabled_reason, detected, previously_used)) in
+        entries.iter().enumerate()
+    {
+        if y >= max_y {
+            break;
+        }
+        let is_cur = i == cursor;
+        let prefix = if is_cur { "▸ " } else { "  " };
+        let mark = if disabled_reason.is_some() {
+            Span::styled(" ✗ ", Style::default().fg(theme::STATUS_DANGER))
+        } else if *enabled {
+            Span::styled(" ✓ ", Style::default().fg(theme::MARK).bold())
+        } else {
+            Span::styled(" ◇ ", Style::default().fg(theme::TEXT_MUTED))
+        };
+        let label_style = if is_cur {
+            Style::default().fg(theme::ACCENT).bold()
+        } else {
+            Style::default().fg(theme::TEXT_PRIMARY)
+        };
+        let mut spans = vec![
+            Span::styled(prefix, Style::default().fg(theme::ACCENT)),
+            mark,
+            Span::styled(label.clone(), label_style),
+        ];
+        let mut hints: Vec<&str> = Vec::new();
+        if *previously_used {
+            hints.push("in use");
+        } else if *detected {
+            hints.push("detected");
+        }
+        if let Some(reason) = disabled_reason {
+            hints.push(reason.as_str());
+        }
+        if !hints.is_empty() {
+            spans.push(Span::styled(
+                format!("    {}", hints.join(" · ")),
+                Style::default().fg(theme::TEXT_MUTED).italic(),
+            ));
+        }
+        let row_rect = Rect::new(inner.x, y, inner.width, 1);
+        select.harness_dialog_entry_areas.push(row_rect);
+        frame.render_widget(Paragraph::new(Line::from(spans)), row_rect);
+        y += 1;
+    }
+
+    if y < max_y {
+        y += 1;
+    }
+
+    // Save button (clickable) + cancel hint
+    if y < max_y {
+        let save_label = " Save ";
+        let save_w = save_label.chars().count() as u16;
+        let save_rect = Rect::new(inner.x, y, save_w, 1);
+        select.harness_dialog_save_area = save_rect;
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                save_label,
+                Style::default().fg(theme::ON_DARK).bg(theme::ACCENT).bold(),
+            ))),
+            save_rect,
+        );
+        let hint_x = inner.x.saturating_add(save_w + 2);
+        if hint_x < inner.right() {
+            frame.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled("space", Style::default().fg(theme::ACCENT)),
+                    Span::styled(" toggle  ", Style::default().fg(theme::TEXT_MUTED)),
+                    Span::styled("esc", Style::default().fg(theme::ACCENT)),
+                    Span::styled(" cancel", Style::default().fg(theme::TEXT_MUTED)),
+                ])),
+                Rect::new(hint_x, y, inner.right().saturating_sub(hint_x), 1),
+            );
+        }
+    }
+}
+
+// ── Repo dialog ──────────────────────────────────────────
+
+fn draw_repo_dialog(frame: &mut Frame, select: &mut TabbedSelect) {
+    let (input_mode, input_text, options, cursor) = match select.repo_dialog.as_ref() {
+        Some(d) => (
+            d.input_mode,
+            d.input.clone(),
+            d.options
+                .iter()
+                .map(|o| o.label.clone())
+                .collect::<Vec<_>>(),
+            d.cursor,
+        ),
+        None => return,
+    };
+    let content_h: u16 = if input_mode {
+        // 1 prompt + 1 example + 1 spacer + 1 input
+        4
+    } else {
+        // N option rows + 1 spacer + 1 button row + 1 spacer + 1 hint
+        options.len() as u16 + 4
+    };
+    let (inner, dialog_area) =
+        draw_dialog_chrome(frame, "Package Source", theme::ACCENT, content_h, 64);
+    select.repo_dialog_outer = dialog_area;
+
+    select.repo_dialog_option_areas.clear();
+    select.repo_dialog_add_area = Rect::default();
+    select.repo_dialog_select_area = Rect::default();
+    select.repo_dialog_remove_area = Rect::default();
+
+    if input_mode {
+        let prompt = vec![
+            Line::from(Span::styled(
+                "Enter repo or URL",
+                Style::default().fg(theme::TEXT_PRIMARY).bold(),
+            )),
+            Line::from(Span::styled(
+                "Examples: owner/repo or https://github.com/owner/repo",
+                Style::default().fg(theme::TEXT_MUTED),
+            )),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("> ", Style::default().fg(theme::ACCENT).bold()),
+                Span::styled(input_text, Style::default().fg(theme::TEXT_PRIMARY)),
+            ]),
+        ];
+        frame.render_widget(Paragraph::new(prompt), inner);
+        return;
+    }
+
+    let max_y = inner.bottom();
+    let mut y = inner.y;
+
+    for (i, label) in options.iter().enumerate() {
+        if y >= max_y {
+            break;
+        }
+        let style = if i == cursor {
+            Style::default()
+                .fg(theme::ON_DARK)
+                .bg(theme::DIALOG_CURSOR_BG)
+                .bold()
+        } else {
+            Style::default().fg(theme::TEXT_PRIMARY)
+        };
+        let row_rect = Rect::new(inner.x, y, inner.width, 1);
+        select.repo_dialog_option_areas.push(row_rect);
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(format!(" {label} "), style))),
+            row_rect,
+        );
+        y += 1;
+    }
+
+    if y < max_y {
+        y += 1; // spacer before button row
+    }
+
+    // Action buttons row: Select · Remove · + Add repo
+    if y < max_y {
+        let on_existing = cursor < options.len();
+        let select_label = " Select ";
+        let remove_label = " Remove ";
+        let add_label = " + Add repo by link ";
+        let select_w = select_label.chars().count() as u16;
+        let remove_w = remove_label.chars().count() as u16;
+        let add_w = add_label.chars().count() as u16;
+
+        let mut x = inner.x;
+
+        let select_style = if on_existing {
+            Style::default().fg(theme::ON_DARK).bg(theme::ACCENT).bold()
+        } else {
+            Style::default()
+                .fg(theme::TEXT_MUTED)
+                .add_modifier(Modifier::DIM)
+        };
+        let select_rect = Rect::new(x, y, select_w, 1);
+        select.repo_dialog_select_area = if on_existing {
+            select_rect
+        } else {
+            Rect::default()
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(select_label, select_style))),
+            select_rect,
+        );
+        x = x.saturating_add(select_w + 2);
+
+        let remove_style = if on_existing {
+            Style::default()
+                .fg(theme::ON_DANGER)
+                .bg(theme::STATUS_DANGER)
+                .bold()
+        } else {
+            Style::default()
+                .fg(theme::TEXT_MUTED)
+                .add_modifier(Modifier::DIM)
+        };
+        let remove_rect = Rect::new(x, y, remove_w, 1);
+        select.repo_dialog_remove_area = if on_existing {
+            remove_rect
+        } else {
+            Rect::default()
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(remove_label, remove_style))),
+            remove_rect,
+        );
+        x = x.saturating_add(remove_w + 2);
+
+        if x + add_w < inner.right() {
+            let add_rect = Rect::new(x, y, add_w, 1);
+            select.repo_dialog_add_area = add_rect;
+            let add_style = Style::default().fg(theme::ACCENT).bold();
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(add_label, add_style))),
+                add_rect,
+            );
+        }
+        y += 1;
+    }
+
+    if y + 1 < max_y {
+        y += 1;
+    }
+    if y < max_y {
+        let hint_spans = vec![
+            Span::styled("enter", Style::default().fg(theme::ACCENT)),
+            Span::styled(" select  ", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("x", Style::default().fg(theme::ACCENT)),
+            Span::styled(" remove  ", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("esc", Style::default().fg(theme::ACCENT)),
+            Span::styled(" close", Style::default().fg(theme::TEXT_MUTED)),
+        ];
+        frame.render_widget(
+            Paragraph::new(Line::from(hint_spans)),
+            Rect::new(inner.x, y, inner.width, 1),
+        );
+    }
+}
+
+// ── Helpers ──────────────────────────────────────────
+
+/// Centered modal frame with thick accent border + padded inner area.
+/// Renders Clear, the outer border, title; returns (inner, outer) so the
+/// caller can record hit areas and lay out content.
+fn draw_dialog_chrome(
+    frame: &mut Frame,
+    title: &str,
+    accent: Color,
+    content_h: u16,
+    dialog_w: u16,
+) -> (Rect, Rect) {
+    let area = frame.area();
+    let dialog_w = dialog_w.min(area.width.saturating_sub(4));
+    let dialog_h = (content_h + 4).min(area.height.saturating_sub(2));
+    let outer = Rect::new(
+        (area.width.saturating_sub(dialog_w)) / 2,
+        (area.height.saturating_sub(dialog_h)) / 2,
+        dialog_w,
+        dialog_h,
+    );
+    frame.render_widget(Clear, outer);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Thick)
+        .border_style(Style::default().fg(accent).bg(Color::Reset))
+        .title(Span::styled(
+            format!(" {title} "),
+            Style::default().fg(accent).bold(),
+        ))
+        .style(Style::default().bg(Color::Reset))
+        .padding(Padding::new(2, 2, 1, 1));
+    let inner = block.inner(outer);
+    frame.render_widget(block, outer);
+    (inner, outer)
 }
 
 fn wrap_text(text: &str, width: usize) -> Vec<String> {
     if width == 0 {
         return vec![text.to_string()];
     }
+    if text.is_empty() {
+        return vec![String::new()];
+    }
     let mut lines = Vec::new();
     let mut current = String::new();
+    let mut current_len = 0usize;
     for word in text.split_whitespace() {
+        let word_len = word.chars().count();
         if current.is_empty() {
-            current = word.to_string();
-        } else if current.len() + 1 + word.len() <= width {
+            current.push_str(word);
+            current_len = word_len;
+        } else if current_len + 1 + word_len <= width {
             current.push(' ');
             current.push_str(word);
+            current_len += 1 + word_len;
         } else {
-            lines.push(current);
-            current = word.to_string();
+            lines.push(std::mem::take(&mut current));
+            current.push_str(word);
+            current_len = word_len;
         }
     }
     if !current.is_empty() {
@@ -531,168 +2208,12 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
     lines
 }
 
-fn wrap_text_lines(text: &str, width: usize) -> Vec<String> {
-    let mut out = Vec::new();
-    for raw_line in text.lines() {
-        let wrapped = wrap_text(raw_line, width);
-        if wrapped.is_empty() {
-            out.push(String::new());
-        } else {
-            out.extend(wrapped);
-        }
-    }
-    if out.is_empty() {
-        out.push(String::new());
-    }
-    out
-}
-
-fn draw_status(frame: &mut Frame, area: Rect, select: &mut TabbedSelect) {
-    frame.render_widget(
-        Block::default()
-            .borders(Borders::TOP)
-            .border_style(Style::default().fg(Color::Indexed(236))),
-        area,
-    );
-
-    let tab_count = select.selected_count();
-    let total = select.total_selected();
-
-    let mut status_text = if let Some(ref msg) = select.flash_message {
-        format!("  {msg}")
-    } else if select.multi {
-        if select.tabs.len() > 1 {
-            format!("  {} selected in tab, {} total", tab_count, total)
-        } else {
-            format!("  {} selected", total)
-        }
-    } else if total > 0 {
-        let flat = select.tabs[select.active_tab]
-            .groups
-            .iter()
-            .flat_map(|g| &g.items)
-            .collect::<Vec<_>>();
-        if let Some(item) = flat.get(select.cursor) {
-            format!("  → {}", item.label)
-        } else {
-            "  None selected".to_string()
-        }
-    } else {
-        "  None selected".to_string()
-    };
-
-    let text_style = if select.flash_message.is_some() {
-        Style::default().fg(Color::Yellow)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-
-    let text_x = area.x;
-    let text_width = area.width;
-
-    if text_width > 0 {
-        status_text.truncate(text_width.saturating_sub(1) as usize);
-    }
-
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![Span::styled(status_text, text_style)])),
-        Rect {
-            x: text_x,
-            y: area.y + 1,
-            width: text_width,
-            height: 1,
-        },
-    );
-}
-
-fn draw_help(frame: &mut Frame, area: Rect, select: &TabbedSelect) {
-    let mut keys: Vec<(&str, &str)> = vec![("↑↓", "navigate")];
-
-    if select.tabs.len() > 1 {
-        keys.push(("tab", "switch tab"));
-    }
-    if !select.source_options.is_empty() {
-        keys.push(("r", "repos"));
-    }
-    keys.push(("←", "back"));
-
-    let cur_tab = &select.tabs[select.active_tab].name;
-    let on_installed = cur_tab == "Installed";
-    let on_updates = cur_tab.starts_with("Updates");
-
-    if !on_installed && !on_updates {
-        keys.push(("enter", "toggle"));
-        if select.multi {
-            keys.push(("a", "all"));
-        }
-    }
-
-    if on_updates {
-        keys.push(("u", "update all"));
-    }
-
-    let has_installed = select.tabs.iter().any(|t| t.name == "Installed");
-    if has_installed {
-        keys.push(("d", "remove"));
-        if on_installed {
-            keys.push(("D", "remove all"));
-        }
-    }
-
-    let is_final_step = matches!(select.step_position(), Some((cur, tot)) if cur == tot);
-    if is_final_step {
-        keys.push(("i", "install"));
-    } else {
-        keys.push(("→", "next"));
-    }
-    keys.push(("esc", "quit"));
-
-    if select.tabs[select.active_tab].name.starts_with("Updates") {
-        keys.push(("U", "update all"));
-    }
-
-    // Build help spans, splitting into multiple lines if needed
-    let avail_width = area.width.saturating_sub(2) as usize; // padding
-    let mut lines: Vec<Line> = Vec::new();
-    let mut current_spans: Vec<Span> = Vec::new();
-    let mut current_width: usize = 0;
-
-    for (idx, (key, desc)) in keys.iter().enumerate() {
-        let entry_width = 1 + key.len() + 1 + desc.len();
-        let sep_width = if idx < keys.len() - 1 { 2 } else { 0 };
-
-        if !current_spans.is_empty() && current_width + entry_width + sep_width > avail_width {
-            lines.push(Line::from(std::mem::take(&mut current_spans)));
-            current_width = 0;
-        }
-
-        current_spans.push(Span::styled(
-            format!(" {key}"),
-            Style::default().fg(Color::Cyan),
-        ));
-        current_spans.push(Span::styled(
-            format!(" {desc}"),
-            Style::default().fg(Color::DarkGray),
-        ));
-        current_width += entry_width;
-
-        if idx < keys.len() - 1 {
-            current_spans.push(Span::styled("  ", Style::default().fg(Color::Indexed(236))));
-            current_width += sep_width;
-        }
-    }
-    if !current_spans.is_empty() {
-        lines.push(Line::from(current_spans));
-    }
-
-    let help = Paragraph::new(lines).block(Block::default().padding(Padding::horizontal(1)));
-    frame.render_widget(help, area);
-}
+// ── Summary screen (post-install) ──────────────────────────────
 
 pub fn draw_summary(frame: &mut Frame, data: &super::SummaryData, scroll: usize) -> usize {
     let area = frame.area();
     frame.render_widget(
-        Block::default().style(Style::default().bg(Color::Black)),
+        Block::default().style(Style::default().bg(Color::Reset)),
         area,
     );
 
@@ -700,16 +2221,15 @@ pub fn draw_summary(frame: &mut Frame, data: &super::SummaryData, scroll: usize)
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(2),              // header
-            Constraint::Length(1),              // separator
-            Constraint::Length(summary_height), // summary info
-            Constraint::Length(1),              // separator
-            Constraint::Min(5),                 // items
-            Constraint::Length(2),              // help
+            Constraint::Length(2),
+            Constraint::Length(1),
+            Constraint::Length(summary_height),
+            Constraint::Length(1),
+            Constraint::Min(5),
+            Constraint::Length(2),
         ])
         .split(area);
 
-    // Header
     let header = Paragraph::new(Line::from(vec![
         Span::styled(
             " vstack ",
@@ -717,18 +2237,14 @@ pub fn draw_summary(frame: &mut Frame, data: &super::SummaryData, scroll: usize)
         ),
         Span::styled(
             "  Installation complete",
-            Style::default().fg(Color::White).bold(),
+            Style::default().fg(theme::TEXT_PRIMARY).bold(),
         ),
     ]))
     .block(Block::default().padding(Padding::top(1)));
     frame.render_widget(header, chunks[0]);
 
-    // Separator
-    let sep = Paragraph::new("─".repeat(area.width as usize))
-        .style(Style::default().fg(Color::Indexed(236)));
-    frame.render_widget(sep, chunks[1]);
+    draw_sep(frame, chunks[1]);
 
-    // Summary info (what · how · where)
     let total = data.agents.len() + data.skills.len() + data.hooks.len() + data.pi_extensions.len();
     let n_updated = data.updated.len();
     let n_new = total.saturating_sub(n_updated);
@@ -772,19 +2288,14 @@ pub fn draw_summary(frame: &mut Frame, data: &super::SummaryData, scroll: usize)
     }
     frame.render_widget(Paragraph::new(summary_lines), chunks[2]);
 
-    // Separator
-    let sep2 = Paragraph::new("─".repeat(area.width as usize))
-        .style(Style::default().fg(Color::Indexed(236)));
-    frame.render_widget(sep2, chunks[3]);
+    draw_sep(frame, chunks[3]);
 
-    // Build item lines — split into updated vs new
     let content_width = area.width.saturating_sub(2) as usize;
     let mut all_lines: Vec<Line> = Vec::new();
 
     let updated_set: std::collections::HashSet<&str> =
         data.updated.iter().map(|s| s.as_str()).collect();
 
-    // Updated items first
     let updated_agents: Vec<_> = data
         .agents
         .iter()
@@ -803,7 +2314,6 @@ pub fn draw_summary(frame: &mut Frame, data: &super::SummaryData, scroll: usize)
         .filter(|(n, _)| updated_set.contains(n.as_str()))
         .cloned()
         .collect();
-
     let new_agents: Vec<_> = data
         .agents
         .iter()
@@ -822,7 +2332,6 @@ pub fn draw_summary(frame: &mut Frame, data: &super::SummaryData, scroll: usize)
         .filter(|(n, _)| !updated_set.contains(n.as_str()))
         .cloned()
         .collect();
-
     let updated_pi: Vec<_> = data
         .pi_extensions
         .iter()
@@ -862,13 +2371,11 @@ pub fn draw_summary(frame: &mut Frame, data: &super::SummaryData, scroll: usize)
             name_grid(&new_agents, content_width, &mut all_lines);
             all_lines.push(Line::from(""));
         }
-
         if !new_skills.is_empty() {
             all_lines.push(section_header("Skills", content_width));
             name_grid(&new_skills, content_width, &mut all_lines);
             all_lines.push(Line::from(""));
         }
-
         if !new_hooks.is_empty() {
             all_lines.push(section_header("Hooks", content_width));
             for (name, event) in &new_hooks {
@@ -880,42 +2387,13 @@ pub fn draw_summary(frame: &mut Frame, data: &super::SummaryData, scroll: usize)
             }
             all_lines.push(Line::from(""));
         }
-
         if !new_pi.is_empty() {
-            all_lines.push(section_header("Pi Extensions", content_width));
+            all_lines.push(section_header("Pi Packages", content_width));
             name_grid(&new_pi, content_width, &mut all_lines);
-            all_lines.push(Line::from(""));
-        }
-    } else if !has_updates {
-        // Edge case: nothing at all (shouldn't happen but be safe)
-        if !data.agents.is_empty() {
-            all_lines.push(section_header("Agents", content_width));
-            name_grid(&data.agents, content_width, &mut all_lines);
-            all_lines.push(Line::from(""));
-        }
-        if !data.skills.is_empty() {
-            all_lines.push(section_header("Skills", content_width));
-            name_grid(&data.skills, content_width, &mut all_lines);
-            all_lines.push(Line::from(""));
-        }
-        if !data.hooks.is_empty() {
-            all_lines.push(section_header("Hooks", content_width));
-            for (name, event) in &data.hooks {
-                all_lines.push(Line::from(vec![
-                    Span::styled("    ◆ ", Style::default().fg(Color::Green)),
-                    Span::styled(name.clone(), Style::default().fg(Color::Cyan)),
-                    Span::styled(format!("  {event}"), Style::default().fg(Color::DarkGray)),
-                ]));
-            }
-        }
-        if !data.pi_extensions.is_empty() {
-            all_lines.push(section_header("Pi Extensions", content_width));
-            name_grid(&data.pi_extensions, content_width, &mut all_lines);
             all_lines.push(Line::from(""));
         }
     }
 
-    // Render scrollable items
     let visible = chunks[4].height as usize;
     let total = all_lines.len();
     let max_scroll = total.saturating_sub(visible);
@@ -929,7 +2407,6 @@ pub fn draw_summary(frame: &mut Frame, data: &super::SummaryData, scroll: usize)
     let list = List::new(visible_items).block(Block::default().padding(Padding::new(1, 1, 0, 0)));
     frame.render_widget(list, chunks[4]);
 
-    // Help
     let help_spans = vec![
         Span::styled(" ↑↓", Style::default().fg(Color::Cyan)),
         Span::styled(" scroll", Style::default().fg(Color::DarkGray)),
@@ -946,16 +2423,14 @@ pub fn draw_summary(frame: &mut Frame, data: &super::SummaryData, scroll: usize)
 }
 
 fn section_header<'a>(title: &str, width: usize) -> Line<'a> {
-    let rule_len = width.saturating_sub(title.len() + 3);
+    // Mirrors the group-header style used in the main list: no leading
+    // indent and TEXT_PRIMARY for the label.
+    let prefix = format!("{title} ");
+    let prefix_w = prefix.chars().count();
+    let rule_len = width.saturating_sub(prefix_w + 1);
     Line::from(vec![
-        Span::styled(
-            format!("  {title} "),
-            Style::default().fg(Color::DarkGray).bold(),
-        ),
-        Span::styled(
-            "─".repeat(rule_len),
-            Style::default().fg(Color::Indexed(236)),
-        ),
+        Span::styled(prefix, Style::default().fg(theme::TEXT_PRIMARY).bold()),
+        Span::styled("─".repeat(rule_len), Style::default().fg(theme::SEP)),
     ])
 }
 
@@ -969,7 +2444,10 @@ fn name_grid_color(names: &[String], content_width: usize, color: Color, out: &m
         for name in chunk {
             spans.push(Span::styled("    ◆ ", Style::default().fg(color)));
             let padded = format!("{:<width$}", name, width = max_len + 2);
-            spans.push(Span::styled(padded, Style::default().fg(Color::White)));
+            spans.push(Span::styled(
+                padded,
+                Style::default().fg(theme::TEXT_PRIMARY),
+            ));
         }
         out.push(Line::from(spans));
     }
@@ -979,335 +2457,438 @@ fn name_grid(names: &[String], content_width: usize, out: &mut Vec<Line<'_>>) {
     name_grid_color(names, content_width, Color::Green, out);
 }
 
-fn draw_confirm_dialog(frame: &mut Frame, select: &mut TabbedSelect, message: &str) {
-    let area = frame.area();
-
-    let dialog_width = 60u16.min(area.width.saturating_sub(4));
-    let wrap_width = dialog_width.saturating_sub(6) as usize;
-    let wrapped = wrap_text_lines(message, wrap_width);
-    let dialog_height = (wrapped.len() as u16 + 6).min(area.height.saturating_sub(4));
-
-    let dialog_area = Rect::new(
-        (area.width.saturating_sub(dialog_width)) / 2,
-        (area.height.saturating_sub(dialog_height)) / 2,
-        dialog_width,
-        dialog_height,
-    );
-
-    // Clear dialog area completely (wipe underlying content)
-    frame.render_widget(Clear, dialog_area);
-    frame.render_widget(
-        Block::default().style(Style::default().bg(Color::Black)),
-        dialog_area,
-    );
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow).bg(Color::Black))
-        .title(Span::styled(
-            " Confirm ",
-            Style::default().fg(Color::Yellow).bold(),
-        ))
-        .style(Style::default().bg(Color::Black))
-        .padding(Padding::new(2, 2, 1, 1));
-
-    let inner = block.inner(dialog_area);
-    frame.render_widget(block, dialog_area);
-
-    // Message
-    let text_lines: Vec<Line> = wrapped
-        .iter()
-        .map(|l| {
-            Line::from(Span::styled(
-                l.as_str(),
-                Style::default().fg(Color::White).bg(Color::Black),
-            ))
-        })
-        .collect();
-
-    let msg_height = inner.height.saturating_sub(2);
-    let max_scroll = wrapped.len().saturating_sub(msg_height as usize);
-    let scroll = select.confirm_dialog_scroll.min(max_scroll);
-    select.confirm_dialog_scroll = scroll;
-    let msg_area = Rect::new(inner.x, inner.y, inner.width, msg_height);
-    frame.render_widget(
-        Paragraph::new(text_lines)
-            .scroll((scroll as u16, 0))
-            .style(Style::default().bg(Color::Black)),
-        msg_area,
-    );
-
-    // Help line at bottom
-    let help_area = Rect::new(inner.x, inner.y + msg_height, inner.width, 1);
-    let help = Line::from(vec![
-        Span::styled("↑↓", Style::default().fg(Color::Cyan)),
-        Span::styled(" scroll  ", Style::default().fg(Color::DarkGray)),
-        Span::styled("enter", Style::default().fg(Color::Cyan)),
-        Span::styled(" confirm  ", Style::default().fg(Color::DarkGray)),
-        Span::styled("esc", Style::default().fg(Color::Cyan)),
-        Span::styled(" cancel", Style::default().fg(Color::DarkGray)),
-    ]);
-    frame.render_widget(Paragraph::new(help), help_area);
-}
-
-fn draw_repo_dialog(frame: &mut Frame, select: &mut TabbedSelect) {
-    let Some(dialog) = select.repo_dialog.as_ref() else {
-        return;
-    };
-    let area = frame.area();
-    let dialog_width = 56u16.min(area.width.saturating_sub(4));
-    let option_count = dialog.options.len() as u16 + 1; // +1 for "+ Add repo"
-    let dialog_height = (option_count + 7)
-        .max(12)
-        .min(area.height.saturating_sub(4));
-    let dialog_area = Rect::new(
-        (area.width.saturating_sub(dialog_width)) / 2,
-        (area.height.saturating_sub(dialog_height)) / 2,
-        dialog_width,
-        dialog_height,
-    );
-
-    frame.render_widget(Clear, dialog_area);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Indexed(45)))
-        .title(Span::styled(
-            " Package Source ",
-            Style::default().fg(Color::Indexed(45)).bold(),
-        ))
-        .padding(Padding::new(1, 1, 1, 1));
-    let inner = block.inner(dialog_area);
-    select.repo_dialog_inner = inner;
-    frame.render_widget(block, dialog_area);
-
-    if dialog.input_mode {
-        let prompt = vec![
-            Line::from(Span::styled(
-                "Enter repo or URL",
-                Style::default().fg(Color::White).bold(),
-            )),
-            Line::from(Span::styled(
-                "Examples: owner/repo or https://github.com/owner/repo",
-                Style::default().fg(Color::DarkGray),
-            )),
-            Line::from(""),
-            Line::from(vec![
-                Span::styled("> ", Style::default().fg(Color::Indexed(45)).bold()),
-                Span::styled(&dialog.input, Style::default().fg(Color::White)),
-            ]),
-        ];
-        frame.render_widget(Paragraph::new(prompt), inner);
-    } else {
-        let mut lines: Vec<Line> = dialog
-            .options
-            .iter()
-            .enumerate()
-            .map(|(i, option)| {
-                let style = if i == dialog.cursor {
-                    Style::default().fg(Color::Black).bg(Color::Yellow).bold()
-                } else {
-                    Style::default().fg(Color::White)
-                };
-                Line::from(Span::styled(format!(" {} ", option.label), style))
-            })
-            .collect();
-        let add_style = if dialog.cursor == dialog.options.len() {
-            Style::default().fg(Color::Black).bg(Color::Yellow).bold()
-        } else {
-            Style::default().fg(Color::Indexed(45)).bold()
-        };
-        lines.push(Line::from(Span::styled(" + Add repo by link ", add_style)));
-        lines.push(Line::from(""));
-        let hint_spans = vec![
-            Span::styled("enter", Style::default().fg(Color::Cyan)),
-            Span::styled(" select  ", Style::default().fg(Color::DarkGray)),
-            Span::styled("x", Style::default().fg(Color::Cyan)),
-            Span::styled(" remove  ", Style::default().fg(Color::DarkGray)),
-            Span::styled("esc", Style::default().fg(Color::Cyan)),
-            Span::styled(" close", Style::default().fg(Color::DarkGray)),
-        ];
-        lines.push(Line::from(hint_spans));
-        frame.render_widget(Paragraph::new(lines), inner);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::multiselect::{ItemGroup, SelectItem, Tab};
+    use crate::tui::multiselect::{ItemGroup, Scope, SelectItem, Tab, TabKind};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
-    #[test]
-    fn draw_tabbed_select_tracks_wrapped_detail_rows_for_mouse_hit_testing() {
-        let mut select = TabbedSelect::new(
-            "Select items",
-            vec![Tab {
-                name: "Skills".into(),
-                groups: vec![ItemGroup {
-                    label: String::new(),
-                    items: vec![
-                        SelectItem {
-                            label: "alpha".into(),
-                            description: "A deliberately long description that must wrap across multiple terminal rows for stable mouse hit testing.".into(),
-                            selected: false,
-                            tag: None,
-                            suffix: None,
-                            locked: false,
-                            installed: false,
-                            installed_scope: None,
-                            outdated: false,
-                        },
-                        SelectItem {
-                            label: "beta".into(),
-                            description: String::new(),
-                            selected: false,
-                            tag: None,
-                            suffix: None,
-                            locked: false,
-                            installed: false,
-                            installed_scope: None,
-                            outdated: false,
-                        },
-                    ],
-                }],
+    fn item(label: &str, desc: &str) -> SelectItem {
+        SelectItem {
+            label: label.to_string(),
+            description: desc.to_string(),
+            selected: false,
+            suffix: None,
+            locked: false,
+            installed: false,
+            installed_scope: None,
+            outdated: false,
+            kind: None,
+            search_haystack: String::new(),
+        }
+    }
+
+    fn source_tab(name: &str, items: Vec<SelectItem>) -> Tab {
+        Tab {
+            name: name.into(),
+            kind: TabKind::Source,
+            groups: vec![ItemGroup {
+                label: String::new(),
+                items,
             }],
-            true,
-        );
-        select.cursor = 0;
-
-        let backend = TestBackend::new(36, 12);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal
-            .draw(|frame| draw_tabbed_select(frame, &mut select))
-            .unwrap();
-
-        let alpha_rows = select
-            .rendered_list_rows
-            .iter()
-            .filter(|row| **row == Some(0))
-            .count();
-
-        assert!(
-            alpha_rows >= 2,
-            "expected wrapped detail rows for the cursor item"
-        );
-        assert_eq!(
-            select.rendered_list_rows.iter().find_map(|row| *row),
-            Some(0)
-        );
+        }
     }
 
     #[test]
-    fn draw_tabbed_select_tracks_each_tab_hit_area() {
+    fn draw_records_tab_hit_areas() {
         let mut select = TabbedSelect::new(
-            "Select items",
+            "x",
             vec![
-                Tab {
-                    name: "Agents".into(),
-                    groups: vec![ItemGroup {
-                        label: String::new(),
-                        items: vec![],
-                    }],
-                },
-                Tab {
-                    name: "Skills".into(),
-                    groups: vec![ItemGroup {
-                        label: String::new(),
-                        items: vec![],
-                    }],
-                },
+                source_tab("Agents", vec![item("a", "")]),
+                source_tab("Skills", vec![item("s", "")]),
                 Tab {
                     name: "Updates (2)".into(),
+                    kind: TabKind::Updates,
                     groups: vec![ItemGroup {
                         label: String::new(),
-                        items: vec![
-                            SelectItem {
-                                label: "one".into(),
-                                description: String::new(),
-                                selected: false,
-                                tag: None,
-                                suffix: None,
-                                locked: false,
-                                installed: false,
-                                installed_scope: None,
-                                outdated: false,
-                            },
-                            SelectItem {
-                                label: "two".into(),
-                                description: String::new(),
-                                selected: false,
-                                tag: None,
-                                suffix: None,
-                                locked: false,
-                                installed: false,
-                                installed_scope: None,
-                                outdated: false,
-                            },
-                        ],
+                        items: vec![item("one", ""), item("two", "")],
                     }],
                 },
             ],
-            true,
-        )
-        .with_step("2/3")
-        .with_step_labels(&["Packages", "Scope", "Harnesses", "Method"]);
+        );
 
-        let backend = TestBackend::new(60, 12);
+        let backend = TestBackend::new(120, 24);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
-            .draw(|frame| draw_tabbed_select(frame, &mut select))
+            .draw(|f| draw_tabbed_select(f, &mut select))
             .unwrap();
 
         assert_eq!(select.tab_hit_areas.len(), 3);
-        assert_eq!(select.step_hit_areas.len(), 3);
-        assert!(
-            select
-                .tab_hit_areas
-                .windows(2)
-                .all(|pair| pair[0].x < pair[1].x)
+        assert!(select.tab_hit_areas.iter().all(|a| a.width > 0));
+    }
+
+    /// Regression: hit areas must line up with the rendered tab text.
+    /// If they drift (as happened when Tabs::padding changed without
+    /// updating the per-tab width calc), late tabs become unclickable.
+    /// We assert: each tab's first non-space character lands inside that
+    /// tab's hit area, and consecutive hit areas are separated by exactly
+    /// one divider's worth of cells.
+    #[test]
+    fn tab_hit_areas_align_with_rendered_tab_text() {
+        let mut select = TabbedSelect::new(
+            "x",
+            vec![
+                source_tab("Agents", vec![item("a", "")]),
+                source_tab("Skills", vec![item("s", "")]),
+                source_tab("Hooks", vec![item("h", "")]),
+                source_tab("Pi Packages", vec![item("p", "")]),
+                Tab {
+                    name: "Installed".into(),
+                    kind: TabKind::Installed,
+                    groups: vec![ItemGroup {
+                        label: "Project / Agents".into(),
+                        items: vec![item("foo", "")],
+                    }],
+                },
+            ],
         );
-        assert!(select.tab_hit_areas.iter().all(|area| area.width > 0));
+
+        let backend = TestBackend::new(140, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| draw_tabbed_select(f, &mut select))
+            .unwrap();
+
+        let buf = terminal.backend().buffer();
+        let tab_y = select.layout_tab_bar.y;
+
+        // The expected first label characters per tab. Each tab title is
+        // " {prefix}{name}" so the first non-space is the first letter of
+        // the prefix (or 'A', 'S', 'H', 'P', 'I' for these names).
+        let expected_first_chars = ['A', 'S', 'H', 'P', 'I'];
+
+        for (i, hit) in select.tab_hit_areas.iter().enumerate() {
+            // Find the first non-space character within this hit area.
+            let mut found_col: Option<u16> = None;
+            for x in hit.x..hit.x + hit.width {
+                let cell = &buf[(x, tab_y)];
+                if cell.symbol() != " " && cell.symbol() != "│" {
+                    found_col = Some(x);
+                    break;
+                }
+            }
+            let col = found_col.unwrap_or_else(|| {
+                panic!("no rendered text inside hit area for tab {i}: {:?}", hit)
+            });
+            let cell = &buf[(col, tab_y)];
+            assert_eq!(
+                cell.symbol(),
+                expected_first_chars[i].to_string(),
+                "tab {i} first char in hit area should be '{}', got '{}' at col {col} (hit {:?})",
+                expected_first_chars[i],
+                cell.symbol(),
+                hit,
+            );
+        }
+
+        // Consecutive hit areas must be separated by exactly the divider
+        // width (3 cells: " │ ").
+        for pair in select.tab_hit_areas.windows(2) {
+            let gap = pair[1].x - (pair[0].x + pair[0].width);
+            assert_eq!(
+                gap, 3,
+                "expected 3-cell divider gap between tabs, got {gap}: {:?} -> {:?}",
+                pair[0], pair[1]
+            );
+        }
+    }
+
+    #[test]
+    fn action_bar_renders_buttons_when_marks_present() {
+        let mut item = item("foo", "");
+        item.installed = false;
+        item.selected = true;
+        let mut select = TabbedSelect::new("x", vec![source_tab("Agents", vec![item])]);
+
+        let backend = TestBackend::new(120, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| draw_tabbed_select(f, &mut select))
+            .unwrap();
+
+        let install_btn = select
+            .button_hits
+            .iter()
+            .any(|b| b.action == ActionButton::BatchInstall && b.enabled);
+        assert!(install_btn, "install button should be enabled with 1 mark");
+    }
+
+    #[test]
+    fn inspector_stacks_vertically_when_terminal_is_narrow() {
+        let mut select =
+            TabbedSelect::new("x", vec![source_tab("Agents", vec![item("foo", "desc")])]);
+        // Narrow but tall: should stack the inspector under the list.
+        let backend = TestBackend::new(80, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| draw_tabbed_select(f, &mut select))
+            .unwrap();
+
         assert!(
-            select
-                .step_hit_areas
-                .windows(2)
-                .all(|pair| pair[0].x < pair[1].x)
+            select.layout_inspector.height > 0,
+            "inspector should be visible when terminal is narrow but tall"
+        );
+        assert_eq!(
+            select.layout_inspector.x, select.layout_list.x,
+            "stacked inspector should share the list's left edge"
+        );
+        assert!(
+            select.layout_inspector.y > select.layout_list.y,
+            "stacked inspector should be below the list, got list.y={} inspector.y={}",
+            select.layout_list.y,
+            select.layout_inspector.y
         );
     }
 
     #[test]
-    fn draw_tabbed_select_shows_install_button_on_final_step() {
-        let mut select = TabbedSelect::new(
-            "Installation method",
-            vec![Tab {
-                name: "Method".into(),
-                groups: vec![ItemGroup {
-                    label: String::new(),
-                    items: vec![SelectItem {
-                        label: "Symlink".into(),
-                        description: String::new(),
-                        selected: true,
-                        tag: None,
-                        suffix: None,
-                        locked: false,
-                        installed: false,
-                        installed_scope: None,
-                        outdated: false,
-                    }],
-                }],
-            }],
-            false,
-        )
-        .with_step("3/3")
-        .with_step_labels(&["Packages", "Scope", "Harnesses", "Method"]);
-
-        let backend = TestBackend::new(60, 12);
+    fn inspector_hides_when_terminal_is_narrow_and_short() {
+        let mut select =
+            TabbedSelect::new("x", vec![source_tab("Agents", vec![item("foo", "desc")])]);
+        // Narrow AND short: no room to stack — inspector hidden entirely.
+        let backend = TestBackend::new(80, 16);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
-            .draw(|frame| draw_tabbed_select(frame, &mut select))
+            .draw(|f| draw_tabbed_select(f, &mut select))
             .unwrap();
 
-        assert!(select.action_button_area.width > 0);
+        assert_eq!(
+            select.layout_inspector,
+            Rect::default(),
+            "inspector should be hidden when terminal can't fit either layout"
+        );
+    }
+
+    #[test]
+    fn settings_chips_have_button_hits() {
+        let mut select = TabbedSelect::new("x", vec![source_tab("Agents", vec![])]);
+        let backend = TestBackend::new(120, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| draw_tabbed_select(f, &mut select))
+            .unwrap();
+
+        let scope_actions: Vec<_> = select
+            .button_hits
+            .iter()
+            .filter(|b| {
+                matches!(
+                    b.action,
+                    ActionButton::ScopeProject | ActionButton::ScopeGlobal
+                )
+            })
+            .collect();
+        assert_eq!(scope_actions.len(), 2);
+
+        let method_actions: Vec<_> = select
+            .button_hits
+            .iter()
+            .filter(|b| {
+                matches!(
+                    b.action,
+                    ActionButton::MethodSymlink | ActionButton::MethodCopy
+                )
+            })
+            .collect();
+        assert_eq!(method_actions.len(), 2);
+
+        assert!(
+            select
+                .button_hits
+                .iter()
+                .any(|b| b.action == ActionButton::HarnessOpen)
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn dump_layout_snapshot() {
+        // Run with: cargo test --release dump_layout_snapshot -- --ignored --nocapture
+        let updates = Tab {
+            name: "Updates (3)".into(),
+            kind: TabKind::Updates,
+            groups: vec![ItemGroup {
+                label: "Content".into(),
+                items: vec![
+                    {
+                        let mut i = item(
+                            "generalist",
+                            "General-purpose agent for documentation, cleanup, stale references, code organization, and miscellaneous maintenance tasks.",
+                        );
+                        i.installed = true;
+                        i.outdated = true;
+                        i.installed_scope = Some(Scope::Global);
+                        i.kind = Some(crate::config::ItemKind::Agent);
+                        i
+                    },
+                    {
+                        let mut i = item("rust", "Rust engineer for performance-critical systems.");
+                        i.installed = true;
+                        i.outdated = true;
+                        i.installed_scope = Some(Scope::Global);
+                        i.kind = Some(crate::config::ItemKind::Agent);
+                        i.selected = true;
+                        i
+                    },
+                    {
+                        let mut i =
+                            item("trading-design", "Professional trading UI design system.");
+                        i.installed = true;
+                        i.outdated = true;
+                        i.installed_scope = Some(Scope::Both);
+                        i.kind = Some(crate::config::ItemKind::Skill);
+                        i
+                    },
+                ],
+            }],
+        };
+        let agents_tab = source_tab("Agents", vec![item("a", "")]);
+        let skills_tab = source_tab("Skills", vec![item("s", "")]);
+        let installed_tab = Tab {
+            name: "Installed".into(),
+            kind: TabKind::Installed,
+            groups: vec![ItemGroup {
+                label: "Global / Agents".into(),
+                items: vec![item("foo", "")],
+            }],
+        };
+        let mut select = TabbedSelect::new(
+            "Package manager",
+            vec![updates, agents_tab, skills_tab, installed_tab],
+        );
+        select.source_label = Some("local: /mnt/Tertiary/dev/vstack/main".into());
+        select.harness_selection.insert("claude-code".into(), true);
+        select.harness_selection.insert("opencode".into(), true);
+        select.harness_selection.insert("codex".into(), true);
+        select.harness_selection.insert("pi".into(), true);
+
+        let backend = TestBackend::new(140, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| draw_tabbed_select(f, &mut select))
+            .unwrap();
+
+        let buf = terminal.backend().buffer();
+        eprintln!("\n=== TUI snapshot (140x40) ===");
+        for y in 0..buf.area.height {
+            let mut line = String::new();
+            for x in 0..buf.area.width {
+                line.push_str(buf[(x, y)].symbol());
+            }
+            eprintln!("{}", line.trim_end());
+        }
+        eprintln!("=== end snapshot ===");
+    }
+
+    /// Regression: when a frame's source chip can't fit (terminal too
+    /// narrow or no source label), the previous frame's hit rect must not
+    /// remain live. A stale rect would let a click in dead space re-open
+    /// the repo dialog after a resize.
+    #[test]
+    fn source_chip_area_resets_when_no_source_label() {
+        let mut select = TabbedSelect::new("x", vec![source_tab("Agents", vec![item("a", "")])]);
+        // Pre-seed a non-default rect so we can prove the draw call clears it.
+        select.source_chip_area = Rect::new(10, 0, 20, 1);
+
+        let backend = TestBackend::new(120, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| draw_tabbed_select(f, &mut select))
+            .unwrap();
+
+        assert_eq!(
+            select.source_chip_area,
+            Rect::default(),
+            "source_chip_area should reset when source_label is None",
+        );
+    }
+
+    /// Regression: the rendered checkbox span must occupy exactly the
+    /// columns the click handler considers "checkbox area". If someone
+    /// widens the rendered span without updating LIST_CHECKBOX_HIT_WIDTH
+    /// (or vice-versa), checkboxes silently miss clicks. We assert the
+    /// `[` character lands at the inner padding column and the `]`
+    /// character lands inside the hit-width window.
+    #[test]
+    fn checkbox_column_matches_hit_width() {
+        let mut select = TabbedSelect::new("x", vec![source_tab("Agents", vec![item("foo", "")])]);
+        let backend = TestBackend::new(120, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| draw_tabbed_select(f, &mut select))
+            .unwrap();
+
+        let buf = terminal.backend().buffer();
+        let row_y = select.layout_list.y;
+        let inner_x = select.layout_list.x + LIST_INNER_PAD_LEFT;
+
+        assert_eq!(
+            buf[(inner_x, row_y)].symbol(),
+            "[",
+            "checkbox should start at layout_list.x + LIST_INNER_PAD_LEFT"
+        );
+        // The closing bracket must land strictly inside the hit window so
+        // a click anywhere on the bracket pair toggles the row.
+        let close_x = inner_x + 2;
+        assert!(
+            close_x < inner_x + LIST_CHECKBOX_HIT_WIDTH,
+            "closing `]` at col {close_x} must be < inner_x + hit_width ({})",
+            inner_x + LIST_CHECKBOX_HIT_WIDTH,
+        );
+        assert_eq!(buf[(close_x, row_y)].symbol(), "]");
+    }
+
+    /// Toggling an item via space key fills the checkbox glyph — this
+    /// keeps the visual "selected" state in sync with the user's mark
+    /// set. A regression here would mean the click handler toggles
+    /// internal state but the user can't see it.
+    #[test]
+    fn checkbox_glyph_reflects_selection() {
+        let mut select = TabbedSelect::new("x", vec![source_tab("Agents", vec![item("foo", "")])]);
+        let backend = TestBackend::new(120, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|f| draw_tabbed_select(f, &mut select))
+            .unwrap();
+        let inner_x = select.layout_list.x + LIST_INNER_PAD_LEFT;
+        let row_y = select.layout_list.y;
+        assert_eq!(
+            terminal.backend().buffer()[(inner_x + 1, row_y)].symbol(),
+            " ",
+            "unselected row should render an empty checkbox"
+        );
+
+        select.toggle();
+        terminal
+            .draw(|f| draw_tabbed_select(f, &mut select))
+            .unwrap();
+        assert_eq!(
+            terminal.backend().buffer()[(inner_x + 1, row_y)].symbol(),
+            "✓",
+            "selected row should render a filled checkbox"
+        );
+    }
+
+    #[test]
+    fn inspector_buttons_render_for_cursor_item() {
+        let mut select =
+            TabbedSelect::new("x", vec![source_tab("Agents", vec![item("foo", "desc")])]);
+        let backend = TestBackend::new(120, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| draw_tabbed_select(f, &mut select))
+            .unwrap();
+
+        let mark_btn = select
+            .button_hits
+            .iter()
+            .any(|b| b.action == ActionButton::InspectorMarkToggle);
+        let install_btn = select
+            .button_hits
+            .iter()
+            .any(|b| b.action == ActionButton::InspectorInstall);
+        assert!(mark_btn);
+        assert!(install_btn);
     }
 }

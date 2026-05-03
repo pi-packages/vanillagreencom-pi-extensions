@@ -143,7 +143,6 @@ pub fn run(
         selected_hooks,
         selected_pi_extensions,
         harnesses,
-        skipped_harnesses,
         global,
         method,
         update_cli,
@@ -220,14 +219,14 @@ pub fn run(
         let total = agents.len() + skills.len() + hooks.len() + pi_extensions.len();
         if total == 0 && (yes || all || harness_filter.is_some()) {
             eprintln!(
-                "No agents, skills, hooks, or pi-extensions found in {}",
+                "No agents, skills, hooks, or pi-packages found in {}",
                 source_dir.display()
             );
             return Ok(());
         }
 
         eprintln!(
-            "Found {} agent(s), {} skill(s), {} hook(s), {} pi-extension(s) in {}",
+            "Found {} agent(s), {} skill(s), {} hook(s), {} pi-package(s) in {}",
             agents.len(),
             skills.len(),
             hooks.len(),
@@ -243,7 +242,6 @@ pub fn run(
                 hooks,
                 pi_extensions,
                 Harness::ALL.to_vec(),
-                Vec::new(),
                 global,
                 if copy {
                     InstallMethod::Copy
@@ -268,9 +266,9 @@ pub fn run(
                 return Ok(());
             }
 
-            // In non-interactive mode, only auto-install Pi extensions when Pi
+            // In non-interactive mode, only auto-install Pi packages when Pi
             // is one of the chosen harnesses. The agents/skills/hooks loops
-            // run per-harness, but Pi extensions are scope-only — they go to
+            // run per-harness, but Pi packages are scope-only — they go to
             // ~/.pi/agent/packages/<name> regardless of which agent harness
             // selection was requested.
             let pi_selected = harnesses.iter().any(|h| matches!(h, Harness::Pi));
@@ -287,7 +285,6 @@ pub fn run(
                 hooks,
                 chosen_pi_extensions,
                 harnesses,
-                Vec::new(),
                 global,
                 if copy {
                     InstallMethod::Copy
@@ -316,7 +313,6 @@ pub fn run(
                         sel.hooks,
                         sel.pi_extensions,
                         sel.harnesses,
-                        sel.skipped_harnesses,
                         sel.global,
                         sel.method,
                         sel.update_cli,
@@ -395,7 +391,7 @@ pub fn run(
     }
 
     let mut harnesses = harnesses;
-    let mut skipped_harnesses = skipped_harnesses;
+    let mut skipped_harnesses: Vec<String> = Vec::new();
     if global {
         let mut unsupported: Vec<String> = harnesses
             .iter()
@@ -519,7 +515,7 @@ pub fn run(
         }
     }
 
-    // Pi extensions install once per scope (not per harness). Records as
+    // Pi packages install once per scope (not per harness). Records as
     // ItemKind::PiExtension with harness id "pi" so list/remove can find them.
     // Returns Ok(None) when the install was skipped (cross-scope duplicate);
     // skipped extensions are not added to the lock summary.
@@ -529,7 +525,7 @@ pub fn run(
         for ext in &selected_pi_extensions {
             match crate::pi_extension::install_pi_extension(ext, global) {
                 Ok(Some(dest)) => {
-                    let detail = format!("{} → {} (Pi extension)", ext.name, dest.display());
+                    let detail = format!("{} → {} (Pi package)", ext.name, dest.display());
                     log_lines.push(detail.clone());
                     results.push(installer::InstallResult {
                         name: ext.name.clone(),
@@ -550,7 +546,7 @@ pub fn run(
                     // in the lock so vstack list reflects the actual state.
                 }
                 Err(e) => {
-                    eprintln!("Warning: failed to install Pi extension {}: {e}", ext.name);
+                    eprintln!("Warning: failed to install Pi package {}: {e}", ext.name);
                 }
             }
         }

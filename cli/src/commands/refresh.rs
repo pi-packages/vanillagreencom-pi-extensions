@@ -1,8 +1,245 @@
+use crate::agent::Agent;
 use crate::config::{self, ItemKind};
 use crate::harness::Harness;
+use crate::hook::Hook;
 use crate::installer;
+use crate::mapping::{MappingConfig, OptionalSkill};
+use crate::pi_extension::PiExtension;
+use crate::project_config::ProjectConfig;
+use crate::skill::Skill;
 use anyhow::Result;
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+/// Result counts from one invocation of [`refresh_items_in_scope`].
+#[derive(Default)]
+pub struct RefreshStats {
+    pub agents_refreshed: usize,
+    pub skills_refreshed: usize,
+    pub pi_refreshed: usize,
+    /// Map of agent_name → (full merged required-skills list, newly added skill names).
+    pub upstream_skill_updates: HashMap<String, (Vec<String>, Vec<String>)>,
+    /// Map of agent_name → (full merged optional-skills list, newly added skill names).
+    pub upstream_optional_updates: HashMap<String, (Vec<OptionalSkill>, Vec<String>)>,
+}
+
+impl RefreshStats {
+    /// Persist any required/optional skill upstream additions back to the
+    /// project's `vstack.toml`. No-op for global scope (no project config).
+    pub fn persist_upstream(&self, project_root: &Path) {
+        if !self.upstream_skill_updates.is_empty() {
+            let merged: HashMap<String, Vec<String>> = self
+                .upstream_skill_updates
+                .iter()
+                .map(|(k, (list, _))| (k.clone(), list.clone()))
+                .collect();
+            crate::project_config::merge_upstream_agent_skills(project_root, &merged);
+        }
+        if !self.upstream_optional_updates.is_empty() {
+            let merged: HashMap<String, Vec<OptionalSkill>> = self
+                .upstream_optional_updates
+                .iter()
+                .map(|(k, (list, _))| (k.clone(), list.clone()))
+                .collect();
+            crate::project_config::merge_upstream_agent_skills_optional(project_root, &merged);
+        }
+    }
+}
+
+/// Generic upstream-merge: starts with `project_list` if present, else
+/// `source_list`; appends source items not already present, returning
+/// (merged, names_added). Used by both required and optional skill merges.
+fn merge_upstream<T: Clone>(
+    project_list: Option<&[T]>,
+    source_list: &[T],
+    key: impl Fn(&T) -> String,
+) -> (Vec<T>, Vec<String>) {
+    let Some(project_list) = project_list else {
+        return (source_list.to_vec(), Vec::new());
+    };
+    let mut merged: Vec<T> = project_list.to_vec();
+    let existing: std::collections::HashSet<String> = merged.iter().map(&key).collect();
+    let prev_len = merged.len();
+    for s in source_list {
+        if !existing.contains(&key(s)) {
+            merged.push(s.clone());
+        }
+    }
+    let added: Vec<String> = merged[prev_len..].iter().map(&key).collect();
+    (merged, added)
+}
+
+/// Re-install the items currently recorded in `lock` (or just those in
+/// `name_filter`) using the supplied source data.
+///
+/// Both `vstack refresh` and the TUI's inline-update path go through this
+/// helper. Caller is responsible for: source discovery (filling in
+/// `agents`/`skills`/`hooks`/`pi_extensions` and `mapping`), project-config
+/// loading, lock loading, lock-disk reconciliation, and writing the
+/// upstream-additions back to disk via
+/// [`crate::project_config::merge_upstream_agent_skills`] /
+/// [`crate::project_config::merge_upstream_agent_skills_optional`].
+#[allow(clippy::too_many_arguments)]
+pub fn refresh_items_in_scope(
+    global: bool,
+    lock: &config::LockFile,
+    agents: &[Agent],
+    skills: &[Skill],
+    hooks: &[Hook],
+    pi_extensions: &[PiExtension],
+    mapping: &MappingConfig,
+    project_config: &mut ProjectConfig,
+    project_root: &Path,
+    name_filter: Option<&[String]>,
+) -> RefreshStats {
+    let mut stats = RefreshStats::default();
+    let pass = |name: &str| name_filter.is_none_or(|f| f.iter().any(|n| n == name));
+
+    let installed_skills: Vec<String> = lock
+        .entries
+        .iter()
+        .filter(|(_, e)| e.kind == ItemKind::Skill)
+        .map(|(name, _)| name.clone())
+        .collect();
+
+    let installed_hook_names: std::collections::HashSet<String> = lock
+        .entries
+        .iter()
+        .filter(|(_, e)| e.kind == ItemKind::Hook)
+        .map(|(name, _)| name.clone())
+        .collect();
+
+    let installed_hooks: Vec<Hook> = hooks
+        .iter()
+        .filter(|h| installed_hook_names.contains(&h.name))
+        .cloned()
+        .collect();
+
+    // ── Agents ───────────────────────────────────────────────
+    for (name, entry) in lock
+        .entries
+        .iter()
+        .filter(|(_, e)| e.kind == ItemKind::Agent)
+        .filter(|(n, _)| pass(n))
+    {
+        let Some(agent) = agents.iter().find(|a| &a.name == name) else {
+            if name_filter.is_none() {
+                eprintln!("  ! {} — source not found, skipped", name);
+            }
+            continue;
+        };
+
+        // Required skills: project list (if present) merged with source additions.
+        let source_skills = mapping.skills_for_agent(&agent.name, &agent.role, &installed_skills);
+        let project_required = project_config.agent_skills_for(&agent.name);
+        let (skill_names, added) = merge_upstream(
+            project_required.as_deref().map(|v| &v[..]),
+            &source_skills,
+            |s| s.clone(),
+        );
+        if !added.is_empty() {
+            project_config
+                .agent_skills
+                .insert(agent.name.clone(), skill_names.clone());
+            stats
+                .upstream_skill_updates
+                .insert(agent.name.clone(), (skill_names.clone(), added));
+        }
+
+        let skill_pairs = crate::resolve::resolve_skill_pairs(&skill_names, skills);
+
+        // Optional skills: same merge logic as required.
+        let source_optional = mapping.optional_skills_for_agent(&agent.name, &installed_skills);
+        let project_optional: Option<&[OptionalSkill]> = project_config
+            .agent_skills_optional
+            .get(&agent.name)
+            .map(|v| v.as_slice());
+        let (optional_entries, added) =
+            merge_upstream(project_optional, &source_optional, |e| e.skill.clone());
+        if !added.is_empty() {
+            project_config
+                .agent_skills_optional
+                .insert(agent.name.clone(), optional_entries.clone());
+            stats
+                .upstream_optional_updates
+                .insert(agent.name.clone(), (optional_entries.clone(), added));
+        }
+        let optional_pairs = crate::resolve::resolve_optional_skill_pairs(&optional_entries);
+
+        let matched_hooks: Vec<Hook> = mapping
+            .hooks_for_agent(&agent.role, &installed_hooks)
+            .into_iter()
+            .cloned()
+            .collect();
+
+        for harness_id in &entry.harnesses {
+            if let Some(harness) = Harness::from_id(harness_id) {
+                let existing_path = harness
+                    .agents_dir(global)
+                    .join(harness.agent_filename(&agent.name));
+                let file_extras = crate::resolve::read_existing_extras(&existing_path, harness);
+                project_config.save_extracted(project_root, &agent.name, &file_extras);
+            }
+        }
+
+        let extras =
+            crate::resolve::build_agent_extras(project_config, &agent.name, &agent.role, None);
+
+        for harness_id in &entry.harnesses {
+            if let Some(harness) = Harness::from_id(harness_id) {
+                let _ = harness.generate_agent(
+                    agent,
+                    global,
+                    &skill_pairs,
+                    &optional_pairs,
+                    &matched_hooks,
+                    &extras,
+                );
+            }
+        }
+        stats.agents_refreshed += 1;
+    }
+
+    // ── Skills ───────────────────────────────────────────────
+    for (name, entry) in lock
+        .entries
+        .iter()
+        .filter(|(_, e)| e.kind == ItemKind::Skill)
+        .filter(|(n, _)| pass(n))
+    {
+        let Some(skill) = skills.iter().find(|s| &s.name == name) else {
+            continue;
+        };
+
+        for harness_id in &entry.harnesses {
+            if let Some(harness) = Harness::from_id(harness_id) {
+                let skill_instr = project_config.skill_instructions_for(&skill.name);
+                let _ = installer::install_skill(skill, harness, global, entry.method, skill_instr);
+            }
+        }
+        stats.skills_refreshed += 1;
+    }
+
+    // ── Hooks ─────────────────────────────────────────────
+    // Hooks are reattached on agent regen (above), so refresh doesn't need
+    // a separate pass — they ride along with their owning agents.
+
+    // ── Pi packages ──────────────────────────────────────
+    for (name, _) in lock
+        .entries
+        .iter()
+        .filter(|(_, e)| e.kind == ItemKind::PiExtension)
+        .filter(|(n, _)| pass(n))
+    {
+        let Some(ext) = pi_extensions.iter().find(|e| &e.name == name) else {
+            continue;
+        };
+        let _ = crate::pi_extension::install_pi_extension(ext, global);
+        stats.pi_refreshed += 1;
+    }
+
+    stats
+}
 
 /// Regenerate all installed agent files and re-copy skills from source.
 pub fn run(global: bool) -> Result<()> {
@@ -67,196 +304,6 @@ pub fn run(global: bool) -> Result<()> {
             .extend(crate::hook::discover_hooks(&dir.join("hooks")).unwrap_or_default());
     }
 
-    let installed_skills: Vec<String> = lock
-        .entries
-        .iter()
-        .filter(|(_, e)| e.kind == ItemKind::Skill)
-        .map(|(name, _)| name.clone())
-        .collect();
-
-    let installed_hook_names: std::collections::HashSet<String> = lock
-        .entries
-        .iter()
-        .filter(|(_, e)| e.kind == ItemKind::Hook)
-        .map(|(name, _)| name.clone())
-        .collect();
-
-    // Filter source hooks to only those actually installed
-    let installed_hooks: Vec<crate::hook::Hook> = all_source_hooks
-        .into_iter()
-        .filter(|h| installed_hook_names.contains(&h.name))
-        .collect();
-
-    // Refresh agents
-    let mut agents_refreshed = 0usize;
-    let mut skills_refreshed = 0usize;
-    // Tracks agents whose project [agent-skills] got new upstream additions:
-    // agent_name → (full merged list, newly added skill names)
-    let mut upstream_skill_updates: std::collections::HashMap<String, (Vec<String>, Vec<String>)> =
-        std::collections::HashMap::new();
-    // Tracks agents whose [agent-skills-optional] got new upstream additions
-    let mut upstream_optional_updates: std::collections::HashMap<
-        String,
-        (Vec<crate::mapping::OptionalSkill>, Vec<String>),
-    > = std::collections::HashMap::new();
-    let agent_entries: Vec<_> = lock
-        .entries
-        .iter()
-        .filter(|(_, e)| e.kind == ItemKind::Agent)
-        .collect();
-
-    for (name, entry) in &agent_entries {
-        let Some(agent) = all_source_agents.iter().find(|a| &a.name == *name) else {
-            eprintln!("  ! {} — source not found, skipped", name);
-            continue;
-        };
-
-        // Start from project [agent-skills] if present, else source mapping.
-        // Then merge any new skills from the source mapping that aren't already
-        // in the list — this ensures upstream additions propagate to projects.
-        let source_skills = mapping.skills_for_agent(&agent.name, &agent.role, &installed_skills);
-        let skill_names: Vec<String> =
-            if let Some(project_list) = project_config.agent_skills_for(&agent.name) {
-                let mut merged = project_list.clone();
-                let existing: std::collections::HashSet<String> = merged.iter().cloned().collect();
-                for s in &source_skills {
-                    if !existing.contains(s) {
-                        merged.push(s.clone());
-                    }
-                }
-                if merged.len() > project_list.len() {
-                    let added: Vec<String> = merged[project_list.len()..].to_vec();
-                    project_config
-                        .agent_skills
-                        .insert(agent.name.clone(), merged.clone());
-                    upstream_skill_updates.insert(agent.name.clone(), (merged.clone(), added));
-                }
-                merged
-            } else {
-                source_skills
-            };
-
-        let skill_pairs = crate::resolve::resolve_skill_pairs(&skill_names, &all_source_skills);
-
-        // Start from project [agent-skills-optional] if present, else source mapping.
-        // Then merge any new optional skills from the source mapping that aren't
-        // already in the list — same principle as required skills above.
-        let source_optional = mapping.optional_skills_for_agent(&agent.name, &installed_skills);
-        let optional_entries =
-            if let Some(project_list) = project_config.agent_skills_optional.get(&agent.name) {
-                let mut merged = project_list.clone();
-                let existing: std::collections::HashSet<String> =
-                    merged.iter().map(|e| e.skill.clone()).collect();
-                for s in &source_optional {
-                    if !existing.contains(&s.skill) {
-                        merged.push(s.clone());
-                    }
-                }
-                if merged.len() > project_list.len() {
-                    let added: Vec<String> = merged[project_list.len()..]
-                        .iter()
-                        .map(|e| e.skill.clone())
-                        .collect();
-                    project_config
-                        .agent_skills_optional
-                        .insert(agent.name.clone(), merged.clone());
-                    upstream_optional_updates.insert(agent.name.clone(), (merged.clone(), added));
-                }
-                merged
-            } else {
-                source_optional
-            };
-        let optional_pairs = crate::resolve::resolve_optional_skill_pairs(&optional_entries);
-
-        let matched_hooks: Vec<crate::hook::Hook> = mapping
-            .hooks_for_agent(&agent.role, &installed_hooks)
-            .into_iter()
-            .cloned()
-            .collect();
-
-        for harness_id in &entry.harnesses {
-            if let Some(harness) = Harness::from_id(harness_id) {
-                let existing_path = harness
-                    .agents_dir(global)
-                    .join(harness.agent_filename(&agent.name));
-                let file_extras = crate::resolve::read_existing_extras(&existing_path, harness);
-                project_config.save_extracted(&project_root, &agent.name, &file_extras);
-            }
-        }
-
-        let extras =
-            crate::resolve::build_agent_extras(&project_config, &agent.name, &agent.role, None);
-
-        for harness_id in &entry.harnesses {
-            if let Some(harness) = Harness::from_id(harness_id) {
-                let _ = harness.generate_agent(
-                    agent,
-                    global,
-                    &skill_pairs,
-                    &optional_pairs,
-                    &matched_hooks,
-                    &extras,
-                );
-            }
-        }
-        agents_refreshed += 1;
-    }
-
-    // Persist upstream skill additions to project vstack.toml
-    if !global && !upstream_skill_updates.is_empty() {
-        let merged_map: std::collections::HashMap<String, Vec<String>> = upstream_skill_updates
-            .iter()
-            .map(|(k, (list, _))| (k.clone(), list.clone()))
-            .collect();
-        crate::project_config::merge_upstream_agent_skills(&project_root, &merged_map);
-        for (agent, (_, added)) in &upstream_skill_updates {
-            eprintln!(
-                "  + {} — added upstream skills: {}",
-                agent,
-                added.join(", ")
-            );
-        }
-    }
-
-    // Persist upstream optional skill additions to project vstack.toml
-    if !global && !upstream_optional_updates.is_empty() {
-        let merged_map: std::collections::HashMap<String, Vec<crate::mapping::OptionalSkill>> =
-            upstream_optional_updates
-                .iter()
-                .map(|(k, (list, _))| (k.clone(), list.clone()))
-                .collect();
-        crate::project_config::merge_upstream_agent_skills_optional(&project_root, &merged_map);
-        for (agent, (_, added)) in &upstream_optional_updates {
-            eprintln!(
-                "  + {} — added upstream optional skills: {}",
-                agent,
-                added.join(", ")
-            );
-        }
-    }
-
-    // Refresh skills — re-copy from source
-    let skill_entries: Vec<_> = lock
-        .entries
-        .iter()
-        .filter(|(_, e)| e.kind == ItemKind::Skill)
-        .collect();
-
-    for (name, entry) in &skill_entries {
-        let Some(skill) = all_source_skills.iter().find(|s| &s.name == *name) else {
-            continue;
-        };
-
-        for harness_id in &entry.harnesses {
-            if let Some(harness) = Harness::from_id(harness_id) {
-                let skill_instr = project_config.skill_instructions_for(&skill.name);
-                let _ = installer::install_skill(skill, harness, global, entry.method, skill_instr);
-            }
-        }
-        skills_refreshed += 1;
-    }
-
-    // Refresh Pi extensions — re-copy from source and re-register settings
     let mut all_pi_extensions = Vec::new();
     for dir in &source_dirs {
         all_pi_extensions.extend(
@@ -264,18 +311,36 @@ pub fn run(global: bool) -> Result<()> {
                 .unwrap_or_default(),
         );
     }
-    let pi_ext_entries: Vec<_> = lock
-        .entries
-        .iter()
-        .filter(|(_, e)| e.kind == ItemKind::PiExtension)
-        .collect();
-    let mut pi_extensions_refreshed = 0usize;
-    for (name, _) in &pi_ext_entries {
-        let Some(ext) = all_pi_extensions.iter().find(|e| &e.name == *name) else {
-            continue;
-        };
-        let _ = crate::pi_extension::install_pi_extension(ext, global);
-        pi_extensions_refreshed += 1;
+
+    let stats = refresh_items_in_scope(
+        global,
+        &lock,
+        &all_source_agents,
+        &all_source_skills,
+        &all_source_hooks,
+        &all_pi_extensions,
+        &mapping,
+        &mut project_config,
+        &project_root,
+        None,
+    );
+
+    if !global {
+        stats.persist_upstream(&project_root);
+        for (agent, (_, added)) in &stats.upstream_skill_updates {
+            eprintln!(
+                "  + {} — added upstream skills: {}",
+                agent,
+                added.join(", ")
+            );
+        }
+        for (agent, (_, added)) in &stats.upstream_optional_updates {
+            eprintln!(
+                "  + {} — added upstream optional skills: {}",
+                agent,
+                added.join(", ")
+            );
+        }
     }
 
     // Update lock file timestamps and content hashes
@@ -288,8 +353,8 @@ pub fn run(global: bool) -> Result<()> {
     lock.save(&lock_path)?;
 
     eprintln!(
-        "Refreshed {} agent(s), {} skill(s), {} pi-extension(s)",
-        agents_refreshed, skills_refreshed, pi_extensions_refreshed
+        "Refreshed {} agent(s), {} skill(s), {} pi-package(s)",
+        stats.agents_refreshed, stats.skills_refreshed, stats.pi_refreshed
     );
     Ok(())
 }

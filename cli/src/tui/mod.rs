@@ -47,7 +47,6 @@ pub struct InstallSelections {
     pub hooks: Vec<Hook>,
     pub pi_extensions: Vec<PiExtension>,
     pub harnesses: Vec<Harness>,
-    pub skipped_harnesses: Vec<String>,
     pub global: bool,
     pub method: InstallMethod,
     pub update_cli: bool,

@@ -47,7 +47,7 @@ pub fn run(global: bool, agent_filter: Option<&str>) -> Result<()> {
         ("Agents", &agents),
         ("Skills", &skills),
         ("Hooks", &hooks),
-        ("Pi Extensions", &pi_extensions),
+        ("Pi Packages", &pi_extensions),
     ] {
         if items.is_empty() {
             continue;
@@ -64,7 +64,7 @@ pub fn run(global: bool, agent_filter: Option<&str>) -> Result<()> {
     }
 
     eprintln!(
-        "\n  Total: {} agent(s), {} skill(s), {} hook(s), {} pi-extension(s)",
+        "\n  Total: {} agent(s), {} skill(s), {} hook(s), {} pi-package(s)",
         agents.len(),
         skills.len(),
         hooks.len(),

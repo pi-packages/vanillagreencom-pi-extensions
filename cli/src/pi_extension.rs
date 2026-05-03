@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-/// A Pi extension package discovered under `pi-extensions/<name>/`.
+/// A Pi package discovered under `pi-extensions/<name>/`.
 ///
 /// Pi packages are npm-shaped. We surface the subset of `package.json`
 /// that vstack actually uses to display, install, and register the
@@ -58,7 +58,7 @@ enum BinField {
 }
 
 impl PiExtension {
-    /// Parse a `pi-extensions/<name>/package.json` and the directory containing it.
+    /// Parse a Pi package manifest at `pi-extensions/<name>/package.json`.
     pub fn from_dir(dir: &Path) -> Result<Self> {
         let pkg_path = dir.join("package.json");
         let raw = std::fs::read_to_string(&pkg_path)
@@ -90,7 +90,7 @@ impl PiExtension {
     }
 }
 
-/// Discover Pi extension packages in `<source>/pi-extensions/<name>/package.json`.
+/// Discover Pi packages in `<source>/pi-extensions/<name>/package.json`.
 pub fn discover_pi_extensions(dir: &Path) -> Result<Vec<PiExtension>> {
     let mut out = Vec::new();
     if !dir.exists() {
@@ -169,7 +169,7 @@ fn remove_same_scope_legacy_packages(name: &str, global: bool) -> Result<()> {
         let removed = remove_pi_extension(legacy, global)?;
         let scope_label = if global { "global" } else { "project" };
         if removed.is_empty() {
-            eprintln!("  Migrated legacy pi-extension {legacy} → {name} ({scope_label} scope)");
+            eprintln!("  Migrated legacy pi-package {legacy} → {name} ({scope_label} scope)");
         } else {
             let removed_list = removed
                 .iter()
@@ -177,14 +177,14 @@ fn remove_same_scope_legacy_packages(name: &str, global: bool) -> Result<()> {
                 .collect::<Vec<_>>()
                 .join(", ");
             eprintln!(
-                "  Migrated legacy pi-extension {legacy} → {name} ({scope_label} scope): removed {removed_list}"
+                "  Migrated legacy pi-package {legacy} → {name} ({scope_label} scope): removed {removed_list}"
             );
         }
     }
     Ok(())
 }
 
-/// Install a Pi extension package into the chosen scope.
+/// Install a Pi package into the chosen scope.
 ///
 /// Steps:
 /// 1. Remove any same-scope vstack legacy package names for this package
@@ -225,7 +225,7 @@ pub fn install_pi_extension(ext: &PiExtension, global: bool) -> Result<Option<Pa
         let this_label = if global { "global" } else { "project" };
         let other_label = if global { "project" } else { "global" };
         eprintln!(
-            "  Skip pi-extension {} ({this_label} install): already installed at {other_label} scope. Run `vstack remove {}{}` first to switch.",
+            "  Skip pi-package {} ({this_label} install): already installed at {other_label} scope. Run `vstack remove {}{}` first to switch.",
             ext.name,
             if !global { "--global " } else { "" },
             ext.name,
@@ -241,7 +241,7 @@ pub fn install_pi_extension(ext: &PiExtension, global: bool) -> Result<Option<Pa
             let this_label = if global { "global" } else { "project" };
             let other_label = if global { "project" } else { "global" };
             eprintln!(
-                "  Skip pi-extension {} ({this_label} install): legacy package {legacy} is installed at {other_label} scope and registers the same resources. Run `vstack remove {}{legacy}` first.",
+                "  Skip pi-package {} ({this_label} install): legacy package {legacy} is installed at {other_label} scope and registers the same resources. Run `vstack remove {}{legacy}` first.",
                 ext.name,
                 if !global { "--global " } else { "" },
             );
@@ -253,13 +253,9 @@ pub fn install_pi_extension(ext: &PiExtension, global: bool) -> Result<Option<Pa
     std::fs::create_dir_all(&dest_dir)?;
     let dest = dest_dir.join(&ext.name);
 
-    if dest.exists() {
-        if dest.is_symlink() {
-            let _ = std::fs::remove_file(&dest);
-        } else {
-            let _ = std::fs::remove_dir_all(&dest);
-        }
-    }
+    // Idempotent reinstall: clear any prior copy. NotFound is fine; other
+    // errors (EACCES etc.) propagate so we don't copy onto a broken state.
+    clear_path(&dest)?;
 
     copy_dir(&ext.source_dir, &dest)?;
     install_bin_links(ext, &dest, global)?;
@@ -268,7 +264,7 @@ pub fn install_pi_extension(ext: &PiExtension, global: bool) -> Result<Option<Pa
     Ok(Some(dest))
 }
 
-/// Remove a Pi extension package, its bin symlinks, and its settings entry.
+/// Remove a Pi package, its bin symlinks, and its settings entry.
 pub fn remove_pi_extension(name: &str, global: bool) -> Result<Vec<PathBuf>> {
     let mut removed = Vec::new();
     let dest = crate::config::pi_packages_dir(global).join(name);
@@ -281,19 +277,16 @@ pub fn remove_pi_extension(name: &str, global: bool) -> Result<Vec<PathBuf>> {
     {
         for cli_name in ext.bin.keys() {
             let link = crate::config::pi_bin_dir(global).join(cli_name);
-            if link.is_symlink() || link.is_file() {
-                if std::fs::remove_file(&link).is_ok() {
-                    removed.push(link);
-                }
+            match std::fs::remove_file(&link) {
+                Ok(()) => removed.push(link),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.into()),
             }
         }
     }
 
-    if dest.is_symlink() || dest.is_file() {
-        if std::fs::remove_file(&dest).is_ok() {
-            removed.push(dest.clone());
-        }
-    } else if dest.is_dir() && std::fs::remove_dir_all(&dest).is_ok() {
+    // NotFound is expected when the package isn't installed.
+    if clear_path(&dest)? {
         removed.push(dest.clone());
     }
     if unregister_from_pi_settings(name, &dest, global)? {
@@ -322,9 +315,7 @@ fn install_bin_links(ext: &PiExtension, package_dest: &Path, global: bool) -> Re
             continue;
         }
         let link = bin_dir.join(cli_name);
-        if link.is_symlink() || link.is_file() {
-            let _ = std::fs::remove_file(&link);
-        }
+        let _ = std::fs::remove_file(&link);
         #[cfg(unix)]
         std::os::unix::fs::symlink(&target, &link)
             .with_context(|| format!("symlinking bin {} → {}", link.display(), target.display()))?;
@@ -357,11 +348,6 @@ fn entry_matches_package(entry: &serde_json::Value, name: &str, absolute_dest: &
 
 /// Add a relative `./packages/<name>` entry to the `packages` array of Pi's
 /// `settings.json` for the scope, preserving every other entry.
-///
-/// This must never write package default settings into
-/// `vstack.extensionManager.config` or otherwise modify extension-manager user
-/// configuration. Users own those settings; install/refresh/update only owns
-/// package files plus the `packages` registration entry.
 ///
 /// Dedupe also recognizes the absolute-path form previously written by
 /// vstack so re-installs don't leave a stale duplicate behind.
@@ -453,6 +439,24 @@ fn write_settings(path: &Path, value: &serde_json::Value) -> Result<()> {
     Ok(())
 }
 
+/// Remove `path` whether it's a file, symlink, or directory. Returns
+/// `Ok(true)` if something was removed, `Ok(false)` if it didn't exist.
+/// Other errors (permissions, IO) propagate.
+fn clear_path(path: &Path) -> std::io::Result<bool> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) => {
+            if meta.is_dir() {
+                std::fs::remove_dir_all(path)?;
+            } else {
+                std::fs::remove_file(path)?;
+            }
+            Ok(true)
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
 const COPY_DIR_SKIP_NAMES: &[&str] = &[
     "node_modules",
     ".git",
@@ -525,7 +529,7 @@ mod tests {
             r#"{
                 "name": "pi-session-bridge",
                 "version": "0.1.0",
-                "description": "Pi extension and CLI",
+                "description": "Pi package and CLI",
                 "keywords": ["pi-package", "pi"],
                 "bin": { "pi-bridge": "./bin/pi-bridge.js" },
                 "pi": { "extensions": ["./extensions/session-bridge.ts"] }
@@ -1084,7 +1088,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// End-to-end smoke test that installs all vstack-managed Pi extensions
+    /// End-to-end smoke test that installs all vstack-managed Pi packages
     /// from the repo into a sandboxed `PI_CODING_AGENT_DIR`, then launches
     /// `pi` in non-interactive mode and confirms it prints no extension errors.
     ///
@@ -1097,7 +1101,7 @@ mod tests {
     #[test]
     #[ignore = "exercises real `pi` binary; opt-in via --ignored"]
     fn pi_smoke_install_and_launch() {
-        // Locate and install every repo-managed Pi extension package relative
+        // Locate and install every repo-managed Pi package relative
         // to CARGO_MANIFEST_DIR, so this smoke stays current as the catalog grows.
         let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
         let pi_ext_root = manifest_dir
@@ -1106,7 +1110,7 @@ mod tests {
             .join("pi-extensions");
         let extensions = discover_pi_extensions(&pi_ext_root).unwrap();
         if extensions.is_empty() {
-            eprintln!("skipping pi_smoke: no pi-extensions packages found");
+            eprintln!("skipping pi_smoke: no pi-packages found");
             return;
         }
 

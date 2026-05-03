@@ -25,7 +25,7 @@ pub fn run(names: &[String], global: bool) -> Result<()> {
             Harness::ALL.to_vec()
         };
 
-        // Pi extensions live in a separate location and are removed via
+        // Pi packages live in a separate location and are removed via
         // the dedicated helper. Also allow removing stale/manual Pi packages
         // that are present on disk or in settings but missing from the lock.
         let mut removed = Vec::new();

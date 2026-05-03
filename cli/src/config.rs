@@ -27,6 +27,26 @@ pub enum ItemKind {
     PiExtension,
 }
 
+impl ItemKind {
+    /// Short human label used in TUI rows, dialogs, and inspector. Stays
+    /// consistent with [`Display`] except `PiExtension` reads as
+    /// "pi-package" — that's what users call them in the package manager.
+    pub fn label_short(self) -> &'static str {
+        match self {
+            ItemKind::Agent => "agent",
+            ItemKind::Skill => "skill",
+            ItemKind::Hook => "hook",
+            ItemKind::PiExtension => "pi-package",
+        }
+    }
+
+    /// Same as [`label_short`] but accepts `Option<ItemKind>`; falls back
+    /// to "item" when None (e.g. the `vstack (cli)` binary update entry).
+    pub fn label_short_or_item(kind: Option<Self>) -> &'static str {
+        kind.map_or("item", Self::label_short)
+    }
+}
+
 impl std::fmt::Display for ItemKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -252,7 +272,7 @@ pub fn pi_packages_dir(global: bool) -> PathBuf {
     }
 }
 
-/// Directory where vstack symlinks Pi extension `bin` entries.
+/// Directory where vstack symlinks Pi package `bin` entries.
 /// Pi expects CLI tools at `<scope>/bin/<name>`.
 pub fn pi_bin_dir(global: bool) -> PathBuf {
     if global {

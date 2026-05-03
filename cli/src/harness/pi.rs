@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 /// Generate a Pi agent file (`<scope>/agents/<name>.md`).
 ///
 /// Pi has no built-in subagents; agent files only act as agent definitions when
-/// a Pi extension that loads `agents/*.md` is also installed. Even then, the
+/// a Pi package that loads `agents/*.md` is also installed. Even then, the
 /// markdown body is the canonical place for vstack-managed prose, so we emit
 /// the same "Required Skills" / hook prose / additional instructions sections
 /// that other harnesses use.

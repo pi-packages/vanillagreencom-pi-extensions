@@ -1,14 +1,21 @@
 use crate::skill::Skill;
 use std::collections::HashMap;
 
-use super::multiselect::{ItemGroup, SelectItem, Tab};
+use super::multiselect::{ItemGroup, Scope, SelectItem, Tab, TabKind};
 
 pub(super) struct InstalledInfo {
-    pub scope: String,
+    pub scope: Scope,
     pub harnesses: Vec<String>,
     pub kind: Option<crate::config::ItemKind>,
     pub installed_at: String,
+    /// Lock entry from whichever scope was loaded first (for legacy callers).
     pub lock_entry: crate::config::LockEntry,
+    /// Lock entry from the project scope (if installed there).
+    pub project_entry: Option<crate::config::LockEntry>,
+    /// Lock entry from the global scope (if installed there).
+    pub global_entry: Option<crate::config::LockEntry>,
+    /// True if any installed copy is stale relative to its source.
+    pub outdated: bool,
 }
 
 pub(super) type InstalledState = HashMap<String, InstalledInfo>;
@@ -16,32 +23,34 @@ pub(super) type InstalledState = HashMap<String, InstalledInfo>;
 pub(super) fn load_installed_state() -> InstalledState {
     let mut state = InstalledState::new();
 
-    // Project lock file
     let project_lock = crate::config::lock_file_path(false);
     if let Ok(lock) = crate::config::LockFile::load(&project_lock) {
         for (name, entry) in &lock.entries {
+            let outdated = crate::config::is_source_changed(entry);
             state.insert(
                 name.clone(),
                 InstalledInfo {
-                    scope: "project".into(),
+                    scope: Scope::Project,
                     harnesses: entry.harnesses.clone(),
                     kind: Some(entry.kind),
                     installed_at: entry.installed_at.clone(),
                     lock_entry: entry.clone(),
+                    project_entry: Some(entry.clone()),
+                    global_entry: None,
+                    outdated,
                 },
             );
         }
     }
 
-    // Global lock file
     let global_lock = crate::config::lock_file_path(true);
     if let Ok(lock) = crate::config::LockFile::load(&global_lock) {
         for (name, entry) in &lock.entries {
+            let outdated = crate::config::is_source_changed(entry);
             state
                 .entry(name.clone())
                 .and_modify(|info| {
-                    info.scope = format!("{}+global", info.scope);
-                    // Keep the earlier installed_at (more conservative for staleness)
+                    info.scope = info.scope.merge_with_global();
                     if entry.installed_at < info.installed_at {
                         info.installed_at = entry.installed_at.clone();
                     }
@@ -50,13 +59,18 @@ pub(super) fn load_installed_state() -> InstalledState {
                             info.harnesses.push(h.clone());
                         }
                     }
+                    info.global_entry = Some(entry.clone());
+                    info.outdated = info.outdated || outdated;
                 })
                 .or_insert(InstalledInfo {
-                    scope: "global".into(),
+                    scope: Scope::Global,
                     harnesses: entry.harnesses.clone(),
                     kind: Some(entry.kind),
                     installed_at: entry.installed_at.clone(),
                     lock_entry: entry.clone(),
+                    project_entry: None,
+                    global_entry: Some(entry.clone()),
+                    outdated,
                 });
         }
     }
@@ -64,48 +78,32 @@ pub(super) fn load_installed_state() -> InstalledState {
     state
 }
 
-/// Check if an installed item's source has changed (content hash comparison).
-pub(super) fn is_item_outdated(info: &InstalledInfo) -> bool {
-    crate::config::is_source_changed(&info.lock_entry)
-}
-
-pub(super) fn installed_scope_label(scope: &str) -> String {
-    match scope {
-        "project+global" => "both".into(),
-        other => other.to_string(),
-    }
-}
-
 pub(super) fn build_item_tabs(
     items: &super::DiscoveredItems,
     dep_display: &HashMap<String, String>,
     installed: &InstalledState,
+    cli_update: Option<&str>,
 ) -> Vec<Tab> {
     let mut tabs = Vec::new();
 
-    // Config paths no longer needed for staleness — hash-based detection
-    // includes config content in the hash at install time.
-
-    // ── Agents tab ───────────────────────────────────────────────────
     if !items.agents.is_empty() {
         let mut engineers = Vec::new();
         let mut reviewers = Vec::new();
         let mut managers = Vec::new();
 
         for a in &items.agents {
-            let installed_info = installed.get(&a.name);
-            let is_installed = installed_info.is_some();
-            let agent_outdated = installed_info.is_some_and(|info| is_item_outdated(info));
+            let info = installed.get(&a.name);
             let item = SelectItem {
                 label: a.name.clone(),
                 description: a.description.clone(),
                 selected: false,
-                tag: None,
                 suffix: None,
                 locked: false,
-                installed: is_installed,
-                installed_scope: installed_info.map(|info| installed_scope_label(&info.scope)),
-                outdated: agent_outdated,
+                installed: info.is_some(),
+                installed_scope: info.map(|i| i.scope),
+                outdated: info.is_some_and(|i| i.outdated),
+                kind: Some(crate::config::ItemKind::Agent),
+                search_haystack: String::new(),
             };
             match a.role {
                 crate::agent::AgentRole::Engineer => engineers.push(item),
@@ -136,11 +134,11 @@ pub(super) fn build_item_tabs(
 
         tabs.push(Tab {
             name: "Agents".into(),
+            kind: TabKind::Source,
             groups,
         });
     }
 
-    // ── Skills tab ───────────────────────────────────────────────────
     if !items.skills.is_empty() {
         let mut rust = Vec::new();
         let mut perf = Vec::new();
@@ -148,18 +146,18 @@ pub(super) fn build_item_tabs(
         let mut workflow = Vec::new();
 
         for s in &items.skills {
-            let installed_info = installed.get(&s.name);
-            let is_installed = installed_info.is_some();
+            let info = installed.get(&s.name);
             let item = SelectItem {
                 label: s.name.clone(),
                 description: s.description.clone(),
                 selected: false,
-                tag: None,
                 suffix: dep_display.get(&s.name).cloned(),
                 locked: false,
-                installed: is_installed,
-                installed_scope: installed_info.map(|info| installed_scope_label(&info.scope)),
-                outdated: installed_info.is_some_and(|info| is_item_outdated(info)),
+                installed: info.is_some(),
+                installed_scope: info.map(|i| i.scope),
+                outdated: info.is_some_and(|i| i.outdated),
+                kind: Some(crate::config::ItemKind::Skill),
+                search_haystack: String::new(),
             };
 
             if s.name.starts_with("rust-") {
@@ -204,34 +202,35 @@ pub(super) fn build_item_tabs(
 
         tabs.push(Tab {
             name: "Skills".into(),
+            kind: TabKind::Source,
             groups,
         });
     }
 
-    // ── Hooks tab ────────────────────────────────────────────────────
     if !items.hooks.is_empty() {
         let items_list: Vec<SelectItem> = items
             .hooks
             .iter()
             .map(|h| {
-                let installed_info = installed.get(&h.name);
-                let is_installed = installed_info.is_some();
+                let info = installed.get(&h.name);
                 SelectItem {
                     label: h.name.clone(),
                     description: h.description.clone(),
                     selected: false,
-                    tag: None,
                     suffix: Some(h.event.clone()),
                     locked: false,
-                    installed: is_installed,
-                    installed_scope: installed_info.map(|info| installed_scope_label(&info.scope)),
-                    outdated: installed_info.is_some_and(|info| is_item_outdated(info)),
+                    installed: info.is_some(),
+                    installed_scope: info.map(|i| i.scope),
+                    outdated: info.is_some_and(|i| i.outdated),
+                    kind: Some(crate::config::ItemKind::Hook),
+                    search_haystack: String::new(),
                 }
             })
             .collect();
 
         tabs.push(Tab {
             name: "Hooks".into(),
+            kind: TabKind::Source,
             groups: vec![ItemGroup {
                 label: String::new(),
                 items: items_list,
@@ -239,35 +238,35 @@ pub(super) fn build_item_tabs(
         });
     }
 
-    // ── Pi Extensions tab ────────────────────────────────────────────
     if !items.pi_extensions.is_empty() {
         let items_list: Vec<SelectItem> = items
             .pi_extensions
             .iter()
             .map(|ext| {
-                let installed_info = installed.get(&ext.name);
-                let is_installed = installed_info.is_some();
+                let info = installed.get(&ext.name);
                 let suffix = ext.version.clone().map(|v| format!("v{v}"));
                 SelectItem {
                     label: ext.name.clone(),
                     description: if ext.description.is_empty() {
-                        "Pi extension package".into()
+                        "Pi package".into()
                     } else {
                         ext.description.clone()
                     },
                     selected: false,
-                    tag: Some("pi".into()),
                     suffix,
                     locked: false,
-                    installed: is_installed,
-                    installed_scope: installed_info.map(|info| installed_scope_label(&info.scope)),
-                    outdated: installed_info.is_some_and(|info| is_item_outdated(info)),
+                    installed: info.is_some(),
+                    installed_scope: info.map(|i| i.scope),
+                    outdated: info.is_some_and(|i| i.outdated),
+                    kind: Some(crate::config::ItemKind::PiExtension),
+                    search_haystack: String::new(),
                 }
             })
             .collect();
 
         tabs.push(Tab {
-            name: "Pi Extensions".into(),
+            name: "Pi Packages".into(),
+            kind: TabKind::Source,
             groups: vec![ItemGroup {
                 label: String::new(),
                 items: items_list,
@@ -275,191 +274,42 @@ pub(super) fn build_item_tabs(
         });
     }
 
-    // ── Installed tab ─────────────────────────────────────────
-    if !installed.is_empty() {
-        let mut project_agents = Vec::new();
-        let mut project_skills = Vec::new();
-        let mut project_hooks = Vec::new();
-        let mut project_pi_extensions = Vec::new();
-        let mut global_agents = Vec::new();
-        let mut global_skills = Vec::new();
-        let mut global_hooks = Vec::new();
-        let mut global_pi_extensions = Vec::new();
-        let mut both_agents = Vec::new();
-        let mut both_skills = Vec::new();
-        let mut both_hooks = Vec::new();
-        let mut both_pi_extensions = Vec::new();
-
-        let mut sorted: Vec<_> = installed.iter().collect();
-        sorted.sort_by_key(|(name, _)| (*name).clone());
-
-        for (name, info) in sorted {
-            let h = info.harnesses.join(", ");
-            let installed_scope = installed_scope_label(&info.scope);
-            let item = SelectItem {
-                label: name.clone(),
-                description: format!("[{h}]"),
-                selected: false,
-                tag: None,
-                suffix: None,
-                locked: false,
-                installed: true,
-                installed_scope: Some(installed_scope.clone()),
-                outdated: is_item_outdated(info),
-            };
-            match (installed_scope.as_str(), info.kind) {
-                ("project", Some(crate::config::ItemKind::Agent)) => project_agents.push(item),
-                ("project", Some(crate::config::ItemKind::Hook)) => project_hooks.push(item),
-                ("project", Some(crate::config::ItemKind::PiExtension)) => {
-                    project_pi_extensions.push(item)
-                }
-                ("project", _) => project_skills.push(item),
-                ("global", Some(crate::config::ItemKind::Agent)) => global_agents.push(item),
-                ("global", Some(crate::config::ItemKind::Hook)) => global_hooks.push(item),
-                ("global", Some(crate::config::ItemKind::PiExtension)) => {
-                    global_pi_extensions.push(item)
-                }
-                ("global", _) => global_skills.push(item),
-                ("both", Some(crate::config::ItemKind::Agent)) => both_agents.push(item),
-                ("both", Some(crate::config::ItemKind::Hook)) => both_hooks.push(item),
-                ("both", Some(crate::config::ItemKind::PiExtension)) => {
-                    both_pi_extensions.push(item)
-                }
-                ("both", _) => both_skills.push(item),
-                (_, Some(crate::config::ItemKind::Agent)) => project_agents.push(item),
-                (_, Some(crate::config::ItemKind::Hook)) => project_hooks.push(item),
-                (_, Some(crate::config::ItemKind::PiExtension)) => project_pi_extensions.push(item),
-                _ => project_skills.push(item),
-            }
-        }
-
-        let mut groups = Vec::new();
-        if !project_agents.is_empty() {
-            groups.push(ItemGroup {
-                label: "Project / Agents".into(),
-                items: project_agents,
-            });
-        }
-        if !project_skills.is_empty() {
-            groups.push(ItemGroup {
-                label: "Project / Skills".into(),
-                items: project_skills,
-            });
-        }
-        if !project_hooks.is_empty() {
-            groups.push(ItemGroup {
-                label: "Project / Hooks".into(),
-                items: project_hooks,
-            });
-        }
-        if !project_pi_extensions.is_empty() {
-            groups.push(ItemGroup {
-                label: "Project / Pi Extensions".into(),
-                items: project_pi_extensions,
-            });
-        }
-        if !global_agents.is_empty() {
-            groups.push(ItemGroup {
-                label: "Global / Agents".into(),
-                items: global_agents,
-            });
-        }
-        if !global_skills.is_empty() {
-            groups.push(ItemGroup {
-                label: "Global / Skills".into(),
-                items: global_skills,
-            });
-        }
-        if !global_hooks.is_empty() {
-            groups.push(ItemGroup {
-                label: "Global / Hooks".into(),
-                items: global_hooks,
-            });
-        }
-        if !global_pi_extensions.is_empty() {
-            groups.push(ItemGroup {
-                label: "Global / Pi Extensions".into(),
-                items: global_pi_extensions,
-            });
-        }
-        if !both_agents.is_empty() {
-            groups.push(ItemGroup {
-                label: "Both / Agents".into(),
-                items: both_agents,
-            });
-        }
-        if !both_skills.is_empty() {
-            groups.push(ItemGroup {
-                label: "Both / Skills".into(),
-                items: both_skills,
-            });
-        }
-        if !both_hooks.is_empty() {
-            groups.push(ItemGroup {
-                label: "Both / Hooks".into(),
-                items: both_hooks,
-            });
-        }
-        if !both_pi_extensions.is_empty() {
-            groups.push(ItemGroup {
-                label: "Both / Pi Extensions".into(),
-                items: both_pi_extensions,
-            });
-        }
-
-        if !groups.is_empty() {
-            tabs.push(Tab {
-                name: "Installed".into(),
-                groups,
-            });
-        }
+    if let Some(installed_tab) = build_installed_tab(installed) {
+        tabs.push(installed_tab);
     }
 
-    // ── Updates tab ───────────────────────────────────────────
-    // Collect outdated items from the tabs we just built
     let mut update_items: Vec<SelectItem> = Vec::new();
-
     for tab in &tabs {
-        if tab.name == "Installed" {
+        if tab.kind != TabKind::Source {
             continue;
         }
         for group in &tab.groups {
             for item in &group.items {
                 if item.outdated {
-                    update_items.push(SelectItem {
-                        label: item.label.clone(),
-                        description: item.description.clone(),
-                        selected: false,
-                        tag: item.tag.clone(),
-                        suffix: item.suffix.clone(),
-                        locked: false,
-                        installed: true,
-                        installed_scope: item.installed_scope.clone(),
-                        outdated: true,
-                    });
+                    let mut clone = item.clone();
+                    clone.selected = false;
+                    update_items.push(clone);
                 }
             }
         }
     }
 
-    // Check for CLI binary update
-    let cli_update = check_for_update();
-    if let Some(ref info) = cli_update {
+    if let Some(info) = cli_update {
         update_items.push(SelectItem {
             label: "vstack (cli)".into(),
             description: format!("Binary update: {info}"),
             selected: false,
-            tag: None,
             suffix: Some("binary".into()),
             locked: false,
             installed: true,
-            installed_scope: Some("global".into()),
+            installed_scope: Some(Scope::Global),
             outdated: true,
+            kind: None,
+            search_haystack: String::new(),
         });
     }
 
     if !update_items.is_empty() {
-        // Split into content updates and CLI update
         let content_items: Vec<SelectItem> = update_items
             .iter()
             .filter(|i| i.label != "vstack (cli)")
@@ -489,15 +339,170 @@ pub(super) fn build_item_tabs(
             0,
             Tab {
                 name: format!("Updates ({count})"),
+                kind: TabKind::Updates,
                 groups,
             },
         );
     }
 
+    if let Some(dup_tab) = build_duplicates_tab(installed) {
+        tabs.insert(0, dup_tab);
+    }
+
     tabs
 }
 
-/// Check for CLI binary update (quick, non-blocking)
+fn kind_bucket(kind: Option<crate::config::ItemKind>) -> &'static str {
+    match kind {
+        Some(crate::config::ItemKind::Agent) => "Agents",
+        Some(crate::config::ItemKind::Hook) => "Hooks",
+        Some(crate::config::ItemKind::PiExtension) => "Pi Packages",
+        _ => "Skills",
+    }
+}
+
+const KIND_ORDER: &[&str] = &["Agents", "Skills", "Hooks", "Pi Packages"];
+
+fn build_installed_tab(installed: &InstalledState) -> Option<Tab> {
+    if installed.is_empty() {
+        return None;
+    }
+
+    let mut buckets: HashMap<(&'static str, &'static str), Vec<SelectItem>> = HashMap::new();
+
+    let mut sorted: Vec<_> = installed.iter().collect();
+    sorted.sort_by_key(|(name, _)| name.as_str());
+
+    for (name, info) in sorted {
+        let h = info.harnesses.join(", ");
+        let scope_str = info.scope.title_label();
+        let item = SelectItem {
+            label: name.clone(),
+            description: format!("[{h}]"),
+            selected: false,
+            suffix: None,
+            locked: false,
+            installed: true,
+            installed_scope: Some(info.scope),
+            outdated: info.outdated,
+            kind: info.kind,
+            search_haystack: String::new(),
+        };
+        buckets
+            .entry((scope_str, kind_bucket(info.kind)))
+            .or_default()
+            .push(item);
+    }
+
+    let mut groups = Vec::new();
+    for scope in ["Project", "Global", "Both"] {
+        for kind in KIND_ORDER {
+            if let Some(items) = buckets.remove(&(scope, *kind))
+                && !items.is_empty()
+            {
+                groups.push(ItemGroup {
+                    label: format!("{scope} / {kind}"),
+                    items,
+                });
+            }
+        }
+    }
+
+    if groups.is_empty() {
+        None
+    } else {
+        Some(Tab {
+            name: "Installed".into(),
+            kind: TabKind::Installed,
+            groups,
+        })
+    }
+}
+
+fn build_duplicates_tab(installed: &InstalledState) -> Option<Tab> {
+    let mut sorted: Vec<_> = installed
+        .iter()
+        .filter(|(_, info)| info.scope == Scope::Both)
+        .collect();
+    if sorted.is_empty() {
+        return None;
+    }
+    sorted.sort_by_key(|(name, _)| name.as_str());
+
+    let mut buckets: HashMap<&'static str, Vec<SelectItem>> = HashMap::new();
+    for (name, info) in sorted {
+        let proj_hash = info
+            .project_entry
+            .as_ref()
+            .map(|e| e.source_hash.as_str())
+            .unwrap_or("");
+        let global_hash = info
+            .global_entry
+            .as_ref()
+            .map(|e| e.source_hash.as_str())
+            .unwrap_or("");
+        let proj_when = info
+            .project_entry
+            .as_ref()
+            .map(|e| e.installed_at.as_str())
+            .unwrap_or("");
+        let global_when = info
+            .global_entry
+            .as_ref()
+            .map(|e| e.installed_at.as_str())
+            .unwrap_or("");
+        let identical = proj_hash == global_hash && !proj_hash.is_empty();
+        let mut suffix_parts: Vec<String> = Vec::new();
+        if identical {
+            suffix_parts.push("identical".to_string());
+        } else {
+            let newer = if proj_when > global_when {
+                "project newer"
+            } else if global_when > proj_when {
+                "global newer"
+            } else {
+                "differs"
+            };
+            suffix_parts.push(newer.to_string());
+        }
+        suffix_parts.push(crate::config::ItemKind::label_short_or_item(info.kind).to_string());
+        let item = SelectItem {
+            label: name.clone(),
+            description: format!("project + global · {}", info.harnesses.join(", ")),
+            selected: false,
+            suffix: Some(suffix_parts.join(" · ")),
+            locked: false,
+            installed: true,
+            installed_scope: Some(Scope::Both),
+            outdated: info.outdated,
+            kind: info.kind,
+            search_haystack: String::new(),
+        };
+        buckets
+            .entry(kind_bucket(info.kind))
+            .or_default()
+            .push(item);
+    }
+
+    let mut groups = Vec::new();
+    for kind in KIND_ORDER {
+        if let Some(items) = buckets.remove(*kind) {
+            groups.push(ItemGroup {
+                label: (*kind).into(),
+                items,
+            });
+        }
+    }
+
+    let count: usize = groups.iter().map(|g| g.items.len()).sum();
+    Some(Tab {
+        name: format!("Duplicates ({count})"),
+        kind: TabKind::Duplicates,
+        groups,
+    })
+}
+
+/// Check for CLI binary update (~1.5s timeout).
 pub(super) fn check_for_update() -> Option<String> {
     let local = env!("CARGO_PKG_VERSION");
     let remote = crate::commands::update::get_remote_version_with_timeout(
