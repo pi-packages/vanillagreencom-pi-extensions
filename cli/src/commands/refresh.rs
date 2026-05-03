@@ -343,14 +343,33 @@ pub fn run(global: bool) -> Result<()> {
         }
     }
 
-    // Update lock file timestamps and content hashes
+    // Update lock file timestamps and content hashes. Also repair stale source
+    // paths: if an entry's recorded source no longer resolves but we found a
+    // working source via CWD/registry fallback, rewrite the entry's source so
+    // future refresh/staleness checks use the valid path.
     let mut lock = config::LockFile::load(&lock_path)?;
     let now = config::now_iso();
+    let fallback_source = source_dirs.first().map(|p| p.display().to_string());
+    let mut repaired_sources = 0usize;
     for entry in lock.entries.values_mut() {
+        if resolve_single_source(&entry.source).is_none() {
+            if let Some(replacement) = &fallback_source {
+                if &entry.source != replacement {
+                    entry.source = replacement.clone();
+                    repaired_sources += 1;
+                }
+            }
+        }
         entry.installed_at = now.clone();
         entry.source_hash = config::compute_source_hash(entry);
     }
     lock.save(&lock_path)?;
+    if repaired_sources > 0 {
+        eprintln!(
+            "  Repaired {} lock entry source path(s) (previous source missing)",
+            repaired_sources
+        );
+    }
 
     eprintln!(
         "Refreshed {} agent(s), {} skill(s), {} pi-package(s)",

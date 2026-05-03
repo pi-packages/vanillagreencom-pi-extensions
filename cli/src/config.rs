@@ -125,7 +125,30 @@ impl SourceRegistry {
         }
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("reading source registry {}", path.display()))?;
-        serde_json::from_str(&content).context("parsing source registry")
+        let mut registry: Self =
+            serde_json::from_str(&content).context("parsing source registry")?;
+        let pruned = registry.prune_dead_paths();
+        if pruned > 0 {
+            // Best-effort persist; if it fails we still return the in-memory
+            // pruned view so the rest of the run sees a clean list.
+            let _ = registry.save(path);
+        }
+        Ok(registry)
+    }
+
+    /// Drop entries that look like local filesystem paths but no longer exist.
+    /// Remote shorthand entries (e.g. "owner/repo", "https://...") are
+    /// preserved unconditionally — they're not paths to check. Returns the
+    /// number of entries removed.
+    pub fn prune_dead_paths(&mut self) -> usize {
+        let before = self.entries.len();
+        self.entries.retain(|entry| !is_dead_local_path(entry));
+        if let Some(current) = &self.current
+            && is_dead_local_path(current)
+        {
+            self.current = None;
+        }
+        before - self.entries.len()
     }
 
     pub fn save(&self, path: &Path) -> Result<()> {
@@ -150,6 +173,28 @@ impl SourceRegistry {
             self.current = None;
         }
     }
+}
+
+/// True iff `entry` looks like a local filesystem path (absolute, `~`-tilde,
+/// or relative starting with `.`) that no longer exists. Anything that doesn't
+/// match those shapes (remote shorthand `owner/repo`, URLs, etc.) is left
+/// alone — only path-like entries can become dead.
+fn is_dead_local_path(entry: &str) -> bool {
+    let looks_like_path = entry.starts_with('/')
+        || entry.starts_with('~')
+        || entry.starts_with("./")
+        || entry.starts_with("../");
+    if !looks_like_path {
+        return false;
+    }
+    let expanded = if let Some(stripped) = entry.strip_prefix("~/") {
+        user_home_dir().join(stripped)
+    } else if entry == "~" {
+        user_home_dir()
+    } else {
+        PathBuf::from(entry)
+    };
+    !expanded.exists()
 }
 
 /// Resolve the lock file path based on scope
@@ -689,4 +734,85 @@ fn epoch_days_to_date(days: u64) -> (u64, u64, u64) {
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
     (y, m, d)
+}
+
+#[cfg(test)]
+mod source_registry_tests {
+    use super::*;
+    use std::fs;
+
+    fn sandbox(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "vstack_source_registry_{label}_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn prune_drops_dead_absolute_paths_keeps_shorthand_and_live_paths() {
+        let dir = sandbox("prune_drops_dead");
+        let live = dir.join("live");
+        fs::create_dir_all(&live).unwrap();
+        let dead = dir.join("dead");
+        // dead is intentionally not created.
+
+        let mut reg = SourceRegistry {
+            current: Some("vanillagreencom/vstack".to_string()),
+            entries: vec![
+                "vanillagreencom/vstack".to_string(),
+                live.display().to_string(),
+                dead.display().to_string(),
+                "https://example.com/repo".to_string(),
+            ],
+        };
+        let pruned = reg.prune_dead_paths();
+        assert_eq!(pruned, 1);
+        assert_eq!(
+            reg.entries,
+            vec![
+                "vanillagreencom/vstack".to_string(),
+                live.display().to_string(),
+                "https://example.com/repo".to_string(),
+            ]
+        );
+        assert_eq!(reg.current.as_deref(), Some("vanillagreencom/vstack"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn prune_clears_current_if_current_is_dead() {
+        let dir = sandbox("prune_clears_current");
+        let dead = dir.join("dead");
+        let mut reg = SourceRegistry {
+            current: Some(dead.display().to_string()),
+            entries: vec![dead.display().to_string()],
+        };
+        let pruned = reg.prune_dead_paths();
+        assert_eq!(pruned, 1);
+        assert!(reg.current.is_none());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_persists_pruned_view_to_disk() {
+        let dir = sandbox("load_persists");
+        let path = dir.join("sources.json");
+        let dead = dir.join("dead-source").display().to_string();
+        let raw = serde_json::json!({
+            "current": "vanillagreencom/vstack",
+            "entries": ["vanillagreencom/vstack", dead],
+        });
+        fs::write(&path, raw.to_string()).unwrap();
+
+        let loaded = SourceRegistry::load(&path).unwrap();
+        assert_eq!(loaded.entries, vec!["vanillagreencom/vstack".to_string()]);
+
+        let on_disk: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(on_disk["entries"].as_array().unwrap().len(), 1);
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

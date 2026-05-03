@@ -242,8 +242,8 @@ fn draw_title(frame: &mut Frame, area: Rect, select: &mut TabbedSelect) {
                 Paragraph::new(Line::from(Span::styled(
                     display,
                     Style::default()
-                        .fg(Color::Black)
-                        .bg(theme::TEXT_MUTED)
+                        .fg(theme::ON_DARK)
+                        .bg(theme::STATUS_OK)
                         .bold(),
                 ))),
                 select.source_chip_area,
