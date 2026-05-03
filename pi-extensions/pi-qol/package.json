@@ -250,6 +250,16 @@
           "apply": "live"
         },
         {
+          "key": "enableContextCommand",
+          "label": "Enable /context command",
+          "description": "Register the /context command to show inline context-window usage with estimated Pi/model category breakdowns.",
+          "type": "boolean",
+          "default": true,
+          "category": "Context",
+          "apply": "reload",
+          "requiresReload": true
+        },
+        {
           "key": "sessionSearch.enabled",
           "label": "Enable session search",
           "description": "Register the previous-session search palette, preview, resume, and context-import actions.",

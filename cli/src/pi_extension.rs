@@ -371,19 +371,29 @@ fn register_in_pi_settings(name: &str, dest: &Path, global: bool) -> Result<()> 
         .and_then(|p| p.as_array_mut())
         .context("Pi settings.json `packages` is not an array")?;
 
-    // Drop legacy absolute-path entries for this package; the relative form
-    // below is the canonical one.
-    let absolute = dest.to_string_lossy().into_owned();
-    packages.retain(|e| match e {
-        serde_json::Value::String(s) => s != &absolute && s != &entry,
-        serde_json::Value::Object(obj) => !obj
-            .get("source")
-            .and_then(|v| v.as_str())
-            .is_some_and(|s| s == absolute || s == entry),
-        _ => true,
-    });
+    // Replace any existing entry for this package in place so reinstalling a
+    // package does not change Pi extension load order. This matters when two
+    // packages both customize the same UI surface (for example the editor).
+    // Dedupe also recognizes legacy absolute-path entries and object forms.
+    let mut replacement_index = None;
+    let mut next_packages = Vec::with_capacity(packages.len() + 1);
+    for existing in packages.drain(..) {
+        if entry_matches_package(&existing, name, dest) {
+            if replacement_index.is_none() {
+                replacement_index = Some(next_packages.len());
+            }
+            continue;
+        }
+        next_packages.push(existing);
+    }
 
-    packages.push(serde_json::Value::String(entry));
+    let replacement = serde_json::Value::String(entry);
+    if let Some(index) = replacement_index {
+        next_packages.insert(index, replacement);
+    } else {
+        next_packages.push(replacement);
+    }
+    *packages = next_packages;
 
     write_settings(&settings_path, &settings)
 }
@@ -946,7 +956,7 @@ mod tests {
                 &settings_path,
                 serde_json::to_string_pretty(&serde_json::json!({
                     "theme": "dark",
-                    "packages": ["npm:@foo/bar"],
+                    "packages": ["npm:@foo/bar", "./packages/pi-qol", "./packages/pi-statusline"],
                     "vstack": {
                         "extensionManager": {
                             "config": {
@@ -1010,6 +1020,11 @@ mod tests {
                 pkgs.iter().filter(|s| **s == "./packages/pi-qol").count(),
                 1,
                 "reinstall should not duplicate package entries: {pkgs:?}"
+            );
+            assert_eq!(
+                pkgs,
+                vec!["npm:@foo/bar", "./packages/pi-qol", "./packages/pi-statusline"],
+                "reinstall should preserve package load order: {pkgs:?}"
             );
         });
 

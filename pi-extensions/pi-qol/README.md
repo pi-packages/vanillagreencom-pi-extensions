@@ -9,6 +9,7 @@ Quality-of-life extension for Pi.
 - Reliable multiline input: `Shift+Enter` / `Shift+Return` inserts a newline when the terminal reports it distinctly; `ctrl+j` is the default fallback newline key. `Alt+Enter` is reserved for Pi follow-up messages.
 - Compact image placeholders: existing pasted image paths can collapse to `[Image #N]` aliases and are attached on submit.
 - Session naming: `/session-name [name]` sets or shows the friendly session name; automatic first-prompt naming is enabled by default.
+- Context usage: `/context` prints an inline Claude-style context-window visualization with estimated Pi/model category breakdowns.
 - Previous-session search: `/search` and optional `F3` overlay search prior sessions, preview snippets, resume, inject summarized context, or start a new session with summarized context.
 - Handoff: `/handoff <goal>` drafts a focused prompt for a new session, preserving the latest compaction summary plus retained branch entries.
 - Optional permission gate: when enabled, prompts before configured `bash` tool command fragments run; default match is `rm -Rf`.
@@ -29,6 +30,7 @@ Quality-of-life extension for Pi.
 | `/qol rename status` | Show auto-rename settings and current session name. |
 | `/qol rename full` | Regenerate the session name from the full conversation. |
 | `/session-name [name]` | Set or show the current session's friendly name. |
+| `/context` | Show inline context-window usage, model/context limit, and estimated category breakdowns. |
 | `/search [query]` | Open previous-session search, optionally prefilled with a query. |
 | `/search resume <sessionPath>` | Resume a session by path. |
 | `/search refresh` | Refresh the session search cache. |
@@ -58,6 +60,10 @@ Settings are exposed through `pi-extension-manager` under **QOL**.
 - Summary knobs: `summaryModel`, `summaryMaxTokens`, `summaryInputMaxChars`.
 
 Search rows use Pi's `/resume`-style title: explicit session name, otherwise first user prompt, otherwise filename.
+
+### Context usage
+
+- `enableContextCommand`: register `/context`; default on. The display uses Pi's `ctx.getContextUsage()` for total tokens/context window, then estimates the category split from the current system prompt, active tool definitions, session messages, compact summaries, context files, skills, and custom agents when Pi exposes that structured data.
 
 ### Notifications
 
