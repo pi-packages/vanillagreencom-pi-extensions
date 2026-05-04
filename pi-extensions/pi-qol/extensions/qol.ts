@@ -3270,10 +3270,8 @@ class QolSessionSearchComponent {
 			return `${clippedLeft}${" ".repeat(gap)}${right}`;
 		};
 		const cursor = accent("│");
-		const queryDisplay = state.query
-			? `${state.query.slice(0, state.cursor)}${cursor}${state.query.slice(state.cursor)}`
-			: `${cursor}${muted("Type to search sessions...")}`;
-		lines.push(filledRow(` ${queryDisplay}`));
+		const queryDisplay = `${state.query.slice(0, state.cursor)}${cursor}${state.query.slice(state.cursor)}`;
+		lines.push(filledRow(` > ${queryDisplay}`));
 		lines.push(row(dim(`${state.total} sessions · re:<pattern> regex · "phrase" exact`)));
 		lines.push(empty(), divider(), empty());
 		if (state.results.length === 0) {

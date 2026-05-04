@@ -288,10 +288,10 @@ function framePopup(lines: string[], width: number, theme: Theme, title = "", ri
 }
 
 function renderSearchLine(searchInput: Input, width: number, theme: Theme): string {
-	const pad = " ";
-	const inputWidth = Math.max(1, width - visibleWidth(pad) * 2);
+	const prefix = " > ";
+	const inputWidth = Math.max(1, width - visibleWidth(prefix) - 1);
 	const input = searchInput.render(inputWidth)[0] ?? "";
-	return theme.bg("toolPendingBg", padAnsi(truncateToWidth(`${pad}${input}`, width, ""), width));
+	return theme.bg("toolPendingBg", padAnsi(truncateToWidth(`${prefix}${input}`, width, ""), width));
 }
 
 function filterItems(items: StashItem[], query: string): StashItem[] {
@@ -368,7 +368,7 @@ async function openStashPopup(ctx: ExtensionContext): Promise<void> {
 				clampSelection();
 
 				const lines: string[] = [];
-				lines.push(panelLine(theme.fg("dim", "Type to search · ↑↓/jk select · enter pop · ctrl+d delete · ctrl+x delete all"), innerWidth));
+				lines.push(panelLine(`${ansiYellow("↑↓/jk")} ${theme.fg("dim", "select · ")}${ansiYellow("enter")} ${theme.fg("dim", "pop · ")}${ansiYellow("ctrl+d")} ${theme.fg("dim", "delete · ")}${ansiYellow("ctrl+x")} ${theme.fg("dim", "delete all")}`, innerWidth));
 				lines.push(panelLine("", innerWidth));
 				lines.push(panelLine(renderSearchLine(searchInput, innerWidth, theme), innerWidth));
 				lines.push(panelLine("", innerWidth));

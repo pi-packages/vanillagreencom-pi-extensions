@@ -1344,7 +1344,7 @@ function createManagerComponent(
 		lines.push("");
 		lines.push(ui.showAudit
 			? `${theme.fg("dim", "diagnostics · ")}${ansiYellow("↑↓")} ${theme.fg("dim", "scroll · ")}${ansiYellow("PgUp/PgDn")} ${theme.fg("dim", "scroll · ")}${ansiYellow("Alt+A")} ${theme.fg("dim", "back · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`
-			: `${ansiYellow("tab")} ${theme.fg("dim", "switch tabs · ")}${ansiYellow("↑↓")} ${theme.fg("dim", "navigate · ")}${ansiYellow("enter")} ${theme.fg("dim", "toggle/edit · ")}${ansiYellow("d")} ${theme.fg("dim", "reset setting · ")}${ansiYellow("D")} ${theme.fg("dim", "reset extension · type search · ")}${ansiYellow("Alt+A")} ${theme.fg("dim", "diagnostics · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`);
+			: `${ansiYellow("tab")} ${theme.fg("dim", "switch tabs · ")}${ansiYellow("↑↓")} ${theme.fg("dim", "navigate · ")}${ansiYellow("enter")} ${theme.fg("dim", "toggle/edit · ")}${ansiYellow("d")} ${theme.fg("dim", "reset setting · ")}${ansiYellow("D")} ${theme.fg("dim", "reset extension · ")}${ansiYellow("Alt+A")} ${theme.fg("dim", "diagnostics · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`);
 		lines.push("");
 		lines.push(divider(bodyWidth, theme));
 		const availableRows = Math.max(1, layout.innerRows - lines.length);
@@ -1474,7 +1474,7 @@ function renderExtensions(inventory: Inventory, ui: ManagerUiState, width: numbe
 	const right = renderInspector(inventory, selected, ui, rightWidth, theme, layout.settingsRows);
 	const rows = layout.bodyRows;
 	const view = ui.topTab === TAB_ALL ? (ui.showResources ? "raw resources" : "packages") : "package";
-	const searchText = ` ${ui.search || theme.fg("dim", "Type to filter")}`;
+	const searchText = ` > ${ui.search || theme.inverse(" ")}`;
 	const searchLine = theme.bg("toolPendingBg", pad(searchText, width));
 	const lines = [
 		"",
@@ -1918,12 +1918,12 @@ function createQuickSettingsComponent(pi: ExtensionAPI, ctx: ExtensionCommandCon
 		const lines: string[] = [];
 		const searchLine = ui.editing
 			? theme.bg("toolPendingBg", pad(` ${theme.fg("dim", "Editing inline value")}`, bodyWidth))
-			: theme.bg("toolPendingBg", pad(` ${ui.search || theme.fg("dim", "Type to filter settings")}`, bodyWidth));
+			: theme.bg("toolPendingBg", pad(` > ${ui.search || theme.inverse(" ")}`, bodyWidth));
 		lines.push(renderTabBar(tabs, ui.tab, bodyWidth, theme));
 		lines.push("");
 		lines.push(ui.editing
 			? `${theme.fg("dim", "editing value · ")}${ansiYellow("enter")} ${theme.fg("dim", "save · ")}${ansiYellow("esc")} ${theme.fg("dim", "cancel · ")}${ansiYellow("backspace")} ${theme.fg("dim", "delete · ")}${ansiYellow("ctrl+u")} ${theme.fg("dim", "clear")}`
-			: `${ansiYellow("tab")} ${theme.fg("dim", "switch extension tabs · ")}${ansiYellow("↑↓")} ${theme.fg("dim", "navigate · ")}${ansiYellow("enter")} ${theme.fg("dim", "edit/toggle · ")}${ansiYellow("d")} ${theme.fg("dim", "reset setting · ")}${ansiYellow("D")} ${theme.fg("dim", "reset extension · type search · ")}${ansiYellow("backspace")} ${theme.fg("dim", "clear · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`);
+			: `${ansiYellow("tab")} ${theme.fg("dim", "switch extension tabs · ")}${ansiYellow("↑↓")} ${theme.fg("dim", "navigate · ")}${ansiYellow("enter")} ${theme.fg("dim", "edit/toggle · ")}${ansiYellow("d")} ${theme.fg("dim", "reset setting · ")}${ansiYellow("D")} ${theme.fg("dim", "reset extension · ")}${ansiYellow("backspace")} ${theme.fg("dim", "clear · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`);
 		lines.push("");
 		lines.push(searchLine);
 		lines.push("");

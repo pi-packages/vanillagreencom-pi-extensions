@@ -998,6 +998,16 @@ class PrefixedEditor implements Component {
 	invalidate(): void { this.editor.invalidate(); }
 }
 
+class SearchInputLine implements Component {
+	constructor(private readonly input: Input, private readonly theme: Theme, private readonly prefix = " > ") {}
+	render(width: number): string[] {
+		const inputWidth = Math.max(1, width - visibleWidth(this.prefix));
+		const line = truncateToWidth(`${this.prefix}${this.input.render(inputWidth)[0] ?? ""}`, width, "");
+		return [this.theme.bg("toolPendingBg", padAnsi(line, width))];
+	}
+	invalidate(): void { this.input.invalidate(); }
+}
+
 class ScrollableSkillPreview implements Component {
 	private scrollOffset = 0;
 	private lastInnerWidth = 1;
@@ -1370,7 +1380,7 @@ class SkillsManagerDialog implements Focusable {
 		const totalCount = this.registry.allSkills.length;
 		root.addChild(new Text(this.theme.fg("dim", `${enabledCount}/${totalCount} enabled`), 1, 0));
 		root.addChild(new Spacer(1));
-		root.addChild(this.browseInput);
+		root.addChild(new SearchInputLine(this.browseInput, this.theme));
 		root.addChild(new Spacer(1));
 		const list = new Container();
 		const entries: Array<{ kind: "create" } | { kind: "header"; label: string } | { kind: "skill"; skill: SkillEntry }> = [{ kind: "create" }];
@@ -1420,10 +1430,10 @@ class SkillsManagerDialog implements Focusable {
 		root.addChild(list);
 		root.addChild(new Spacer(1));
 		const selected = this.getSelectedSkill();
-		const actions = ["type search", "↑↓ select"];
+		const actions = ["↑↓ select"];
 		if (!selected) actions.push("enter create", "esc close");
 		else { if (selected.enabled) actions.push("enter insert"); actions.push("tab preview", "ctrl+x enable/disable"); if (!this.browseQuery && isDeletableSkill(selected)) actions.push("backspace delete"); actions.push("esc close"); }
-		root.addChild(new Text(actions.map((action) => action.replace(/^(enter|tab|ctrl\+x|backspace|esc|↑↓|type search)/, (key) => ansiYellow(key))).join(this.theme.fg("dim", " • ")), 1, 0));
+		root.addChild(new Text(actions.map((action) => action.replace(/^(enter|tab|ctrl\+x|backspace|esc|↑↓)/, (key) => ansiYellow(key))).join(this.theme.fg("dim", " • ")), 1, 0));
 		return renderFrame(this.theme, width, root.render(innerWidth), undefined, "Skills Manager");
 	}
 

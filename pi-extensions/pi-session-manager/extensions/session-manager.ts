@@ -19,10 +19,12 @@ const POPUP_PADDING_Y = 1;
 const ROW_META_MAX_WIDTH = 44;
 const ANSI_PATTERN = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/g;
 const ANSI_GREEN_FG = "\x1b[32m";
+const ANSI_RED_FG = "\x1b[31m";
 const ANSI_YELLOW_FG = "\x1b[33m";
 const ANSI_FG_RESET = "\x1b[39m";
 
 function ansiGreen(text: string): string { return `${ANSI_GREEN_FG}${text}${ANSI_FG_RESET}`; }
+function ansiRed(text: string): string { return `${ANSI_RED_FG}${text}${ANSI_FG_RESET}`; }
 function ansiYellow(text: string): string { return `${ANSI_YELLOW_FG}${text}${ANSI_FG_RESET}`; }
 
 type SessionInfo = Awaited<ReturnType<typeof SessionManager.list>>[number];
@@ -392,6 +394,22 @@ function buildSnippet(session: SessionInfo, parsed: ParsedQuery): string | undef
 		}
 	}
 	return source.slice(0, 180);
+}
+
+function styleSearchMatches(text: string, query: string): string {
+	let styled = text;
+	const parsed = parseQuery(query);
+	if (parsed.mode !== "tokens") return styled;
+	for (const token of parsed.tokens) {
+		const value = token.value.trim();
+		if (!value || value.length > 80) continue;
+		try {
+			styled = styled.replace(new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), (match) => ansiRed(match));
+		} catch {
+			// Keep unstyled text if a token cannot be highlighted safely.
+		}
+	}
+	return styled;
 }
 
 function isNamed(session: SessionInfo): boolean {
@@ -940,7 +958,7 @@ class SessionManagerOverlay implements Focusable {
 			return this.notice.kind === "error" ? error(this.notice.text) : accent(this.notice.text);
 		}
 		if (this.queryError) return error(`Search error: ${this.queryError}`);
-		return dim("Tab scope · Ctrl+S sort · Ctrl+N names · Ctrl+P path · type search · re:<pattern> regex · \"phrase\" exact");
+		return dim("Search supports re:<pattern> regex and \"phrase\" exact matching.");
 	}
 
 	private renderSearch(inner: number, dim: (s: string) => string): string {
@@ -951,7 +969,7 @@ class SessionManagerOverlay implements Focusable {
 		}
 		const prefix = " ";
 		const input = this.searchInput.render(Math.max(1, inner - visibleWidth(prefix)))[0] ?? "";
-		return input.trim() ? prefix + input : `${prefix}${dim("Type to search sessions...")}`;
+		return prefix + input;
 	}
 
 	private renderListRows(
@@ -1020,9 +1038,9 @@ class SessionManagerOverlay implements Focusable {
 		const leftFixed = cursor + ui.dim(prefix) + marker;
 		const availableTitle = Math.max(8, inner - visibleWidth(leftFixed) - visibleWidth(right) - 2);
 		let title = truncateToWidth(titleRaw, availableTitle, "…");
-		if (current) title = ui.accent(title);
+		if (selected) title = this.theme.bold(ui.accent(title));
+		else if (current) title = ui.accent(title);
 		else if (isNamed(session)) title = ui.warning(title);
-		if (selected) title = this.theme.bold(title);
 		const left = leftFixed + title;
 		const spacing = " ".repeat(Math.max(1, inner - visibleWidth(left) - visibleWidth(right)));
 		let line = ui.fixed(left + spacing + right, inner);
@@ -1077,7 +1095,8 @@ class SessionManagerOverlay implements Focusable {
 		const snippet = selectedNode?.snippet || oneLine(selected.firstMessage);
 		if (snippet) {
 			const previewPrefix = ui.dim(`${selectedNode?.snippet ? "match" : "first"}   `);
-			lines.push(ui.row(previewPrefix + ui.muted(`“${truncateToWidth(snippet, Math.max(10, inner - visibleWidth(previewPrefix) - 1), "…")}`)));
+			const preview = truncateToWidth(styleSearchMatches(snippet, this.searchInput.getValue()), Math.max(10, inner - visibleWidth(previewPrefix) - 1), "…");
+			lines.push(ui.row(previewPrefix + ui.muted(`“${preview}`)));
 		} else {
 			lines.push(ui.row(""));
 		}

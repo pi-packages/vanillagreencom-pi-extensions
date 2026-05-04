@@ -564,12 +564,10 @@ function renderAgentsBody(
 	const left = renderAgentList(agents, statuses, ui, leftWidth, theme, layout.listRows);
 	const right = renderAgentInspector(selected, statuses, ui, rightWidth, bodyRows, theme);
 	const rows = bodyRows;
+	const searchLine = theme.bg("toolPendingBg", agentPad(` > ${ui.search || theme.inverse(" ")}`, width));
 	const lines = [
-		truncateToWidth(
-			`${theme.fg("accent", "Search")}: ${ui.search || theme.fg("dim", "type to filter")}  ${theme.fg("accent", "View")}: agents  ${theme.fg("accent", "Filters")}: scope ${ui.scope} · ${agents.length}/${discovery.agents.length} shown · ${paneCount} pane · ${liveCount} live`,
-			width,
-			"",
-		),
+		searchLine,
+		`${theme.fg("muted", "View")}: ${theme.fg("text", "agents")}  ${theme.fg("muted", "Filters")}: scope ${ui.scope} · ${agents.length}/${discovery.agents.length} shown · ${paneCount} pane · ${liveCount} live`,
 		agentDivider(width, theme),
 	];
 	for (let i = 0; i < rows; i += 1) {
@@ -676,7 +674,7 @@ function createAgentsBrowserComponent(
 		const bodyWidth = agentFrameContentWidth(safeWidth);
 		const lines = [
 			renderAgentScopeTabs(ui.scope, bodyWidth, theme),
-			`${ansiYellow("tab")} ${theme.fg("dim", "scope · ")}${ansiYellow("↑↓")} ${theme.fg("dim", "navigate/scroll · ")}${ansiYellow("←/→")} ${theme.fg("dim", "pane · ")}${ansiYellow("enter/i")} ${theme.fg("dim", "insert · type search · ")}${ansiYellow("s/a/x")} ${theme.fg("dim", "pane · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`,
+			`${ansiYellow("tab")} ${theme.fg("dim", "scope · ")}${ansiYellow("↑↓")} ${theme.fg("dim", "navigate/scroll · ")}${ansiYellow("←/→")} ${theme.fg("dim", "pane · ")}${ansiYellow("enter/i")} ${theme.fg("dim", "insert · ")}${ansiYellow("s/a/x")} ${theme.fg("dim", "pane · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`,
 			agentDivider(bodyWidth, theme),
 			...renderAgentsBody(discovery, filtered(), statuses, ui, bodyWidth, theme, layout),
 		];
