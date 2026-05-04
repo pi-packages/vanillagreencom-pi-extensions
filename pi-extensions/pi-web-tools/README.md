@@ -7,7 +7,7 @@ Implemented in this package:
 - `web_search` with provider selection (`auto`, `exa`, `openai-native`, `perplexity`, `gemini`). Direct execution is implemented for Exa; OpenAI-native is handled by a `before_provider_request` rewrite on supported OpenAI/Codex models.
 - `web_research` using Exa Deep Search with `researchMode: lite|standard|full` plus low-level overrides (`type`, `numResults`, `textMaxCharacters`, domains, dates, additional queries). It accepts inline `query` or `queryFile`, plus `contextFiles`/`contextGlob`.
 - `web_research.outputPath` findings report writing with Pi's file mutation queue. Clean reports default to a raw metadata sidecar (`findings.raw.json`) instead of embedding raw JSON in `findings.md`.
-- `web_fetch` with research-focused extraction for GitHub URLs, PDF text, HTML/text/JSON, and Exa `contents` fallback/override.
+- `web_fetch` with research-focused extraction for GitHub URLs, URL/local PDF text, HTML/text/JSON, and Exa `contents` fallback/override for URLs.
 - `web_answer`, `web_find_similar`, `code_search` Exa-first tools.
 - `get_web_content` retrieval for stored full content.
 - `/web-tools doctor` and `/web-tools provider ...` guidance.
@@ -16,7 +16,8 @@ Implemented in this package:
 
 `web_fetch` returns a compact preview and stores extracted content in the current Pi session under a generated content id such as `web-...`. Tool text and UI label preview output separately from stored full text; when a preview is truncated the renderer shows `preview <shown>/<full> chars`. Use `get_web_content` with that content id to retrieve the stored text; it does not fetch the URL again.
 
-- GitHub blob, GitHub repo metadata/README, direct HTTP, and basic PDF extraction store the full extracted text before preview truncation.
+- GitHub blob, GitHub repo metadata/README, direct HTTP, and PDF extraction store the full extracted text before preview truncation. PDF extraction prefers local `pdftotext` when available, then falls back to a basic embedded-text parser; URL PDFs can fall back to Exa when local extraction fails.
+- Local PDFs are supported with `filePath`/`filePaths`, `file://...`, or PDF-looking paths. They are extracted locally and are never sent to Exa fallback.
 - Exa `contents` fallback/override stores the text returned by Exa; `textMaxCharacters` is the provider extraction cap for that path.
 - `web_fetch.textMaxCharacters` caps the immediate preview shown to the model for direct/GitHub/PDF paths; default preview cap is 4k characters per stored item.
 - `get_web_content.maxCharacters` caps the retrieval returned to the model; default is 50k characters. Omit it for normal full-context retrieval, lower it only for previews.

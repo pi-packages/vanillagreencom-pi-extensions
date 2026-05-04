@@ -11,6 +11,21 @@ export type GetWebContentInput = Static<typeof getWebContentSchema>;
 
 export const DEFAULT_GET_WEB_CONTENT_CHARACTERS = 50000;
 
+function fallbackTitle(url: string | undefined, fallback = "content"): string {
+	if (!url) return fallback;
+	try {
+		const parsed = new URL(url);
+		const leaf = parsed.pathname.split("/").filter(Boolean).pop();
+		return leaf || parsed.hostname || url;
+	} catch {
+		return url.split("/").filter(Boolean).pop() || url || fallback;
+	}
+}
+
+function displayTitle(item: { title?: string; url?: string; id?: string }): string {
+	return item.title?.trim() || fallbackTitle(item.url, item.id || "content");
+}
+
 export function createGetWebContentToolDefinition(name = "get_web_content") {
 	return {
 		renderShell: "self" as const,
@@ -34,8 +49,12 @@ export function createGetWebContentToolDefinition(name = "get_web_content") {
 			}
 			const details = result?.details ?? {};
 			const provider = details?.metadata?.provider ?? "stored";
-			const title = details.title ?? details.url ?? details.id ?? context?.args?.id ?? "content";
-			const meta = [`${details.contentLength ?? 0} chars`, details.truncated ? "truncated" : undefined].filter(Boolean).join(" · ");
+			const title = displayTitle({ title: details.title, url: details.url, id: details.id ?? context?.args?.id });
+			const contentLength = typeof details.contentLength === "number" ? details.contentLength : 0;
+			const maxCharacters = typeof details.maxCharacters === "number" ? details.maxCharacters : contentLength;
+			const shownCharacters = Math.min(contentLength, Math.max(0, maxCharacters));
+			const lengthMeta = details.truncated ? `${shownCharacters}/${contentLength} chars` : `${contentLength} chars`;
+			const meta = [lengthMeta, details.truncated ? "truncated" : "full"].filter(Boolean).join(" · ");
 			const rows = [details.id ? "contentId" : undefined, provider ? "source" : undefined, details.url ? "url" : undefined].filter(Boolean);
 			const lines = [successSummary(theme, providerLabel("Get Web Content", "session"), title, meta)];
 			if (details.id) lines.push(`${tree(theme, rows.at(-1) === "contentId" ? "└" : "├")}${muted(theme, "content id ")}${accent(theme, details.id)}`);
@@ -48,7 +67,7 @@ export function createGetWebContentToolDefinition(name = "get_web_content") {
 			if (!item) throw new Error(`Stored content id not found: ${params.id}. Use a content id returned by web_search/web_fetch; passing a URL here will not fetch it.`);
 			const maxCharacters = params.maxCharacters ?? DEFAULT_GET_WEB_CONTENT_CHARACTERS;
 			const { text, truncated } = truncateText(item.content, maxCharacters);
-			return { content: [{ type: "text", text: `${item.title ?? item.url ?? item.id}\n${item.url ?? ""}\n\n${text}${truncated ? "\n\n[Use a larger maxCharacters value for more.]" : ""}` }], details: { ...item, truncated, maxCharacters, contentLength: item.content.length } };
+			return { content: [{ type: "text", text: `${displayTitle(item)}\n${item.url ?? ""}\n\n${text}${truncated ? "\n\n[Use a larger maxCharacters value for more.]" : ""}` }], details: { ...item, truncated, maxCharacters, contentLength: item.content.length } };
 		},
 	};
 }

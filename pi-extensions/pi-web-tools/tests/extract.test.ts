@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { parseGitHubUrl, extractGitHubUrl } from "../src/extract/github.js";
 import { fetchHttpContent, htmlToMarkdown } from "../src/extract/http.js";
-import { extractPdfText } from "../src/extract/pdf.js";
+import { extractPdfText, fetchLocalPdfText } from "../src/extract/pdf.js";
 
 function response(body: string, headers: Record<string, string> = {}, status = 200): Response {
 	return new Response(body, { status, headers });
@@ -33,6 +36,15 @@ test("PDF extraction reads simple text-bearing PDF streams", () => {
 	const extracted = extractPdfText(pdf);
 	assert.match(extracted.text, /Hello PDF/);
 	assert.match(extracted.text, /chunk two/);
+});
+
+test("local PDF extraction can fall back to basic parser when pdftotext is disabled", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "pi-web-tools-pdf-test-"));
+	const path = join(dir, "sample.pdf");
+	writeFileSync(path, "%PDF-1.4\nBT\n(Local PDF) Tj\nET");
+	const extracted = await fetchLocalPdfText(path, { preferPdftotext: false });
+	assert.match(extracted.text, /Local PDF/);
+	assert.equal(extracted.metadata.extraction, "pdf-basic");
 });
 
 test("GitHub URL parser covers repo, blob, tree, and commit", () => {

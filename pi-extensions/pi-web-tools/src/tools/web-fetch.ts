@@ -1,8 +1,10 @@
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { basename, isAbsolute, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Type, type Static } from "typebox";
 import { extractGitHubUrl } from "../extract/github.js";
 import { fetchHttpContent, isProbablyPdf } from "../extract/http.js";
-import { fetchPdfText } from "../extract/pdf.js";
+import { fetchLocalPdfText, fetchPdfText } from "../extract/pdf.js";
 import { ExaClient } from "../providers/exa.js";
 import type { WebToolsSettings } from "../settings.js";
 import { storeWebContent, type StoredWebContent } from "../storage.js";
@@ -12,6 +14,8 @@ import { accent, emptyComponent, errorSummary, firstText, muted, providerLabel, 
 export const webFetchSchema = Type.Object({
 	url: Type.Optional(Type.String()),
 	urls: Type.Optional(Type.Array(Type.String())),
+	filePath: Type.Optional(Type.String({ description: "Local file path to extract. Currently supports PDFs. Relative paths resolve against ctx.cwd; leading @ is stripped." })),
+	filePaths: Type.Optional(Type.Array(Type.String({ description: "Local file paths to extract. Currently supports PDFs." }))),
 	textMaxCharacters: Type.Optional(Type.Number({ description: "Preview character cap for direct/GitHub/PDF fetches and provider extraction cap for Exa fallback/override. Direct fetches still store the full extracted text in session storage before preview truncation." })),
 	provider: Type.Optional(Type.Union([Type.Literal("auto"), Type.Literal("http"), Type.Literal("exa")])),
 });
@@ -34,10 +38,44 @@ interface WebFetchPreviewDetails {
 	items: WebFetchPreviewItem[];
 }
 
+function fallbackTitle(url: string | undefined, fallback = "content"): string {
+	if (!url) return fallback;
+	try {
+		const parsed = new URL(url);
+		const leaf = parsed.pathname.split("/").filter(Boolean).pop();
+		return leaf || parsed.hostname || url;
+	} catch {
+		return url.split("/").filter(Boolean).pop() || url || fallback;
+	}
+}
+
+function displayTitle(item: { title?: string; url?: string; id?: string }): string {
+	return item.title?.trim() || fallbackTitle(item.url, item.id || "content");
+}
+
 function urls(params: WebFetchInput): string[] {
-	const items = [...(params.urls ?? [])];
+	const items = [...(params.urls ?? []), ...(params.filePaths ?? [])];
 	if (params.url) items.unshift(params.url);
+	if (params.filePath) items.unshift(params.filePath);
 	return items.map((url) => url.trim()).filter(Boolean);
+}
+
+function cleanPath(path: string): string {
+	return path.startsWith("@") ? path.slice(1) : path;
+}
+
+function isLocalFileInput(input: string): boolean {
+	if (input.startsWith("file://")) return true;
+	const cleaned = cleanPath(input);
+	if (isAbsolute(cleaned)) return true;
+	if (/^[a-z][a-z0-9+.-]*:\/\//i.test(cleaned)) return false;
+	return isProbablyPdf(cleaned);
+}
+
+function resolveLocalFilePath(cwd: string, input: string): string {
+	if (input.startsWith("file://")) return fileURLToPath(input);
+	const cleaned = cleanPath(input);
+	return isAbsolute(cleaned) ? cleaned : resolve(cwd, cleaned);
 }
 
 function fetchProviderForLabel(requested: unknown, actual?: unknown): string {
@@ -86,7 +124,7 @@ export function buildWebFetchToolResult(stored: StoredWebContent[], provider: st
 	};
 	const ids = stored.map((item) => item.id).join(", ");
 	const previewText = previewItems.map(({ item, text, stats }) => {
-		const label = item.title ?? item.url ?? "content";
+		const label = displayTitle(item);
 		const meta = `preview ${stats.shownCharacters}/${stats.fullCharacters} chars${stats.truncated ? "; full text stored" : ""}`;
 		return `- ${item.id}: ${label}\n[${meta}]\n${text}`;
 	}).join("\n\n");
@@ -102,8 +140,8 @@ export function createWebFetchToolDefinition(pi: ExtensionAPI, getSettings: (cwd
 		renderShell: "self" as const,
 		name,
 		label: name === "web_fetch" ? "Web Fetch" : "Fetch Content",
-		description: "Fetch known URL content and store full extracted text for get_web_content. Auto handles GitHub, PDF, HTML/text/JSON, with Exa contents as fallback/override. Direct/GitHub/PDF fetches store full extracted text; the tool result is only a preview.",
-		promptSnippet: "Fetch and store known URL content; use the returned content id with get_web_content for full stored text.",
+		description: "Fetch known URL or local PDF content and store full extracted text for get_web_content. Auto handles GitHub, PDF, HTML/text/JSON, with Exa contents fallback/override for URLs. Direct/GitHub/PDF fetches store full extracted text; the tool result is only a preview.",
+		promptSnippet: "Fetch and store known URL or local PDF content; use the returned content id with get_web_content for full stored text.",
 		parameters: webFetchSchema,
 		renderCall(args: WebFetchInput, theme: any, context: any) {
 			if (context?.executionStarted && !context?.isPartial) return emptyComponent();
@@ -117,12 +155,13 @@ export function createWebFetchToolDefinition(pi: ExtensionAPI, getSettings: (cwd
 			const provider = fetchProviderForLabel(context?.args?.provider, result?.details?.provider);
 			const preview = result?.details?.preview;
 			const meta = [`${stored.length} stored`, preview?.truncated ? `preview ${preview.shownCharacters}/${preview.fullCharacters} chars` : undefined].filter(Boolean).join(" · ");
-			const lines = [successSummary(theme, providerLabel(name === "web_fetch" ? "Web Fetch" : name, provider), context?.args?.url || context?.args?.urls?.[0] || "content", meta)];
+			const target = context?.args?.url || context?.args?.urls?.[0] || context?.args?.filePath || context?.args?.filePaths?.[0] || "content";
+			const lines = [successSummary(theme, providerLabel(name === "web_fetch" ? "Web Fetch" : name, provider), target, meta)];
 			for (let index = 0; index < stored.slice(0, 3).length; index++) {
 				const item = stored[index]!;
 				const itemPreview = Array.isArray(preview?.items) ? preview.items.find((candidate: any) => candidate?.id === item.id) : undefined;
 				const previewMeta = itemPreview?.truncated ? ` · preview ${itemPreview.shownCharacters}/${itemPreview.fullCharacters} chars` : "";
-				lines.push(`${tree(theme, index === stored.length - 1 ? "└" : "├")}${accent(theme, item.title ?? item.url ?? item.id)}${muted(theme, ` · content id ${item.id}${previewMeta}`)}`);
+				lines.push(`${tree(theme, index === stored.length - 1 ? "└" : "├")}${accent(theme, displayTitle(item))}${muted(theme, ` · content id ${item.id}${previewMeta}`)}`);
 			}
 			if (stored.length > 3) lines.push(`${tree(theme, "└")}${muted(theme, `… ${stored.length - 3} more`)}`);
 			return textComponent(lines.join("\n"));
@@ -130,17 +169,25 @@ export function createWebFetchToolDefinition(pi: ExtensionAPI, getSettings: (cwd
 		async execute(_toolCallId: string, params: WebFetchInput, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: ExtensionContext) {
 			const settings = getSettings(ctx.cwd);
 			const list = urls(params);
-			if (list.length === 0) throw new Error(`${name} requires url or urls.`);
+			if (list.length === 0) throw new Error(`${name} requires url/urls or filePath/filePaths.`);
+			if (params.provider === "exa" && list.some(isLocalFileInput)) throw new Error("provider=exa can only fetch remote URLs. Use provider=auto or provider=http for local PDF paths.");
 			async function fetchWithExa(failedUrls: string[]) {
 				const client = new ExaClient({ apiKey: settings.apiKeys.exa });
 				const response = await client.contents({ urls: failedUrls, textMaxCharacters: params.textMaxCharacters }, signal);
-				return response.results.map((result) => storeWebContent(pi, { title: result.title, url: result.url, content: result.text || result.summary || "", metadata: { provider: "exa", tool: name } }));
+				return response.results.map((result) => storeWebContent(pi, { title: result.title?.trim() || fallbackTitle(result.url), url: result.url, content: result.text || result.summary || "", metadata: { provider: "exa", tool: name } }));
 			}
 			if (params.provider !== "exa") {
 				const stored = [];
 				const failed: Array<{ url: string; error: unknown }> = [];
 				for (const url of list) {
 					try {
+						if (isLocalFileInput(url)) {
+							const localPath = resolveLocalFilePath(ctx.cwd, url);
+							if (!isProbablyPdf(localPath)) throw new Error(`Local file extraction currently supports PDFs only: ${localPath}`);
+							const pdf = await fetchLocalPdfText(localPath);
+							stored.push(storeWebContent(pi, { title: basename(localPath), url: pathToFileURL(localPath).href, content: pdf.text, metadata: { provider: "local", tool: name, localPath, ...pdf.metadata } }));
+							continue;
+						}
 						const github = settings.githubClone.enabled ? await extractGitHubUrl(url, { signal }).catch((error) => ({ error })) : undefined;
 						if (github && !("error" in github)) {
 							stored.push(storeWebContent(pi, { title: github.title, url, content: github.content, metadata: github.metadata }));
@@ -158,6 +205,8 @@ export function createWebFetchToolDefinition(pi: ExtensionAPI, getSettings: (cwd
 					}
 				}
 				if (failed.length) {
+					const localFailure = failed.find((item) => isLocalFileInput(item.url));
+					if (localFailure) throw new Error(`Local file extraction failed for ${localFailure.url}: ${localFailure.error instanceof Error ? localFailure.error.message : String(localFailure.error)}`);
 					if (params.provider === "http" || !settings.apiKeys.exa) throw new Error(`Direct fetch failed for ${failed.map((item) => item.url).join(", ")}: ${failed[0]?.error instanceof Error ? failed[0].error.message : String(failed[0]?.error)}`);
 					stored.push(...await fetchWithExa(failed.map((item) => item.url)));
 				}

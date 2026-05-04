@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { clearMemoryForTests, getWebContent, restoreStoredContent, storeWebContent } from "../src/storage.js";
 import { createGetWebContentToolDefinition } from "../src/tools/get-web-content.js";
@@ -31,9 +34,17 @@ test("get_web_content renderer separates session retrieval from source provider"
 	const tool = createGetWebContentToolDefinition();
 	const component = tool.renderResult({ details: { id: "web-123", title: "Example", url: "https://example.com", contentLength: 42, metadata: { provider: "exa" } } }, {}, theme, { args: { id: "web-123" } });
 	const text = component.render(200).join("\n");
-	assert.match(text, /Get Web Content \(Session\) Example · 42 chars/);
+	assert.match(text, /Get Web Content \(Session\) Example · 42 chars · full/);
 	assert.match(text, /content id web-123/);
 	assert.match(text, /source Exa/);
+});
+
+test("get_web_content renderer shows shown/full metadata when truncated", () => {
+	const tool = createGetWebContentToolDefinition();
+	const component = tool.renderResult({ details: { id: "web-long", title: "Long", url: "https://example.com/long", contentLength: 120000, maxCharacters: 50000, truncated: true, metadata: { provider: "http" } } }, {}, theme, { args: { id: "web-long" } });
+	const text = component.render(200).join("\n");
+	assert.match(text, /Get Web Content \(Session\) Long · 50000\/120000 chars · truncated/);
+	assert.match(text, /source HTTP/);
 });
 
 test("web_fetch renderer shows resolved provider without requested auto suffix", () => {
@@ -78,4 +89,37 @@ test("web_fetch renderer shows concise preview shown/full metadata when preview-
 	assert.match(rendered, /Web Fetch \(GitHub\) https:\/\/example\.com\/long · 1 stored · preview 4000\/4005 chars/);
 	assert.match(rendered, /content id web-long · preview 4000\/4005 chars/);
 	assert.doesNotMatch(rendered, /GitHub\/Auto/);
+});
+
+test("web_fetch and get_web_content render URL leaf when provider returns blank title", () => {
+	const fetchTool = createWebFetchToolDefinition({} as any, () => ({}) as any);
+	const result = buildWebFetchToolResult([{
+		id: "web-pdf",
+		title: "",
+		url: "https://example.com/path/dummy.pdf",
+		content: "Dummy PDF file\n",
+		createdAt: "2026-01-01T00:00:00.000Z",
+	}], "exa");
+	const renderedFetch = fetchTool.renderResult(result, {}, theme, { args: { provider: "auto", url: "https://example.com/path/dummy.pdf" } }).render(200).join("\n");
+	assert.match(renderedFetch, /dummy\.pdf · content id web-pdf/);
+
+	const contentTool = createGetWebContentToolDefinition();
+	const renderedContent = contentTool.renderResult({ details: { id: "web-pdf", title: "", url: "https://example.com/path/dummy.pdf", contentLength: 15, truncated: false, metadata: { provider: "exa" } } }, {}, theme, { args: { id: "web-pdf" } }).render(200).join("\n");
+	assert.match(renderedContent, /Get Web Content \(Session\) dummy\.pdf · 15 chars · full/);
+});
+
+test("web_fetch extracts local PDF file paths into session storage", async () => {
+	clearMemoryForTests();
+	const dir = mkdtempSync(join(tmpdir(), "pi-web-tools-local-pdf-"));
+	const path = join(dir, "local.pdf");
+	writeFileSync(path, "%PDF-1.4\nBT\n(Local PDF) Tj\nET");
+	const appended: any[] = [];
+	const tool = createWebFetchToolDefinition({ appendEntry(type: string, data: unknown) { appended.push({ type, data }); } } as any, () => ({ githubClone: { enabled: true }, apiKeys: {} }) as any);
+	const result = await tool.execute("call", { filePath: path, provider: "auto" }, undefined, undefined, { cwd: dir } as any);
+	assert.equal(result.details.provider, "local");
+	const stored = result.details.stored[0]!;
+	assert.equal(stored.title, "local.pdf");
+	assert.equal(stored.metadata?.provider, "local");
+	assert.match(result.content[0]!.text, /Local PDF/);
+	assert.equal(appended.length, 1);
 });

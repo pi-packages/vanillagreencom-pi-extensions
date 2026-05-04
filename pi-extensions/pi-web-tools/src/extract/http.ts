@@ -56,7 +56,12 @@ export function htmlToMarkdown(html: string): { title?: string; markdown: string
 }
 
 export function isProbablyPdf(url: string, contentType?: string): boolean {
-	return /application\/pdf/i.test(contentType ?? "") || new URL(url).pathname.toLowerCase().endsWith(".pdf");
+	if (/application\/pdf/i.test(contentType ?? "")) return true;
+	try {
+		return new URL(url).pathname.toLowerCase().endsWith(".pdf");
+	} catch {
+		return url.toLowerCase().split(/[?#]/, 1)[0]?.endsWith(".pdf") ?? false;
+	}
 }
 
 export async function fetchHttpContent(url: string, options: HttpFetchOptions = {}): Promise<ExtractedContent> {
