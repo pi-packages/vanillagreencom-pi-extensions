@@ -20,11 +20,7 @@ No SQLite, FTS, or native runtime dependencies are used; Pi's `SessionManager.li
 
 | Command | Action |
 | --- | --- |
-| `/sessions` | Open the manager using the configured default scope. |
-| `/sessions current` | Open current-project sessions. |
-| `/sessions all` | Open all sessions. |
-
-Arguments support autocomplete.
+| `/sessions` | Open the manager using the configured default scope; switch Current/All with the tabs. |
 
 ## Keys
 
@@ -52,7 +48,7 @@ Settings are exposed through `pi-extension-manager` under `vstack.extensionManag
 | --- | --- | --- |
 | `enabled` | `true` | Registers commands and shortcut after reload. |
 | `shortcutKey` | `ctrl+shift+r` | Opens `/sessions` when Pi is idle; set to `none` to disable. |
-| `defaultScope` | `current` | `current` or `all`. |
+| `defaultScope` | `current` | Initial Current/All tab when opening `/sessions`. |
 | `defaultSort` | `threaded` | `threaded`, `recent`, or `relevance`. |
 | `visibleRows` | `12` | List rows before scrolling. |
 | `overlayWidth` | `112` | Preferred overlay width in terminal columns. |

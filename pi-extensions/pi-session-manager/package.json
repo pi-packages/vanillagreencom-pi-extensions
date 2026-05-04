@@ -42,7 +42,7 @@
         {
           "key": "defaultScope",
           "label": "Default scope",
-          "description": "Initial session scope for /sessions without arguments.",
+          "description": "Initial Current/All tab when opening /sessions.",
           "type": "enum",
           "enumValues": [
             "current",

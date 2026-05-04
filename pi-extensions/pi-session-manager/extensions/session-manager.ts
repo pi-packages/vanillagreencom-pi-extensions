@@ -870,7 +870,8 @@ class SessionManagerOverlay implements Focusable {
 
 		lines.push(border(`┏${"━".repeat(frameInner)}┓`));
 		for (let i = 0; i < POPUP_PADDING_Y; i++) lines.push(blank());
-		lines.push(row(this.renderHeader(bodyWidth, accent, muted, dim)));
+		lines.push(row(this.renderHeader(bodyWidth, accent, muted)));
+		lines.push(row(this.renderScopeTabs(bodyWidth)));
 		lines.push(row(this.renderSubheader(bodyWidth, accent, muted, dim, warning, error)));
 		lines.push(row(this.renderSearch(bodyWidth, dim)));
 		lines.push(divider());
@@ -892,16 +893,28 @@ class SessionManagerOverlay implements Focusable {
 		return lines.map((line) => truncateToWidth(line, renderWidth, ""));
 	}
 
-	private renderHeader(inner: number, accent: (s: string) => string, muted: (s: string) => string, dim: (s: string) => string): string {
+	private renderHeader(inner: number, accent: (s: string) => string, muted: (s: string) => string): string {
 		const title = accent(this.theme.bold("✦ Session Manager"));
-		const scopeText = `${this.scope === "current" ? accent("● current") : muted("○ current")} ${dim("·")} ${this.scope === "all" ? accent("● all") : muted("○ all")}`;
 		const sortText = `${muted("sort:")} ${accent(this.sortMode)}`;
 		const nameText = `${muted("names:")} ${accent(this.nameFilter)}`;
 		const pathText = `${muted("path:")} ${this.showPath ? accent("on") : muted("off")}`;
-		const right = `${scopeText}  ${sortText}  ${nameText}  ${pathText}`;
+		const right = `${sortText}  ${nameText}  ${pathText}`;
 		const available = Math.max(0, inner - visibleWidth(right) - 1);
 		const left = truncateToWidth(title, available, "");
 		return left + " ".repeat(Math.max(1, inner - visibleWidth(left) - visibleWidth(right))) + right;
+	}
+
+	private renderScopeTabs(inner: number): string {
+		const tabs: { id: Scope; label: string }[] = [
+			{ id: "current", label: "Current" },
+			{ id: "all", label: "All" },
+		];
+		const parts = tabs.map((tab) => {
+			const label = ` ${truncateToWidth(tab.label, 18, "…")} `;
+			if (tab.id === this.scope) return this.theme.fg("accent", this.theme.inverse(this.theme.bold(label)));
+			return this.theme.bg("selectedBg", this.theme.fg("accent", label));
+		});
+		return truncateToWidth(parts.join(" "), inner, "");
 	}
 
 	private renderSubheader(inner: number, accent: (s: string) => string, muted: (s: string) => string, dim: (s: string) => string, warning: (s: string) => string, error: (s: string) => string): string {
@@ -1073,11 +1086,11 @@ class SessionManagerOverlay implements Focusable {
 	}
 }
 
-async function openManager(ctx: ExtensionCommandContext, pi: ExtensionAPI, initialScope?: Scope): Promise<SessionAction> {
+async function openManager(ctx: ExtensionCommandContext, pi: ExtensionAPI): Promise<SessionAction> {
 	const releaseModalLock = acquireVstackModalLock();
 	try {
 		const result = await ctx.ui.custom<SessionAction | undefined>(
-			(tui, theme, keybindings, done) => new SessionManagerOverlay(ctx, pi, theme, keybindings, (action) => done(action), () => tui.requestRender(), initialScope),
+			(tui, theme, keybindings, done) => new SessionManagerOverlay(ctx, pi, theme, keybindings, (action) => done(action), () => tui.requestRender()),
 			{
 				overlay: true,
 				overlayOptions: {
@@ -1094,30 +1107,13 @@ async function openManager(ctx: ExtensionCommandContext, pi: ExtensionAPI, initi
 	}
 }
 
-function initialScopeFromArgs(args: string, cwd: string): Scope | undefined {
-	const first = args.trim().split(/\s+/, 1)[0]?.toLowerCase();
-	if (first === "all") return "all";
-	if (first === "current") return "current";
-	return settingScope(cwd);
-}
-
-function sessionArgumentCompletions(prefix: string) {
-	const query = prefix.trimStart().toLowerCase();
-	const items = [
-		{ value: "current", label: "current", description: "Show sessions for the current project" },
-		{ value: "all", label: "all", description: "Show sessions from every project" },
-	];
-	const filtered = items.filter((item) => item.value.startsWith(query));
-	return filtered.length > 0 ? filtered : null;
-}
-
-async function handleSessionsCommand(args: string, ctx: ExtensionCommandContext, pi: ExtensionAPI): Promise<void> {
+async function handleSessionsCommand(_args: string, ctx: ExtensionCommandContext, pi: ExtensionAPI): Promise<void> {
 	if (!ctx.hasUI) {
 		ctx.ui.notify("/sessions requires interactive UI", "error");
 		return;
 	}
 	await ctx.waitForIdle();
-	const action = await openManager(ctx, pi, initialScopeFromArgs(args, ctx.cwd));
+	const action = await openManager(ctx, pi);
 	if (action.type !== "resume") return;
 	if (samePath(action.path, ctx.sessionManager.getSessionFile())) {
 		ctx.ui.notify("Already in this session", "info");
@@ -1147,7 +1143,6 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 
 	pi.registerCommand("sessions", {
 		description: "Pi session browser and resume manager.",
-		getArgumentCompletions: sessionArgumentCompletions,
 		handler: async (args, ctx) => handleSessionsCommand(args, ctx, pi),
 	});
 
