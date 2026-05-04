@@ -288,8 +288,8 @@ function framePopup(lines: string[], width: number, theme: Theme, title = "", ri
 }
 
 function renderSearchLine(searchInput: Input, width: number, theme: Theme): string {
-	const prefix = " > ";
-	const inputWidth = Math.max(1, width - visibleWidth(prefix) - 1);
+	const prefix = " ";
+	const inputWidth = Math.max(1, width - visibleWidth(prefix));
 	const input = searchInput.render(inputWidth)[0] ?? "";
 	return theme.bg("toolPendingBg", padAnsi(truncateToWidth(`${prefix}${input}`, width, ""), width));
 }
@@ -368,8 +368,6 @@ async function openStashPopup(ctx: ExtensionContext): Promise<void> {
 				clampSelection();
 
 				const lines: string[] = [];
-				lines.push(panelLine(`${ansiYellow("↑↓/jk")} ${theme.fg("dim", "select · ")}${ansiYellow("enter")} ${theme.fg("dim", "pop · ")}${ansiYellow("ctrl+d")} ${theme.fg("dim", "delete · ")}${ansiYellow("ctrl+x")} ${theme.fg("dim", "delete all")}`, innerWidth));
-				lines.push(panelLine("", innerWidth));
 				lines.push(panelLine(renderSearchLine(searchInput, innerWidth, theme), innerWidth));
 				lines.push(panelLine("", innerWidth));
 
@@ -397,8 +395,8 @@ async function openStashPopup(ctx: ExtensionContext): Promise<void> {
 
 				lines.push(panelLine("", innerWidth));
 				const status = confirmDeleteAll
-					? `${theme.fg("warning", "delete all stashed prompts?")} ${ansiYellow("y")} ${theme.fg("dim", "/ n")}`
-					: `${ansiYellow("enter")} ${theme.fg("dim", "pop")}  ${ansiYellow("ctrl+d")} ${theme.fg("dim", "delete")}  ${ansiYellow("ctrl+x")} ${theme.fg("dim", "delete all")}`;
+					? `${theme.fg("warning", "delete all stashed prompts?")} ${ansiYellow("y")} ${theme.fg("dim", "confirm · ")}${ansiYellow("n/esc")} ${theme.fg("dim", "cancel")}`
+					: `${ansiYellow("↑↓/jk")} ${theme.fg("dim", "select · ")}${ansiYellow("enter")} ${theme.fg("dim", "pop · ")}${ansiYellow("ctrl+d")} ${theme.fg("dim", "delete · ")}${ansiYellow("ctrl+x")} ${theme.fg("dim", "delete all · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`;
 				lines.push(panelLine(status, innerWidth));
 
 				return framePopup(lines, width, theme, "Prompt Stash", `${items.length} saved`);
