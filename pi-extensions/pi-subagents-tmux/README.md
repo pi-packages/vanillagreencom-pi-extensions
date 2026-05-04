@@ -72,6 +72,9 @@ Persistent pane delegations return a `taskId`. Keep it if you need to retrieve o
 | `/agents stop <name>` | Stop a persistent pane. |
 | `/agents status` | Show pane status. |
 | `/agents collect` | Collect completed pane results. |
+| `/agents transcripts` | Open/list recent subagent transcripts. |
+| `/agents trace <ref>` | Open/show one trace by task id, short id, or trace ref. |
+| `/agents toggle` | Toggle the persistent dashboard. |
 
 Arguments support autocomplete, including known agent names for `show`, `start`, `send`, `attach`, and `stop`.
 
@@ -137,6 +140,7 @@ A future backend could use Pi SDK `createAgentSession()` for non-pane one-shot s
 `pi-extension-manager` exposes:
 
 - `maxParallelTasks` and `maxConcurrency` for one-shot delegation limits.
+- Dashboard controls: `dashboard`, `quietInlineWhenDashboard`, `dashboardMaxItems`, `dashboardCollapsed`, `dashboardShortcut`, and `treeStyle`.
 - `collapsedItemCount` for compact result rendering.
 - `truncateResults`, `resultMaxBytes` (default 102400), `resultMaxLines` (default 4000), and `preserveFullOutput` for result truncation. Oversized one-shot outputs are saved under `~/.pi/agent/vstack/pi-subagents-tmux/sessions/<session-id>/outputs/` when preservation is enabled.
 - `completionPollMs` and `childInboxPollMs` for persistent pane polling intervals.

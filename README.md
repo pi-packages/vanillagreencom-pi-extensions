@@ -381,16 +381,16 @@ All vstack Pi packages declare `vstack.extensionManager.settings` metadata, incl
 
 - **Purpose:** Keeps the normal interactive Pi TUI visible while exposing a Unix-socket JSONL side channel for external control and event streaming.
 - **Enables:** send prompts, steer/follow-up, abort, inspect state/history, subscribe to live events, and answer pending `pi-questions` prompts.
-- **CLI:** `pi-bridge` for list/state/commands/stream/send/steer/follow-up/history/emit.
+- **CLI:** `pi-bridge` for list/state/commands/stream/send/steer/follow-up/history/emit; vstack installs a scope-local `bin/pi-bridge` symlink for package installs.
 - **Settings:** bridge dir, history limit, line cap, heartbeat, status badge, startup notifications.
 - **More:** [pi-extensions/session-bridge/README.md](pi-extensions/session-bridge/README.md).
 
 #### `pi-subagents-tmux`
 
 - **Purpose:** Delegates work to `.pi/agents`, `.claude/agents`, and user agents with isolated Pi context; supports persistent tmux panes.
-- **Tools/commands:** `subagent`, `get_subagent_result`, `steer_subagent`, `/agents`.
+- **Tools/commands:** `subagent`, `get_subagent_result`, `steer_subagent`, `/agents` browser plus `/agents start|send|attach|stop|status|collect|transcripts|trace|toggle`.
 - **Behavior:** persistent pane tasks keep a durable task registry; `steer_subagent` only sends through `pi-session-bridge` when it can target the exact child pane session file, otherwise it queues an explicit inbox fallback rather than matching by cwd.
-- **Settings:** parallel task limit, concurrency, collapsed result size, result truncation/full-output preservation, pane polling intervals, forced session-bridge loading for panes.
+- **Settings:** parallel task limit, concurrency, dashboard display, result truncation/full-output preservation, pane polling intervals, forced session-bridge loading for panes.
 - **More:** [pi-extensions/pi-subagents-tmux/README.md](pi-extensions/pi-subagents-tmux/README.md).
 
 #### `pi-prompt-stash`
@@ -403,16 +403,23 @@ All vstack Pi packages declare `vstack.extensionManager.settings` metadata, incl
 #### `pi-qol`
 
 - **Purpose:** Compact statusline/`π` prompt, reliable multiline input, styled image placeholder chips, manual/auto session naming, session search/context import, handoff, permission prompts, terminal/tmux notifications, custom compaction, and collapsed-thinking timer.
-- **Commands:** `/qol status`, `/qol rename`, `/qol rename status`, `/qol rename full`, `/qol notify-test`, `/qol attachments`, `/qol collapse`, `/qol reset`, `/session-name`, `/search`, `/handoff`.
-- **Settings:** statusline/footer replacement, compact prompt, git/dirty marker display, Shift+Enter handling, fallback newline key, image chips/status, auto session rename, session search/import, handoff, permission gate, notification triggers/channels, custom/remote/idle compaction, branch summary override, thinking timer.
+- **Commands:** `/qol status`, `/qol rename`, `/qol rename full`, `/qol notify-test`, `/rename [name]`, `/context`, `/search [query]`, `/search refresh`, `/handoff <goal>`.
+- **Settings:** statusline/footer replacement, compact prompt, git/dirty marker display, image chips/status, auto session rename, session search/import, context display, handoff, permission gate, notification triggers/channels, custom/remote/idle compaction, branch summary override, thinking timer.
 - **More:** [pi-extensions/pi-qol/README.md](pi-extensions/pi-qol/README.md).
 
 #### `pi-session-manager`
 
-- **Purpose:** Polished Pi session browser for searching, threaded lineage review, resuming, renaming, and safely deleting sessions.
-- **Commands/UI:** `/sessions [current|all]`; configurable idle shortcut (`Ctrl+Shift+R` by default).
-- **Settings:** enablement, shortcut, default scope/sort, overlay width, visible rows, named-session status badge, trash-before-unlink deletion.
+- **Purpose:** Polished Pi session browser for searching, threaded lineage review, resuming, renaming, and safely deleting one or all shown sessions.
+- **Commands/UI:** `/sessions`; Current/All scope is switched in the popup, with a configurable idle shortcut (`Ctrl+Shift+R` by default).
+- **Settings:** enablement, shortcut, default scope/sort, overlay width, visible rows, trash-before-unlink deletion.
 - **More:** [pi-extensions/pi-session-manager/README.md](pi-extensions/pi-session-manager/README.md).
+
+#### `pi-codex-minimal-tools`
+
+- **Purpose:** Adds Codex-style `view_image`, `apply_patch`, native OpenAI `image_generation`/`web_search`, and diagnostics without replacing Pi's native file/shell/edit tools.
+- **Commands/tools:** `/codex-minimal-tools`, `/codex-minimal-tools doctor`, `/codex-minimal-tools settings`; `view_image`, `apply_patch`, and supported provider tools.
+- **Settings:** auto-enable, native provider tool shim, image/web toggles, image output directory/model, direct Images API fallback, patch-mode controls.
+- **More:** [pi-extensions/pi-codex-minimal-tools/README.md](pi-extensions/pi-codex-minimal-tools/README.md).
 
 #### `pi-output-policy`
 

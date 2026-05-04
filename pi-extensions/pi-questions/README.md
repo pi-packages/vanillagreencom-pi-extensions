@@ -63,7 +63,7 @@ Very large result JSON is truncated to Pi's default 50KB/2000-line tool limit an
 | Key | Action |
 | --- | --- |
 | `←` / `→` or `Tab` | Switch tabs. |
-| `↑` / `↓` or `j` / `k` | Move selection. |
+| `↑` / `↓` | Move selection. |
 | `Enter` | Pick/advance/submit; on the custom row, open text input. |
 | `Space` | Toggle multi-select rows; on the custom row, open text input. |
 | `Esc` | Cancel the request, or leave custom text input. |

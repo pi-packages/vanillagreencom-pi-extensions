@@ -176,6 +176,7 @@
     "typebox": "*"
   },
   "devDependencies": {
+    "@types/node": "^24.10.1",
     "@mariozechner/pi-ai": "^0.72.1",
     "@mariozechner/pi-coding-agent": "^0.72.1",
     "@mariozechner/pi-tui": "^0.72.1",

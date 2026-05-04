@@ -18,7 +18,7 @@ Initialize development session, display status, select work, evaluate research, 
 
 3. **If build errors or auth failures** → fix locally before proceeding to § 1.3.
 
-4. **If dashboard shows "Worktree session"** → STOP. Wrong workflow. Use [start-worktree.md](start-worktree.md) instead.
+4. **If dashboard shows "Worktree session"** → STOP. Wrong workflow. Use the orchestration workflow from the worktree pane instead: [`../../orchestration/workflows/start.md`](../../orchestration/workflows/start.md).
 
 ### 1.3 Select Work
 
@@ -126,7 +126,7 @@ After all issues processed → § 3.
 
 5. **Set labels**: `agent:[TYPE]` per domain, appropriate stack labels
 
-6. **Set blocking relations**: Read [agent-sequencing.md](agent-sequencing.md). Include relations to/from existing children.
+6. **Set blocking relations**: infer dependency order from parent requirements, domain ownership, and existing child blockers. Include relations to/from existing children; ask the user if sequencing is ambiguous.
 
 7. **Rewrite parent description**: Replace `## Requirements` with `## Sub-Issues` listing ALL children (existing + new), add `## Context`, remove implementation-level detail.
 

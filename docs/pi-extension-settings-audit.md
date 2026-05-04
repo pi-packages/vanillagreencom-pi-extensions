@@ -4,7 +4,7 @@ This audit covers every local vstack Pi package under `pi-extensions/`. Each pac
 
 ## Runtime constraints
 
-Pi's public extension API does not currently expose a native API to inject a third-party tab into the built-in `/settings` UI or to unload already-loaded extension modules. `pi-extension-manager` therefore provides a full Pi-styled settings shell through `/extensions`, quick inline settings through `/extensions settings`, plus a best-effort `/settings` wrapper when explicitly enabled.
+Pi's public extension API does not currently expose a native API to inject a third-party tab into the built-in `/settings` UI or to unload already-loaded extension modules. `pi-extension-manager` therefore provides a full Pi-styled settings shell through `/extensions` plus quick inline settings through `/extensions settings`.
 
 Settings persist under `vstack.extensionManager.config.<packageName>` in Pi `settings.json` files to avoid colliding with Pi's own top-level `extensions` resource array.
 
@@ -13,7 +13,7 @@ Settings persist under `vstack.extensionManager.config.<packageName>` in Pi `set
 ### `pi-extension-manager`
 
 - Toggle: `enabled` disables the full manager UI after reload; `/extensions enable` remains as recovery.
-- Useful settings: show/hide built-in tools, default save scope, best-effort `/settings` wrapper.
+- Useful settings: show/hide built-in tools, default save scope.
 - Apply semantics: inventory settings are live; command registration changes need reload/restart.
 
 ### `pi-skills-manager`
@@ -30,9 +30,9 @@ Settings persist under `vstack.extensionManager.config.<packageName>` in Pi `set
 
 ### `pi-questions`
 
-- Toggle: `enabled` registers/unregisters the `question` tool, `/question-demo`, popup UI, and bridge question service after reload.
-- Useful settings: popup width/max-height, visible option rows, default header, bridge reply enablement. Large free-form answer results use Pi default tool-result truncation with temp-file preservation.
-- Apply semantics: popup and bridge settings are live.
+- Toggle: `enabled` registers/unregisters the `question` tool, editor/overlay question UI, and bridge question service after reload.
+- Useful settings: render mode, overlay width/max-height, visible option rows, default header, bridge reply enablement. Large free-form answer results use Pi default tool-result truncation with temp-file preservation.
+- Apply semantics: render/UI and bridge settings are live.
 
 ### `pi-session-bridge`
 
@@ -42,9 +42,9 @@ Settings persist under `vstack.extensionManager.config.<packageName>` in Pi `set
 
 ### `pi-subagents-tmux`
 
-- Toggle: `enabled` registers/unregisters the `subagent` tool, `/agents` command, and persistent pane polling after reload.
-- Useful settings: max parallel tasks, max one-shot concurrency, collapsed result size, result truncation/full-output preservation, parent/child poll intervals.
-- Apply semantics: execution/render/output limits are live; polling interval changes need reload/session restart.
+- Toggle: `enabled` registers/unregisters the `subagent`, `get_subagent_result`, and `steer_subagent` tools, `/agents` command, dashboard shortcut, and persistent pane polling after reload.
+- Useful settings: max parallel tasks, max one-shot concurrency, dashboard display, result truncation/full-output preservation, parent/child poll intervals, forced session-bridge loading for panes.
+- Apply semantics: execution/render/output limits are live; command/tool/shortcut registration and polling interval changes need reload/session restart.
 
 ### `pi-prompt-stash`
 
@@ -54,14 +54,14 @@ Settings persist under `vstack.extensionManager.config.<packageName>` in Pi `set
 
 ### `pi-qol`
 
-- Toggle: `enabled` installs/removes QOL statusline/editor helpers, `/qol`, and QOL compaction hooks after reload.
-- Useful settings: footer replacement, compact `π` prompt, input padding, git/dirty marker display, Shift+Enter newline, fallback newline key, image chip rendering, attachment count badge, session commands, terminal/tmux notification triggers/channels (including active-window bell suppression and tmux client-TTY native notifications for Ghostty), custom compaction model/profile/remote endpoint, branch summary override, idle compaction thresholds, hidden-thinking placeholder preference.
-- Apply semantics: git/dirty, image/status, notification, and compaction behavior settings are live; editor/footer and command registration need reload. Hidden-thinking is a settings contract only until Pi exposes an assistant-message renderer hook.
+- Toggle: `enabled` installs/removes QOL statusline/editor helpers, `/qol`, `/rename`, `/context`, `/search`, `/handoff`, and QOL compaction hooks after reload.
+- Useful settings: footer replacement, compact `π` prompt, input padding, git/dirty marker display, image chip rendering, session auto-rename, session search/context import, terminal/tmux notification triggers/channels, permission gate, custom compaction model/profile/remote endpoint, branch summary override, idle compaction thresholds, thinking timer.
+- Apply semantics: git/dirty, image/status, notification, and compaction behavior settings are live; editor/footer and command registration need reload.
 
 ### `pi-session-manager`
 
-- Toggle: `enabled` registers/unregisters `/sessions`, the status badge, and the optional shortcut after reload.
-- Useful settings: shortcut key, default scope, default sort, visible rows, overlay width, named-session status badge, trash-before-unlink deletion.
+- Toggle: `enabled` registers/unregisters `/sessions` and the optional shortcut after reload.
+- Useful settings: shortcut key, default scope, default sort, visible rows, overlay width, trash-before-unlink deletion.
 - Apply semantics: browse/render/delete settings are live; command and shortcut registration need reload.
 
 ### `pi-output-policy`
@@ -78,15 +78,21 @@ Settings persist under `vstack.extensionManager.config.<packageName>` in Pi `set
 
 ### `pi-task-panel`
 
-- Toggle: `enabled` registers/unregisters `todo_write`, `/todo`, panel widget, reminders, and shortcuts after reload.
-- Useful settings: default panel state, Ctrl+T takeover, Alt+T tri-state toggle, compact task count, active-task auto-advance/hide, expanded notes, auto-show, sequential task updates, model-facing workflow context/reminders, incomplete-task reminders.
-- Apply semantics: panel/reminder settings are live; shortcut registration needs reload.
+- Toggle: `enabled` registers/unregisters `tasks_write`, `/tasks`, panel widget, reminders, and shortcuts after reload.
+- Useful settings: default panel state, Ctrl+T takeover, Alt+T tri-state toggle, compact task count, active-task auto-advance/hide, expanded notes, auto-show, compact tool output, sequential task updates, model-facing workflow context/reminders, incomplete-task reminders.
+- Apply semantics: panel/reminder settings are live; command/tool/shortcut registration needs reload.
 
 ### `pi-caveman`
 
 - Toggle: `enabled` controls whether sessions start in caveman mode by default; `/caveman off` remains a session override.
 - Useful settings: default mode, status badge, clarity escape, resume policy, session override permission, normal-code/commit/review boundaries, custom prompt suffix.
 - Apply semantics: prompt-injection settings are live per turn; default startup mode applies at session start.
+
+### `pi-codex-minimal-tools`
+
+- Toggle: `enabled` registers/removes Codex/OpenAI augmentation tools and diagnostics after reload.
+- Useful settings: auto-enable, native OpenAI provider tools, image/web toggles, image output directory/model, direct Images API fallback, apply_patch controls, strict patch mode, absolute-path allowance.
+- Apply semantics: active-tool and fallback settings are live; provider shim and command/tool registration need reload.
 
 ## Manager behavior
 

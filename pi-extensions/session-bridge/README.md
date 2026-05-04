@@ -9,10 +9,10 @@ Pi package that keeps the normal interactive Pi TUI visible while exposing a str
 Via vstack:
 
 ```bash
-vstack add --agent pi
+vstack add vanillagreencom/vstack
 ```
 
-The vstack TUI lists this package under **Pi Extensions** and registers it in Pi's `settings.json`.
+Select Pi as the target harness and choose **pi-session-bridge** from the **Pi Extensions** tab. Non-interactive Pi installs can use `vstack add vanillagreencom/vstack --harness pi -y` to install the catalog's Pi agents/skills/hooks and Pi packages. vstack registers the package in Pi's `settings.json`.
 
 Manual install:
 
@@ -75,14 +75,7 @@ If exactly one active bridge exists, target flags are optional. Target filters i
 
 For `pi-questions` tabs with `allowCustom=true`, answer strings may be free-form text.
 
-When installed via vstack as a local-path Pi package, the `pi-bridge` binary is **not** automatically placed on `PATH` because Pi local installs do not expose npm `bin` entries. Use one of:
-
-```bash
-node /path/to/pi-extensions/session-bridge/bin/pi-bridge.js list
-ln -sf /path/to/pi-extensions/session-bridge/bin/pi-bridge.js ~/.local/bin/pi-bridge
-```
-
-Or use the raw socket protocol below from any language.
+When installed via vstack, `pi-bridge` is symlinked into the install scope's `bin/` directory (`.pi/bin/pi-bridge` for project scope, `~/.pi/agent/bin/pi-bridge` for global scope). Add that directory to `PATH`, run it by path, or use the raw socket protocol below from any language.
 
 ## Raw protocol
 
