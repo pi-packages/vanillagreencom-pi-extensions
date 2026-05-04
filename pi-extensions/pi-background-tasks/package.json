@@ -114,7 +114,62 @@
             "aboveEditor",
             "belowEditor"
           ],
-          "default": "belowEditor",
+          "default": "aboveEditor",
+          "category": "UI",
+          "apply": "live"
+        },
+        {
+          "key": "toolRenderMode",
+          "label": "Tool output style",
+          "description": "Compact keeps bg_task results to one status line; stacked adds short task/log rows and Ctrl+O expands details.",
+          "type": "enum",
+          "enumValues": [
+            "compact",
+            "stacked"
+          ],
+          "default": "stacked",
+          "category": "UI",
+          "apply": "live"
+        },
+        {
+          "key": "toolExpandedLogLines",
+          "label": "Expanded tool log lines",
+          "description": "Maximum log lines shown when bg_task log output is expanded with Ctrl+O.",
+          "type": "number",
+          "default": 80,
+          "category": "UI",
+          "apply": "live"
+        },
+        {
+          "key": "dashboardOutputMaxLines",
+          "label": "Dashboard output line cap",
+          "description": "Maximum output lines kept in the interactive dashboard viewport. Full logs remain on disk.",
+          "type": "number",
+          "default": 800,
+          "category": "UI",
+          "apply": "live"
+        },
+        {
+          "key": "widgetToggleShortcut",
+          "label": "Mini-dashboard toggle shortcut",
+          "description": "Keyboard shortcut to toggle the inline mini-dashboard between compact and expanded views. Requires restart because shortcuts register at extension load.",
+          "type": "string",
+          "default": "alt+h",
+          "category": "UI",
+          "apply": "restart",
+          "requiresReload": true
+        },
+        {
+          "key": "widgetDefaultMode",
+          "label": "Mini-dashboard default mode",
+          "description": "Initial inline mini-dashboard mode.",
+          "type": "enum",
+          "enumValues": [
+            "compact",
+            "expanded",
+            "hidden"
+          ],
+          "default": "compact",
           "category": "UI",
           "apply": "live"
         },
@@ -123,7 +178,7 @@
           "label": "Dashboard shortcut",
           "description": "Keyboard shortcut registered for the dashboard. Requires restart because shortcuts register at extension load.",
           "type": "string",
-          "default": "ctrl+shift+b",
+          "default": "alt+shift+h",
           "category": "UI",
           "apply": "restart",
           "requiresReload": true
