@@ -182,12 +182,24 @@ function padAnsi(text: string, width: number): string {
 	return `${text}${" ".repeat(Math.max(0, width - visibleWidth(text)))}`;
 }
 
-function simpleFrame(lines: string[], width: number, theme: Theme): string[] {
+const ANSI_GREEN_FG = "\x1b[32m";
+const ANSI_YELLOW_FG = "\x1b[33m";
+const ANSI_FG_RESET = "\x1b[39m";
+function ansiGreen(text: string): string { return `${ANSI_GREEN_FG}${text}${ANSI_FG_RESET}`; }
+function ansiYellow(text: string): string { return `${ANSI_YELLOW_FG}${text}${ANSI_FG_RESET}`; }
+
+function simpleFrame(lines: string[], width: number, theme: Theme, title = ""): string[] {
 	if (width < 8) return lines.map((line) => truncateToWidth(line, width, ""));
 	const border = (text: string) => theme.fg("borderAccent", text);
 	const innerWidth = Math.max(1, width - 4);
+	const top = () => {
+		if (!title) return `${border("┏")}${border("━".repeat(width - 2))}${border("┓")}`;
+		const titlePlain = ` ${truncateToWidth(title, Math.max(1, width - 4), "…")} `;
+		const fill = Math.max(1, width - 2 - visibleWidth(titlePlain));
+		return `${border("┏")}${ansiGreen(titlePlain)}${border("━".repeat(fill))}${border("┓")}`;
+	};
 	return [
-		`${border("┏")}${border("━".repeat(width - 2))}${border("┓")}`,
+		top(),
 		...lines.map((line) => `${border("┃")} ${padAnsi(truncateToWidth(line, innerWidth, ""), innerWidth)} ${border("┃")}`),
 		`${border("┗")}${border("━".repeat(width - 2))}${border("┛")}`,
 	].map((line) => truncateToWidth(line, width, ""));
@@ -389,7 +401,7 @@ function agentDivider(width: number, theme: Theme): string {
 	return theme.fg("dim", "─".repeat(Math.max(1, width)));
 }
 
-function agentFrame(lines: string[], width: number, theme: Theme, fixedInnerRows = AGENTS_BROWSER_INNER_ROWS): string[] {
+function agentFrame(lines: string[], width: number, theme: Theme, fixedInnerRows = AGENTS_BROWSER_INNER_ROWS, title = ""): string[] {
 	const safeWidth = Math.max(1, width);
 	const inner = Math.max(1, safeWidth - 2);
 	const contentWidth = agentFrameContentWidth(safeWidth);
@@ -402,7 +414,13 @@ function agentFrame(lines: string[], width: number, theme: Theme, fixedInnerRows
 		body = [...body, ...Array.from({ length: fixedInnerRows - body.length }, () => "")];
 	}
 	const blank = `${border("┃")}${" ".repeat(inner)}${border("┃")}`;
-	const out = [`${border("┏")}${border("━".repeat(inner))}${border("┓")}`];
+	const top = () => {
+		if (!title) return `${border("┏")}${border("━".repeat(inner))}${border("┓")}`;
+		const titlePlain = ` ${truncateToWidth(title, Math.max(1, inner - 2), "…")} `;
+		const fill = Math.max(1, inner - visibleWidth(titlePlain));
+		return `${border("┏")}${ansiGreen(titlePlain)}${border("━".repeat(fill))}${border("┓")}`;
+	};
+	const out = [top()];
 	for (let i = 0; i < AGENTS_POPUP_PADDING_Y; i += 1) out.push(blank);
 	for (const line of body) out.push(`${border("┃")}${" ".repeat(AGENTS_POPUP_PADDING_X)}${agentPad(line, contentWidth)}${" ".repeat(AGENTS_POPUP_PADDING_X)}${border("┃")}`);
 	for (let i = 0; i < AGENTS_POPUP_PADDING_Y; i += 1) out.push(blank);
@@ -478,10 +496,10 @@ function renderAgentList(agents: AgentConfig[], statuses: Map<string, AgentPaneS
 	for (const [visibleIndex, agent] of agents.slice(ui.scroll, ui.scroll + listRows).entries()) {
 		const index = ui.scroll + visibleIndex;
 		const status = agentStatus(agent, statuses.get(agent.name));
-		const marker = index === ui.selected ? theme.fg("accent", "›") : theme.fg("dim", " ");
+		const marker = " ";
 		const meta = theme.fg("dim", ` ${status === "one-shot" ? "one-shot" : "pane"} · ${agent.source}`);
 		const model = agent.model ? theme.fg("dim", ` · ${agent.model}`) : "";
-		const row = truncateToWidth(`${marker} ${agentStatusIcon(status, theme)} ${agent.name}${meta}${model}`, width, "…");
+		const row = truncateToWidth(`${marker}${agentStatusIcon(status, theme)} ${agent.name}${meta}${model}`, width, "…");
 		lines.push(index === ui.selected ? theme.bg("selectedBg", agentPad(row, width)) : row);
 	}
 	const hidden = Math.max(0, agents.length - (ui.scroll + listRows));
@@ -658,11 +676,11 @@ function createAgentsBrowserComponent(
 		const bodyWidth = agentFrameContentWidth(safeWidth);
 		const lines = [
 			renderAgentScopeTabs(ui.scope, bodyWidth, theme),
-			theme.fg("dim", "tab scope · ↑↓ navigate/scroll · ←/→ pane · enter/i insert · type search · s/a/x pane · esc close"),
+			`${ansiYellow("tab")} ${theme.fg("dim", "scope · ")}${ansiYellow("↑↓")} ${theme.fg("dim", "navigate/scroll · ")}${ansiYellow("←/→")} ${theme.fg("dim", "pane · ")}${ansiYellow("enter/i")} ${theme.fg("dim", "insert · type search · ")}${ansiYellow("s/a/x")} ${theme.fg("dim", "pane · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`,
 			agentDivider(bodyWidth, theme),
 			...renderAgentsBody(discovery, filtered(), statuses, ui, bodyWidth, theme, layout),
 		];
-		return agentFrame(lines, safeWidth, theme, layout.innerRows);
+		return agentFrame(lines, safeWidth, theme, layout.innerRows, "Subagents");
 	}
 
 	return { handleInput, invalidate() {}, render };
@@ -2765,7 +2783,7 @@ function traceViewerLines(state: TraceViewerState, width: number, rows: number, 
 	const innerWidth = Math.max(1, width - 4);
 	const frameRows = Math.max(8, rows);
 	const item = state.items[state.selected] ?? state.items[0];
-	const title = `${theme.fg("customMessageLabel", theme.bold(state.title))} ${theme.fg("dim", "· tab/←→ sections · ↑↓ scroll · enter/e open · esc close")}`;
+	const help = `${ansiYellow("tab/←→")} ${theme.fg("dim", "sections · ")}${ansiYellow("↑↓")} ${theme.fg("dim", "scroll · ")}${ansiYellow("enter/e")} ${theme.fg("dim", "open · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`;
 	const tabs = renderTraceTabBar(state.items, state.selected, innerWidth, theme);
 	const meta = [
 		item?.ref ? theme.fg("accent", item.ref) : "",
@@ -2783,7 +2801,7 @@ function traceViewerLines(state: TraceViewerState, width: number, rows: number, 
 	const visible = content.slice(state.scroll, state.scroll + bodyRows);
 	const footer = theme.fg("dim", `${state.scroll + 1}-${Math.min(content.length, state.scroll + bodyRows)}/${content.length} · ${item?.path ? "enter/e opens $VISUAL/$EDITOR" : "metadata"}`);
 	const innerLines = [
-		title,
+		help,
 		tabs,
 		divider(innerWidth, theme),
 		meta || file,
@@ -2794,7 +2812,7 @@ function traceViewerLines(state: TraceViewerState, width: number, rows: number, 
 		footer,
 	];
 	while (innerLines.length < frameRows - 2) innerLines.splice(Math.max(0, innerLines.length - 2), 0, "");
-	return simpleFrame(innerLines.slice(0, frameRows - 2), width, theme);
+	return simpleFrame(innerLines.slice(0, frameRows - 2), width, theme, state.title);
 }
 
 function renderTraceTabBar(items: TraceViewerItem[], selected: number, width: number, theme: Theme): string {

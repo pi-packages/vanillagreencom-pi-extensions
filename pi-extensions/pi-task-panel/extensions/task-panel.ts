@@ -19,6 +19,12 @@ const POPUP_PADDING_X = 2;
 const POPUP_PADDING_Y = 1;
 const PANEL_CARD_PADDING_X = 1;
 const MANAGE_TASK_ROWS = 12;
+const ANSI_GREEN_FG = "\x1b[32m";
+const ANSI_YELLOW_FG = "\x1b[33m";
+const ANSI_FG_RESET = "\x1b[39m";
+
+function ansiGreen(text: string): string { return `${ANSI_GREEN_FG}${text}${ANSI_FG_RESET}`; }
+function ansiYellow(text: string): string { return `${ANSI_YELLOW_FG}${text}${ANSI_FG_RESET}`; }
 
 type Status = "pending" | "in_progress" | "completed" | "abandoned";
 type PanelState = "hidden" | "compact" | "expanded";
@@ -172,12 +178,18 @@ function panelGroupStem(theme: Theme, isLastTask: boolean, isLastGroup: boolean,
 	return theme.fg(PANEL_RULE_COLOR, `${isLastGroup ? "   " : "│  "}${isLastTask ? "   " : "│  "}`);
 }
 
-function framePopup(lines: string[], width: number, theme: Theme): string[] {
+function framePopup(lines: string[], width: number, theme: Theme, title = ""): string[] {
 	if (width < 8) return lines.map((line) => truncateToWidth(line, width, ""));
 	const border = (text: string) => theme.fg("borderAccent", text);
 	const contentWidth = Math.max(1, width - 2 - POPUP_PADDING_X * 2);
 	const blank = `${border("┃")}${" ".repeat(width - 2)}${border("┃")}`;
-	const framed = [`${border("┏")}${border("━".repeat(width - 2))}${border("┓")}`];
+	const top = () => {
+		if (!title) return `${border("┏")}${border("━".repeat(width - 2))}${border("┓")}`;
+		const titlePlain = ` ${truncateToWidth(title, Math.max(1, width - 4), "…")} `;
+		const fill = Math.max(1, width - 2 - visibleWidth(titlePlain));
+		return `${border("┏")}${ansiGreen(titlePlain)}${border("━".repeat(fill))}${border("┓")}`;
+	};
+	const framed = [top()];
 	for (let i = 0; i < POPUP_PADDING_Y; i += 1) framed.push(blank);
 	for (const line of lines) {
 		framed.push(`${border("┃")}${" ".repeat(POPUP_PADDING_X)}${padAnsi(line, contentWidth)}${" ".repeat(POPUP_PADDING_X)}${border("┃")}`);
@@ -795,8 +807,7 @@ export default function taskPanel(pi: ExtensionAPI): void {
 						syncSelection();
 						const tasks = taskList();
 						const lines = [
-							theme.fg("text", theme.bold("Tasks manager")),
-							theme.fg("dim", "↑↓ select · enter/s start · d done · x drop · r remove · c clear done · e edit · esc close"),
+							`${ansiYellow("↑↓")} ${theme.fg("dim", "select · ")}${ansiYellow("enter/s")} ${theme.fg("dim", "start · ")}${ansiYellow("d")} ${theme.fg("dim", "done · ")}${ansiYellow("x")} ${theme.fg("dim", "drop · ")}${ansiYellow("r")} ${theme.fg("dim", "remove · ")}${ansiYellow("c")} ${theme.fg("dim", "clear done · ")}${ansiYellow("e")} ${theme.fg("dim", "edit · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`,
 							"",
 						];
 						if (tasks.length === 0) {
@@ -806,17 +817,16 @@ export default function taskPanel(pi: ExtensionAPI): void {
 							for (const task of tasks.slice(scroll, scroll + MANAGE_TASK_ROWS)) {
 								const selected = task.id === selectedId;
 								const active = task.status === "in_progress";
-								const cursor = selected ? theme.fg("accent", "›") : theme.fg("dim", "·");
 								const marker = theme.fg(markerColor(task.status, active), taskIcon(task.status, active));
 								const content = selected ? theme.fg("text", active ? theme.bold(task.content) : task.status === "completed" || task.status === "abandoned" ? theme.strikethrough(task.content) : task.content) : taskText(task, active, theme);
 								const phase = task.phaseId ? ` · ${phaseTitle(state, task.phaseId)}` : "";
-								const row = `${cursor} ${marker} ${content}${theme.fg("dim", `${phase} · ${editableStatusLabel(task.status)}`)}`;
+								const row = ` ${marker} ${content}${theme.fg(selected ? "text" : "dim", `${phase} · ${editableStatusLabel(task.status)}`)}`;
 								lines.push(selected ? theme.bg("selectedBg", padAnsi(row, contentWidth)) : row);
 							}
 							const below = Math.max(0, tasks.length - (scroll + MANAGE_TASK_ROWS));
 							if (below > 0) lines.push(theme.fg("dim", `↓ ${below} more task(s)`));
 						}
-						return framePopup(lines.map((line) => truncateToWidth(line, contentWidth, "")), width, theme);
+						return framePopup(lines.map((line) => truncateToWidth(line, contentWidth, "")), width, theme, "Tasks Manager");
 					},
 				};
 			}, { overlay: true, overlayOptions: { anchor: "center", width: 100, maxHeight: "85%" } });

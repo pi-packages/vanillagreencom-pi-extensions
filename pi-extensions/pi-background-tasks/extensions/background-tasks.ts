@@ -38,6 +38,12 @@ const DEFAULT_LOG_TAIL_MAX_CHARS = 50_000;
 const DASHBOARD_WIDTH = 96;
 const DASHBOARD_MAX_HEIGHT = "80%";
 const DASHBOARD_PADDING_X = 2;
+const ANSI_GREEN_FG = "\x1b[32m";
+const ANSI_YELLOW_FG = "\x1b[33m";
+const ANSI_FG_RESET = "\x1b[39m";
+
+function ansiGreen(text: string): string { return `${ANSI_GREEN_FG}${text}${ANSI_FG_RESET}`; }
+function ansiYellow(text: string): string { return `${ANSI_YELLOW_FG}${text}${ANSI_FG_RESET}`; }
 const DASHBOARD_PADDING_Y = 1;
 const DASHBOARD_TASK_ROWS = 12;
 const DASHBOARD_OUTPUT_ROWS = 16;
@@ -347,13 +353,21 @@ function dashboardContentWidth(width: number): number {
 	return Math.max(1, width - 2 - DASHBOARD_PADDING_X * 2);
 }
 
-function frameDashboard(lines: string[], width: number, theme: Theme): string[] {
+function frameDashboard(lines: string[], width: number, theme: Theme, title = "", right = ""): string[] {
 	if (width < 8) return lines.map((line) => truncateToWidth(line, width, ""));
 
 	const border = (text: string) => theme.fg("borderAccent", text);
 	const contentWidth = dashboardContentWidth(width);
 	const blank = `${border("┃")}${" ".repeat(width - 2)}${border("┃")}`;
-	const framed = [`${border("┏")}${border("━".repeat(width - 2))}${border("┓")}`];
+	const top = () => {
+		if (!title) return `${border("┏")}${border("━".repeat(width - 2))}${border("┓")}`;
+		const rightPlain = right ? ` ${right} ` : "";
+		const titleBudget = Math.max(1, width - 2 - visibleWidth(rightPlain) - 1);
+		const titlePlain = ` ${truncateToWidth(title, Math.max(1, titleBudget - 2), "…")} `;
+		const fill = Math.max(1, width - 2 - visibleWidth(titlePlain) - visibleWidth(rightPlain));
+		return `${border("┏")}${ansiGreen(titlePlain)}${border("━".repeat(fill))}${right ? theme.fg("dim", rightPlain) : ""}${border("┓")}`;
+	};
+	const framed = [top()];
 
 	for (let i = 0; i < DASHBOARD_PADDING_Y; i += 1) framed.push(blank);
 	for (const line of lines) {
@@ -850,11 +864,7 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 					syncOutputScroll();
 
 					const lines = [
-						`${theme.fg("text", theme.bold("⚙ Background tasks"))} ${theme.fg(
-							"muted",
-							`${running} running · ${sorted.length - running} finished`,
-						)}`,
-						theme.fg("dim", "[↑↓/jk] select · [s] stop · [c] clear · [f] follow · [PgUp/PgDn] scroll · [esc] close"),
+						`${ansiYellow("↑↓/jk")} ${theme.fg("dim", "select")} · ${ansiYellow("s")} ${theme.fg("dim", "stop")} · ${ansiYellow("c")} ${theme.fg("dim", "clear")} · ${ansiYellow("f")} ${theme.fg("dim", "follow")} · ${ansiYellow("PgUp/PgDn")} ${theme.fg("dim", "scroll")} · ${ansiYellow("esc")} ${theme.fg("dim", "close")}`,
 						"",
 					];
 
@@ -873,11 +883,10 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 					if (taskScroll > 0) left.push(theme.fg("dim", `↑ ${taskScroll} earlier task(s)`));
 					for (const task of sorted.slice(taskScroll, taskScroll + DASHBOARD_TASK_ROWS)) {
 						const isSelected = task.id === selected?.id;
-						const selectedMarker = isSelected ? theme.fg("accent", "›") : theme.fg("dim", "·");
 						const statusColor = task.status === "running" ? "success" : task.status === "failed" ? "error" : "muted";
-						const row = `${selectedMarker} ${theme.fg(statusColor, task.id)} ${theme.fg("dim", summarizeTaskStatus(task.status, task.exitCode))}`;
+						const row = ` ${theme.fg(statusColor, task.id)} ${theme.fg(isSelected ? "text" : "dim", summarizeTaskStatus(task.status, task.exitCode))}`;
 						left.push(isSelected ? theme.bg("selectedBg", padAnsi(row, taskPaneWidth)) : row);
-						left.push(`  ${taskDisplayName(task)}`);
+						left.push(` ${taskDisplayName(task)}`);
 					}
 					const hiddenBelow = Math.max(0, sorted.length - (taskScroll + DASHBOARD_TASK_ROWS));
 					if (hiddenBelow > 0) left.push(theme.fg("dim", `↓ ${hiddenBelow} more task(s)`));
@@ -947,7 +956,9 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 					},
 					invalidate() {},
 					render(width: number) {
-						return frameDashboard(renderLines(dashboardContentWidth(width)), width, theme);
+						const sorted = sortedTasks();
+						const running = sorted.filter((task) => task.status === "running").length;
+						return frameDashboard(renderLines(dashboardContentWidth(width)), width, theme, "Background Tasks", `${running} running · ${sorted.length - running} finished`);
 					},
 				};
 			},

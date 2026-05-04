@@ -23,6 +23,12 @@ const PADDING_Y = 1;
 const INSTALL_SYMBOL = Symbol.for("vstack.prompt-stash.installed");
 const VSTACK_MODAL_LOCK_SYMBOL = Symbol.for("vstack.pi.modal-lock");
 const DEFAULT_SHORTCUT = "alt+s";
+const ANSI_GREEN_FG = "\x1b[32m";
+const ANSI_YELLOW_FG = "\x1b[33m";
+const ANSI_FG_RESET = "\x1b[39m";
+
+function ansiGreen(text: string): string { return `${ANSI_GREEN_FG}${text}${ANSI_FG_RESET}`; }
+function ansiYellow(text: string): string { return `${ANSI_YELLOW_FG}${text}${ANSI_FG_RESET}`; }
 
 interface StashItem {
 	id: string;
@@ -256,13 +262,21 @@ function popupContentWidth(width: number): number {
 	return Math.max(1, width - 2 - PADDING_X * 2);
 }
 
-function framePopup(lines: string[], width: number, theme: Theme): string[] {
+function framePopup(lines: string[], width: number, theme: Theme, title = "", right = ""): string[] {
 	if (width < 8) return lines.map((line) => truncateToWidth(line, width, ""));
 
 	const border = (text: string) => theme.fg("borderAccent", text);
 	const contentWidth = popupContentWidth(width);
 	const blank = `${border("┃")}${" ".repeat(width - 2)}${border("┃")}`;
-	const framed = [`${border("┏")}${border("━".repeat(width - 2))}${border("┓")}`];
+	const top = () => {
+		if (!title) return `${border("┏")}${border("━".repeat(width - 2))}${border("┓")}`;
+		const rightPlain = right ? ` ${right} ` : "";
+		const titleBudget = Math.max(1, width - 2 - visibleWidth(rightPlain) - 1);
+		const titlePlain = ` ${truncateToWidth(title, Math.max(1, titleBudget - 2), "…")} `;
+		const fill = Math.max(1, width - 2 - visibleWidth(titlePlain) - visibleWidth(rightPlain));
+		return `${border("┏")}${ansiGreen(titlePlain)}${border("━".repeat(fill))}${right ? theme.fg("dim", rightPlain) : ""}${border("┓")}`;
+	};
+	const framed = [top()];
 
 	for (let i = 0; i < PADDING_Y; i += 1) framed.push(blank);
 	for (const line of lines) {
@@ -274,10 +288,10 @@ function framePopup(lines: string[], width: number, theme: Theme): string[] {
 }
 
 function renderSearchLine(searchInput: Input, width: number, theme: Theme): string {
-	const label = `${theme.fg("accent", "Search")}: `;
-	const inputWidth = Math.max(1, width - visibleWidth(label));
+	const pad = " ";
+	const inputWidth = Math.max(1, width - visibleWidth(pad) * 2);
 	const input = searchInput.render(inputWidth)[0] ?? "";
-	return truncateToWidth(`${label}${input}`, width, "");
+	return theme.bg("toolPendingBg", padAnsi(truncateToWidth(`${pad}${input}`, width, ""), width));
 }
 
 function filterItems(items: StashItem[], query: string): StashItem[] {
@@ -354,10 +368,6 @@ async function openStashPopup(ctx: ExtensionContext): Promise<void> {
 				clampSelection();
 
 				const lines: string[] = [];
-				const title = `${theme.fg("text", theme.bold("⚑ Prompt stash"))} ${theme.fg("muted", `${items.length} saved`)}`;
-				const esc = theme.fg("dim", "esc");
-				const titleGap = Math.max(1, innerWidth - visibleWidth(`⚑ Prompt stash ${items.length} saved`) - visibleWidth("esc"));
-				lines.push(panelLine(`${title}${" ".repeat(titleGap)}${esc}`, innerWidth));
 				lines.push(panelLine(theme.fg("dim", "Type to search · ↑↓/jk select · enter pop · ctrl+d delete · ctrl+x delete all"), innerWidth));
 				lines.push(panelLine("", innerWidth));
 				lines.push(panelLine(renderSearchLine(searchInput, innerWidth, theme), innerWidth));
@@ -372,13 +382,12 @@ async function openStashPopup(ctx: ExtensionContext): Promise<void> {
 						const countText = `~${count} ${count === 1 ? "line" : "lines"}`;
 						const countWidth = visibleWidth(countText);
 						const rowWidth = innerWidth;
-						const marker = index === selected ? theme.fg("accent", "› ") : "  ";
-						const markerWidth = visibleWidth("› ");
-						const previewWidth = Math.max(1, rowWidth - markerWidth - countWidth - 2);
+						const itemPad = " ";
+						const previewWidth = Math.max(1, rowWidth - visibleWidth(itemPad) - countWidth - 1);
 						const preview = truncateToWidth(previewText(item.text), previewWidth, "");
 						const styledPreview = index === selected ? theme.bold(preview) : preview;
 						const styledCount = index === selected ? theme.fg("text", countText) : theme.fg("dim", countText);
-						const row = `${marker}${styledPreview}${" ".repeat(Math.max(1, rowWidth - markerWidth - visibleWidth(preview) - countWidth))}${styledCount}`;
+						const row = `${itemPad}${styledPreview}${" ".repeat(Math.max(1, rowWidth - visibleWidth(itemPad) - visibleWidth(preview) - countWidth))}${styledCount}`;
 						lines.push(index === selected ? selectedLine(theme, row, innerWidth) : panelLine(row, innerWidth));
 					}
 				}
@@ -388,11 +397,11 @@ async function openStashPopup(ctx: ExtensionContext): Promise<void> {
 
 				lines.push(panelLine("", innerWidth));
 				const status = confirmDeleteAll
-					? `${theme.fg("warning", "delete all stashed prompts?")} ${theme.fg("text", "y")} ${theme.fg("dim", "/ n")}`
-					: `${theme.fg("text", "enter")} ${theme.fg("dim", "pop")}  ${theme.fg("text", "delete")} ${theme.fg("dim", "ctrl+d")}  ${theme.fg("text", "delete all")} ${theme.fg("dim", "ctrl+x")}`;
+					? `${theme.fg("warning", "delete all stashed prompts?")} ${ansiYellow("y")} ${theme.fg("dim", "/ n")}`
+					: `${ansiYellow("enter")} ${theme.fg("dim", "pop")}  ${ansiYellow("ctrl+d")} ${theme.fg("dim", "delete")}  ${ansiYellow("ctrl+x")} ${theme.fg("dim", "delete all")}`;
 				lines.push(panelLine(status, innerWidth));
 
-				return framePopup(lines, width, theme);
+				return framePopup(lines, width, theme, "Prompt Stash", `${items.length} saved`);
 			};
 
 			const component: Focusable & { handleInput(data: string): void; invalidate(): void; render(width: number): string[] } = {

@@ -18,6 +18,12 @@ const POPUP_PADDING_X = 2;
 const POPUP_PADDING_Y = 1;
 const ROW_META_MAX_WIDTH = 44;
 const ANSI_PATTERN = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/g;
+const ANSI_GREEN_FG = "\x1b[32m";
+const ANSI_YELLOW_FG = "\x1b[33m";
+const ANSI_FG_RESET = "\x1b[39m";
+
+function ansiGreen(text: string): string { return `${ANSI_GREEN_FG}${text}${ANSI_FG_RESET}`; }
+function ansiYellow(text: string): string { return `${ANSI_YELLOW_FG}${text}${ANSI_FG_RESET}`; }
 
 type SessionInfo = Awaited<ReturnType<typeof SessionManager.list>>[number];
 type Scope = "current" | "all";
@@ -863,17 +869,24 @@ class SessionManagerOverlay implements Focusable {
 			const clipped = truncateToWidth(safe, rowWidth, "");
 			return clipped + " ".repeat(Math.max(0, rowWidth - visibleWidth(clipped)));
 		};
+		const top = (title: string, right = "") => {
+			const rightPlain = right ? ` ${right} ` : "";
+			const titleBudget = Math.max(1, frameInner - visibleWidth(rightPlain) - 1);
+			const titlePlain = ` ${truncateToWidth(title, Math.max(1, titleBudget - 2), "…")} `;
+			const fill = Math.max(1, frameInner - visibleWidth(titlePlain) - visibleWidth(rightPlain));
+			return `${border("┏")}${ansiGreen(titlePlain)}${border("━".repeat(fill))}${right ? dim(rightPlain) : ""}${border("┓")}`;
+		};
 		const blank = () => border("┃") + " ".repeat(frameInner) + border("┃");
 		const row = (content = "") => border("┃") + " ".repeat(POPUP_PADDING_X) + fixed(content) + " ".repeat(POPUP_PADDING_X) + border("┃");
+		const filledRow = (content = "") => border("┃") + " ".repeat(POPUP_PADDING_X) + th.bg("toolPendingBg", fixed(content)) + " ".repeat(POPUP_PADDING_X) + border("┃");
 		const divider = () => row(muted("━".repeat(bodyWidth)));
 		const lines: string[] = [];
 
-		lines.push(border(`┏${"━".repeat(frameInner)}┓`));
+		lines.push(top("Session Manager", `${this.filtered.length}/${this.sessions.length} shown`));
 		for (let i = 0; i < POPUP_PADDING_Y; i++) lines.push(blank());
-		lines.push(row(this.renderHeader(bodyWidth, accent, muted)));
 		lines.push(row(this.renderScopeTabs(bodyWidth)));
 		lines.push(row(this.renderSubheader(bodyWidth, accent, muted, dim, warning, error)));
-		lines.push(row(this.renderSearch(bodyWidth, dim)));
+		lines.push(filledRow(this.renderSearch(bodyWidth, dim)));
 		lines.push(divider());
 
 		if (this.mode === "loading") {
@@ -932,13 +945,13 @@ class SessionManagerOverlay implements Focusable {
 
 	private renderSearch(inner: number, dim: (s: string) => string): string {
 		if (this.mode === "rename") {
-			const prefix = `${dim("rename ›")} `;
+			const prefix = " ";
 			const input = this.renameInput.render(Math.max(1, inner - visibleWidth(prefix)))[0] ?? "";
 			return prefix + input;
 		}
-		const prefix = `${dim("search ›")} `;
+		const prefix = " ";
 		const input = this.searchInput.render(Math.max(1, inner - visibleWidth(prefix)))[0] ?? "";
-		return prefix + input;
+		return input.trim() ? prefix + input : `${prefix}${dim("Type to search sessions...")}`;
 	}
 
 	private renderListRows(
@@ -994,8 +1007,8 @@ class SessionManagerOverlay implements Focusable {
 		const current = this.isCurrent(session);
 		const titleRaw = sessionResumeTitle(session);
 		const prefix = rowTreePrefix(node);
-		const cursor = selected ? ui.accent("› ") : "  ";
-		const marker = current ? ui.accent("● ") : session.parentSessionPath ? ui.dim("⑂ ") : "";
+		const cursor = " ";
+		const marker = "";
 		const rightParts = [
 			`${session.messageCount} msg`,
 			formatAge(session.modified),
@@ -1003,7 +1016,7 @@ class SessionManagerOverlay implements Focusable {
 		].filter(Boolean);
 		const rightRaw = rightParts.join(" · ");
 		const rightMax = Math.min(ROW_META_MAX_WIDTH, Math.max(14, Math.floor(inner * 0.38)));
-		const right = ui.dim(truncateToWidth(rightRaw, rightMax, "…"));
+		const right = selected ? this.theme.fg("text", truncateToWidth(rightRaw, rightMax, "…")) : ui.dim(truncateToWidth(rightRaw, rightMax, "…"));
 		const leftFixed = cursor + ui.dim(prefix) + marker;
 		const availableTitle = Math.max(8, inner - visibleWidth(leftFixed) - visibleWidth(right) - 2);
 		let title = truncateToWidth(titleRaw, availableTitle, "…");
@@ -1072,11 +1085,11 @@ class SessionManagerOverlay implements Focusable {
 	}
 
 	private renderFooter(inner: number, dim: (s: string) => string, warning: (s: string) => string, error: (s: string) => string): string[] {
-		if (this.mode === "confirm-delete") return [error("Enter confirm · Esc cancel")];
-		if (this.mode === "rename") return [warning("Enter save · Esc cancel · empty name clears title")];
+		if (this.mode === "confirm-delete") return [`${ansiYellow("Enter")} ${error("confirm")} · ${ansiYellow("Esc")} ${error("cancel")}`];
+		if (this.mode === "rename") return [`${ansiYellow("Enter")} ${warning("save")} · ${ansiYellow("Esc")} ${warning("cancel")} · ${warning("empty name clears title")}`];
 		return [
-			dim("↑↓/jk move · Enter resume · Ctrl+R rename · Ctrl+D delete"),
-			dim("Tab scope · Ctrl+S sort · Ctrl+N names · Ctrl+P path · Esc close"),
+			`${ansiYellow("↑↓/jk")} ${dim("move · ")}${ansiYellow("Enter")} ${dim("resume · ")}${ansiYellow("Ctrl+R")} ${dim("rename · ")}${ansiYellow("Ctrl+D")} ${dim("delete")}`,
+			`${ansiYellow("Tab")} ${dim("scope · ")}${ansiYellow("Ctrl+S")} ${dim("sort · ")}${ansiYellow("Ctrl+N")} ${dim("names · ")}${ansiYellow("Ctrl+P")} ${dim("path · ")}${ansiYellow("Esc")} ${dim("close")}`,
 		];
 	}
 

@@ -54,6 +54,12 @@ const SKILL_CONTEXT_MESSAGE_TYPE = "pi-skills-manager:loaded-skills";
 const SKILL_MARKER_PREFIX = "[skill] ";
 const SKILL_MARKER_FRAGMENTS = ["[skill]", "[skill", "[skil", "[ski", "[sk"];
 const VSTACK_MODAL_LOCK_SYMBOL = Symbol.for("vstack.pi.modal-lock");
+const ANSI_GREEN_FG = "\x1b[32m";
+const ANSI_YELLOW_FG = "\x1b[33m";
+const ANSI_FG_RESET = "\x1b[39m";
+
+function ansiGreen(text: string): string { return `${ANSI_GREEN_FG}${text}${ANSI_FG_RESET}`; }
+function ansiYellow(text: string): string { return `${ANSI_YELLOW_FG}${text}${ANSI_FG_RESET}`; }
 
 const GENERATE_SKILL_SYSTEM_PROMPT = `You create production-ready Pi Agent skills.
 
@@ -910,12 +916,18 @@ function fitFrameBody(theme: Theme, lines: string[], fixedInnerRows?: number): s
 	return lines;
 }
 
-function renderFrame(theme: Theme, width: number, lines: string[], fixedInnerRows?: number): string[] {
+function renderFrame(theme: Theme, width: number, lines: string[], fixedInnerRows?: number, title = ""): string[] {
 	const body = fitFrameBody(theme, lines, fixedInnerRows);
 	if (width < 6) return body.map((line) => truncateToWidth(inlineLine(line), width, ""));
 	const innerWidth = Math.max(1, width - 4);
+	const top = () => {
+		if (!title) return theme.fg("borderAccent", `┏${"━".repeat(innerWidth + 2)}┓`);
+		const titlePlain = ` ${truncateToWidth(title, Math.max(1, innerWidth), "…")} `;
+		const fill = Math.max(1, innerWidth + 2 - visibleWidth(titlePlain));
+		return `${theme.fg("borderAccent", "┏")}${ansiGreen(titlePlain)}${theme.fg("borderAccent", "━".repeat(fill))}${theme.fg("borderAccent", "┓")}`;
+	};
 	return [
-		theme.fg("borderAccent", `┏${"━".repeat(innerWidth + 2)}┓`),
+		top(),
 		...body.map((line) => frameLine(theme, line, innerWidth)),
 		theme.fg("borderAccent", `┗${"━".repeat(innerWidth + 2)}┛`),
 	].map((line) => truncateToWidth(inlineLine(line), width, ""));
@@ -1356,7 +1368,7 @@ class SkillsManagerDialog implements Focusable {
 		const root = new Container();
 		const enabledCount = this.registry.allSkills.filter((skill) => skill.enabled).length;
 		const totalCount = this.registry.allSkills.length;
-		root.addChild(new Text(`${skillEntityTitle(this.theme, "Skills Manager")} ${this.theme.fg("dim", `${enabledCount}/${totalCount} enabled`)}`, 1, 0));
+		root.addChild(new Text(this.theme.fg("dim", `${enabledCount}/${totalCount} enabled`), 1, 0));
 		root.addChild(new Spacer(1));
 		root.addChild(this.browseInput);
 		root.addChild(new Spacer(1));
@@ -1388,12 +1400,12 @@ class SkillsManagerDialog implements Focusable {
 					list.addChild(new Spacer(1));
 					list.addChild(new SingleLineText(skillSectionTitle(this.theme, entry.label), ellipsis));
 				} else if (entry.kind === "create") {
-					const prefix = isSelected ? this.theme.fg("accent", "› ") : "  ";
+					const prefix = " ";
 					const label = "Create new skill";
 					list.addChild(new ListLineText(`${prefix}${label}${this.theme.fg("dim", " — generate and save a new skill")}`, isSelected, this.theme, ellipsis));
 				} else {
 					const skill = entry.skill;
-					const prefix = isSelected ? this.theme.fg("accent", "› ") : "  ";
+					const prefix = " ";
 					const name = skill.enabled ? skill.name : this.theme.fg("muted", skill.name);
 					const status = skill.enabled ? "" : this.theme.fg("warning", " [disabled]");
 					const scope = this.theme.fg("muted", ` [${scopeLabel(skill)}]`);
@@ -1411,8 +1423,8 @@ class SkillsManagerDialog implements Focusable {
 		const actions = ["type search", "↑↓ select"];
 		if (!selected) actions.push("enter create", "esc close");
 		else { if (selected.enabled) actions.push("enter insert"); actions.push("tab preview", "ctrl+x enable/disable"); if (!this.browseQuery && isDeletableSkill(selected)) actions.push("backspace delete"); actions.push("esc close"); }
-		root.addChild(new Text(this.theme.fg("dim", actions.join(" • ")), 1, 0));
-		return renderFrame(this.theme, width, root.render(innerWidth));
+		root.addChild(new Text(actions.map((action) => action.replace(/^(enter|tab|ctrl\+x|backspace|esc|↑↓|type search)/, (key) => ansiYellow(key))).join(this.theme.fg("dim", " • ")), 1, 0));
+		return renderFrame(this.theme, width, root.render(innerWidth), undefined, "Skills Manager");
 	}
 
 	private renderCreate(width: number): string[] {
@@ -1426,7 +1438,7 @@ class SkillsManagerDialog implements Focusable {
 		else {
 			for (const option of step.options) {
 				const selected = option.value === this.createLocation;
-				root.addChild(new ListLineText(`${selected ? this.theme.fg("accent", "› ") : "  "}${option.label}${this.theme.fg("dim", ` — ${option.description}`)}`, selected, this.theme));
+				root.addChild(new ListLineText(` ${option.label}${this.theme.fg(selected ? "text" : "dim", ` — ${option.description}`)}`, selected, this.theme));
 			}
 			root.addChild(new Spacer(1)); root.addChild(new Text(this.theme.fg("dim", step.hint), 1, 0));
 		}

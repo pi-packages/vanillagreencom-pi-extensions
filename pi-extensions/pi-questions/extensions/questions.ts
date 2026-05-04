@@ -27,6 +27,12 @@ const DEFAULT_RENDER_MODE = "editor";
 const PADDING_X = 2;
 const PADDING_Y = 0;
 const OPTION_ROWS = 10;
+const ANSI_GREEN_FG = "\x1b[32m";
+const ANSI_YELLOW_FG = "\x1b[33m";
+const ANSI_FG_RESET = "\x1b[39m";
+
+function ansiGreen(text: string): string { return `${ANSI_GREEN_FG}${text}${ANSI_FG_RESET}`; }
+function ansiYellow(text: string): string { return `${ANSI_YELLOW_FG}${text}${ANSI_FG_RESET}`; }
 
 type VstackConfig = Record<string, unknown>;
 type QuestionRenderMode = "editor" | "overlay";
@@ -307,13 +313,21 @@ function popupContentWidth(width: number): number {
 	return Math.max(1, width - 2 - PADDING_X * 2);
 }
 
-function framePopup(lines: string[], width: number, theme: Theme): string[] {
+function framePopup(lines: string[], width: number, theme: Theme, title = "", right = ""): string[] {
 	if (width < 8) return lines.map((line) => truncateToWidth(line, width, ""));
 
 	const border = (text: string) => theme.fg("borderAccent", text);
 	const contentWidth = popupContentWidth(width);
 	const blank = `${border("┃")}${" ".repeat(width - 2)}${border("┃")}`;
-	const framed = [`${border("┏")}${border("━".repeat(width - 2))}${border("┓")}`];
+	const top = () => {
+		if (!title) return `${border("┏")}${border("━".repeat(width - 2))}${border("┓")}`;
+		const rightPlain = right ? ` ${right} ` : "";
+		const titleBudget = Math.max(1, width - 2 - visibleWidth(rightPlain) - 1);
+		const titlePlain = ` ${truncateToWidth(title, Math.max(1, titleBudget - 2), "…")} `;
+		const fill = Math.max(1, width - 2 - visibleWidth(titlePlain) - visibleWidth(rightPlain));
+		return `${border("┏")}${ansiGreen(titlePlain)}${border("━".repeat(fill))}${right ? theme.fg("dim", rightPlain) : ""}${border("┓")}`;
+	};
+	const framed = [top()];
 
 	for (let i = 0; i < PADDING_Y; i += 1) framed.push(blank);
 	for (const line of lines) {
@@ -743,10 +757,10 @@ async function openQuestionUi(ctx: ExtensionContext, pending: PendingQuestion): 
 				const isCursor = index === selectedRows[activeTab];
 				const customValue = customAnswers[activeTab].trim();
 				const isChecked = custom ? customValue.length > 0 : selections[activeTab].has(option!.label);
-				const marker = isCursor ? theme.fg("accent", "› ") : "  ";
+				const marker = " ";
 				const checkbox = question.multiple ? (isChecked ? "☑" : "☐") : isChecked ? "●" : "○";
-				const prefix = `${marker}${theme.fg(isChecked ? "accent" : "muted", checkbox)} `;
-				const prefixWidth = visibleWidth("› ☐ ");
+				const prefix = `${marker}${theme.fg(isChecked || isCursor ? "text" : "muted", checkbox)} `;
+				const prefixWidth = visibleWidth(" ☐ ");
 				const rawLabel = custom && customValue ? `${question.customLabel}: ${customValue}` : custom ? question.customLabel : option!.label;
 				const rawDesc = custom
 					? customValue ? "edit custom response" : question.customPlaceholder
@@ -765,10 +779,6 @@ async function openQuestionUi(ctx: ExtensionContext, pending: PendingQuestion): 
 				const question = request.questions[activeTab];
 				const lines: string[] = [];
 
-				const title = theme.fg("text", theme.bold(request.header));
-				const esc = theme.fg("dim", inputMode ? "esc back" : "esc");
-				const titleGap = Math.max(1, innerWidth - visibleWidth(request.header) - visibleWidth(inputMode ? "esc back" : "esc"));
-				lines.push(panelLine(`${title}${" ".repeat(titleGap)}${esc}`, innerWidth));
 				lines.push(panelLine(renderTabs(innerWidth), innerWidth));
 				lines.push(panelLine("", innerWidth));
 				for (const line of wrapPlain(question.question, innerWidth, 3)) {
@@ -803,10 +813,10 @@ async function openQuestionUi(ctx: ExtensionContext, pending: PendingQuestion): 
 
 				lines.push(panelLine("", innerWidth));
 				const footer = inputMode
-					? `${theme.fg("text", "enter")} ${theme.fg("dim", "submit text")}  ${theme.fg("text", "esc")} ${theme.fg("dim", "back")}`
-					: `${theme.fg("text", "enter")} ${theme.fg("dim", question.multiple ? "next/submit" : "choose")}  ${theme.fg("text", "space")} ${theme.fg("dim", question.multiple ? "toggle/type" : question.allowCustom ? "type custom" : "-")}  ${theme.fg("text", "tab/←/→")} ${theme.fg("dim", "tabs")}`;
+					? `${ansiYellow("enter")} ${theme.fg("dim", "submit text")}  ${ansiYellow("esc")} ${theme.fg("dim", "back")}`
+					: `${ansiYellow("enter")} ${theme.fg("dim", question.multiple ? "next/submit" : "choose")}  ${ansiYellow("space")} ${theme.fg("dim", question.multiple ? "toggle/type" : question.allowCustom ? "type custom" : "-")}  ${ansiYellow("tab/←/→")} ${theme.fg("dim", "tabs")}`;
 				lines.push(panelLine(footer, innerWidth));
-				return framePopup(lines, width, theme);
+				return framePopup(lines, width, theme, request.header, inputMode ? "esc back" : "esc");
 			};
 
 			return {

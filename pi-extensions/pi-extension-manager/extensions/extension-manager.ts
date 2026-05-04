@@ -31,6 +31,12 @@ const MANAGER_INNER_ROWS = 32;
 const QUICK_SETTINGS_INNER_ROWS = 30;
 const QUICK_SETTINGS_ROWS = 18;
 const VSTACK_MODAL_LOCK_SYMBOL = Symbol.for("vstack.pi.modal-lock");
+const ANSI_GREEN_FG = "\x1b[32m";
+const ANSI_YELLOW_FG = "\x1b[33m";
+const ANSI_FG_RESET = "\x1b[39m";
+
+function ansiGreen(text: string): string { return `${ANSI_GREEN_FG}${text}${ANSI_FG_RESET}`; }
+function ansiYellow(text: string): string { return `${ANSI_YELLOW_FG}${text}${ANSI_FG_RESET}`; }
 
 type Scope = "user" | "project" | "temporary" | "builtin" | "unknown";
 type ExtensionState = "active" | "disabled" | "shadowed" | "broken";
@@ -1336,13 +1342,15 @@ function createManagerComponent(
 		let lines: string[] = [];
 		lines.push(renderTabBar(topTabs, ui.topTab, bodyWidth, theme));
 		lines.push("");
-		lines.push(theme.fg("dim", ui.showAudit ? "diagnostics · ↑↓ scroll · PgUp/PgDn · Alt+A back · esc close" : "tab switch tabs · ↑↓ navigate · enter toggle/edit · d reset setting · D reset extension · type search · Alt+A diagnostics · esc close"));
+		lines.push(ui.showAudit
+			? `${theme.fg("dim", "diagnostics · ")}${ansiYellow("↑↓")} ${theme.fg("dim", "scroll · ")}${ansiYellow("PgUp/PgDn")} ${theme.fg("dim", "scroll · ")}${ansiYellow("Alt+A")} ${theme.fg("dim", "back · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`
+			: `${ansiYellow("tab")} ${theme.fg("dim", "switch tabs · ")}${ansiYellow("↑↓")} ${theme.fg("dim", "navigate · ")}${ansiYellow("enter")} ${theme.fg("dim", "toggle/edit · ")}${ansiYellow("d")} ${theme.fg("dim", "reset setting · ")}${ansiYellow("D")} ${theme.fg("dim", "reset extension · type search · ")}${ansiYellow("Alt+A")} ${theme.fg("dim", "diagnostics · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`);
 		lines.push("");
 		lines.push(divider(bodyWidth, theme));
 		const availableRows = Math.max(1, layout.innerRows - lines.length);
 		if (ui.showAudit) lines.push(...renderDiagnosticsViewport(inventory, ui, bodyWidth, theme, availableRows));
 		else lines.push(...renderExtensions(inventory, ui, bodyWidth, theme, layout));
-		return frame(lines, safeWidth, theme, layout.innerRows);
+		return frame(lines, safeWidth, theme, layout.innerRows, "Extension Manager");
 	}
 
 	return { handleInput, invalidate() {}, render };
@@ -1496,11 +1504,11 @@ function renderList(items: InventoryItem[], ui: ManagerUiState, width: number, t
 	for (const [visibleIndex, item] of items.slice(ui.scroll, ui.scroll + listRows).entries()) {
 		const index = ui.scroll + visibleIndex;
 		const selected = index === ui.selected;
-		const marker = selected ? theme.fg("accent", "›") : theme.fg("dim", " ");
+		const marker = " ";
 		const stateIcon = item.state === "active" ? theme.fg("success", "●") : item.state === "disabled" ? theme.fg("warning", "○") : item.state === "shadowed" ? theme.fg(selected ? "text" : "dim", "◌") : theme.fg("error", "×");
 		const name = selected ? theme.fg("text", listDisplayName(item, ui)) : listDisplayName(item, ui);
 		const meta = managerMutedForSelection(theme, ` ${kindLabel(item.kind)} · ${item.scope}`, selected);
-		const row = truncateToWidth(`${marker} ${stateIcon} ${name}${meta}`, width, "…");
+		const row = truncateToWidth(`${marker}${stateIcon} ${name}${meta}`, width, "…");
 		lines.push(selected ? managerSelectedLine(theme, row, width) : row);
 	}
 	const hidden = Math.max(0, items.length - (ui.scroll + listRows));
@@ -1558,14 +1566,14 @@ function renderInspector(inventory: Inventory, item: InventoryItem | undefined, 
 		const index = ui.settingScroll + visibleIndex;
 		const selected = index === ui.settingSelected;
 		const config = getConfigValue(inventory, extensionId, schema);
-		const marker = selected ? theme.fg("accent", "›") : " ";
+		const marker = " ";
 		const apply = schema.apply ?? (schema.requiresReload ? "reload" : "live");
 		const value = formatSettingValue(schema, config.value);
 		const scope = config.explicit ? config.scope : "default";
 		const valueText = theme.fg(config.explicit ? "warning" : selected ? "text" : "muted", value);
 		const meta = managerMutedForSelection(theme, `(${schema.type}, ${scope}, ${apply})`, selected);
 		const label = selected ? theme.fg("text", schema.label ?? schema.key) : schema.label ?? schema.key;
-		const row = truncateToWidth(`${marker} ${label}: ${valueText} ${meta}`, width, "…");
+		const row = truncateToWidth(`${marker}${label}: ${valueText} ${meta}`, width, "…");
 		lines.push(selected ? managerSelectedLine(theme, row, width) : row);
 		if (selected && schema.description) lines.push(`  ${theme.fg("muted", schema.description)}`);
 	}
@@ -1589,7 +1597,7 @@ function divider(width: number, theme: Theme): string {
 	return theme.fg("dim", "─".repeat(Math.max(1, width)));
 }
 
-function frame(lines: string[], width: number, theme: Theme, fixedInnerRows?: number): string[] {
+function frame(lines: string[], width: number, theme: Theme, fixedInnerRows?: number, title = ""): string[] {
 	const inner = Math.max(1, width - 2);
 	const contentWidth = frameContentWidth(width);
 	const border = (s: string) => theme.fg("borderAccent", s);
@@ -1603,7 +1611,13 @@ function frame(lines: string[], width: number, theme: Theme, fixedInnerRows?: nu
 		}
 	}
 	const blank = `${border("┃")}${" ".repeat(inner)}${border("┃")}`;
-	const out = [`${border("┏")}${border("━".repeat(inner))}${border("┓")}`];
+	const top = () => {
+		if (!title) return `${border("┏")}${border("━".repeat(inner))}${border("┓")}`;
+		const titlePlain = ` ${truncateToWidth(title, Math.max(1, inner - 2), "…")} `;
+		const fill = Math.max(1, inner - visibleWidth(titlePlain));
+		return `${border("┏")}${ansiGreen(titlePlain)}${border("━".repeat(fill))}${border("┓")}`;
+	};
+	const out = [top()];
 	for (let i = 0; i < POPUP_PADDING_Y; i += 1) out.push(blank);
 	for (const line of body) out.push(`${border("┃")}${" ".repeat(POPUP_PADDING_X)}${pad(line, contentWidth)}${" ".repeat(POPUP_PADDING_X)}${border("┃")}`);
 	for (let i = 0; i < POPUP_PADDING_Y; i += 1) out.push(blank);
@@ -1900,18 +1914,20 @@ function createQuickSettingsComponent(pi: ExtensionAPI, ctx: ExtensionCommandCon
 		const visible = filtered().slice(ui.scroll, ui.scroll + layout.listRows);
 		const lines: string[] = [];
 		const searchLine = ui.editing
-			? `${theme.fg("accent", "Editing")}: ${theme.fg("dim", "inline value active")}`
-			: `${theme.fg("accent", "Search")}: ${ui.search || theme.fg("dim", "type to filter settings")}`;
+			? theme.bg("toolPendingBg", pad(` ${theme.fg("dim", "Editing inline value")}`, bodyWidth))
+			: theme.bg("toolPendingBg", pad(` ${ui.search || theme.fg("dim", "Type to filter settings")}`, bodyWidth));
 		lines.push(renderTabBar(tabs, ui.tab, bodyWidth, theme));
 		lines.push("");
-		lines.push(theme.fg("dim", ui.editing ? "editing value · enter save · esc cancel · backspace delete · ctrl+u clear" : "tab switch extension tabs · ↑↓ navigate · enter edit/toggle · d reset setting · D reset extension · type search · backspace clear · esc close"));
+		lines.push(ui.editing
+			? `${theme.fg("dim", "editing value · ")}${ansiYellow("enter")} ${theme.fg("dim", "save · ")}${ansiYellow("esc")} ${theme.fg("dim", "cancel · ")}${ansiYellow("backspace")} ${theme.fg("dim", "delete · ")}${ansiYellow("ctrl+u")} ${theme.fg("dim", "clear")}`
+			: `${ansiYellow("tab")} ${theme.fg("dim", "switch extension tabs · ")}${ansiYellow("↑↓")} ${theme.fg("dim", "navigate · ")}${ansiYellow("enter")} ${theme.fg("dim", "edit/toggle · ")}${ansiYellow("d")} ${theme.fg("dim", "reset setting · ")}${ansiYellow("D")} ${theme.fg("dim", "reset extension · type search · ")}${ansiYellow("backspace")} ${theme.fg("dim", "clear · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`);
 		lines.push("");
 		lines.push(searchLine);
 		lines.push("");
 		lines.push(divider(bodyWidth, theme));
 		if (visible.length === 0) {
 			lines.push(theme.fg("muted", "No matching settings."));
-			return frame(lines, safeWidth, theme, layout.innerRows);
+			return frame(lines, safeWidth, theme, layout.innerRows, "Extension Settings");
 		}
 		let lastPackage = "";
 		for (const [visibleIndex, row] of visible.entries()) {
@@ -1923,7 +1939,7 @@ function createQuickSettingsComponent(pi: ExtensionAPI, ctx: ExtensionCommandCon
 			}
 			const selected = index === ui.selected;
 			const config = getConfigValue(inventory, row.extensionId, row.schema);
-			const marker = selected ? theme.fg("accent", "›") : " ";
+			const itemPad = " ";
 			const labelText = truncateToWidth(row.schema.label ?? row.schema.key, 34, "…");
 			const label = selected ? theme.fg("text", labelText) : labelText;
 			const isEditing = ui.editing?.rowId === row.id;
@@ -1931,7 +1947,7 @@ function createQuickSettingsComponent(pi: ExtensionAPI, ctx: ExtensionCommandCon
 			const valueText = theme.fg(isEditing ? "accent" : config.explicit ? "warning" : selected ? "text" : "muted", value);
 			const mode = isEditing ? "editing" : row.schema.type === "boolean" || row.schema.type === "enum" ? "toggle" : "edit";
 			const meta = managerMutedForSelection(theme, `${row.schema.type} · ${mode} · ${config.scope}`, selected);
-			const rowText = truncateToWidth(`${marker} ${label}${" ".repeat(Math.max(1, 36 - visibleWidth(labelText)))}${valueText} ${meta}`, bodyWidth, "…");
+			const rowText = truncateToWidth(`${itemPad}${label}${" ".repeat(Math.max(1, 36 - visibleWidth(labelText)))}${valueText} ${meta}`, bodyWidth, "…");
 			lines.push(selected ? managerSelectedLine(theme, rowText, bodyWidth) : rowText);
 			if (isEditing) lines.push(theme.fg("muted", "    Enter saves · Esc cancels · Backspace deletes · Ctrl+U clears"));
 			else if (selected && row.schema.description) lines.push(theme.fg("muted", `    ${truncateToWidth(row.schema.description, bodyWidth - 4, "…")}`));
@@ -1939,7 +1955,7 @@ function createQuickSettingsComponent(pi: ExtensionAPI, ctx: ExtensionCommandCon
 		const moreBefore = ui.scroll > 0 ? `↑ ${ui.scroll}` : "";
 		const moreAfter = ui.scroll + layout.listRows < filtered().length ? `↓ ${filtered().length - ui.scroll - layout.listRows}` : "";
 		if (moreBefore || moreAfter) lines.push("", theme.fg("dim", [moreBefore, moreAfter].filter(Boolean).join(" · ")));
-		return frame(lines, safeWidth, theme, layout.innerRows);
+		return frame(lines, safeWidth, theme, layout.innerRows, "Extension Settings");
 	}
 
 	return { handleInput, invalidate() {}, render };
