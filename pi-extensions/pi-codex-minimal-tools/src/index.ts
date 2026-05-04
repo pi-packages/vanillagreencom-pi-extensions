@@ -7,7 +7,6 @@ import { loadSettings, settingsDiagnostics } from "./settings.js";
 import { createApplyPatchToolDefinition } from "./tools/apply-patch.js";
 import { createImageGenerationToolDefinition } from "./tools/image-generation.js";
 import { viewImage, viewImageToolSchema, type ValidatedImage, type ViewImageInput } from "./tools/view-image.js";
-import { createWebSearchToolDefinition } from "./tools/web-search.js";
 import { renderTmuxKittyPlaceholderImage, wrapKittyGraphicsForTmux } from "./terminal-image-rendering.js";
 
 const INSTALL_SYMBOL = Symbol.for("vstack.pi-codex-minimal-tools.installed");
@@ -197,7 +196,6 @@ function registerDiagnosticCommand(pi: ExtensionAPI): void {
 
 function registerTools(pi: ExtensionAPI): void {
 	pi.registerTool(createImageGenerationToolDefinition({ loadSettings }) as never);
-	pi.registerTool(createWebSearchToolDefinition() as never);
 	pi.registerTool({
 		renderShell: "self",
 		name: "view_image",
@@ -247,7 +245,7 @@ export default function codexMinimalTools(pi: ExtensionAPI): void {
 	pi.on("before_provider_request", (event, ctx) => {
 		const settings = loadSettings(ctx.cwd);
 		if (!settings.enabled || !settings.nativeProviderTools || !hasOpenAiModelsLoaded(ctx) || contextModel(ctx)?.provider !== "openai-codex") return undefined;
-		const result = rewriteNativeOpenAiTools(event.payload, { webSearchExternalAccess: settings.webSearchExternalAccess });
+		const result = rewriteNativeOpenAiTools(event.payload);
 		return result.rewritten.length > 0 ? result.payload : undefined;
 	});
 }

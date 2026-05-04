@@ -1,0 +1,176 @@
+#!/usr/bin/env node
+import { existsSync } from "node:fs";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+
+const deepTypes = new Set(["deep-reasoning", "deep-lite", "deep"]);
+const formats = new Set(["findings", "markdown", "json"]);
+
+function jsonOut(stream, value) { stream.write(`${JSON.stringify(value)}\n`); }
+function fail(message, extra = {}) { jsonOut(process.stderr, { ok: false, error: message, ...extra }); process.exit(1); }
+
+async function loadEnvFile(path) {
+  if (!existsSync(path)) return;
+  const text = await readFile(path, "utf8");
+  for (const line of text.split(/\r?\n/)) {
+    const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
+    if (!match || process.env[match[1]]) continue;
+    let value = match[2];
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
+    process.env[match[1]] = value;
+  }
+}
+
+async function loadEnv() {
+  await loadEnvFile(resolve(process.cwd(), ".env.local"));
+  await loadEnvFile(resolve(process.cwd(), ".env"));
+}
+
+function resolveSecretRef(value, name) {
+  if (!value || !value.startsWith("op://")) return value;
+  const result = spawnSync("op", ["read", value], { encoding: "utf8" });
+  if (result.status === 0 && result.stdout.trim()) return result.stdout.trim();
+  fail(`${name} is a 1Password reference but could not be resolved. Install/sign in to the op CLI and run: op read '${value}'`);
+}
+
+function parseArgs(argv) {
+  const command = argv.shift();
+  const options = { command, positional: [], context: [], additionalQuery: [], includeDomain: [], excludeDomain: [], type: "deep-reasoning", numResults: 10, textMaxCharacters: 12000, format: "findings", timeout: 600 };
+  while (argv.length) {
+    const arg = argv.shift();
+    const value = () => argv.shift() ?? fail(`Missing value for ${arg}`);
+    if (arg === "--output") options.output = value();
+    else if (arg === "--query-file") options.queryFile = value();
+    else if (arg === "--context") options.context.push(value());
+    else if (arg === "--system-prompt") options.systemPrompt = value();
+    else if (arg === "--additional-query") options.additionalQuery.push(value());
+    else if (arg === "--include-domain") options.includeDomain.push(value());
+    else if (arg === "--exclude-domain") options.excludeDomain.push(value());
+    else if (arg === "--start-date") options.startDate = value();
+    else if (arg === "--end-date") options.endDate = value();
+    else if (arg === "--num-results") options.numResults = Number(value());
+    else if (arg === "--text-max-characters") options.textMaxCharacters = Number(value());
+    else if (arg === "--format") options.format = value();
+    else if (arg === "--raw-output") options.rawOutput = value();
+    else if (arg === "--timeout") options.timeout = Number(value());
+    else if (arg === "--type") options.type = value();
+    else if (arg?.startsWith("--")) fail(`Unknown flag: ${arg}`);
+    else options.positional.push(arg);
+  }
+  return options;
+}
+
+async function resolveQuery(options) {
+  let query = options.positional.join(" ").trim();
+  if (options.queryFile) query = (await readFile(resolve(options.queryFile), "utf8")).trim();
+  if (!query) fail("A query or --query-file is required.");
+  return query;
+}
+
+async function readMaybeFile(value) {
+  if (!value) return undefined;
+  const path = resolve(value);
+  if (existsSync(path)) return readFile(path, "utf8");
+  return value;
+}
+
+async function buildSystemPrompt(options) {
+  const parts = [];
+  const custom = await readMaybeFile(options.systemPrompt);
+  if (custom) parts.push(custom);
+  else parts.push("You are producing an evidence-backed research findings report. Prioritize primary sources, current documentation, tradeoffs, risks, and concrete revisit conditions. Include source URLs for material claims when Exa returns citations.");
+  for (const contextPath of options.context) {
+    const text = await readFile(resolve(contextPath), "utf8");
+    parts.push(`Context from ${contextPath}:\n${text}`);
+  }
+  return parts.join("\n\n---\n\n");
+}
+
+function normalizeResults(raw) {
+  return Array.isArray(raw?.results) ? raw.results : [];
+}
+function synthesized(raw) {
+  for (const key of ["answer", "summary", "output", "research", "text"]) if (typeof raw?.[key] === "string" && raw[key].trim()) return raw[key];
+  if (typeof raw?.data?.answer === "string") return raw.data.answer;
+  return "Exa returned sources but no synthesized answer field. Review evidence and raw metadata.";
+}
+function sourcesMarkdown(results) {
+  if (!results.length) return "- No source URLs returned by Exa.";
+  return results.map((r, i) => `- [${i + 1}] ${r.title || r.url || "Untitled"}${r.url ? ` — ${r.url}` : ""}${r.publishedDate ? ` (${r.publishedDate})` : ""}`).join("\n");
+}
+function evidenceMarkdown(results) {
+  return results.map((r, i) => {
+    const snippets = [r.summary, ...(Array.isArray(r.highlights) ? r.highlights : []), r.text].filter(Boolean).join("\n");
+    return `### [${i + 1}] ${r.title || r.url || "Untitled"}\n\n${r.url || ""}\n\n${snippets || "No snippet returned."}`;
+  }).join("\n\n");
+}
+function renderFindings(query, raw) {
+  const answer = synthesized(raw);
+  const results = normalizeResults(raw);
+  return `# Findings: ${query}\n\n## Research Question\n\n${query}\n\n## Executive Summary\n\n${answer}\n\n## Key Findings\n\n${answer}\n\n## Evidence and Sources\n\n${sourcesMarkdown(results)}\n\n${evidenceMarkdown(results)}\n\n## Tradeoffs / Alternatives\n\n- Review source evidence for tradeoffs and project-specific applicability.\n\n## Recommendation\n\n${answer}\n\n## Risks / Unknowns\n\n- Verify source freshness and applicability.\n- Re-run if upstream APIs, pricing, or release notes change.\n\n## Revisit Conditions\n\n- New primary-source documentation contradicts these findings.\n- Implementation constraints differ from supplied context.\n- Exa returns materially different source coverage in a later run.\n\n## Raw Exa Metadata\n\n\`\`\`json\n${JSON.stringify(raw, null, 2)}\n\`\`\`\n`;
+}
+
+async function writeAtomic(path, content) {
+  const target = resolve(path);
+  await mkdir(dirname(target), { recursive: true });
+  const temp = `${target}.tmp-${process.pid}-${Date.now()}`;
+  await writeFile(temp, content, "utf8");
+  await rename(temp, target);
+  return target;
+}
+
+async function callExa(query, options) {
+  if (process.env.EXA_MOCK_RESPONSE_FILE) return JSON.parse(await readFile(resolve(process.env.EXA_MOCK_RESPONSE_FILE), "utf8"));
+  if (typeof fetch !== "function") fail("This Node runtime does not provide fetch. Use Node 18+.");
+  const key = resolveSecretRef(process.env.EXA_API_KEY, "EXA_API_KEY");
+  if (!key) fail("EXA_API_KEY is required for Exa deep research. Set EXA_API_KEY or add it to .env.local.");
+  if (!deepTypes.has(options.type)) fail(`Invalid --type ${options.type}`);
+  if (!formats.has(options.format)) fail(`Invalid --format ${options.format}`);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.max(1, options.timeout) * 1000);
+  const body = {
+    query,
+    type: options.type,
+    numResults: options.numResults,
+    contents: { text: { maxCharacters: options.textMaxCharacters }, highlights: true },
+    systemPrompt: await buildSystemPrompt(options),
+    additionalQueries: options.additionalQuery.length ? options.additionalQuery : undefined,
+    includeDomains: options.includeDomain.length ? options.includeDomain : undefined,
+    excludeDomains: options.excludeDomain.length ? options.excludeDomain : undefined,
+    startPublishedDate: options.startDate,
+    endPublishedDate: options.endDate,
+  };
+  Object.keys(body).forEach((key) => body[key] === undefined && delete body[key]);
+  try {
+    const response = await fetch("https://api.exa.ai/search", { method: "POST", headers: { "content-type": "application/json", "x-api-key": key }, body: JSON.stringify(body), signal: controller.signal });
+    if (!response.ok) fail(`Exa request failed (${response.status}): ${await response.text().catch(() => response.statusText)}`);
+    return response.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function main() {
+  await loadEnv();
+  const options = parseArgs(process.argv.slice(2));
+  if (!options.command || options.command === "help" || options.command === "--help") {
+    jsonOut(process.stdout, { ok: true, usage: "deep-research report|json|doctor [query] --output path" });
+    return;
+  }
+  if (options.command === "doctor") {
+    jsonOut(process.stdout, { ok: true, node: process.version, fetch: typeof fetch === "function", exaApiKey: Boolean(process.env.EXA_API_KEY) });
+    return;
+  }
+  if (options.command !== "report" && options.command !== "json") fail(`Unknown command: ${options.command}`);
+  const query = await resolveQuery(options);
+  const raw = await callExa(query, options);
+  const format = options.command === "json" ? "json" : options.format;
+  const content = format === "json" ? JSON.stringify(raw, null, 2) : renderFindings(query, raw);
+  let output;
+  if (options.output) output = await writeAtomic(options.output, content);
+  if (options.rawOutput) await writeAtomic(options.rawOutput, JSON.stringify(raw, null, 2));
+  jsonOut(process.stdout, { ok: true, output, rawOutput: options.rawOutput ? resolve(options.rawOutput) : undefined, sources: normalizeResults(raw).length });
+}
+
+main().catch((error) => fail(error?.message || String(error)));

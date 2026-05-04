@@ -1,7 +1,7 @@
 {
   "name": "pi-codex-minimal-tools",
   "version": "0.1.0",
-  "description": "Minimal Codex/OpenAI native tools for Pi: image_generation, web_search, view_image, apply_patch",
+  "description": "Minimal Codex/OpenAI native tools for Pi: image_generation, view_image, apply_patch",
   "type": "module",
   "keywords": [
     "pi-package",
@@ -10,7 +10,6 @@
     "codex",
     "openai",
     "image-generation",
-    "web-search",
     "apply-patch"
   ],
   "license": "MIT",
@@ -26,7 +25,7 @@
         {
           "key": "enabled",
           "label": "Enable Codex minimal tools",
-          "description": "Register and auto-manage image_generation, web_search, view_image, and apply_patch.",
+          "description": "Register and auto-manage image_generation, view_image, and apply_patch.",
           "type": "boolean",
           "default": true,
           "category": "General",
@@ -45,7 +44,7 @@
         {
           "key": "nativeProviderTools",
           "label": "Use native OpenAI tools",
-          "description": "Rewrite image_generation and web_search to native OpenAI Codex Responses tools when supported.",
+          "description": "Rewrite image_generation to native OpenAI Codex Responses tools when supported.",
           "type": "boolean",
           "default": true,
           "category": "Provider",
@@ -91,33 +90,6 @@
           "type": "boolean",
           "default": false,
           "category": "Images",
-          "apply": "live"
-        },
-        {
-          "key": "webSearch",
-          "label": "Enable web_search",
-          "description": "Expose native OpenAI Codex web search on supported models.",
-          "type": "boolean",
-          "default": true,
-          "category": "Web",
-          "apply": "live"
-        },
-        {
-          "key": "webSearchExternalAccess",
-          "label": "Allow external web access",
-          "description": "Set external_web_access on native OpenAI web_search tools.",
-          "type": "boolean",
-          "default": true,
-          "category": "Web",
-          "apply": "live"
-        },
-        {
-          "key": "showWebSearchSessionNotice",
-          "label": "Show web search session notice",
-          "description": "Show a one-time notice when native web search is enabled. Off by default to avoid startup noise.",
-          "type": "boolean",
-          "default": false,
-          "category": "Web",
           "apply": "live"
         },
         {

@@ -4,7 +4,6 @@ export interface NativeToolRewriteResult<T = unknown> {
 }
 
 export interface NativeToolRewriteOptions {
-	webSearchExternalAccess?: boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -30,7 +29,6 @@ function imageToolConfig(tool: Record<string, unknown>): Record<string, unknown>
 
 export function rewriteNativeOpenAiTools<T>(payload: T, options: NativeToolRewriteOptions = {}): NativeToolRewriteResult<T> {
 	if (!isRecord(payload) || !Array.isArray(payload.tools)) return { payload, rewritten: [] };
-	const externalWebAccess = options.webSearchExternalAccess ?? true;
 	const rewritten: string[] = [];
 	const tools = payload.tools.map((candidate) => {
 		if (!isRecord(candidate)) return candidate;
@@ -38,10 +36,6 @@ export function rewriteNativeOpenAiTools<T>(payload: T, options: NativeToolRewri
 		if (name === "image_generation") {
 			rewritten.push(name);
 			return imageToolConfig(candidate);
-		}
-		if (name === "web_search") {
-			rewritten.push(name);
-			return { type: "web_search", external_web_access: externalWebAccess };
 		}
 		return candidate;
 	});

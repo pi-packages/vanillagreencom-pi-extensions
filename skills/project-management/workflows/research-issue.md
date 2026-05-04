@@ -1,6 +1,6 @@
 # Research Issue Workflow
 
-Create research issue in issue tracker and prepare assets for human execution.
+Create research issue in issue tracker, prepare assets, and delegate execution to the researcher agent.
 
 ## Inputs
 
@@ -14,6 +14,8 @@ Create research issue in issue tracker and prepare assets for human execution.
 | `type` | Caller (Targeted/Pervasive/Strategic) | Yes |
 | `prior_research` | Caller (research-spike § 2.2 findings) | No |
 | `consultation_agent_name` | Caller (start § 3.3 agent name) | No |
+| `researcher_agent_name` | Caller (existing researcher pane/session) | No |
+| `auto_execute` | Caller (default true) | No |
 | `research_paths` | Caller (project research docs paths) | No |
 | `decision_ids` | Caller (DXXX references) | No |
 | `batch_issues` | Caller (list of per-issue context: {topic, questions, domains, blocked_issue, type, consultation_agent_name, research_paths, decision_ids}) | No |
@@ -47,7 +49,7 @@ Create issue using input variables.
 .agents/skills/linear/scripts/linear.sh issues create \
   --title "Research: [TOPIC]" \
   --project "[PROJECT]" \
-  --labels "agent:human,research,[DOMAINS]" \
+  --labels "agent:researcher,research,[DOMAINS]" \
   --priority 2 \
   --estimate 1 \
   --description "[DESCRIPTION]"
@@ -63,6 +65,9 @@ Create issue using input variables.
 [TYPE_SECTION]
 ## Expected Decision
 Next available DXXX via `.agents/skills/decider/scripts/decisions next-id` (decider skill)
+
+## Researcher Execution
+Use the deep-research skill with Exa. Write findings to `[RESEARCH_DOCS_PATH]/[RESEARCH_ISSUE_ID]/findings.md` and preserve raw Exa metadata when available.
 ```
 
 **[TYPE_SECTION]** — insert based on [TYPE]:
@@ -170,7 +175,20 @@ Create project research docs directory for `[RESEARCH_ISSUE_ID]/`:
 - Self-contained (no external references, no issue IDs, no file paths)
 - Include prior research findings inline if referenced
 - Extract relevant architecture content directly
-- Ensure external research agent has all necessary context in regards to the research prompt. If there is anything they need to know to execute the research effectively, add it.
+- Ensure the researcher agent has all necessary context to execute the research effectively. If there is anything they need to know, add it.
+
+**run.sh** - Generated executable command helper:
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+.agents/skills/deep-research/scripts/deep-research report \
+  --query-file "[RESEARCH_DOCS_PATH]/[RESEARCH_ISSUE_ID]/prompt.txt" \
+  --context "[RESEARCH_DOCS_PATH]/[RESEARCH_ISSUE_ID]/context-[TOPIC].md" \
+  --output "[RESEARCH_DOCS_PATH]/[RESEARCH_ISSUE_ID]/findings.md" \
+  --raw-output "[RESEARCH_DOCS_PATH]/[RESEARCH_ISSUE_ID]/raw-exa.json"
+```
+
+Also write `command.txt` with the same command if executable bits are not preserved by the harness.
 
 ### 2.5 Validate Self-Containment
 
@@ -202,6 +220,9 @@ Assets complete. Update issue description with asset paths, then set state to To
 
    ## Completion
    `research-complete [RESEARCH_ISSUE_ID]`
+
+   ## Researcher Execution
+   Run `[RESEARCH_DOCS_PATH]/[RESEARCH_ISSUE_ID]/run.sh` or use Pi `web_research` with `outputPath` set to `[RESEARCH_DOCS_PATH]/[RESEARCH_ISSUE_ID]/findings.md`.
    ```
 
 3. **Update**: `.agents/skills/linear/scripts/linear.sh issues update [RESEARCH_ISSUE_ID] --description "[FULL_DESCRIPTION]"`
@@ -212,16 +233,53 @@ Present to user: "Research assets ready for [RESEARCH_ISSUE_ID]".
 
 ---
 
-## 4. Asset Quality Checklist
+## 4. Delegate to Researcher
+
+**If `auto_execute` is false**: Present the issue/assets and stop. Tell the caller the issue is labeled `agent:researcher` and ready for researcher execution.
+
+Otherwise delegate to `researcher` (or `[RESEARCHER_AGENT_NAME]` when provided). Use the exact self-contained prompt below. Fill placeholders and omit empty lines only.
+
+<delegation_format>
+Research issue: [RESEARCH_ISSUE_ID] - [TOPIC]
+
+Read:
+- [RESEARCH_DOCS_PATH]/[RESEARCH_ISSUE_ID]/prompt.txt
+- [RESEARCH_DOCS_PATH]/[RESEARCH_ISSUE_ID]/context-*.md
+
+Use the deep-research skill with Exa.
+Write findings to:
+[RESEARCH_DOCS_PATH]/[RESEARCH_ISSUE_ID]/findings.md
+
+Requirements:
+1. Use Exa deep research, preferably deep-reasoning.
+2. Include citations/source URLs.
+3. Include executive summary, key findings, recommendation, risks, and revisit conditions.
+4. Save raw Exa metadata if available.
+5. Do not change production code.
+6. Return only after findings.md exists.
+</delegation_format>
+
+After researcher returns:
+
+1. Verify `[RESEARCH_DOCS_PATH]/[RESEARCH_ISSUE_ID]/findings.md` exists.
+2. Verify it has non-empty `Executive Summary`, `Key Findings`, `Evidence and Sources`, `Recommendation`, `Risks / Unknowns`, and `Revisit Conditions` sections.
+3. Add a comment to the research issue with a concise summary, findings path, researcher identity, and raw metadata path when present.
+4. If this workflow is running inside a managed parent orchestration flow, directly invoke `research-complete [RESEARCH_ISSUE_ID]`. If standalone, set the research issue Done only after verification and present the next command: `research-complete [RESEARCH_ISSUE_ID]`.
+
+---
+
+## 5. Asset Quality Checklist
 
 - [ ] prompt.txt follows project research prompt template
 - [ ] All context files are self-contained
 - [ ] No external references in any file
 - [ ] Questions refined by domain agents
 - [ ] Deliverables are specific and actionable
+- [ ] run.sh or command.txt invokes deep-research with prompt/context/output paths
+- [ ] Delegation prompt is self-contained
 
-## 5. Return State
+## 6. Return State
 
 **If managed**: Return to the parent workflow's next section.
 
-**If standalone**: Session complete — research issue created.
+**If standalone**: Session complete — research issue created and delegated, or ready for researcher if `auto_execute=false`.

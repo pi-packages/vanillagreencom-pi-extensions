@@ -6,12 +6,15 @@ Implemented features:
 
 - `view_image` — validate and return a local image file as model image content.
 - `apply_patch` — local Codex-style patch application with the public argument shape `{ input: string }`.
+- `image_generation` — native OpenAI Codex image generation on supported models.
 - `/codex-minimal-tools` — diagnostic command for current settings, model, and active package tools.
 - Capability gating that only adds/removes this package's tools and preserves Pi native tools.
 - OpenAI-loaded gating: package tools are not registered until OpenAI/OpenAI-Codex models are present.
-- Native-aware OpenAI Codex provider shim for active `image_generation` / `web_search` tools.
+- Native-aware OpenAI Codex provider shim for active `image_generation` tools.
 - Generated image saving under `imageOutputDir` with `latest.<ext>` mirrors.
 - Optional direct OpenAI Images API fallback when `directImageApiFallback` is enabled and `OPENAI_API_KEY` is set.
+
+`web_search` moved to the `pi-web-tools` package. Old `pi-codex-minimal-tools` web-search settings are ignored after this migration.
 
 ## Commands
 

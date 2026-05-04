@@ -269,6 +269,7 @@ Windows note:
 |---|---|---|
 | `generalist` | engineer | General maintenance, cleanup, docs, stale references, and project hygiene. |
 | `iced` | engineer | Iced UI implementation and architecture specialist. |
+| `researcher` | engineer | Exa-powered research specialist for evidence-backed findings reports. |
 | `rust` | engineer | Rust engineer for systems work, performance, zero-allocation, and low-level design. |
 | `tpm` | manager | Technical program management and roadmap analysis agent. |
 | `reviewer-arch` | reviewer | Reviews boundaries, abstractions, and architectural drift. |
@@ -323,6 +324,7 @@ Windows note:
 | Skill | Brief | Arguments |
 |---|---|---|
 | `decider*` | Architectural decision document management and indexing. | — |
+| `deep-research` | Exa-powered deep research and portable findings report generation. | <ul><li><code>scripts/deep-research report "question" --output findings.md</code></li><li><code>scripts/deep-research doctor</code></li></ul> |
 | `github*` | GitHub PR, thread, review, CI, and merge workflows. | — |
 | `issue-lifecycle*` | Delegated implementation/review/QA issue workflows. | — |
 | `linear*` | Linear issue, cycle, milestone, and project workflows with fully custom API scripts. | — |
@@ -416,10 +418,17 @@ All vstack Pi packages declare `vstack.extensionManager.settings` metadata, incl
 
 #### `pi-codex-minimal-tools`
 
-- **Purpose:** Adds Codex-style `view_image`, `apply_patch`, native OpenAI `image_generation`/`web_search`, and diagnostics without replacing Pi's native file/shell/edit tools.
+- **Purpose:** Adds Codex-style `view_image`, `apply_patch`, native OpenAI `image_generation`, and diagnostics without replacing Pi's native file/shell/edit tools. Web search moved to `pi-web-tools`.
 - **Commands/tools:** `/codex-minimal-tools`, `/codex-minimal-tools doctor`, `/codex-minimal-tools settings`; `view_image`, `apply_patch`, and supported provider tools.
-- **Settings:** auto-enable, native provider tool shim, image/web toggles, image output directory/model, direct Images API fallback, patch-mode controls.
+- **Settings:** auto-enable, native provider tool shim, image toggles, image output directory/model, direct Images API fallback, patch-mode controls.
 - **More:** [pi-extensions/pi-codex-minimal-tools/README.md](pi-extensions/pi-codex-minimal-tools/README.md).
+
+#### `pi-web-tools`
+
+- **Purpose:** Owns `web_search` provider toggles, OpenAI-native web_search rewrite, Exa search/fetch/answer/similar/code tools, and Exa deep research reports.
+- **Commands/tools:** `/web-tools doctor`, `/web-tools provider ...`; `web_search`, `web_fetch`, `web_research`, `web_answer`, `web_find_similar`, `code_search`, `get_web_content`.
+- **Settings:** default provider, enabled providers, OpenAI external web access, Exa deep research, advanced/compatibility tools, curator/content staged toggles.
+- **More:** [pi-extensions/pi-web-tools/README.md](pi-extensions/pi-web-tools/README.md).
 
 #### `pi-output-policy`
 

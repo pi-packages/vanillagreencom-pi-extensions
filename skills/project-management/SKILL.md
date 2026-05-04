@@ -37,9 +37,9 @@ User-facing wrappers and TPM-execution workflows for project-level planning, aud
 | [audit-issues](workflows/audit-issues.md) | User dialog + Linear actions for issue/project audits; delegates to `tpm-audit` / `tpm-audit-project-order` |
 | [roadmap-plan](workflows/roadmap-plan.md) | Specialist consultation + research gating; delegates to `tpm-roadmap-plan` |
 | [roadmap-create](workflows/roadmap-create.md) | Execute a roadmap plan: project + issue creation via audit |
-| [research-spike](workflows/research-spike.md) | User-initiated research with consultation + asset prep |
-| [research-complete](workflows/research-complete.md) | Route a completed research issue (Targeted / Pervasive / Strategic) |
-| [research-issue](workflows/research-issue.md) | Create research issue + assets (called by `research-spike`) |
+| [research-spike](workflows/research-spike.md) | User-initiated research with consultation, asset prep, and researcher delegation |
+| [research-complete](workflows/research-complete.md) | Route a researcher-completed research issue (Targeted / Pervasive / Strategic) |
+| [research-issue](workflows/research-issue.md) | Create research issue + assets, then delegate to `agent:researcher` (called by `research-spike`) |
 
 ### TPM-execution (called by the wrappers)
 

@@ -1,0 +1,241 @@
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { execFileSync } from "node:child_process";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+
+export const PACKAGE_ID = "pi-web-tools";
+export const WEB_PROVIDERS = ["auto", "exa", "openai-native", "perplexity", "gemini"] as const;
+export type WebProvider = (typeof WEB_PROVIDERS)[number];
+export type ResolvedWebProvider = Exclude<WebProvider, "auto">;
+
+export interface WebToolsSettings {
+	enabled: boolean;
+	autoEnable: boolean;
+	defaultProvider: WebProvider;
+	enabledProviders: ResolvedWebProvider[];
+	nativeOpenAiWebSearch: boolean;
+	openAiExternalWebAccess: boolean;
+	exaDeepResearchEnabled: boolean;
+	exaAdvancedEnabled: boolean;
+	compatibilityTools: boolean;
+	curatorEnabled: boolean;
+	curatorTimeoutSeconds: number;
+	summaryModel: string;
+	includeContentByDefault: boolean;
+	browserCookieAccess: boolean;
+	githubClone: { enabled: boolean; maxRepoSizeMB: number };
+	video: { enabled: boolean };
+	shortcuts: { curator: string; activity: string };
+	apiKeys: Partial<Record<ResolvedWebProvider | "openai", string>>;
+	privateConfigFile?: string;
+	warnings: string[];
+}
+
+export const DEFAULT_SETTINGS: Omit<WebToolsSettings, "apiKeys" | "warnings" | "privateConfigFile"> = {
+	enabled: true,
+	autoEnable: true,
+	defaultProvider: "auto",
+	enabledProviders: ["exa", "openai-native", "perplexity", "gemini"],
+	nativeOpenAiWebSearch: true,
+	openAiExternalWebAccess: true,
+	exaDeepResearchEnabled: true,
+	exaAdvancedEnabled: false,
+	compatibilityTools: false,
+	curatorEnabled: true,
+	curatorTimeoutSeconds: 20,
+	summaryModel: "current",
+	includeContentByDefault: false,
+	browserCookieAccess: false,
+	githubClone: { enabled: true, maxRepoSizeMB: 350 },
+	video: { enabled: true },
+	shortcuts: { curator: "ctrl+shift+s", activity: "ctrl+shift+w" },
+};
+
+type SettingsRecord = Record<string, unknown>;
+const settingsParseWarnings = new Map<string, string>();
+
+function expandHome(input: string): string {
+	if (input === "~") return homedir();
+	if (input.startsWith("~/")) return join(homedir(), input.slice(2));
+	return input;
+}
+
+export function piUserDir(): string {
+	return resolve(expandHome(process.env.PI_CODING_AGENT_DIR?.trim() || "~/.pi/agent"));
+}
+
+export function projectSettingsPath(cwd: string): string {
+	let current = resolve(cwd);
+	while (true) {
+		const candidate = join(current, ".pi", "settings.json");
+		if (existsSync(candidate)) return candidate;
+		if (existsSync(join(current, ".pi")) || existsSync(join(current, ".git")) || existsSync(join(current, ".vstack-lock.json"))) return candidate;
+		const parent = dirname(current);
+		if (parent === current) return join(resolve(cwd), ".pi", "settings.json");
+		current = parent;
+	}
+}
+
+export function piSettingsPaths(cwd = process.cwd()): string[] {
+	return [join(piUserDir(), "settings.json"), projectSettingsPath(cwd)];
+}
+
+function asRecord(value: unknown): SettingsRecord | undefined {
+	return value && typeof value === "object" && !Array.isArray(value) ? (value as SettingsRecord) : undefined;
+}
+
+function mergeDeep(target: SettingsRecord, source: SettingsRecord): SettingsRecord {
+	for (const [key, value] of Object.entries(source)) {
+		const current = asRecord(target[key]);
+		const incoming = asRecord(value);
+		if (current && incoming) target[key] = mergeDeep({ ...current }, incoming);
+		else target[key] = value;
+	}
+	return target;
+}
+
+export function readRawVstackConfig(cwd?: string): SettingsRecord {
+	const merged: SettingsRecord = {};
+	for (const path of piSettingsPaths(cwd)) {
+		if (!existsSync(path)) continue;
+		try {
+			const parsed = JSON.parse(readFileSync(path, "utf8"));
+			settingsParseWarnings.delete(path);
+			const config = asRecord(asRecord(asRecord(parsed?.vstack)?.extensionManager)?.config)?.[PACKAGE_ID];
+			if (config && typeof config === "object" && !Array.isArray(config)) mergeDeep(merged, config as SettingsRecord);
+		} catch (error) {
+			settingsParseWarnings.set(path, error instanceof Error ? error.message : String(error));
+		}
+	}
+	return merged;
+}
+
+export function settingsDiagnostics(cwd?: string): string[] {
+	readRawVstackConfig(cwd);
+	return piSettingsPaths(cwd).flatMap((path) => {
+		const warning = settingsParseWarnings.get(path);
+		return warning ? [`${path}: ${warning}`] : [];
+	});
+}
+
+function boolSetting(raw: SettingsRecord, key: keyof typeof DEFAULT_SETTINGS): boolean {
+	const fallback = DEFAULT_SETTINGS[key];
+	const value = raw[key as string];
+	return typeof value === "boolean" ? value : Boolean(fallback);
+}
+
+function numberSetting(raw: SettingsRecord, key: string, fallback: number, min = 0, max = Number.MAX_SAFE_INTEGER): number {
+	const value = raw[key];
+	const number = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : fallback;
+	return Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : fallback;
+}
+
+function stringSetting(raw: SettingsRecord, key: string, fallback: string): string {
+	const value = raw[key];
+	return typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback;
+}
+
+function providerSetting(raw: SettingsRecord): WebProvider {
+	const value = raw.defaultProvider;
+	return WEB_PROVIDERS.includes(value as WebProvider) ? value as WebProvider : DEFAULT_SETTINGS.defaultProvider;
+}
+
+function enabledProvidersSetting(raw: SettingsRecord): ResolvedWebProvider[] {
+	const value = raw.enabledProviders;
+	const rawList = Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : DEFAULT_SETTINGS.enabledProviders;
+	const allowed = new Set<ResolvedWebProvider>();
+	for (const item of rawList) {
+		const provider = String(item).trim() as ResolvedWebProvider;
+		if (provider === "exa" || provider === "openai-native" || provider === "perplexity" || provider === "gemini") allowed.add(provider);
+	}
+	return allowed.size > 0 ? [...allowed] : [...DEFAULT_SETTINGS.enabledProviders];
+}
+
+function nested(raw: SettingsRecord, key: string): SettingsRecord {
+	return asRecord(raw[key]) ?? {};
+}
+
+function readJsonFile(path: string): SettingsRecord {
+	if (!existsSync(path)) return {};
+	const parsed = JSON.parse(readFileSync(path, "utf8"));
+	return asRecord(parsed) ?? {};
+}
+
+function resolveConfigPath(raw: SettingsRecord): string | undefined {
+	const candidate = typeof raw.webToolsConfigFile === "string" ? raw.webToolsConfigFile : typeof raw.configFile === "string" ? raw.configFile : process.env.PI_WEB_TOOLS_CONFIG_FILE;
+	if (!candidate || !candidate.trim()) return undefined;
+	const expanded = expandHome(candidate.trim());
+	return isAbsolute(expanded) ? expanded : resolve(process.cwd(), expanded);
+}
+
+function secretFrom(raw: SettingsRecord, keys: string[]): string | undefined {
+	for (const key of keys) {
+		const value = raw[key];
+		if (typeof value === "string" && value.trim()) return value.trim();
+	}
+	return undefined;
+}
+
+function resolveSecretRef(value: string | undefined, name: string, warnings: string[]): string | undefined {
+	if (!value || !value.startsWith("op://")) return value;
+	try {
+		return execFileSync("op", ["read", value], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+	} catch {
+		warnings.push(`${name} is a 1Password reference but could not be resolved. Install/sign in to the op CLI and run: op read '${value}'`);
+		return value;
+	}
+}
+
+export function loadSettings(cwd = process.cwd()): WebToolsSettings {
+	const raw = readRawVstackConfig(cwd);
+	const warnings = settingsDiagnostics(cwd);
+	const privateConfigFile = resolveConfigPath(raw);
+	let privateConfig: SettingsRecord = {};
+	if (privateConfigFile) {
+		try { privateConfig = readJsonFile(privateConfigFile); }
+		catch (error) { warnings.push(`${privateConfigFile}: ${error instanceof Error ? error.message : String(error)}`); }
+	}
+	const githubClone = nested(raw, "githubClone");
+	const video = nested(raw, "video");
+	const shortcuts = nested(raw, "shortcuts");
+	const sharedSecrets = ["exaApiKey", "perplexityApiKey", "geminiApiKey", "openaiApiKey"].filter((key) => typeof raw[key] === "string");
+	if (sharedSecrets.length > 0) warnings.push(`API keys in shared Pi settings are supported for compatibility but env vars or PI_WEB_TOOLS_CONFIG_FILE are preferred: ${sharedSecrets.join(", ")}`);
+	const secrets = { ...raw, ...privateConfig };
+	const exaKey = process.env.EXA_API_KEY || secretFrom(secrets, ["EXA_API_KEY", "exaApiKey"]);
+	const perplexityKey = process.env.PERPLEXITY_API_KEY || secretFrom(secrets, ["PERPLEXITY_API_KEY", "perplexityApiKey"]);
+	const geminiKey = process.env.GEMINI_API_KEY || secretFrom(secrets, ["GEMINI_API_KEY", "geminiApiKey"]);
+	const openAiKey = process.env.OPENAI_API_KEY || secretFrom(secrets, ["OPENAI_API_KEY", "openaiApiKey"]);
+	return {
+		enabled: boolSetting(raw, "enabled"),
+		autoEnable: boolSetting(raw, "autoEnable"),
+		defaultProvider: providerSetting(raw),
+		enabledProviders: enabledProvidersSetting(raw),
+		nativeOpenAiWebSearch: boolSetting(raw, "nativeOpenAiWebSearch"),
+		openAiExternalWebAccess: boolSetting(raw, "openAiExternalWebAccess"),
+		exaDeepResearchEnabled: boolSetting(raw, "exaDeepResearchEnabled"),
+		exaAdvancedEnabled: boolSetting(raw, "exaAdvancedEnabled"),
+		compatibilityTools: boolSetting(raw, "compatibilityTools"),
+		curatorEnabled: boolSetting(raw, "curatorEnabled"),
+		curatorTimeoutSeconds: numberSetting(raw, "curatorTimeoutSeconds", DEFAULT_SETTINGS.curatorTimeoutSeconds, 1, 600),
+		summaryModel: stringSetting(raw, "summaryModel", DEFAULT_SETTINGS.summaryModel),
+		includeContentByDefault: boolSetting(raw, "includeContentByDefault"),
+		browserCookieAccess: boolSetting(raw, "browserCookieAccess"),
+		githubClone: {
+			enabled: typeof githubClone.enabled === "boolean" ? githubClone.enabled : DEFAULT_SETTINGS.githubClone.enabled,
+			maxRepoSizeMB: numberSetting(githubClone, "maxRepoSizeMB", DEFAULT_SETTINGS.githubClone.maxRepoSizeMB, 1),
+		},
+		video: { enabled: typeof video.enabled === "boolean" ? video.enabled : DEFAULT_SETTINGS.video.enabled },
+		shortcuts: {
+			curator: stringSetting(shortcuts, "curator", DEFAULT_SETTINGS.shortcuts.curator),
+			activity: stringSetting(shortcuts, "activity", DEFAULT_SETTINGS.shortcuts.activity),
+		},
+		apiKeys: {
+			exa: resolveSecretRef(exaKey, "EXA_API_KEY", warnings),
+			perplexity: resolveSecretRef(perplexityKey, "PERPLEXITY_API_KEY", warnings),
+			gemini: resolveSecretRef(geminiKey, "GEMINI_API_KEY", warnings),
+			openai: resolveSecretRef(openAiKey, "OPENAI_API_KEY", warnings),
+		},
+		privateConfigFile,
+		warnings,
+	};
+}

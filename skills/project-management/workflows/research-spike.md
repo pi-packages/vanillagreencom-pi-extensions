@@ -106,7 +106,7 @@ Run Workflow: `⤵ workflows/research-issue.md § 1-5 → § 4` with context:
 
 <output_format>
 
-### 📚 RESEARCH SPIKE READY
+### 📚 RESEARCH SPIKE DELEGATED
 
 | Field | Value |
 |-------|-------|
@@ -132,15 +132,23 @@ Run Workflow: `⤵ workflows/research-issue.md § 1-5 → § 4` with context:
 |-------|
 | ✓ [RESEARCH_DOCS_PATH]/[RESEARCH_ISSUE_ID]/prompt.txt |
 | ✓ [RESEARCH_DOCS_PATH]/[RESEARCH_ISSUE_ID]/context-[TOPIC].md |
+| ✓ [RESEARCH_DOCS_PATH]/[RESEARCH_ISSUE_ID]/run.sh |
+
+### 🤖 RESEARCHER EXECUTION
+
+| Field | Value |
+|-------|-------|
+| Owner | agent:researcher |
+| Status | Delegated when auto_execute=true; otherwise ready for researcher |
+| Output | [RESEARCH_DOCS_PATH]/[RESEARCH_ISSUE_ID]/findings.md |
 
 ### 📋 NEXT STEPS
 
 | # | Step |
 |---|------|
-| 1 | Review prompt.txt - refine questions if needed |
-| 2 | Execute research (external session) |
-| 3 | Add findings: [RESEARCH_DOCS_PATH]/[RESEARCH_ISSUE_ID]/findings.md |
-| 4 | Complete: /research-complete [RESEARCH_ISSUE_ID] |
+| 1 | Review generated findings |
+| 2 | Run or continue `research-complete [RESEARCH_ISSUE_ID]` if not already invoked |
+| 3 | Approve follow-up work/decisions |
 </output_format>
 
-**END**: Research spike complete. User executes research externally, then runs `research-complete [ISSUE_ID]`.
+**END**: Research spike complete. Research is owned by `agent:researcher`; user reviews findings and continues `research-complete` if the managed workflow did not already invoke it.

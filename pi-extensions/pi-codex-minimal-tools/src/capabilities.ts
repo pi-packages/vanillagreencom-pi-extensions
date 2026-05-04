@@ -1,6 +1,6 @@
 import type { CodexMinimalToolsSettings } from "./settings.js";
 
-export const PACKAGE_TOOL_NAMES = ["image_generation", "web_search", "view_image", "apply_patch"] as const;
+export const PACKAGE_TOOL_NAMES = ["image_generation", "view_image", "apply_patch"] as const;
 export type PackageToolName = (typeof PACKAGE_TOOL_NAMES)[number];
 
 export interface ModelLike {
@@ -50,15 +50,14 @@ export function computeToolCapabilities(model: ModelLike | undefined, settings: 
 	if (!settings.enabled) {
 		return {
 			image_generation: { enabled: false, reason: "package disabled" },
-			web_search: { enabled: false, reason: "package disabled" },
 			view_image: { enabled: false, reason: "package disabled" },
 			apply_patch: { enabled: false, reason: "package disabled" },
 		};
 	}
 
-	const codex = isOpenAiCodexModel(model);
 	const imageInput = supportsImageInput(model);
 	const openAiLike = isOpenAiLikeModel(model);
+	const codex = isOpenAiCodexModel(model);
 
 	return {
 		image_generation: settings.imageGeneration && settings.nativeProviderTools && codex && imageInput
@@ -66,9 +65,6 @@ export function computeToolCapabilities(model: ModelLike | undefined, settings: 
 			: settings.imageGeneration && settings.directImageApiFallback
 				? { enabled: true, reason: "direct Images API fallback enabled" }
 				: { enabled: false, reason: !settings.imageGeneration ? "image_generation disabled by setting" : !settings.nativeProviderTools ? "native provider tools disabled" : !codex ? "requires openai-codex provider" : "model does not advertise image input" },
-		web_search: settings.webSearch && settings.nativeProviderTools && codex
-			? { enabled: true, reason: "OpenAI Codex model with native tools enabled" }
-			: { enabled: false, reason: !settings.webSearch ? "web_search disabled by setting" : !settings.nativeProviderTools ? "native provider tools disabled" : "requires openai-codex provider" },
 		view_image: settings.viewImage && imageInput
 			? { enabled: true, reason: "model accepts image input" }
 			: { enabled: false, reason: !settings.viewImage ? "view_image disabled by setting" : "model does not advertise image input" },

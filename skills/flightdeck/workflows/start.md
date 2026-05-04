@@ -242,7 +242,7 @@ Invoke workflow: `⤵ .agents/skills/project-management/workflows/research-issue
 - `project`: from `.agents/skills/linear/scripts/linear.sh cache projects list --state started`
 - `batch_issues`: list of per-issue objects, each containing: `topic`, `questions`, `domains`, `blocked_issue`, `type`, `consultation_agent_name`, `research_paths`, `decision_ids` — all sourced from § 3.2/3.3 per issue
 
-Research issues block their `blocked_issue`. After `workflows/research-issue.md` completes, user executes research externally, then runs `research-complete [ISSUE_ID]` to continue.
+Research issues block their `blocked_issue`. After `workflows/research-issue.md` completes, the issue is labeled `agent:researcher` and delegated to the researcher agent. Continue with `research-complete [ISSUE_ID]` after findings exist, or let the managed workflow invoke it directly.
 
 After `workflows/research-issue.md` returns → § 3.6.
 
@@ -263,15 +263,15 @@ Terminate the consultation agent if it's still running.
 - **Research issues** (`research` label) → § 4.2
 - **All other issues** → § 4.3
 
-### 4.2 Research Issues (human execution)
+### 4.2 Research Issues (researcher execution)
 
-1. **Check assets**: research prompt file exists for [ISSUE_ID]
+1. **Check assets and findings**: research prompt file and `[RESEARCH_DOCS_PATH]/[ISSUE_ID]/findings.md` status for [ISSUE_ID]
 
-2. **If missing** → Invoke workflow: `⤵ .agents/skills/project-management/workflows/research-issue.md § 2 → § 4.2` (Prepare Assets only)
+2. **If assets missing** → Invoke workflow: `⤵ .agents/skills/project-management/workflows/research-issue.md § 2 → § 4` (Prepare Assets then Delegate to Researcher)
 
-3. **If complete** → Present: `Research Ready: [ISSUE_ID] | Assets: ✓ | Run research-complete after execution`
+3. **If assets exist and findings missing** → Invoke/delegate `project-management/workflows/research-issue.md § 4 Delegate to Researcher`. Do not create a normal implementation worktree.
 
-4. **User executes externally** → `research-complete [ISSUE_ID]` → § 1
+4. **If findings exist** → `research-complete [ISSUE_ID]` → § 1
 
 ### 4.3 Create Worktree
 

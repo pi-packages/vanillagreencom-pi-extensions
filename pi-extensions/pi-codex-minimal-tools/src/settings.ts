@@ -12,9 +12,6 @@ export interface CodexMinimalToolsSettings {
 	imageOutputDir: string;
 	imageModel: "gpt-image-2" | "gpt-image-1.5" | "gpt-image-1";
 	directImageApiFallback: boolean;
-	webSearch: boolean;
-	webSearchExternalAccess: boolean;
-	showWebSearchSessionNotice: boolean;
 	viewImage: boolean;
 	applyPatchEnabled: boolean;
 	strictPatchMode: boolean;
@@ -30,9 +27,6 @@ export const DEFAULT_SETTINGS: CodexMinimalToolsSettings = {
 	imageOutputDir: ".pi/openai-codex-images",
 	imageModel: "gpt-image-2",
 	directImageApiFallback: false,
-	webSearch: true,
-	webSearchExternalAccess: true,
-	showWebSearchSessionNotice: false,
 	viewImage: true,
 	applyPatchEnabled: true,
 	strictPatchMode: false,
@@ -124,9 +118,6 @@ export function loadSettings(cwd?: string): CodexMinimalToolsSettings {
 		imageOutputDir: stringSetting(raw, "imageOutputDir"),
 		imageModel: imageModelSetting(raw),
 		directImageApiFallback: boolSetting(raw, "directImageApiFallback"),
-		webSearch: boolSetting(raw, "webSearch"),
-		webSearchExternalAccess: boolSetting(raw, "webSearchExternalAccess"),
-		showWebSearchSessionNotice: boolSetting(raw, "showWebSearchSessionNotice"),
 		viewImage: boolSetting(raw, "viewImage"),
 		applyPatchEnabled: boolSetting(raw, "applyPatchEnabled"),
 		strictPatchMode: boolSetting(raw, "strictPatchMode"),

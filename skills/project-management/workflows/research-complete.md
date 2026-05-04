@@ -10,11 +10,11 @@ Link completed research to blocked issues, analyze impact, create follow-up work
 
 ## 1. Get Research Details
 
-### 1.1 Ensure Research Committed
+### 1.1 Ensure Researcher Findings Committed
 
 1. **Check for uncommitted files** in project research docs for `[ISSUE_ID]/`.
 
-2. **If uncommitted**: Ask user → `git add [RESEARCH_DOCS_PATH]/[ISSUE_ID]/ && git commit -m "chore([ISSUE_ID]): Add research findings"`
+2. **If uncommitted**: The findings may have been written by `agent:researcher`. Ask user whether to commit now, then run `git add [RESEARCH_DOCS_PATH]/[ISSUE_ID]/ && git commit -m "chore([ISSUE_ID]): Add research findings"`.
 
 ### 1.2 Fetch Issue Details
 
@@ -23,7 +23,9 @@ Link completed research to blocked issues, analyze impact, create follow-up work
    .agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID]
    ```
 
-2. **Read findings**: project research docs `[ISSUE_ID]/findings.md`. Briefly summarize key findings.
+2. **Read findings**: project research docs `[ISSUE_ID]/findings.md`. Briefly summarize key findings. If missing, route back to `research-issue.md § 4 Delegate to Researcher` instead of asking the user to execute research externally.
+
+3. **Capture researcher metadata**: If `[RESEARCH_DOCS_PATH]/[ISSUE_ID]/raw-exa.json` or raw metadata exists in `findings.md`, retain source count/type for completion comments. Treat `agent:researcher` as the producer unless issue history says otherwise.
 
 ## 2. Ensure Domain Labels
 
@@ -360,6 +362,8 @@ Post a comment on the research issue documenting completion:
 
 ### Decision
 [DECISION_ID] - [SUMMARY]
+- **Researcher**: agent:researcher
+- **Deep Research Metadata**: [type/source count/raw metadata path if available]
 - **Rationale**: [BRIEF_RATIONALE]
 - **Revisit**: [CONDITIONS]
 

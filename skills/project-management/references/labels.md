@@ -36,6 +36,8 @@ See project label taxonomy for full taxonomy and colors.
 
 Agent labels are special — MUST have agent definition AND parent group.
 
+`agent:researcher` is reserved for research issues owned by the researcher agent. It requires the canonical `researcher` agent definition and should be used with the `research` workflow/classification label.
+
 ### Process
 
 1. **Create the agent definition** in project agent definitions

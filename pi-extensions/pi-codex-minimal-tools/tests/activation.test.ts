@@ -49,8 +49,8 @@ test("extension does not register tools until OpenAI models are loaded", async (
 		model: { provider: "openai-codex", id: "gpt-5.5", input: ["text", "image"] },
 		modelRegistry: { getAll: () => [{ provider: "openai-codex", id: "gpt-5.5" }] },
 	});
-	assert.equal(pi.tools.length, 4);
-	assert.deepEqual(pi.tools.map((tool) => tool.name).sort(), ["apply_patch", "image_generation", "view_image", "web_search"].sort());
+	assert.equal(pi.tools.length, 3);
+	assert.deepEqual(pi.tools.map((tool) => tool.name).sort(), ["apply_patch", "image_generation", "view_image"].sort());
 	assert.ok(pi.activeTools.includes("read"));
 	assert.ok(pi.activeTools.includes("bash"));
 	assert.ok(pi.activeTools.includes("apply_patch"));
