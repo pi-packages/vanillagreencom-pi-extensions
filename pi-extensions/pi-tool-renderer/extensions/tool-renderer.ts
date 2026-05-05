@@ -669,7 +669,7 @@ function padVisible(text: string, width: number): string {
 
 function terminalWidth(): number {
 	const raw = Number(process.stdout.columns || (process.stderr as any).columns || process.env.COLUMNS || 120);
-	return Math.max(60, Math.min(raw - 4, 220));
+	return Math.max(60, raw);
 }
 
 function truncateAnsi(text: string, width: number): string {
@@ -1272,9 +1272,9 @@ function shouldUseSplitDiff(diff: StructuredDiff, rows: StructuredDiffLine[], wi
 	if (width < DIFF_SPLIT_MIN_WIDTH) return false;
 	const maxNum = Math.max(1, ...diff.lines.map((line) => Math.max(line.oldNum ?? 0, line.newNum ?? 0)));
 	const numWidth = Math.max(2, String(maxNum).length);
-	const dividerWidth = 1;
-	const half = Math.max(24, Math.floor((width - dividerWidth) / 2));
-	const codeWidth = half - numWidth - 3;
+	const innerWidth = Math.max(2, width - 3); // left border + center divider + right border
+	const half = Math.max(24, Math.floor(innerWidth / 2));
+	const codeWidth = half - 2 - numWidth - 3; // inner cell padding + number/sign prefix
 	if (codeWidth < DIFF_SPLIT_MIN_CODE_WIDTH) return false;
 	let contentLines = 0;
 	let wrapCandidates = 0;
@@ -1288,19 +1288,38 @@ function shouldUseSplitDiff(diff: StructuredDiff, rows: StructuredDiffLine[], wi
 	return wrapCandidates / contentLines < DIFF_SPLIT_MAX_WRAP_RATIO;
 }
 
+function renderDiffCell(
+	line: StructuredDiffLine | null,
+	side: "old" | "new",
+	cellWidth: number,
+	numWidth: number,
+	theme: any,
+	path: string | undefined,
+	cwd: string | undefined,
+	ranges: Array<[number, number]> = [],
+): string {
+	const contentWidth = Math.max(1, cellWidth - 2);
+	return ` ${renderDiffHalf(line, side, contentWidth, numWidth, theme, path, cwd, ranges)} `;
+}
+
 function renderSplitDiff(diff: StructuredDiff, rows: StructuredDiffLine[], width: number, theme: any, path?: string, cwd?: string): string[] {
+	const tableWidth = Math.max(DIFF_SPLIT_MIN_WIDTH, width);
 	const maxNum = Math.max(1, ...diff.lines.map((line) => Math.max(line.oldNum ?? 0, line.newNum ?? 0)));
 	const numWidth = Math.max(2, String(maxNum).length);
+	const leftBorder = borderMuted(theme, "│");
 	const divider = borderMuted(theme, "│");
-	const half = Math.max(24, Math.floor((width - visibleLength(divider)) / 2));
-	const ruleSegment = (glyph: string) => borderMuted(theme, glyph.repeat(half));
-	const topRule = `${ruleSegment("─")}${borderMuted(theme, "┬")}${ruleSegment("─")}`;
-	const bottomRule = `${ruleSegment("─")}${borderMuted(theme, "┴")}${ruleSegment("─")}`;
+	const rightBorder = borderMuted(theme, "│");
+	const innerWidth = Math.max(2, tableWidth - visibleLength(leftBorder) - visibleLength(divider) - visibleLength(rightBorder));
+	const leftCellWidth = Math.max(1, Math.floor(innerWidth / 2));
+	const rightCellWidth = Math.max(1, innerWidth - leftCellWidth);
+	const ruleSegment = (width: number) => borderMuted(theme, "─".repeat(Math.max(1, width)));
+	const topRule = `${borderMuted(theme, "┌")}${ruleSegment(leftCellWidth)}${borderMuted(theme, "┬")}${ruleSegment(rightCellWidth)}${borderMuted(theme, "┐")}`;
+	const bottomRule = `${borderMuted(theme, "└")}${ruleSegment(leftCellWidth)}${borderMuted(theme, "┴")}${ruleSegment(rightCellWidth)}${borderMuted(theme, "┘")}`;
 	const out = [topRule];
 	for (const pair of pairDiffRows(rows)) {
 		const leftRanges = pair.left && pair.right ? lineWordRanges(pair.left, pair.right, cwd) : [];
 		const rightRanges = pair.left && pair.right ? lineWordRanges(pair.right, pair.left, cwd) : [];
-		out.push(`${renderDiffHalf(pair.left, "old", half, numWidth, theme, path ?? diff.path, cwd, leftRanges)}${divider}${renderDiffHalf(pair.right, "new", half, numWidth, theme, path ?? diff.path, cwd, rightRanges)}`);
+		out.push(`${leftBorder}${renderDiffCell(pair.left, "old", leftCellWidth, numWidth, theme, path ?? diff.path, cwd, leftRanges)}${divider}${renderDiffCell(pair.right, "new", rightCellWidth, numWidth, theme, path ?? diff.path, cwd, rightRanges)}${rightBorder}`);
 	}
 	out.push(bottomRule);
 	return out;
