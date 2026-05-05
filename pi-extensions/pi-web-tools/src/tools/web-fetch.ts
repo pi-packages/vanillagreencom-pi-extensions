@@ -4,7 +4,9 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import { Type, type Static } from "typebox";
 import { extractGitHubUrl } from "../extract/github.js";
 import { fetchHttpContent, isProbablyPdf } from "../extract/http.js";
-import { fetchLocalPdfText, fetchPdfText } from "../extract/pdf.js";
+import { readFile as fsReadFile } from "node:fs/promises";
+import { fetchLocalPdfText, fetchPdfText, extractPdfTextBest } from "../extract/pdf.js";
+import { looksLikeScannedPdf, rasterizePdfPages, type PdfPageImage } from "../extract/pdf-pages.js";
 import { ExaClient } from "../providers/exa.js";
 import type { WebToolsSettings } from "../settings.js";
 import { storeWebContent, type StoredWebContent } from "../storage.js";
@@ -118,7 +120,7 @@ function previewStats(content: string, maxCharacters: number): WebFetchPreviewIt
 	};
 }
 
-export function buildWebFetchToolResult(stored: StoredWebContent[], provider: string, maxCharacters = DEFAULT_WEB_FETCH_PREVIEW_CHARACTERS) {
+export function buildWebFetchToolResult(stored: StoredWebContent[], provider: string, maxCharacters = DEFAULT_WEB_FETCH_PREVIEW_CHARACTERS, pageImages: Array<{ type: "image"; mimeType: string; data: string; pageNumber?: number }> = []) {
 	const previewItems = stored.map((item) => {
 		const stats = previewStats(item.content, maxCharacters);
 		const { text } = truncateText(item.content, maxCharacters);
@@ -138,9 +140,14 @@ export function buildWebFetchToolResult(stored: StoredWebContent[], provider: st
 		return `- ${item.id}: ${label}\n[${meta}]\n${text}`;
 	}).join("\n\n");
 	const previewMeta = preview.truncated ? ` (${preview.shownCharacters}/${preview.fullCharacters} chars shown)` : "";
+	const imagesNote = pageImages.length ? `\n\n[${pageImages.length} scanned PDF page image${pageImages.length === 1 ? "" : "s"} attached for vision OCR]` : "";
+	const content: Array<{ type: "text"; text: string } | { type: "image"; mimeType: string; data: string }> = [
+		{ type: "text", text: `Fetched ${stored.length} URL(s). Preview returned${previewMeta}. Full extracted text is stored under content id(s): ${ids || "none"}.\n\n${previewText}${imagesNote}\n\nUse get_web_content with the content id for stored full text.` },
+	];
+	for (const image of pageImages) content.push({ type: "image", mimeType: image.mimeType, data: image.data });
 	return {
-		content: [{ type: "text", text: `Fetched ${stored.length} URL(s). Preview returned${previewMeta}. Full extracted text is stored under content id(s): ${ids || "none"}.\n\n${previewText}\n\nUse get_web_content with the content id for stored full text.` }],
-		details: { provider, stored, preview },
+		content,
+		details: { provider, stored, preview, pageImageCount: pageImages.length },
 	};
 }
 
@@ -193,14 +200,40 @@ export function createWebFetchToolDefinition(pi: ExtensionAPI, getSettings: (cwd
 			}
 			if (params.provider !== "exa") {
 				const stored = [];
+				const pageImages: PdfPageImage[] = [];
 				const failed: Array<{ url: string; error: unknown }> = [];
+				async function handlePdfBuffer(buffer: Buffer | ArrayBuffer | Uint8Array, source: { provider: "http" | "local"; url: string; title: string; localPath?: string }) {
+					const bufferLike = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer));
+					let text = "";
+					let textMeta: Record<string, unknown> = {};
+					try {
+						const result = await extractPdfTextBest(bufferLike);
+						text = result.text;
+						textMeta = result.metadata;
+					} catch (error) {
+						textMeta = { extraction: "pdf-empty", textError: error instanceof Error ? error.message : String(error) };
+					}
+					let rasterized: { pageCount: number; truncated: boolean } | undefined;
+					if (settings.pdfOcr.enabled && looksLikeScannedPdf(text, bufferLike.byteLength)) {
+						try {
+							const result = await rasterizePdfPages(bufferLike, { maxPages: settings.pdfOcr.maxPages, dpi: settings.pdfOcr.dpi });
+							rasterized = { pageCount: result.pageCount, truncated: result.truncated };
+							for (const image of result.images) pageImages.push(image);
+						} catch (error) {
+							textMeta = { ...textMeta, ocrError: error instanceof Error ? error.message : String(error) };
+						}
+					}
+					const content = text || (rasterized ? `[Scanned PDF: ${rasterized.pageCount} pages, ${pageImages.length} attached as images${rasterized.truncated ? ` (truncated to ${settings.pdfOcr.maxPages})` : ""}]` : "[Empty PDF: no extractable text]");
+					const metadata = { provider: source.provider, tool: name, ...textMeta, ...(source.localPath ? { localPath: source.localPath } : {}), ...(rasterized ? { pdfPageCount: rasterized.pageCount, pdfPagesRasterized: pageImages.length, pdfPagesTruncated: rasterized.truncated } : {}) };
+					stored.push(storeWebContent(pi, { title: source.title, url: source.url, content, metadata }));
+				}
 				for (const url of list) {
 					try {
 						if (isLocalFileInput(url)) {
 							const localPath = resolveLocalFilePath(ctx.cwd, url);
 							if (!isProbablyPdf(localPath)) throw new Error(`Local file extraction currently supports PDFs only: ${localPath}`);
-							const pdf = await fetchLocalPdfText(localPath);
-							stored.push(storeWebContent(pi, { title: basename(localPath), url: pathToFileURL(localPath).href, content: pdf.text, metadata: { provider: "local", tool: name, localPath, ...pdf.metadata } }));
+							const buffer = await fsReadFile(localPath);
+							await handlePdfBuffer(buffer, { provider: "local", url: pathToFileURL(localPath).href, title: basename(localPath), localPath });
 							continue;
 						}
 						const github = await extractGitHubUrl(url, { signal, cloneEnabled: settings.githubClone.enabled, maxRepoSizeMB: settings.githubClone.maxRepoSizeMB, cloneTimeoutSeconds: settings.githubClone.cloneTimeoutSeconds, maxAgeHours: settings.githubClone.cacheMaxAgeHours }).catch((error) => ({ error }));
@@ -209,8 +242,10 @@ export function createWebFetchToolDefinition(pi: ExtensionAPI, getSettings: (cwd
 							continue;
 						}
 						if (isProbablyPdf(url)) {
-							const pdf = await fetchPdfText(url, fetch, signal);
-							stored.push(storeWebContent(pi, { title: url.split("/").pop() || url, url, content: pdf.text, metadata: { provider: "http", tool: name, ...pdf.metadata } }));
+							const response = await fetch(url, { signal });
+							if (!response.ok) throw new Error(`PDF fetch failed (${response.status}) for ${url}`);
+							const buffer = await response.arrayBuffer();
+							await handlePdfBuffer(buffer, { provider: "http", url, title: url.split("/").pop() || url });
 							continue;
 						}
 						const extracted = await fetchHttpContent(url, { signal, jinaFallback: settings.htmlExtraction.jinaFallback, jinaApiKey: settings.apiKeys.jina });
@@ -226,7 +261,7 @@ export function createWebFetchToolDefinition(pi: ExtensionAPI, getSettings: (cwd
 					stored.push(...await fetchWithExa(failed.map((item) => item.url)));
 				}
 				const actualProvider = storedProvider(stored);
-				return buildWebFetchToolResult(stored, params.provider === "http" ? "http" : actualProvider, previewLimit(params));
+				return buildWebFetchToolResult(stored, params.provider === "http" ? "http" : actualProvider, previewLimit(params), pageImages);
 			}
 			const stored = await fetchWithExa(list);
 			return buildWebFetchToolResult(stored, "exa", previewLimit(params));

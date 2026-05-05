@@ -26,6 +26,7 @@ export interface WebToolsSettings {
 	browserCookieAccess: boolean;
 	githubClone: { enabled: boolean; maxRepoSizeMB: number; cloneTimeoutSeconds: number; cacheMaxAgeHours: number };
 	htmlExtraction: { jinaFallback: boolean };
+	pdfOcr: { enabled: boolean; maxPages: number; dpi: number };
 	browserCookies: { preferredBrowser: "auto" | "firefox" | "zen" | "chrome" | "chromium"; profile?: string };
 	video: { enabled: boolean };
 	shortcuts: { curator: string; activity: string };
@@ -52,6 +53,7 @@ export const DEFAULT_SETTINGS: Omit<WebToolsSettings, "apiKeys" | "warnings" | "
 	browserCookieAccess: false,
 	githubClone: { enabled: true, maxRepoSizeMB: 350, cloneTimeoutSeconds: 60, cacheMaxAgeHours: 24 },
 	htmlExtraction: { jinaFallback: true },
+	pdfOcr: { enabled: true, maxPages: 5, dpi: 150 },
 	browserCookies: { preferredBrowser: "auto" },
 	video: { enabled: true },
 	shortcuts: { curator: "ctrl+shift+s", activity: "ctrl+shift+w" },
@@ -247,6 +249,7 @@ export function loadSettings(cwd = process.cwd()): WebToolsSettings {
 	}
 	const githubClone = nested(raw, "githubClone");
 	const htmlExtraction = nested(raw, "htmlExtraction");
+	const pdfOcr = nested(raw, "pdfOcr");
 	const browserCookies = nested(raw, "browserCookies");
 	const video = nested(raw, "video");
 	const shortcuts = nested(raw, "shortcuts");
@@ -282,6 +285,11 @@ export function loadSettings(cwd = process.cwd()): WebToolsSettings {
 		},
 		htmlExtraction: {
 			jinaFallback: typeof htmlExtraction.jinaFallback === "boolean" ? htmlExtraction.jinaFallback : DEFAULT_SETTINGS.htmlExtraction.jinaFallback,
+		},
+		pdfOcr: {
+			enabled: typeof pdfOcr.enabled === "boolean" ? pdfOcr.enabled : DEFAULT_SETTINGS.pdfOcr.enabled,
+			maxPages: numberSetting(pdfOcr, "maxPages", DEFAULT_SETTINGS.pdfOcr.maxPages, 1, 20),
+			dpi: numberSetting(pdfOcr, "dpi", DEFAULT_SETTINGS.pdfOcr.dpi, 72, 300),
 		},
 		browserCookies: {
 			preferredBrowser: (["auto", "firefox", "zen", "chrome", "chromium"] as const).includes((browserCookies.preferredBrowser as any)) ? (browserCookies.preferredBrowser as any) : DEFAULT_SETTINGS.browserCookies.preferredBrowser,

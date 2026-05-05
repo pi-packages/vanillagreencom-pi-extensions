@@ -79,7 +79,9 @@ test("web_fetch returned text and details identify preview truncation and stored
 		content: "x".repeat(DEFAULT_WEB_FETCH_PREVIEW_CHARACTERS + 5),
 		createdAt: "2026-01-01T00:00:00.000Z",
 	}], "http");
-	const text = result.content[0]!.text;
+	const block = result.content[0]!;
+	assert.equal(block.type, "text");
+	const text = block.type === "text" ? block.text : "";
 	assert.match(text, /Preview returned \(4000\/4005 chars shown\)/);
 	assert.match(text, /Full extracted text is stored under content id\(s\): web-long/);
 	assert.match(text, /\[preview 4000\/4005 chars; full text stored\]/);
@@ -201,12 +203,14 @@ test("web_fetch extracts local PDF file paths into session storage", async () =>
 	const path = join(dir, "local.pdf");
 	writeFileSync(path, "%PDF-1.4\nBT\n(Local PDF) Tj\nET");
 	const appended: any[] = [];
-	const tool = createWebFetchToolDefinition({ appendEntry(type: string, data: unknown) { appended.push({ type, data }); } } as any, () => ({ githubClone: { enabled: true }, apiKeys: {} }) as any);
+	const tool = createWebFetchToolDefinition({ appendEntry(type: string, data: unknown) { appended.push({ type, data }); } } as any, () => ({ githubClone: { enabled: true }, apiKeys: {}, htmlExtraction: { jinaFallback: false }, pdfOcr: { enabled: false, maxPages: 5, dpi: 150 } }) as any);
 	const result = await tool.execute("call", { filePath: path, provider: "auto" }, undefined, undefined, { cwd: dir } as any);
 	assert.equal(result.details.provider, "local");
 	const stored = result.details.stored[0]!;
 	assert.equal(stored.title, "local.pdf");
 	assert.equal(stored.metadata?.provider, "local");
-	assert.match(result.content[0]!.text, /Local PDF/);
+	const block = result.content[0]!;
+	assert.equal(block.type, "text");
+	assert.match(block.type === "text" ? block.text : "", /Local PDF/);
 	assert.equal(appended.length, 1);
 });
