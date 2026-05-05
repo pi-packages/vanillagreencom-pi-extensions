@@ -1,5 +1,5 @@
 import { CompactionSummaryMessageComponent, getLanguageFromPath, getMarkdownTheme, highlightCode, ToolExecutionComponent, type ExtensionAPI, type ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { Container, Markdown, Text, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@mariozechner/pi-tui";
+import { Container, Loader, Markdown, Text, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@mariozechner/pi-tui";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
@@ -12,6 +12,7 @@ const TOOL_EXECUTION_RENDERER_PATCH_SYMBOL = Symbol.for("vstack.pi-tool-renderer
 const TOOL_CHROME_PATCH_SYMBOL = Symbol.for("vstack.pi-tool-renderer.tool-chrome-patch");
 const COMPACTION_SUMMARY_RENDERER_PATCH_SYMBOL = Symbol.for("vstack.pi-tool-renderer.compaction-summary-renderer-patch");
 const MARKDOWN_CODE_BLOCK_PATCH_SYMBOL = Symbol.for("vstack.pi-tool-renderer.markdown-code-block-patch");
+const WORKING_LOADER_ALIGNMENT_PATCH_SYMBOL = Symbol.for("vstack.pi-tool-renderer.working-loader-alignment-patch");
 
 const ANSI_GREEN = "\x1b[32m";
 const ANSI_RED = "\x1b[31m";
@@ -2716,6 +2717,27 @@ function installWorkingIndicator(pi: ExtensionAPI): void {
 	});
 }
 
+function installWorkingLoaderAlignmentPatch(): void {
+	const proto = Loader.prototype as unknown as Record<PropertyKey, any>;
+	if (proto[WORKING_LOADER_ALIGNMENT_PATCH_SYMBOL]) return;
+	const originalRender = proto.render;
+	if (typeof originalRender !== "function") return;
+	proto[WORKING_LOADER_ALIGNMENT_PATCH_SYMBOL] = true;
+	proto.render = function patchedWorkingLoaderRender(this: any, width: number): string[] {
+		const message = typeof this?.message === "string" ? this.message : "";
+		if (!message.startsWith("Working...")) return originalRender.call(this, width);
+		const originalPaddingX = this.paddingX;
+		try {
+			this.paddingX = 0;
+			this.invalidate?.();
+			return originalRender.call(this, width);
+		} finally {
+			this.paddingX = originalPaddingX;
+			this.invalidate?.();
+		}
+	};
+}
+
 function registerRead(pi: ExtensionAPI, agent: any, cwd: string): void {
 	const original = getBuiltInTool(agent, cwd, "read");
 	if (!original) return;
@@ -2972,6 +2994,7 @@ export default async function toolRenderer(pi: ExtensionAPI): Promise<void> {
 	installToolExecutionRendererPatch(pi);
 	installToolChromePatch();
 	registerToolChromeEvents(pi);
+	installWorkingLoaderAlignmentPatch();
 	installWorkingIndicator(pi);
 	installMarkdownCodeBlockRenderer(pi);
 	installCompactionSummaryRenderer(pi, CompactionSummaryMessageComponent);

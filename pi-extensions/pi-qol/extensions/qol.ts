@@ -2388,6 +2388,15 @@ function isPendingQueuePreviewText(text: string): boolean {
 	return plain.startsWith("Steering: ") || plain.startsWith("Follow-up: ");
 }
 
+function isPendingQueueHintText(text: string): boolean {
+	const plain = stripAnsi(text);
+	return plain.startsWith("↳ ") && plain.includes("queued messages");
+}
+
+function pendingQueueLine(text: string): string {
+	return ansiGreen(`| ${text}`);
+}
+
 function installPendingQueueThemePatch(ctx: ExtensionContext): void {
 	if (!ctx.hasUI) return;
 	const proto = Theme.prototype as unknown as Record<PropertyKey, unknown>;
@@ -2401,8 +2410,8 @@ function installPendingQueueThemePatch(ctx: ExtensionContext): void {
 	const patch: PendingQueueThemePatch = { originalFg, cwd: ctx.cwd };
 	proto[PENDING_QUEUE_THEME_PATCH_SYMBOL] = patch;
 	proto.fg = function patchedQolFg(this: Theme, token: string, text: string): string {
-		if (token === "dim" && typeof text === "string" && settingBoolean("pendingQueue.asciiGreen", true, patch.cwd) && isPendingQueuePreviewText(text)) {
-			return ansiGreen(text);
+		if (token === "dim" && typeof text === "string" && settingBoolean("pendingQueue.asciiGreen", true, patch.cwd)) {
+			if (isPendingQueuePreviewText(text) || isPendingQueueHintText(text)) return pendingQueueLine(text);
 		}
 		return (patch.originalFg as (this: Theme, token: string, text: string) => string).call(this, token, text);
 	};

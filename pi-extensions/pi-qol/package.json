@@ -150,7 +150,7 @@
         {
           "key": "pendingQueue.asciiGreen",
           "label": "Green pending queue preview",
-          "description": "Render Pi's built-in steering/follow-up queue preview and Alt+Up hint in ANSI green instead of the dim hint color.",
+          "description": "Render Pi's built-in steering/follow-up queue preview and Alt+Up hint in ANSI green with a left | queue bar instead of the dim hint color.",
           "type": "boolean",
           "default": true,
           "category": "Input",
