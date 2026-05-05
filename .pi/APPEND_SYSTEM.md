@@ -1,6 +1,21 @@
 # Vstack Pi UI rules
-- Before building a new extension or modifying any Pi extension UI, review multiple existing Pi packages in this repo to understand established UI patterns. Stay consistent.
-- Popups: title in top border, `\x1b[32m`; tabs then blank line; search own full-width `toolPendingBg` row, `> [cursor]`, no hint text; footer owns key hints, `\x1b[33m`; active rows use `selectedBg`+text; matches `\x1b[31m`; no decorative cursor glyphs.
-- Tool rendering: compact one-line calls; bold text label, accent target, muted metadata; tree children; status colors success/error/warning; raw output/diffs only when useful or expanded.
-- Persistent banners below status line: framed widget, compact counts in header, tree rows, active item first, muted hints, collapse/clear when empty.
-- Pi extension workflow: after committing changes to any Pi extension/package, run `vstack refresh -g` so the global package install picks up the committed repo state. When creating a new Pi extension/package, install only that Pi package globally with `vstack` (do not globally install agents, skills, or hooks). When developing from a worktree or feature branch, add/test the Pi package through the local project's Pi settings for that checkout; do not register new vstack repo sources that point at temp directories or worktree paths.
+
+For Pi extension UI changes:
+- First inspect multiple `pi-extensions/*` packages; match existing patterns.
+- Popups: title in top border (`\x1b[32m`); tabs then blank line; search = full-width `toolPendingBg` row, `> [cursor]`, no hint; footer owns key hints (`\x1b[33m`); active rows `selectedBg`+text; matches `\x1b[31m`; no decorative cursors.
+- Tool rendering: compact one-line calls; bold label, accent target, muted metadata; tree children; success/error/warning status colors; raw output/diffs only when useful or expanded.
+- Persistent banners below status: framed, compact counts in header, tree rows, active first, muted hints, collapse/clear when empty.
+
+# Vstack Pi extension development workflow
+
+For any `pi-extensions/**` or Pi package behavior change:
+1. Validate changed files/package before finishing.
+2. Commit intended Pi package changes unless user says not to.
+   - Stage only intended files; leave unrelated dirty files untouched and mention them.
+   - If signing fails, retry with `--no-gpg-sign`.
+3. After commit, immediately run `vstack refresh -g` so the global Pi install uses committed repo state.
+   - Refresh after commit, not before.
+   - Report commit hash and refresh result.
+4. Do not say done/fixed/committed/ready to test until commit + refresh are complete. If skipped, say so and why.
+
+New Pi package: install only that Pi package globally with `vstack` (not agents/skills/hooks). Worktree/feature branch dev: test via local project Pi settings for that checkout; do not add vstack repo sources pointing at temp/worktree paths.
