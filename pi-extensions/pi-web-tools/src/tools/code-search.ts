@@ -6,7 +6,13 @@ import { storeWebContent } from "../storage.js";
 import { sourceList } from "../utils/format.js";
 import { renderExaCall, renderExaResultList } from "./exa-render.js";
 
-export const codeSearchSchema = Type.Object({ query: Type.String(), numResults: Type.Optional(Type.Number()), includeDomains: Type.Optional(Type.Array(Type.String())) });
+export const codeSearchSchema = Type.Object({
+	query: Type.String(),
+	numResults: Type.Optional(Type.Number()),
+	includeDomains: Type.Optional(Type.Array(Type.String())),
+	tokensNum: Type.Optional(Type.Union([Type.Number(), Type.Literal("dynamic")], { description: "Token cap for Exa Code context response (default 'dynamic'; 50-100000 for explicit count)." })),
+	mode: Type.Optional(Type.Union([Type.Literal("auto"), Type.Literal("context"), Type.Literal("search")], { description: "auto (default) prefers Exa Code context; search forces classic domain-filtered search." })),
+});
 export type CodeSearchInput = Static<typeof codeSearchSchema>;
 
 export function createCodeSearchToolDefinition(pi: ExtensionAPI, getSettings: (cwd?: string) => WebToolsSettings) {
@@ -14,7 +20,7 @@ export function createCodeSearchToolDefinition(pi: ExtensionAPI, getSettings: (c
 		renderShell: "self" as const,
 		name: "code_search",
 		label: "Code Search",
-		description: "Search code and technical documentation. Uses Exa direct search with code-focused domain hints; Exa MCP get_code_context_exa is staged when available.",
+		description: "Search code and technical documentation. Uses Exa Code (/context endpoint) for token-efficient code snippets by default; falls back to Exa search with code-focused domain hints (github.com, stackoverflow.com).",
 		promptSnippet: "Search for code examples and technical docs via Exa.",
 		parameters: codeSearchSchema,
 		renderCall(args: CodeSearchInput, theme: any, context: any) {
@@ -25,6 +31,23 @@ export function createCodeSearchToolDefinition(pi: ExtensionAPI, getSettings: (c
 		},
 		async execute(_toolCallId: string, params: CodeSearchInput, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: ExtensionContext) {
 			const client = new ExaClient({ apiKey: getSettings(ctx.cwd).apiKeys.exa });
+			const mode = params.mode ?? "auto";
+			if (mode !== "search") {
+				try {
+					const tokensNum = params.tokensNum ?? "dynamic";
+					const context = await client.codeContext(params.query, tokensNum, signal);
+					if (context.text.trim()) {
+						const stored = storeWebContent(pi, { title: `Code Context: ${params.query}`, url: "", content: context.text, metadata: { query: params.query, provider: "exa", tool: "code_search", contentKind: "code-context", source: "exa-code", outputTokens: context.outputTokens, resultsCount: context.resultsCount } });
+						return {
+							content: [{ type: "text", text: `${context.text}\n\nUse get_web_content with content id ${stored.id} for the full stored context.` }],
+							details: { provider: "exa-code", source: "exa-code", text: context.text, outputTokens: context.outputTokens, resultsCount: context.resultsCount, contentId: stored.id, results: [] },
+						};
+					}
+				} catch (error) {
+					if (mode === "context") throw error;
+					// fall through to classic search
+				}
+			}
 			const includeDomains = params.includeDomains?.length ? params.includeDomains : ["github.com", "docs.github.com", "stackoverflow.com"];
 			const response = await client.search({ query: params.query, numResults: params.numResults ?? 8, includeDomains }, signal);
 			const results = response.results.map((result) => {

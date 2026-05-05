@@ -165,4 +165,14 @@ export class ExaClient {
 	async deepResearch(params: ExaSearchParams & { type: ExaDeepType }, signal?: AbortSignal): Promise<NormalizedExaResponse> {
 		return this.search(params, signal);
 	}
+
+	async codeContext(query: string, tokensNum: number | "dynamic" = "dynamic", signal?: AbortSignal): Promise<{ raw: any; text: string; resultsCount?: number; outputTokens?: number }> {
+		const raw = await this.post("/context", { query, tokensNum }, signal);
+		return {
+			raw,
+			text: typeof raw?.response === "string" ? raw.response : "",
+			resultsCount: typeof raw?.resultsCount === "number" ? raw.resultsCount : undefined,
+			outputTokens: typeof raw?.outputTokens === "number" ? raw.outputTokens : undefined,
+		};
+	}
 }
