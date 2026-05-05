@@ -41,9 +41,9 @@ cli/src/
     └── render.rs        Ratatui rendering (header, list, status, help bar, dialog overlay)
 
 vstack.toml              Skill/hook-to-agent mapping config (read by CLI at install time)
-agents/                  12 canonical agents — role field drives per-harness access control
-skills/                  31 skill packages — each has SKILL.md with optional dependencies
-hooks/                   4 safety hooks — bash scripts with YAML comment headers
+agents/                  Canonical agents — `role` field drives per-harness access control
+skills/                  Skill packages — each has SKILL.md with optional dependencies
+hooks/                   Safety hooks — bash scripts with YAML comment headers
 pi-extensions/           Pi extension packages (npm-shaped). Each package has package.json with `pi.extensions`.
 skill-templates/         Templates for new skills
 ```
@@ -107,7 +107,7 @@ Npm-shaped manifest. vstack discovers any subdirectory containing a `package.jso
   }
 }
 ```
-On install vstack copies `pi-extensions/<name>/` into `<scope>/packages/<name>` and adds `./packages/<name>` to the `packages` array of Pi's `settings.json` (relative to the settings file dir). Existing entries and other settings keys are preserved; legacy absolute-path entries are replaced with the relative form. Catalog packages: `pi-extension-manager` (extension inventory/settings UI), `pi-skills-manager` (dedicated `/skills` menu for browsing/creating/editing/toggling skills), `pi-background-tasks` (non-blocking background shell tasks + `/bg` dashboard + task tools), `pi-questions` (structured multi-tab popup questions + `pi-bridge` list/answer/reject integration), `pi-prompt-stash` (per-session prompt stash history + Alt+S stash/pop popup), `pi-session-bridge` (Unix-socket JSONL side channel + `pi-bridge` CLI), `pi-subagents-tmux` (delegation tool + persistent tmux subagent panes with grid layout and automatic completion pickup), `pi-qol`, `pi-output-policy`, `pi-tool-renderer`, `pi-task-panel`, and `pi-caveman`.
+On install vstack copies `pi-extensions/<name>/` into `<scope>/packages/<name>` and adds `./packages/<name>` to the `packages` array of Pi's `settings.json` (relative to the settings file dir). Existing entries and other settings keys are preserved; legacy absolute-path entries are replaced with the relative form. The catalog of currently shipped extensions and their purpose lives in [README.md](README.md#pi-extensions) — don't duplicate it here.
 
 ### Mapping config (`vstack.toml`)
 ```toml
@@ -181,15 +181,9 @@ All skill content lives in `skills/<name>/SKILL.md` — there are no separate `r
 
 ## Updating Pi Extensions
 
-`vstack update-pi` walks the per-scope source index (`<scope>/.vstack-source.json`, written on install) plus `npm:` entries in pi `settings.json`, compares installed versions against source-side `pi-extensions/<name>/package.json` (vstack) or `npm view <name> version` (npm), and reinstalls only the stale ones. Different packages may come from different vstack repos — they are grouped by `(scope, sourceRepo)` and reinstalled independently. Stale index entries (referenced package no longer installed) are dropped.
+`vstack update-pi[ --check][ --scope global|project]` reinstalls only stale Pi packages. Source of truth is `<scope>/.vstack-source.json` plus `npm:` entries in Pi `settings.json`; installed versions are compared against `pi-extensions/<name>/package.json` (vstack repos) or `npm view <name> version` (npm). Different packages can come from different vstack repos — grouped by `(scope, sourceRepo)` and reinstalled independently. Stale index entries (referenced package no longer installed) are dropped. The pi-extension-manager extension reads the same index for its `↑ X.Y.Z` badge.
 
-```bash
-vstack update-pi --check                 # plan only
-vstack update-pi                         # apply updates across all scopes
-vstack update-pi --scope global          # restrict to user scope
-```
-
-The pi-extension-manager extension reads the same source index plus a 24h-cached npm registry lookup, surfaces an `↑ X.Y.Z` badge in the inventory, and posts a one-line warning at session start when updates are available (toggle: `pi-extension-manager.notifyOnUpdates`).
+Pi-specific UI/workflow rules (popup styling, banner conventions, refresh-after-commit) live in [.pi/APPEND_SYSTEM.md](.pi/APPEND_SYSTEM.md).
 
 ## Build & Test
 
