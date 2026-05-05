@@ -176,6 +176,7 @@ trading-design = "Focus on dark theme with green/red accent colors for this proj
 - **Keep CLI version and GitHub release tag in sync.** `cli/Cargo.toml` version and the GitHub release/tag must always match. Do not bump the version or create releases unless explicitly asked; when asked, update both together.
 - **`vstack add` scope is destructive — read the printed summary.** Every non-interactive run prints a block with `Scope:` (`PROJECT (...)` vs `GLOBAL (...)`), method, and every item written with its path. Confirm both before claiming success; wrong scope means the install affects every project on the machine.
 - **Never `--global` without an item filter.** The CLI refuses `--global -y` (or `--global --harness ... -y`) unless `--all` or one of `--agent`/`--skill`/`--hook`/`--pi-extension` is set. To install one Pi package globally: `vstack add <repo> --global --pi-extension <name> --harness pi -y`. Item filters are exclusive — passing any restricts the install to only those kinds.
+- **Scope flag is uniform.** `list`, `check`, `refresh`, `remove` accept `--scope project|global|all`. `-g`/`--global` stays as shorthand for `--scope global`. Default is `all` for read-only/non-destructive (`list`, `check`, `refresh`) and `project` for `remove`. `vstack refresh` (no args) reinstalls items at every scope they're locked at — the right command after editing source files.
 
 ## Updating Skills
 

@@ -46,16 +46,12 @@ struct PlanItem {
     note: Option<String>,
 }
 
-/// Allowed values for the `--scope` flag.
+/// Allowed values for the `--scope` flag. Kept as a thin wrapper over the
+/// shared `crate::scope::ScopeFilter` so update-pi behaves like the rest of
+/// the CLI; returns the boolean `global` flags it covers.
 fn parse_scope_filter(scope: Option<&str>) -> Result<Vec<bool>> {
-    match scope.map(str::to_ascii_lowercase).as_deref() {
-        None | Some("all") => Ok(vec![true, false]),
-        Some("global") | Some("user") => Ok(vec![true]),
-        Some("project") | Some("local") => Ok(vec![false]),
-        Some(other) => anyhow::bail!(
-            "invalid --scope '{other}': expected one of all, global, project"
-        ),
-    }
+    let filter = crate::scope::ScopeFilter::resolve(scope, false, crate::scope::ScopeFilter::All)?;
+    Ok(filter.globals().to_vec())
 }
 
 /// Read a package.json `version` field if present.
@@ -663,8 +659,9 @@ mod tests {
 
     #[test]
     fn parse_scope_filter_accepts_aliases_and_rejects_garbage() {
-        assert_eq!(parse_scope_filter(None).unwrap(), vec![true, false]);
-        assert_eq!(parse_scope_filter(Some("all")).unwrap(), vec![true, false]);
+        // Order matches ScopeFilter::globals() — project (false) before global (true) for All.
+        assert_eq!(parse_scope_filter(None).unwrap(), vec![false, true]);
+        assert_eq!(parse_scope_filter(Some("all")).unwrap(), vec![false, true]);
         assert_eq!(parse_scope_filter(Some("global")).unwrap(), vec![true]);
         assert_eq!(parse_scope_filter(Some("user")).unwrap(), vec![true]);
         assert_eq!(parse_scope_filter(Some("project")).unwrap(), vec![false]);

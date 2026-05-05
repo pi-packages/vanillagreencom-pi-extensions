@@ -147,7 +147,9 @@ enum Commands {
         scope: Option<String>,
     },
 
-    /// Update vstack to the latest version
+    /// Self-update the vstack CLI binary from GitHub releases. Does NOT
+    /// update installed packages — use `vstack refresh` for local source
+    /// edits or `vstack update-pi` for Pi package version bumps.
     Update {
         /// Force reinstall even if version matches
         #[arg(short, long)]
