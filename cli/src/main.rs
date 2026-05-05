@@ -13,6 +13,7 @@ mod project_config;
 #[cfg(test)]
 mod test_util;
 mod resolve;
+mod scope;
 mod skill;
 mod tui;
 
@@ -81,7 +82,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Install skills, agents, and hooks
+    /// Install agents, skills, hooks, and Pi packages from a vstack source
     Add {
         source: Option<String>,
         #[arg(short, long)]
@@ -109,25 +110,42 @@ enum Commands {
         all: bool,
     },
 
-    /// Remove installed skills and/or agents
+    /// Remove installed agents, skills, hooks, or Pi packages
     Remove {
         names: Vec<String>,
+        /// Shortcut for `--scope global`.
         #[arg(short, long)]
         global: bool,
+        /// project | global | all (default: project)
+        #[arg(long)]
+        scope: Option<String>,
     },
 
-    /// List installed skills and agents
+    /// List installed agents, skills, hooks, and Pi packages.
+    /// Defaults to all scopes.
     #[command(alias = "ls")]
     List {
+        /// Shortcut for `--scope global`.
         #[arg(short, long)]
         global: bool,
+        /// project | global | all (default: all)
+        #[arg(long)]
+        scope: Option<String>,
         /// Filter listing by harness id (claude, cursor, opencode, codex, pi)
         #[arg(long)]
         harness: Option<String>,
     },
 
-    /// Check installation status
-    Check,
+    /// Check installation status (outdated, orphaned, missing).
+    /// Defaults to all scopes.
+    Check {
+        /// Shortcut for `--scope global`.
+        #[arg(short, long)]
+        global: bool,
+        /// project | global | all (default: all)
+        #[arg(long)]
+        scope: Option<String>,
+    },
 
     /// Update vstack to the latest version
     Update {
@@ -139,9 +157,14 @@ enum Commands {
     /// Reinstall all locked items (agents, skills, hooks, Pi packages) from
     /// current source. Use after editing source files to push changes to the
     /// install scope. Also re-applies vstack.toml customizations to agents.
+    /// Defaults to all scopes that have a lock file.
     Refresh {
+        /// Shortcut for `--scope global`.
         #[arg(short, long)]
         global: bool,
+        /// project | global | all (default: all)
+        #[arg(long)]
+        scope: Option<String>,
     },
 
     /// Update installed Pi extensions from their source repos and npm.
@@ -187,11 +210,37 @@ fn main() -> Result<()> {
             yes,
             all,
         ),
-        Some(Commands::Remove { names, global }) => commands::remove::run(&names, global),
-        Some(Commands::List { global, harness }) => commands::list::run(global, harness.as_deref()),
-        Some(Commands::Check) => commands::check::run(),
+        Some(Commands::Remove {
+            names,
+            global,
+            scope,
+        }) => {
+            let scope = scope::ScopeFilter::resolve(
+                scope.as_deref(),
+                global,
+                scope::ScopeFilter::Project,
+            )?;
+            commands::remove::run(&names, scope)
+        }
+        Some(Commands::List {
+            global,
+            scope,
+            harness,
+        }) => {
+            let scope =
+                scope::ScopeFilter::resolve(scope.as_deref(), global, scope::ScopeFilter::All)?;
+            commands::list::run(scope, harness.as_deref())
+        }
+        Some(Commands::Check { global, scope }) => {
+            let scope =
+                scope::ScopeFilter::resolve(scope.as_deref(), global, scope::ScopeFilter::All)?;
+            commands::check::run(scope)
+        }
         Some(Commands::Update { force }) => commands::update::run(force),
-        Some(Commands::Refresh { global }) => commands::refresh::run(global),
+        Some(Commands::Refresh { global, scope }) => {
+            let scope = scope::ScopeFilter::resolve(scope.as_deref(), global, scope::ScopeFilter::All)?;
+            commands::refresh::run(scope)
+        }
         Some(Commands::UpdatePi { check, scope }) => commands::update_pi::run(check, scope),
         Some(Commands::Init { name }) => commands::init::run(name.as_deref()),
         // No subcommand → default to add

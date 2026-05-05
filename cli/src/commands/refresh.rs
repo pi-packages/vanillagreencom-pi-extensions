@@ -244,11 +244,33 @@ pub fn refresh_items_in_scope(
     stats
 }
 
-/// Reinstall every item recorded in the scope lock from current source:
+/// Reinstall every item recorded in the selected scopes from current source:
 /// regenerate agent files (re-applying `vstack.toml` customizations),
-/// re-copy skills, and re-copy Pi packages. Use after editing source files
+/// re-copy skills, hooks, and Pi packages. Use after editing source files
 /// to push changes to the install scope without re-running `vstack add`.
-pub fn run(global: bool) -> Result<()> {
+pub fn run(scope: crate::scope::ScopeFilter) -> Result<()> {
+    let mut any_action = false;
+    for &global in scope.globals() {
+        let lock_path = config::lock_file_path(global);
+        if !lock_path.exists() {
+            continue;
+        }
+        let lock = config::LockFile::load(&lock_path).unwrap_or_default();
+        if lock.entries.is_empty() {
+            continue;
+        }
+        any_action = true;
+        let scope_label = if global { "GLOBAL" } else { "PROJECT" };
+        eprintln!("\n─ refresh ({scope_label}) ─");
+        run_one(global)?;
+    }
+    if !any_action {
+        eprintln!("Nothing installed in selected scope(s). Run `vstack add` first.");
+    }
+    Ok(())
+}
+
+fn run_one(global: bool) -> Result<()> {
     let lock_path = config::lock_file_path(global);
     let mut lock = config::LockFile::load(&lock_path)?;
 
@@ -378,7 +400,7 @@ pub fn run(global: bool) -> Result<()> {
     }
 
     eprintln!(
-        "Refreshed {} agent(s), {} skill(s), {} pi-package(s)",
+        "Refreshed {} agent(s), {} skill(s), {} Pi package(s) (hooks ride with agents)",
         stats.agents_refreshed, stats.skills_refreshed, stats.pi_refreshed
     );
     Ok(())

@@ -13,7 +13,7 @@ For any `pi-extensions/**` or Pi package behavior change:
 2. Commit intended Pi package changes unless user says not to.
    - Stage only intended files; leave unrelated dirty files untouched and mention them.
    - If signing fails, retry with `--no-gpg-sign`.
-3. After commit, immediately run `vstack refresh -g` so the global Pi install uses committed repo state.
+3. After commit, immediately run `vstack refresh -g` so the global Pi install picks up committed source state. (`vstack refresh` without `-g` defaults to all scopes; `-g` narrows to global, which is what we want for Pi extension dev.)
    - Refresh after commit, not before.
    - Report commit hash and refresh result.
 4. Do not say done/fixed/committed/ready to test until commit + refresh are complete. If skipped, say so and why.

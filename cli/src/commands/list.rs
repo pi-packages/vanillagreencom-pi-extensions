@@ -1,74 +1,95 @@
 use crate::config::{self, LockFile};
 use crate::harness::Harness;
+use crate::scope::ScopeFilter;
 use anyhow::Result;
 
-pub fn run(global: bool, agent_filter: Option<&str>) -> Result<()> {
-    let lock_path = config::lock_file_path(global);
-    let lock = LockFile::load(&lock_path)?;
+pub fn run(scope: ScopeFilter, harness_filter: Option<&str>) -> Result<()> {
+    let mut printed_anything = false;
+    let mut totals = (0usize, 0usize, 0usize, 0usize); // agents, skills, hooks, pi
 
-    let scope = if global { "global" } else { "project" };
+    for &global in scope.globals() {
+        let lock_path = config::lock_file_path(global);
+        let lock = LockFile::load(&lock_path).unwrap_or_default();
+        let scope_label = if global { "GLOBAL" } else { "PROJECT" };
+        let scope_target = if global {
+            config::display_path(&config::global_state_dir())
+        } else {
+            config::display_path(&config::project_root())
+        };
 
-    if lock.entries.is_empty() {
-        eprintln!("No items installed ({scope} scope).");
+        if lock.entries.is_empty() {
+            // For an explicit single-scope run, surface that the lock is empty.
+            if matches!(scope, ScopeFilter::Project | ScopeFilter::Global) {
+                eprintln!("{scope_label} ({scope_target}): nothing installed.");
+                printed_anything = true;
+            }
+            continue;
+        }
+
+        let mut agents = Vec::new();
+        let mut skills = Vec::new();
+        let mut hooks = Vec::new();
+        let mut pi_extensions = Vec::new();
+
+        for entry in lock.entries.values() {
+            if let Some(filter) = harness_filter
+                && let Some(harness) = Harness::from_id(filter)
+                && !entry
+                    .harnesses
+                    .iter()
+                    .any(|installed| installed == harness.id())
+            {
+                continue;
+            }
+
+            match entry.kind {
+                config::ItemKind::Agent => agents.push(entry),
+                config::ItemKind::Skill => skills.push(entry),
+                config::ItemKind::Hook => hooks.push(entry),
+                config::ItemKind::PiExtension => pi_extensions.push(entry),
+            }
+        }
+
+        if agents.is_empty() && skills.is_empty() && hooks.is_empty() && pi_extensions.is_empty() {
+            continue;
+        }
+
+        if printed_anything {
+            eprintln!();
+        }
+        eprintln!("{scope_label} ({scope_target}):");
+
+        for (label, items) in [
+            ("Agents", &agents),
+            ("Skills", &skills),
+            ("Hooks", &hooks),
+            ("Pi packages", &pi_extensions),
+        ] {
+            if items.is_empty() {
+                continue;
+            }
+            eprintln!("  {label}:");
+            for entry in items {
+                let harnesses = entry.harnesses.join(", ");
+                eprintln!("    {} ({}) [{}]", entry.name, entry.method, harnesses);
+            }
+        }
+
+        totals.0 += agents.len();
+        totals.1 += skills.len();
+        totals.2 += hooks.len();
+        totals.3 += pi_extensions.len();
+        printed_anything = true;
+    }
+
+    if !printed_anything {
+        eprintln!("No items installed.");
         return Ok(());
     }
 
-    eprintln!("Installed items ({scope} scope):\n");
-
-    // Group by kind
-    let mut agents = Vec::new();
-    let mut skills = Vec::new();
-    let mut hooks = Vec::new();
-    let mut pi_extensions = Vec::new();
-
-    for entry in lock.entries.values() {
-        // Apply harness filter
-        if let Some(filter) = agent_filter
-            && let Some(harness) = Harness::from_id(filter)
-            && !entry
-                .harnesses
-                .iter()
-                .any(|installed| installed == harness.id())
-        {
-            continue;
-        }
-
-        match entry.kind {
-            crate::config::ItemKind::Agent => agents.push(entry),
-            crate::config::ItemKind::Skill => skills.push(entry),
-            crate::config::ItemKind::Hook => hooks.push(entry),
-            crate::config::ItemKind::PiExtension => pi_extensions.push(entry),
-        }
-    }
-
-    let mut printed = false;
-
-    for (label, items) in [
-        ("Agents", &agents),
-        ("Skills", &skills),
-        ("Hooks", &hooks),
-        ("Pi Packages", &pi_extensions),
-    ] {
-        if items.is_empty() {
-            continue;
-        }
-        if printed {
-            eprintln!();
-        }
-        eprintln!("  {label}:");
-        for entry in items {
-            let harnesses = entry.harnesses.join(", ");
-            eprintln!("    {} ({}) [{}]", entry.name, entry.method, harnesses);
-        }
-        printed = true;
-    }
-
     eprintln!(
-        "\n  Total: {} agent(s), {} skill(s), {} hook(s), {} pi-package(s)",
-        agents.len(),
-        skills.len(),
-        hooks.len(),
-        pi_extensions.len()
+        "\nTotal: {} agent(s), {} skill(s), {} hook(s), {} Pi package(s)",
+        totals.0, totals.1, totals.2, totals.3
     );
     Ok(())
 }

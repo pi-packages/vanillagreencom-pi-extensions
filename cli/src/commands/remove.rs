@@ -1,65 +1,99 @@
 use crate::config::{self, LockFile};
 use crate::harness::Harness;
 use crate::installer;
+use crate::scope::ScopeFilter;
 use anyhow::Result;
 
-pub fn run(names: &[String], global: bool) -> Result<()> {
+pub fn run(names: &[String], scope: ScopeFilter) -> Result<()> {
     if names.is_empty() {
-        eprintln!("Usage: vstack remove <name> [<name>...]");
+        eprintln!("Usage: vstack remove <name> [<name>...] [--scope project|global|all]");
         return Ok(());
     }
 
-    let lock_path = config::lock_file_path(global);
-    let mut lock = LockFile::load(&lock_path).unwrap_or_default();
+    let mut total_removed = 0usize;
+    let mut total_missing = 0usize;
+    let mut printed_scope_header = false;
 
-    for name in names {
-        // Look up entry first to determine kind and harnesses
-        let lock_entry = lock.entries.get(name.as_str()).cloned();
-        let harnesses: Vec<Harness> = if let Some(ref entry) = lock_entry {
-            entry
-                .harnesses
-                .iter()
-                .filter_map(|h| Harness::from_id(h))
-                .collect()
-        } else {
-            Harness::ALL.to_vec()
-        };
-
-        // Pi packages live in a separate location and are removed via
-        // the dedicated helper. Also allow removing stale/manual Pi packages
-        // that are present on disk or in settings but missing from the lock.
-        let mut removed = Vec::new();
-        let remove_as_pi_extension = matches!(
-            lock_entry.as_ref().map(|e| e.kind),
-            Some(crate::config::ItemKind::PiExtension)
-        ) || (lock_entry.is_none()
-            && crate::pi_extension::is_pi_extension_installed(name, global));
-        if remove_as_pi_extension {
-            removed.extend(crate::pi_extension::remove_pi_extension(name, global)?);
-        } else {
-            removed.extend(installer::remove_item(name, &harnesses, global)?);
+    for &global in scope.globals() {
+        let lock_path = config::lock_file_path(global);
+        if !lock_path.exists() {
+            continue;
         }
+        let mut lock = LockFile::load(&lock_path).unwrap_or_default();
+        let scope_label = if global { "GLOBAL" } else { "PROJECT" };
 
-        if removed.is_empty() {
-            if lock_entry.is_some() {
-                eprintln!("  removed stale lock entry for {name}");
-                lock.remove(name);
+        let mut scope_removed: Vec<String> = Vec::new();
+        let mut scope_missing: Vec<String> = Vec::new();
+
+        for name in names {
+            let lock_entry = lock.entries.get(name.as_str()).cloned();
+            let harnesses: Vec<Harness> = if let Some(ref entry) = lock_entry {
+                entry
+                    .harnesses
+                    .iter()
+                    .filter_map(|h| Harness::from_id(h))
+                    .collect()
             } else {
-                eprintln!("  {name}: not found");
+                Harness::ALL.to_vec()
+            };
+
+            // Pi packages live in a separate location; route to the dedicated
+            // helper. Also catches stale/manual installs missing from the lock.
+            let mut removed = Vec::new();
+            let remove_as_pi_extension = matches!(
+                lock_entry.as_ref().map(|e| e.kind),
+                Some(crate::config::ItemKind::PiExtension)
+            ) || (lock_entry.is_none()
+                && crate::pi_extension::is_pi_extension_installed(name, global));
+            if remove_as_pi_extension {
+                removed.extend(crate::pi_extension::remove_pi_extension(name, global)?);
+            } else {
+                removed.extend(installer::remove_item(name, &harnesses, global)?);
             }
-        } else {
-            let pi_settings_path = config::pi_settings_path(global);
-            for path in &removed {
-                if path == &pi_settings_path {
-                    eprintln!("  updated {}", path.display());
+
+            if removed.is_empty() {
+                if lock_entry.is_some() {
+                    if !printed_scope_header {
+                        eprintln!("\n{scope_label}:");
+                        printed_scope_header = true;
+                    }
+                    eprintln!("  removed stale lock entry for {name}");
+                    lock.remove(name);
+                    scope_removed.push(name.clone());
                 } else {
-                    eprintln!("  removed {}", path.display());
+                    scope_missing.push(name.clone());
                 }
+            } else {
+                if !printed_scope_header {
+                    eprintln!("\n{scope_label}:");
+                    printed_scope_header = true;
+                }
+                let pi_settings_path = config::pi_settings_path(global);
+                for path in &removed {
+                    if path == &pi_settings_path {
+                        eprintln!("  updated {}", path.display());
+                    } else {
+                        eprintln!("  removed {}", path.display());
+                    }
+                }
+                lock.remove(name);
+                scope_removed.push(name.clone());
             }
-            lock.remove(name);
         }
+
+        lock.save(&lock_path)?;
+        total_removed += scope_removed.len();
+        total_missing += scope_missing.len();
+        // Reset header state per scope so each scope prints its own header
+        // when it has output.
+        printed_scope_header = false;
     }
 
-    lock.save(&lock_path)?;
+    eprintln!();
+    if total_removed == 0 && total_missing > 0 {
+        eprintln!("Nothing removed: {total_missing} not found in selected scope(s).");
+    } else {
+        eprintln!("Removed {total_removed} item(s) across {}", scope.label());
+    }
     Ok(())
 }

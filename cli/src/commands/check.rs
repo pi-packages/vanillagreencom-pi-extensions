@@ -1,7 +1,8 @@
 use crate::config::{self, LockEntry, LockFile};
+use crate::scope::ScopeFilter;
 use anyhow::Result;
 
-pub fn run() -> Result<()> {
+pub fn run(scope: ScopeFilter) -> Result<()> {
     // Check CLI version
     let local_version = env!("CARGO_PKG_VERSION");
     let local_hash = env!("VSTACK_GIT_HASH");
@@ -19,11 +20,11 @@ pub fn run() -> Result<()> {
     }
 
     // Check installed items
-    for global in [false, true] {
+    for &global in scope.globals() {
         let lock_path = config::lock_file_path(global);
         let lock = LockFile::load(&lock_path)?;
 
-        let scope = if global { "global" } else { "project" };
+        let scope_label = if global { "global" } else { "project" };
 
         // Scan disk for skills that should be in the lock but aren't
         let disk_skills = config::scan_installed_skills_on_disk(global);
@@ -63,7 +64,7 @@ pub fn run() -> Result<()> {
             continue;
         }
 
-        eprintln!("\n{scope} scope: {} item(s)", lock.entries.len());
+        eprintln!("\n{scope_label} scope: {} item(s)", lock.entries.len());
 
         let mut outdated = 0;
         for entry in lock.entries.values() {

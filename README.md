@@ -36,7 +36,7 @@ Write a package once as a harness-agnostic skill, agent, or hook, then install i
 - **Config-driven attribution**: `vstack.toml` maps extra skills to agents, role-wide skills to agent roles, and hook events to roles.
 - **Project customization**: per-agent guidance, instructions, custom skills, per-skill instructions, and custom hooks via project-level `vstack.toml` — survives upstream updates.
 - **Reconciliation**: installed agents and skills regenerate when packages change, preserving user edits.
-- **`vstack refresh`**: regenerate all agent files and re-inject project skill instructions after editing `vstack.toml`.
+- **`vstack refresh`**: reinstall all locked items (agents, skills, hooks, Pi packages) from current source. Defaults to all scopes; narrow with `--scope project|global|all` (or shorthand `-g`).
 - **Version-based update check**: notifies when the CLI version changes, not on every repo push. `vstack update --force` to rebuild from source.
 - **Source registry**: previously used package repos are remembered and reusable from the TUI.
 - **Fast terminal UX**: native Rust TUI with mouse support, built with `ratatui` and `crossterm`.
@@ -62,6 +62,21 @@ vstack add vanillagreencom/vstack --global --all -y                             
 ```
 
 Every run prints a summary with scope (`PROJECT (...)` vs `GLOBAL (...)`), method, and each item's destination path — read it before claiming success. `--global` without an item filter or `--all` is refused, since it would otherwise install the entire catalog into `~/.config/vstack`, `~/.claude`, `~/.pi`.
+
+### Commands
+
+| Command | Default scope | What it does |
+|---|---|---|
+| `vstack add <source>` | project | Install items (TUI by default; non-interactive with `-y` or filters) |
+| `vstack remove <names>` | project | Uninstall items |
+| `vstack list` (alias `ls`) | all | Show installed items grouped by scope |
+| `vstack check` | all | Validate install state (outdated, orphaned, missing) |
+| `vstack refresh` | all | Reinstall locked items from current source |
+| `vstack update-pi` | all | Update Pi packages by version (npm sources or vstack repos) |
+| `vstack update` | n/a | Self-update the CLI binary |
+| `vstack init <name>` | n/a | Scaffold a new agent + skill template |
+
+All scope-aware commands accept `--scope project|global|all`. `-g`/`--global` is the shorthand for `--scope global` and stays supported. When both are passed, `--scope` wins.
 
 ## Project-Local Config
 
