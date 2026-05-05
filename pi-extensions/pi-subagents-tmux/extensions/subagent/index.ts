@@ -58,6 +58,7 @@ const ICONS = {
 	circleOpen: "\uf10c",   // nf-fa-circle_o
 	clock: "\uf017",        // nf-fa-clock_o (queued / waiting)
 	cog: "\uf013",          // nf-fa-cog (working / running)
+	refresh: "\uf021",      // nf-fa-refresh (turns)
 	hourglass: "\uf252",    // nf-fa-hourglass_half (legacy / unused)
 	warning: "\uf071",      // nf-fa-exclamation_triangle (general warning)
 	dotSmall: "\uf444",     // nf-fa-circle (smaller filled circle)
@@ -340,6 +341,24 @@ async function parseTranscriptUsage(transcriptPath: string | undefined): Promise
 	}
 	if ((total.turns ?? 0) === 0 && total.input === 0 && total.output === 0) return undefined;
 	return { usage: total, model };
+}
+
+function formatUsageStatsForDashboard(usage: {
+	input: number;
+	output: number;
+	cost: number;
+	turns?: number;
+}): string[] {
+	// Slim form for the inline dashboard widget: drop cacheRead/cacheWrite
+	// (cluttery and most users do not act on them) and replace the 'turn'
+	// word with a small refresh glyph so each row stays compact when many
+	// agents are listed.
+	const parts: string[] = [];
+	if (usage.turns) parts.push(`${ICONS.refresh} ${usage.turns}`);
+	if (usage.input) parts.push(`↑${formatTokens(usage.input)}`);
+	if (usage.output) parts.push(`↓${formatTokens(usage.output)}`);
+	if (usage.cost) parts.push(`$${usage.cost.toFixed(4)}`);
+	return parts;
 }
 
 function formatUsageStats(
@@ -1963,7 +1982,15 @@ function dashboardTranscriptRef(filePath: string | undefined): string {
 }
 
 function renderDashboardWidgetLines(state: SubagentDashboardState, theme: Theme, cwd: string, width: number): string[] {
-	const items = Object.values(state.items).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+	// Sort by start time first so the row order is stable - using updatedAt
+	// here would shuffle rows on every transcript-usage poll. Fall back to
+	// taskId for tie-breaks.
+	const items = Object.values(state.items).sort((a, b) => {
+		const aKey = a.startedAt ?? a.taskId;
+		const bKey = b.startedAt ?? b.taskId;
+		if (aKey === bKey) return 0;
+		return aKey < bKey ? -1 : 1;
+	});
 	if (!dashboardEnabled(cwd) || !state.visible || items.length === 0) return [];
 	const running = items.filter((item) => item.status === "running" || item.status === "queued").length;
 	const waiting = items.filter((item) => item.status === "waiting").length;
@@ -1998,11 +2025,14 @@ function renderDashboardWidgetLines(state: SubagentDashboardState, theme: Theme,
 		}
 		return any ? total : undefined;
 	};
+	const dotSep = theme.fg("dim", " · ");
 	if (running === 0 && state.mode === "compact") {
 		const aggregated = aggregateDashboardUsage(items);
-		const usageStr = aggregated ? formatUsageStats(aggregated) : "";
-		const body = usageStr ? theme.fg("dim", usageStr) : theme.fg("dim", `${items.length} transcript${items.length === 1 ? "" : "s"}`);
-		lines.push(`${subagentBranch(theme, "└", cwd)}${theme.fg("success", "done")} ${body}`);
+		const usageParts = aggregated ? formatUsageStatsForDashboard(aggregated) : [];
+		const body = usageParts.length > 0
+			? usageParts.map((part) => theme.fg("dim", part)).join(dotSep)
+			: theme.fg("dim", `${items.length} transcript${items.length === 1 ? "" : "s"}`);
+		lines.push(`${subagentBranch(theme, "└", cwd)}${theme.fg("success", "done")}${dotSep}${body}`);
 		return dashboardFrame(lines.map((line) => truncateToWidth(line, Math.max(1, width - 4), "")), Math.max(1, width), theme);
 	}
 	const maxItems = state.mode === "compact" || state.collapsed ? 1 : state.mode === "normal" ? Math.min(3, dashboardMaxItems(cwd)) : dashboardMaxItems(cwd);
@@ -2011,11 +2041,17 @@ function renderDashboardWidgetLines(state: SubagentDashboardState, theme: Theme,
 	for (const [index, item] of shown.entries()) {
 		const branch = subagentBranch(theme, index === shown.length - 1 && items.length <= shown.length ? "└" : "├", cwd);
 		const name = padAnsi(theme.fg("accent", theme.bold(item.agent)), nameWidth);
-		const where = theme.fg("dim", item.kind);
-		const bridge = item.bridge ? theme.fg("success", " · bridge") : "";
-		const usageStr = item.usage ? formatUsageStats(item.usage) : "";
-		const usageTail = usageStr ? `  ${theme.fg("dim", usageStr)}` : "";
-		lines.push(`${branch}${dashboardStatusIcon(item.status, theme)} ${name}  ${dashboardStatusText(item, theme)} ${where}${bridge}${usageTail}`);
+		const rowParts: string[] = [
+			dashboardStatusText(item, theme),
+			theme.fg("dim", item.kind),
+		];
+		if (item.bridge) rowParts.push(theme.fg("success", "bridge"));
+		if (item.usage) {
+			for (const part of formatUsageStatsForDashboard(item.usage)) {
+				rowParts.push(theme.fg("dim", part));
+			}
+		}
+		lines.push(`${branch}${dashboardStatusIcon(item.status, theme)} ${name}${dotSep}${rowParts.join(dotSep)}`);
 		if (state.mode === "expanded" && !state.collapsed && item.message) {
 			lines.push(`${subagentStem(theme, index === shown.length - 1 && items.length <= shown.length, cwd)}${theme.fg("toolOutput", oneLinePreview(item.message, Math.max(48, width - 16)))}`);
 		}
@@ -2025,7 +2061,10 @@ function renderDashboardWidgetLines(state: SubagentDashboardState, theme: Theme,
 	if (state.mode === "expanded" && !state.collapsed) {
 		const aggregated = aggregateDashboardUsage(items);
 		if (aggregated) {
-			lines.push(`${subagentBranch(theme, "└", cwd)}${theme.fg("dim", `Total: ${formatUsageStats(aggregated)}`)}`);
+			const totalParts = formatUsageStatsForDashboard(aggregated).map((part) => theme.fg("dim", part)).join(dotSep);
+			if (totalParts.length > 0) {
+				lines.push(`${subagentBranch(theme, "└", cwd)}${theme.fg("dim", "Total")}${dotSep}${totalParts}`);
+			}
 		}
 	}
 	return dashboardFrame(lines.map((line) => truncateToWidth(line, Math.max(1, width - 4), "")), Math.max(1, width), theme);
