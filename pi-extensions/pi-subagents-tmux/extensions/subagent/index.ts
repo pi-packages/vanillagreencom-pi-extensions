@@ -474,7 +474,7 @@ function agentSearchText(agent: AgentConfig, status?: AgentPaneStatus): string {
 		agent.filePath,
 		agent.model ?? "",
 		agent.tools?.join(" ") ?? "",
-		agent.pane ? "pane persistent tmux" : "one-shot oneshot",
+		agent.pane ? "pane persistent tmux" : "bg background one-shot oneshot",
 		status?.live ? "live running" : status?.entry ? "dead stopped" : "",
 	].join(" ").toLowerCase();
 }
@@ -596,11 +596,11 @@ function agentStatusLabel(agent: AgentConfig, status: AgentPaneStatus | undefine
 	if (state === "live") return theme.fg("success", "live");
 	if (state === "dead") return theme.fg("warning", "dead");
 	if (state === "pane") return theme.fg("muted", "pane-ready/startable");
-	return theme.fg("dim", "one-shot");
+	return theme.fg("dim", "bg");
 }
 
 function agentLegend(theme: Theme): string {
-	return `${theme.fg("muted", "Legend")}: ${theme.fg("success", ICONS.circleFilled)} live pane · ${theme.fg("warning", ICONS.circleOpen)} pane-ready/startable · ${theme.fg("warning", ICONS.times)} stale pane · ${theme.fg("dim", "·")} one-shot`;
+	return `${theme.fg("muted", "Legend")}: ${theme.fg("success", ICONS.circleFilled)} live pane · ${theme.fg("warning", ICONS.circleOpen)} pane-ready/startable · ${theme.fg("warning", ICONS.times)} stale pane · ${theme.fg("dim", "·")} bg`;
 }
 
 function renderAgentList(agents: AgentConfig[], statuses: Map<string, AgentPaneStatus>, ui: AgentBrowserUiState, width: number, theme: Theme, listRows: number): string[] {
@@ -614,7 +614,7 @@ function renderAgentList(agents: AgentConfig[], statuses: Map<string, AgentPaneS
 		const index = ui.scroll + visibleIndex;
 		const status = agentStatus(agent, statuses.get(agent.name));
 		const marker = " ";
-		const meta = theme.fg("dim", ` ${status === "one-shot" ? "one-shot" : "pane"} · ${agent.source}`);
+		const meta = theme.fg("dim", ` ${status === "one-shot" ? "bg" : "pane"} · ${agent.source}`);
 		const model = agent.model ? theme.fg("dim", ` · ${agent.model}`) : "";
 		const row = truncateToWidth(`${marker}${agentStatusIcon(status, theme)} ${agent.name}${meta}${model}`, width, "…");
 		lines.push(index === ui.selected ? theme.bg("selectedBg", agentPad(row, width)) : row);
@@ -645,7 +645,7 @@ function renderAgentInspector(agent: AgentConfig | undefined, statuses: Map<stri
 		`${agentPaneTitle(theme, "Inspector", ui.pane === "inspector")} ${agentEntityTitle(theme, agent.name)} ${theme.fg(agentStatusColor(agentStatus(agent, status)), agentStatus(agent, status))}`,
 		...wrapTextWithAnsi(agent.description || "No description.", width).slice(0, 3),
 		"",
-		`${theme.fg("muted", "Kind")}: ${agent.pane ? "persistent pane" : "one-shot"}    ${theme.fg("muted", "Scope")}: ${agent.source}`,
+		`${theme.fg("muted", "Kind")}: ${agent.pane ? "persistent pane" : "bg"}    ${theme.fg("muted", "Scope")}: ${agent.source}`,
 		`${theme.fg("muted", "Model")}: ${agent.model ?? "default"}`,
 		`${theme.fg("muted", "Tools")}: ${agent.tools?.join(", ") ?? "default"}`,
 		`${theme.fg("muted", "Path")}: ${compactAgentPath(agent.filePath)}`,
@@ -1847,6 +1847,10 @@ function emitSubagentEvent(pi: ExtensionAPI, event: string, payload: Record<stri
 	}
 }
 
+function dashboardKindLabel(kind: DashboardKind): string {
+	return kind === "oneshot" ? "bg" : kind;
+}
+
 function dashboardStatusFor(rawStatus: PaneTaskStatus | "running" | "waiting", kind: DashboardKind): SubagentDashboardStatus {
 	// Persistent panes return to idle after each task; surface 'completed' as
 	// 'waiting' so the dashboard reads the pane state correctly. Oneshots keep
@@ -2043,7 +2047,7 @@ function renderDashboardWidgetLines(state: SubagentDashboardState, theme: Theme,
 		const name = padAnsi(theme.fg("accent", theme.bold(item.agent)), nameWidth);
 		const rowParts: string[] = [
 			dashboardStatusText(item, theme),
-			theme.fg("dim", item.kind),
+			theme.fg("dim", dashboardKindLabel(item.kind)),
 		];
 		if (item.bridge) rowParts.push(theme.fg("success", "bridge"));
 		if (item.usage) {
@@ -4835,7 +4839,7 @@ export default function (pi: ExtensionAPI) {
 						: queuedPaneCount === total
 							? `${total} agent${pluralN(total)} launched`
 							: queuedPaneCount > 0
-								? `${total} agents launched (${oneshotCompletedCount} oneshot, ${queuedPaneCount} pane)`
+								? `${total} agents launched (${oneshotCompletedCount} bg, ${queuedPaneCount} pane)`
 								: `${total} agent${pluralN(total)} completed`;
 				const hint = isRunning
 					? ""
