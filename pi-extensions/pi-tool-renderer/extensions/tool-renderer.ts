@@ -7,6 +7,7 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 const INSTALL_SYMBOL = Symbol.for("vstack.pi-tool-renderer.installed");
 const USER_MESSAGE_PATCH_SYMBOL = Symbol.for("vstack.pi-tool-renderer.user-message-patch");
 const USER_MESSAGE_BOX_STATE_SYMBOL = Symbol.for("vstack.pi-tool-renderer.user-message-box-state");
+const ASSISTANT_MESSAGE_PATCH_SYMBOL = Symbol.for("vstack.pi-tool-renderer.assistant-message-patch");
 const TOOL_EXECUTION_RENDERER_PATCH_SYMBOL = Symbol.for("vstack.pi-tool-renderer.tool-execution-renderer-patch.v2");
 const TOOL_CHROME_PATCH_SYMBOL = Symbol.for("vstack.pi-tool-renderer.tool-chrome-patch");
 const COMPACTION_SUMMARY_RENDERER_PATCH_SYMBOL = Symbol.for("vstack.pi-tool-renderer.compaction-summary-renderer-patch");
@@ -271,6 +272,51 @@ function installUserMessageRenderer(pi: ExtensionAPI, UserMessageComponent: any)
 		if (prototype[USER_MESSAGE_PATCH_SYMBOL] === state) {
 			prototype.render = state!.originalRender as unknown;
 			delete prototype[USER_MESSAGE_PATCH_SYMBOL];
+		}
+		state!.activeCtx = undefined;
+	});
+}
+
+interface AssistantMessagePatchState {
+	activeCtx?: ExtensionContext;
+	originalUpdateContent: (message: any) => void;
+}
+
+function alignAssistantContent(component: any): void {
+	const children = component?.contentContainer?.children;
+	if (!Array.isArray(children)) return;
+	for (const child of children) {
+		if (child instanceof Markdown || child instanceof Text) {
+			child.paddingX = 0;
+			child.invalidate?.();
+		}
+	}
+}
+
+function installAssistantMessageRenderer(pi: ExtensionAPI, AssistantMessageComponent: any): void {
+	const prototype = AssistantMessageComponent?.prototype as Record<PropertyKey, unknown> | undefined;
+	if (!prototype || typeof prototype.updateContent !== "function") return;
+
+	let state = prototype[ASSISTANT_MESSAGE_PATCH_SYMBOL] as AssistantMessagePatchState | undefined;
+	if (!state) {
+		state = {
+			originalUpdateContent: prototype.updateContent as (message: any) => void,
+		};
+		prototype[ASSISTANT_MESSAGE_PATCH_SYMBOL] = state;
+		prototype.updateContent = function alignedAssistantUpdateContent(this: any, message: any): void {
+			state!.originalUpdateContent.call(this, message);
+			const cwd = state?.activeCtx?.cwd ?? process.cwd();
+			if (settingBoolean("alignAssistantMessages", true, cwd)) alignAssistantContent(this);
+		};
+	}
+
+	pi.on("session_start", (_event: any, ctx: ExtensionContext) => {
+		state!.activeCtx = ctx;
+	});
+	pi.on("session_shutdown", () => {
+		if (prototype[ASSISTANT_MESSAGE_PATCH_SYMBOL] === state) {
+			prototype.updateContent = state!.originalUpdateContent as unknown;
+			delete prototype[ASSISTANT_MESSAGE_PATCH_SYMBOL];
 		}
 		state!.activeCtx = undefined;
 	});
@@ -2931,6 +2977,7 @@ export default async function toolRenderer(pi: ExtensionAPI): Promise<void> {
 
 	const agent = await import("@mariozechner/pi-coding-agent");
 	installUserMessageRenderer(pi, agent.UserMessageComponent);
+	installAssistantMessageRenderer(pi, agent.AssistantMessageComponent);
 	const cwd = process.cwd();
 	registerRead(pi, agent, cwd);
 	registerBash(pi, agent, cwd);
