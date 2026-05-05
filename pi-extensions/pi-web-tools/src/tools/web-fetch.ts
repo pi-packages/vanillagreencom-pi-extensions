@@ -4,6 +4,8 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import { Type, type Static } from "typebox";
 import { extractGitHubUrl } from "../extract/github.js";
 import { fetchHttpContent, isProbablyPdf } from "../extract/http.js";
+import { extractLocalVideo, isLocalVideoPath } from "../extract/video.js";
+import { extractYouTubeUrl, parseYouTubeUrl } from "../extract/youtube.js";
 import { readFile as fsReadFile } from "node:fs/promises";
 import { fetchLocalPdfText, fetchPdfText, extractPdfTextBest } from "../extract/pdf.js";
 import { looksLikeScannedPdf, rasterizePdfPages, type PdfPageImage } from "../extract/pdf-pages.js";
@@ -20,6 +22,7 @@ export const webFetchSchema = Type.Object({
 	filePaths: Type.Optional(Type.Array(Type.String({ description: "Local file paths to extract. Currently supports PDFs." }))),
 	textMaxCharacters: Type.Optional(Type.Number({ description: "Preview character cap for direct/GitHub/PDF fetches and provider extraction cap for Exa fallback/override. Direct fetches still store the full extracted text in session storage before preview truncation." })),
 	provider: Type.Optional(Type.Union([Type.Literal("auto"), Type.Literal("http"), Type.Literal("exa")])),
+	prompt: Type.Optional(Type.String({ description: "Optional prompt for video/YouTube understanding (passed to Gemini Web/API). Ignored for non-video URLs." })),
 });
 export type WebFetchInput = Static<typeof webFetchSchema>;
 
@@ -231,7 +234,12 @@ export function createWebFetchToolDefinition(pi: ExtensionAPI, getSettings: (cwd
 					try {
 						if (isLocalFileInput(url)) {
 							const localPath = resolveLocalFilePath(ctx.cwd, url);
-							if (!isProbablyPdf(localPath)) throw new Error(`Local file extraction currently supports PDFs only: ${localPath}`);
+							if (settings.video.enabled && isLocalVideoPath(localPath)) {
+								const video = await extractLocalVideo(localPath, { prompt: params.prompt, geminiApiKey: settings.apiKeys.gemini, signal });
+								stored.push(storeWebContent(pi, { title: video.title, url: pathToFileURL(localPath).href, content: video.content, metadata: { tool: name, localPath, ...video.metadata } }));
+								continue;
+							}
+							if (!isProbablyPdf(localPath)) throw new Error(`Local file extraction currently supports PDFs and videos only: ${localPath}`);
 							const buffer = await fsReadFile(localPath);
 							await handlePdfBuffer(buffer, { provider: "local", url: pathToFileURL(localPath).href, title: basename(localPath), localPath });
 							continue;
@@ -240,6 +248,13 @@ export function createWebFetchToolDefinition(pi: ExtensionAPI, getSettings: (cwd
 						if (github && !("error" in github)) {
 							stored.push(storeWebContent(pi, { title: github.title, url, content: github.content, metadata: github.metadata }));
 							continue;
+						}
+						if (settings.video.enabled && parseYouTubeUrl(url)) {
+							const yt = await extractYouTubeUrl(url, { prompt: params.prompt, geminiApiKey: settings.apiKeys.gemini, browserCookies: { preferredBrowser: settings.browserCookies.preferredBrowser, profile: settings.browserCookies.profile }, signal });
+							if (yt) {
+								stored.push(storeWebContent(pi, { title: yt.title, url: yt.url, content: yt.content, metadata: { tool: name, ...yt.metadata } }));
+								continue;
+							}
 						}
 						if (isProbablyPdf(url)) {
 							const response = await fetch(url, { signal });

@@ -203,7 +203,7 @@ test("web_fetch extracts local PDF file paths into session storage", async () =>
 	const path = join(dir, "local.pdf");
 	writeFileSync(path, "%PDF-1.4\nBT\n(Local PDF) Tj\nET");
 	const appended: any[] = [];
-	const tool = createWebFetchToolDefinition({ appendEntry(type: string, data: unknown) { appended.push({ type, data }); } } as any, () => ({ githubClone: { enabled: true }, apiKeys: {}, htmlExtraction: { jinaFallback: false }, pdfOcr: { enabled: false, maxPages: 5, dpi: 150 } }) as any);
+	const tool = createWebFetchToolDefinition({ appendEntry(type: string, data: unknown) { appended.push({ type, data }); } } as any, () => ({ githubClone: { enabled: true }, apiKeys: {}, htmlExtraction: { jinaFallback: false }, pdfOcr: { enabled: false, maxPages: 5, dpi: 150 }, video: { enabled: false }, browserCookies: { preferredBrowser: "auto" } }) as any);
 	const result = await tool.execute("call", { filePath: path, provider: "auto" }, undefined, undefined, { cwd: dir } as any);
 	assert.equal(result.details.provider, "local");
 	const stored = result.details.stored[0]!;
