@@ -1213,6 +1213,8 @@ type PaneTaskRegistry = Record<string, PaneTaskRecord>;
 type DashboardDisplayMode = "compact" | "normal" | "expanded";
 type DashboardKind = "pane" | "oneshot";
 
+type SubagentDashboardStatus = PaneTaskStatus | "running" | "waiting";
+
 interface SubagentDashboardItem {
 	agent: string;
 	artifacts?: boolean;
@@ -1222,7 +1224,7 @@ interface SubagentDashboardItem {
 	message?: string;
 	paneId?: string;
 	startedAt?: string;
-	status: PaneTaskStatus | "running";
+	status: SubagentDashboardStatus;
 	task?: string;
 	taskId: string;
 	transcriptPath?: string;
@@ -1830,6 +1832,7 @@ function dashboardStatusIcon(status: SubagentDashboardItem["status"], theme: The
 	if (status === "failed") return theme.fg("error", ICONS.times);
 	if (status === "blocked") return theme.fg("warning", ICONS.warning);
 	if (status === "running") return theme.fg("warning", ICONS.hourglass);
+	if (status === "waiting") return theme.fg("warning", ICONS.clock);
 	if (status === "queued") return theme.fg("warning", ICONS.clock);
 	return theme.fg("accent", ICONS.circleFilled);
 }
@@ -1838,7 +1841,9 @@ function dashboardStatusText(item: SubagentDashboardItem, theme: Theme): string 
 	if (item.status === "completed") return theme.fg("success", "done");
 	if (item.status === "failed") return theme.fg("error", "failed");
 	if (item.status === "blocked") return theme.fg("warning", "blocked");
-	if (item.status === "running") return theme.fg("warning", "running");
+	if (item.status === "running") return theme.fg("warning", "working");
+	if (item.status === "waiting") return theme.fg("warning", "waiting");
+	if (item.status === "queued") return theme.fg("warning", "queued");
 	return theme.fg("accent", item.status);
 }
 
@@ -1952,6 +1957,7 @@ function renderDashboardWidgetLines(state: SubagentDashboardState, theme: Theme,
 	const items = Object.values(state.items).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 	if (!dashboardEnabled(cwd) || !state.visible || items.length === 0) return [];
 	const running = items.filter((item) => item.status === "running" || item.status === "queued").length;
+	const waiting = items.filter((item) => item.status === "waiting").length;
 	const done = items.filter((item) => item.status === "completed").length;
 	const failed = items.filter((item) => item.status === "failed" || item.status === "blocked").length;
 	const shortcut = dashboardShortcut(cwd);
@@ -1960,10 +1966,12 @@ function renderDashboardWidgetLines(state: SubagentDashboardState, theme: Theme,
 	const popupHint = popup === "none" ? "" : theme.fg("dim", ` · ${formatShortcutHint(popup)} agents`);
 	const hint = `${toggleHint}${popupHint}`;
 	const headerParts = [
-		`${done} done`,
-		running ? theme.fg("warning", `${running} active`) : "",
+		done ? `${done} done` : "",
+		running ? theme.fg("warning", `${running} working`) : "",
+		waiting ? theme.fg("warning", `${waiting} waiting`) : "",
 		failed ? theme.fg("error", `${failed} attention`) : "",
 	].filter(Boolean);
+	if (headerParts.length === 0) headerParts.push(`${items.length} ready`);
 	const title = `${theme.fg("customMessageLabel", theme.bold("Subagents"))} ${theme.fg("muted", headerParts.join(" · "))}${hint}`;
 	const lines = [title];
 	const aggregateDashboardUsage = (entries: SubagentDashboardItem[]): UsageStats | undefined => {
@@ -3431,16 +3439,21 @@ export default function (pi: ExtensionAPI) {
 		const transcriptPath = typeof event.transcriptPath === "string" ? event.transcriptPath : existing?.transcriptPath;
 		const eventUsage = (event.usage as UsageStats | undefined) ?? undefined;
 		const eventModel = typeof event.model === "string" ? event.model : undefined;
+		const kind = existing?.kind ?? (event.mode === "oneshot" ? "oneshot" : "pane");
+		// Persistent panes return to idle after each task; surface them as
+		// 'waiting' instead of 'done' so the dashboard reads accurately - the
+		// pane is alive and ready for the next delegation.
+		const effectiveStatus: SubagentDashboardStatus = status === "completed" && kind === "pane" ? "waiting" : status;
 		updateDashboard({
 			agent,
 			artifacts: true,
 			bridge: existing?.bridge,
 			completedAt: typeof event.timestamp === "string" ? event.timestamp : new Date().toISOString(),
-			kind: existing?.kind ?? (event.mode === "oneshot" ? "oneshot" : "pane"),
+			kind,
 			message: typeof event.summary === "string" ? event.summary : existing?.message,
 			paneId: existing?.paneId ?? (typeof event.paneId === "string" ? event.paneId : undefined),
 			startedAt: existing?.startedAt,
-			status,
+			status: effectiveStatus,
 			task: existing?.task ?? (typeof event.task === "string" ? event.task : undefined),
 			taskId,
 			transcriptPath,
@@ -3617,12 +3630,31 @@ export default function (pi: ExtensionAPI) {
 		}
 		syncDashboard(ctx);
 		if (!ctx.hasUI) return;
+		const refreshLiveUsage = async () => {
+			// Re-parse transcripts for any pane subagent that is still alive (waiting
+			// or actively working / queued). Token + cost counts grow as the agent
+			// streams, so the dashboard needs a periodic refresh, not just one-shot
+			// parse on completion.
+			const snapshot = Object.values(dashboardState.items).filter((item) => {
+				if (item.kind !== "pane") return false;
+				if (item.status === "failed" || item.status === "blocked") return false;
+				if (!item.transcriptPath) return false;
+				return true;
+			});
+			for (const item of snapshot) {
+				const parsed = await parseTranscriptUsage(item.transcriptPath).catch(() => undefined);
+				if (!parsed) continue;
+				patchDashboard(item.taskId, { usage: parsed.usage, model: parsed.model });
+			}
+		};
 		const poll = () => {
 			if (completionPollInFlight) return;
 			completionPollInFlight = true;
-			pollPaneCompletions(runtimeRoot, pi).finally(() => {
-				completionPollInFlight = false;
-			});
+			pollPaneCompletions(runtimeRoot, pi)
+				.then(() => refreshLiveUsage())
+				.finally(() => {
+					completionPollInFlight = false;
+				});
 		};
 		poll();
 		completionPoller = setInterval(poll, Math.max(500, Math.floor(settingNumber("completionPollMs", 2000, ctx.cwd))));
