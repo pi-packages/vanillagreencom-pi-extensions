@@ -6,11 +6,12 @@ For the Exa-specific API map and tool semantics, see [`EXA.md`](./EXA.md).
 
 Implemented in this package:
 
-- `web_search` with provider selection (`auto`, `exa`, `openai-native`, `perplexity`, `gemini`). Direct execution is implemented for Exa; OpenAI-native is handled by a `before_provider_request` rewrite on supported OpenAI/Codex models.
-- `web_research` using Exa Deep Search with `researchMode: lite|standard|full` plus low-level overrides (`type`, `numResults`, `textMaxCharacters`, domains, dates, additional queries). It accepts inline `query` or `queryFile`, plus `contextFiles`/`contextGlob`.
+- `web_search` with provider selection (`auto`, `exa`, `openai-native`, `perplexity`, `gemini`). Direct execution wired for Exa, Perplexity Sonar, Gemini API (Google Search grounding), and Gemini Web (browser-cookie auth). OpenAI-native is handled by a `before_provider_request` rewrite on supported OpenAI/Codex models.
+- `web_research` using Exa Deep Search with `researchMode: lite|standard|full` plus low-level overrides (`type`, `numResults`, `textMaxCharacters`, domains, dates, additional queries). Accepts inline `query` or `queryFile`, plus `contextFiles`/`contextGlob`.
 - `web_research.outputPath` findings report writing with Pi's file mutation queue. Clean reports default to a raw metadata sidecar (`findings.raw.json`) instead of embedding raw JSON in `findings.md`.
-- `web_fetch` with research-focused extraction for GitHub URLs, URL/local PDF text, HTML/text/JSON, and Exa `contents` fallback/override for URLs.
-- `web_answer`, `web_find_similar`, `code_search` Exa-first tools.
+- `web_fetch` extraction chain: GitHub URLs (shallow clone cache + cached blob/tree/README), URL + local PDF text via `pdftotext` with vision OCR fallback for scanned PDFs (`pdftoppm` rasterization + ImageContent blocks for the host LLM), HTML/text/JSON with Wikipedia-style chrome stripping, Jina Reader auto-fallback on blocked/cookie-walled pages and 403/429/5xx, YouTube + local video understanding via Gemini Web/API (auto-applies `[HH:MM:SS]` directive when the prompt asks for transcripts/lyrics/captions), and Exa `contents` fallback/override for URLs.
+- `web_answer`, `web_find_similar` Exa-first tools.
+- `code_search` defaults to the Exa Code `/context` endpoint and falls back to classic Exa search with code-focused domain hints; renderer surfaces token + source counts and parsed source URLs (Ctrl+O to expand).
 - `get_web_content` retrieval for stored full content.
 - `/web-tools doctor` and `/web-tools provider ...` guidance.
 
@@ -27,12 +28,9 @@ Implemented in this package:
 
 Staged for follow-up parity with `pi-web-access`:
 
-- Perplexity/Gemini direct search execution.
-- Full Readability/Jina/Gemini fallback extraction chain for difficult pages.
-- OCR-grade/scanned PDF extraction.
-- GitHub clone cache for very large repository workflows.
-- YouTube/local video understanding.
 - Browser curator UI and activity monitor.
+- Gemini extraction fallback for HTML pages where Jina also fails (Jina is the current single fallback after the in-house extractor).
+- ffmpeg/yt-dlp-driven frame extraction for video URLs (text understanding works without these binaries).
 
 ## Settings
 
@@ -45,7 +43,15 @@ Settings are read from the vstack extension-manager namespace:
       "config": {
         "pi-web-tools": {
           "defaultProvider": "auto",
-          "enabledProviders": "exa,openai-native,perplexity,gemini"
+          "enabledProviders": "exa,openai-native,perplexity,gemini",
+          "exaDeepResearchEnabled": true,
+          "exaAdvancedEnabled": false,
+          "htmlExtraction": { "jinaFallback": true },
+          "pdfOcr": { "enabled": true, "maxPages": 5, "dpi": 150 },
+          "githubClone": { "enabled": true, "maxRepoSizeMB": 350, "cloneTimeoutSeconds": 60, "cacheMaxAgeHours": 24 },
+          "video": { "enabled": true },
+          "browserCookieAccess": false,
+          "browserCookies": { "preferredBrowser": "auto" }
         }
       }
     }
@@ -53,12 +59,20 @@ Settings are read from the vstack extension-manager namespace:
 }
 ```
 
+Key toggles:
+
+- `exaAdvancedEnabled` is required to expose `web_answer`, `web_find_similar`, and `code_search` to the active toolset (gated to keep the default surface small). Flip it on per-user or per-project to use them.
+- `browserCookieAccess` opts in to Gemini Web cookie scraping. With `browserCookies.preferredBrowser` set to `auto` (default) / `firefox` / `zen` / `chrome` / `chromium`, the package reads cookies from Firefox/Zen unencrypted SQLite or Chromium-family DBs (libsecret on Linux, Keychain on macOS, DPAPI master key + AES-GCM on Windows).
+- `pdfOcr.enabled` controls whether `pdftoppm` rasterizes scanned PDFs into ImageContent blocks for vision OCR. Defaults on; set to false to skip rasterization on scanned PDFs.
+- `githubClone.enabled` toggles the GitHub clone cache (default on). Repos exceeding `maxRepoSizeMB` automatically fall back to API-based extraction.
+
 Secrets should be supplied with environment variables, project `.env.local`/`.env` files, or a private config file. Process environment variables win over values loaded from files:
 
 - `EXA_API_KEY`
 - `PERPLEXITY_API_KEY`
 - `GEMINI_API_KEY`
 - `OPENAI_API_KEY`
+- `JINA_API_KEY` (optional; anonymous Jina Reader works without it but may rate-limit on heavy use)
 - `PI_WEB_TOOLS_CONFIG_FILE=/path/to/private.json`
 
 Shared Pi settings keys such as `exaApiKey` are loaded for compatibility but emit a warning.
