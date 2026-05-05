@@ -73,6 +73,7 @@ export function providerDisplayName(provider: unknown): string {
 	if (value === "http") return "HTTP";
 	if (value === "jina") return "Jina";
 	if (value === "http+jina") return "HTTP+Jina";
+	if (value === "exa-code") return "Exa Code";
 	if (value === "local") return "Local";
 	if (value === "mixed") return "Mixed";
 	if (value === "auto") return "Auto";

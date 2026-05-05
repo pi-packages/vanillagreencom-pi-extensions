@@ -22,6 +22,19 @@ test("ExaClient.codeContext POSTs to /context and parses response", async () => 
 	assert.equal(out.resultsCount, 12);
 });
 
+test("code_search renderer shows Exa Code label with token count and content id", () => {
+	const tool = createCodeSearchToolDefinition({ appendEntry() {} } as any, () => ({ apiKeys: { exa: "k" } } as any));
+	const theme = { fg: (_t: string, s: string) => s, bold: (s: string) => s };
+	const rendered = tool.renderResult({
+		content: [{ type: "text", text: "snippets" }],
+		details: { provider: "exa-code", source: "exa-code", outputTokens: 1500, resultsCount: 8, contentId: "web-foo", results: [] },
+	}, {}, theme, { args: { query: "react" } }).render(200).join("\n");
+	assert.match(rendered, /Code Search \(Exa Code\) react/);
+	assert.match(rendered, /1500 tokens · 8 sources/);
+	assert.match(rendered, /content id web-foo/);
+	assert.doesNotMatch(rendered, /0 results/);
+});
+
 test("code_search prefers Exa Code context and stores the full text", async () => {
 	const appended: any[] = [];
 	const pi = { appendEntry(type: string, data: unknown) { appended.push({ type, data }); } } as any;

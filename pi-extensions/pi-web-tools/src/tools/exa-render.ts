@@ -48,8 +48,21 @@ export function renderExaResultList(label: string, target: string | undefined, r
 	const details = result?.details ?? {};
 	const results: ExaRenderableResult[] = Array.isArray(details.results) ? details.results : [];
 	const answer = typeof details.answer === "string" && details.answer.trim() ? details.answer.trim() : undefined;
-	const meta = answer && results.length === 0 ? undefined : `${results.length} ${resultNoun}`;
-	const lines = [successSummary(theme, providerLabel(label, "exa"), target || "complete", meta)];
+	const isExaCode = details?.source === "exa-code" || details?.provider === "exa-code";
+	let meta: string | undefined;
+	if (isExaCode) {
+		const tokenBits = typeof details?.outputTokens === "number" ? `${details.outputTokens} tokens` : undefined;
+		const sourceBits = typeof details?.resultsCount === "number" ? `${details.resultsCount} sources` : undefined;
+		meta = [tokenBits, sourceBits].filter(Boolean).join(" · ") || undefined;
+	} else {
+		meta = answer && results.length === 0 ? undefined : `${results.length} ${resultNoun}`;
+	}
+	const providerTag = isExaCode ? "exa-code" : "exa";
+	const lines = [successSummary(theme, providerLabel(label, providerTag), target || "complete", meta)];
+	if (isExaCode) {
+		if (typeof details?.contentId === "string" && details.contentId) lines.push(`${tree(theme, "└")}${muted(theme, "content id ")}${accent(theme, details.contentId)}`);
+		return textComponent(lines.join("\n"));
+	}
 	if (answer) lines.push(...answerPreviewLines(answer, theme, Boolean(options?.expanded), results.length > 0));
 	const limit = options?.expanded ? 8 : 3;
 	const shown = results.slice(0, limit);
