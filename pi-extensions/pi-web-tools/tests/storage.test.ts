@@ -101,7 +101,8 @@ test("web_fetch renderer shows concise preview shown/full metadata when preview-
 	}], "github");
 	const rendered = tool.renderResult(result, {}, theme, { args: { provider: "auto", url: "https://example.com/long" } }).render(200).join("\n");
 	assert.match(rendered, /Web Fetch \(GitHub\) https:\/\/example\.com\/long · 1 stored · preview 4000\/4005 chars/);
-	assert.match(rendered, /Long page · https:\/\/example\.com\/long · preview 4000\/4005 chars/);
+	assert.match(rendered, /Long page · https:\/\/example\.com\/long\s*$/m);
+	assert.doesNotMatch(rendered, /Long page · https:\/\/example\.com\/long · preview/);
 	assert.doesNotMatch(rendered, /content id web-long/);
 	assert.doesNotMatch(rendered, /GitHub\/Auto/);
 });
