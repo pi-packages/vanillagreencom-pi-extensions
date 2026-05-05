@@ -286,13 +286,13 @@ function installUserMessageRenderer(pi: ExtensionAPI, UserMessageComponent: any)
 
 interface AssistantMessagePatchState {
 	activeCtx?: ExtensionContext;
+	originalRender: (width: number) => string[];
 	originalUpdateContent: (message: any) => void;
 }
 
 function alignAssistantContent(component: any): void {
 	const children = component?.contentContainer?.children;
 	if (!Array.isArray(children)) return;
-	while (children[0]?.constructor?.name === "Spacer") children.shift();
 	for (const child of children) {
 		if (child instanceof Markdown || child instanceof Text) {
 			child.paddingX = 0;
@@ -303,14 +303,22 @@ function alignAssistantContent(component: any): void {
 
 function installAssistantMessageRenderer(pi: ExtensionAPI, AssistantMessageComponent: any): void {
 	const prototype = AssistantMessageComponent?.prototype as Record<PropertyKey, unknown> | undefined;
-	if (!prototype || typeof prototype.updateContent !== "function") return;
+	if (!prototype || typeof prototype.render !== "function" || typeof prototype.updateContent !== "function") return;
 
 	let state = prototype[ASSISTANT_MESSAGE_PATCH_SYMBOL] as AssistantMessagePatchState | undefined;
 	if (!state) {
 		state = {
+			originalRender: prototype.render as (width: number) => string[],
 			originalUpdateContent: prototype.updateContent as (message: any) => void,
 		};
 		prototype[ASSISTANT_MESSAGE_PATCH_SYMBOL] = state;
+		prototype.render = function spacedAssistantRender(this: any, width: number): string[] {
+			const rendered = state!.originalRender.call(this, width);
+			if (!Array.isArray(rendered) || rendered.length === 0 || this?.hasToolCalls) return rendered;
+			const end = trimTrailingBlankLines(rendered);
+			if (end.length === 0) return rendered;
+			return [...end, " ".repeat(Math.max(0, width))];
+		};
 		prototype.updateContent = function alignedAssistantUpdateContent(this: any, message: any): void {
 			state!.originalUpdateContent.call(this, message);
 			const cwd = state?.activeCtx?.cwd ?? process.cwd();
@@ -323,6 +331,7 @@ function installAssistantMessageRenderer(pi: ExtensionAPI, AssistantMessageCompo
 	});
 	pi.on("session_shutdown", () => {
 		if (prototype[ASSISTANT_MESSAGE_PATCH_SYMBOL] === state) {
+			prototype.render = state!.originalRender as unknown;
 			prototype.updateContent = state!.originalUpdateContent as unknown;
 			delete prototype[ASSISTANT_MESSAGE_PATCH_SYMBOL];
 		}
@@ -736,6 +745,24 @@ let blinkTimer: ReturnType<typeof setInterval> | undefined;
 
 function stripAnsi(text: string): string {
 	return text.replace(ANSI_RE, "");
+}
+
+function isBlankRenderLine(line: string | undefined): boolean {
+	return stripAnsi(line ?? "").trim().length === 0;
+}
+
+function trimTrailingBlankLines(lines: string[]): string[] {
+	let end = lines.length - 1;
+	while (end >= 0 && isBlankRenderLine(lines[end])) end--;
+	return end < 0 ? [] : lines.slice(0, end + 1);
+}
+
+function trimOuterBlankLines(lines: string[]): string[] {
+	let start = 0;
+	while (start < lines.length && isBlankRenderLine(lines[start])) start++;
+	let end = lines.length - 1;
+	while (end >= start && isBlankRenderLine(lines[end])) end--;
+	return start > end ? [] : lines.slice(start, end + 1);
 }
 
 function visibleLength(text: string): number {
@@ -2640,13 +2667,19 @@ function renderGenericToolResult(name: string, result: any, { expanded, isPartia
 function installToolExecutionRendererPatch(pi: ExtensionAPI): void {
 	const proto = ToolExecutionComponent?.prototype as any;
 	if (!proto) return;
-	const existing = proto[TOOL_EXECUTION_RENDERER_PATCH_SYMBOL] as { originalGetCallRenderer?: unknown; originalGetRenderShell?: unknown; originalGetResultRenderer?: unknown; originalHasRendererDefinition?: unknown } | undefined;
+	const existing = proto[TOOL_EXECUTION_RENDERER_PATCH_SYMBOL] as { originalGetCallRenderer?: unknown; originalGetRenderShell?: unknown; originalGetResultRenderer?: unknown; originalHasRendererDefinition?: unknown; originalRender?: unknown } | undefined;
 	const originalGetCallRenderer = existing?.originalGetCallRenderer ?? proto.getCallRenderer;
 	const originalGetResultRenderer = existing?.originalGetResultRenderer ?? proto.getResultRenderer;
 	const originalHasRendererDefinition = existing?.originalHasRendererDefinition ?? proto.hasRendererDefinition;
 	const originalGetRenderShell = existing?.originalGetRenderShell ?? proto.getRenderShell;
-	if (typeof originalGetCallRenderer !== "function" || typeof originalGetResultRenderer !== "function" || typeof originalHasRendererDefinition !== "function" || typeof originalGetRenderShell !== "function") return;
-	const state = { originalGetCallRenderer, originalGetRenderShell, originalGetResultRenderer, originalHasRendererDefinition };
+	const originalRender = existing?.originalRender ?? proto.render;
+	if (typeof originalGetCallRenderer !== "function" || typeof originalGetResultRenderer !== "function" || typeof originalHasRendererDefinition !== "function" || typeof originalGetRenderShell !== "function" || typeof originalRender !== "function") return;
+	const state = { originalGetCallRenderer, originalGetRenderShell, originalGetResultRenderer, originalHasRendererDefinition, originalRender };
+	proto.render = function patchedToolExecutionRender(this: any, width: number): string[] {
+		const rendered = originalRender.call(this, width);
+		if (!Array.isArray(rendered) || typeof this?.toolName !== "string" || typeof this?.toolCallId !== "string") return rendered;
+		return trimOuterBlankLines(rendered);
+	};
 	proto.hasRendererDefinition = function patchedHasRendererDefinition(this: any) {
 		const toolName = typeof this?.toolName === "string" ? this.toolName : "";
 		if (shouldUseUnknownToolRenderer(this, toolName)) return true;
@@ -2686,6 +2719,7 @@ function installToolExecutionRendererPatch(pi: ExtensionAPI): void {
 	proto[TOOL_EXECUTION_RENDERER_PATCH_SYMBOL] = state;
 	pi.on("session_shutdown", () => {
 		if (proto[TOOL_EXECUTION_RENDERER_PATCH_SYMBOL] !== state) return;
+		proto.render = originalRender;
 		proto.hasRendererDefinition = originalHasRendererDefinition;
 		proto.getRenderShell = originalGetRenderShell;
 		proto.getCallRenderer = originalGetCallRenderer;
