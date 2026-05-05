@@ -285,6 +285,7 @@ interface AssistantMessagePatchState {
 function alignAssistantContent(component: any): void {
 	const children = component?.contentContainer?.children;
 	if (!Array.isArray(children)) return;
+	while (children[0]?.constructor?.name === "Spacer") children.shift();
 	for (const child of children) {
 		if (child instanceof Markdown || child instanceof Text) {
 			child.paddingX = 0;
