@@ -117,6 +117,16 @@
           "apply": "reload",
           "requiresReload": true
         },
+        {
+          "key": "styledCodeBlocks",
+          "label": "Styled markdown code blocks",
+          "description": "Render fenced markdown code blocks as syntax-highlighted panels with a subtle background and left accent strip instead of literal ``` fences.",
+          "type": "boolean",
+          "default": true,
+          "category": "Messages",
+          "apply": "reload",
+          "requiresReload": true
+        },
 
         {
           "key": "renderMutationTools",

@@ -1,5 +1,5 @@
 import { CompactionSummaryMessageComponent, getLanguageFromPath, getMarkdownTheme, highlightCode, ToolExecutionComponent, type ExtensionAPI, type ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { Container, Markdown, Text, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import { Container, Markdown, Text, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@mariozechner/pi-tui";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
@@ -10,6 +10,7 @@ const USER_MESSAGE_BOX_STATE_SYMBOL = Symbol.for("vstack.pi-tool-renderer.user-m
 const TOOL_EXECUTION_RENDERER_PATCH_SYMBOL = Symbol.for("vstack.pi-tool-renderer.tool-execution-renderer-patch.v2");
 const TOOL_CHROME_PATCH_SYMBOL = Symbol.for("vstack.pi-tool-renderer.tool-chrome-patch");
 const COMPACTION_SUMMARY_RENDERER_PATCH_SYMBOL = Symbol.for("vstack.pi-tool-renderer.compaction-summary-renderer-patch");
+const MARKDOWN_CODE_BLOCK_PATCH_SYMBOL = Symbol.for("vstack.pi-tool-renderer.markdown-code-block-patch");
 
 const ANSI_GREEN = "\x1b[32m";
 const ANSI_RED = "\x1b[31m";
@@ -329,6 +330,108 @@ function installCompactionSummaryRenderer(pi: ExtensionAPI, Component: any): voi
 		if (prototype[COMPACTION_SUMMARY_RENDERER_PATCH_SYMBOL] === state) {
 			prototype.updateDisplay = state!.originalUpdateDisplay as unknown;
 			delete prototype[COMPACTION_SUMMARY_RENDERER_PATCH_SYMBOL];
+		}
+		state!.activeCtx = undefined;
+	});
+}
+
+interface MarkdownCodeBlockPatchState {
+	activeCtx?: ExtensionContext;
+	originalRenderToken: (token: any, width: number, nextTokenType?: string, styleContext?: unknown) => string[];
+}
+
+function ansiPartsFromStyled(styled: string): { open: string; close: string } {
+	const marker = "\uE000";
+	const markerIndex = styled.indexOf(marker);
+	if (markerIndex < 0) return { open: "", close: "" };
+	return { open: styled.slice(0, markerIndex), close: styled.slice(markerIndex + marker.length) };
+}
+
+function codeBlockBgParts(ctx?: ExtensionContext): { open: string; close: string } {
+	const marker = "\uE000";
+	try {
+		const theme = ctx?.hasUI ? ctx.ui.theme : undefined;
+		if (theme?.bg) return ansiPartsFromStyled(theme.bg("customMessageBg", marker));
+	} catch {
+		// Fall through to a neutral dark background.
+	}
+	return { open: "\x1b[48;5;236m", close: "\x1b[49m" };
+}
+
+function applyCodeBlockBg(line: string, ctx?: ExtensionContext): string {
+	const { open, close } = codeBlockBgParts(ctx);
+	if (!open) return line;
+	const reapplied = line.replace(/\x1b\[(?:0|49)m/g, (reset) => `${reset}${open}`);
+	return `${open}${reapplied}${close}`;
+}
+
+function padAnsiLine(line: string, width: number): string {
+	return `${line}${" ".repeat(Math.max(0, width - visibleWidth(line)))}`;
+}
+
+function renderStyledCodeBlock(token: any, width: number, markdownTheme: any, ctx?: ExtensionContext): string[] {
+	const contentWidth = Math.max(1, width);
+	const rawLang = typeof token?.lang === "string" ? token.lang.trim() : "";
+	const lang = rawLang.split(/\s+/)[0] || undefined;
+	const code = typeof token?.text === "string" ? token.text : "";
+
+	if (contentWidth < 8) {
+		return code.split("\n").map((line) => (markdownTheme?.codeBlock ? markdownTheme.codeBlock(line) : line));
+	}
+
+	let highlightedLines: string[];
+	try {
+		highlightedLines = markdownTheme?.highlightCode ? markdownTheme.highlightCode(code, lang) : code.split("\n").map((line: string) => (markdownTheme?.codeBlock ? markdownTheme.codeBlock(line) : line));
+	} catch {
+		highlightedLines = code.split("\n").map((line: string) => (markdownTheme?.codeBlock ? markdownTheme.codeBlock(line) : line));
+	}
+
+	const strip = markdownTheme?.codeBlockBorder ? markdownTheme.codeBlockBorder("▌") : "▌";
+	const stripWidth = Math.max(1, visibleWidth(strip));
+	const bodyWidth = Math.max(1, contentWidth - stripWidth);
+	const codeWidth = Math.max(1, bodyWidth - 2);
+	const lines: string[] = [];
+	const blankBody = applyCodeBlockBg(" ".repeat(bodyWidth), ctx);
+	lines.push(`${strip}${blankBody}`);
+	for (const highlightedLine of highlightedLines) {
+		const wrapped = wrapTextWithAnsi(highlightedLine, codeWidth);
+		const segments = wrapped.length > 0 ? wrapped : [""];
+		for (const segment of segments) {
+			const paddedCode = padAnsiLine(segment, codeWidth);
+			lines.push(`${strip}${applyCodeBlockBg(` ${paddedCode} `, ctx)}`);
+		}
+	}
+	lines.push(`${strip}${blankBody}`);
+	return lines;
+}
+
+function installMarkdownCodeBlockRenderer(pi: ExtensionAPI): void {
+	const prototype = Markdown?.prototype as Record<PropertyKey, unknown> | undefined;
+	if (!prototype || typeof prototype.renderToken !== "function") return;
+
+	let state = prototype[MARKDOWN_CODE_BLOCK_PATCH_SYMBOL] as MarkdownCodeBlockPatchState | undefined;
+	if (!state) {
+		state = {
+			originalRenderToken: prototype.renderToken as MarkdownCodeBlockPatchState["originalRenderToken"],
+		};
+		prototype[MARKDOWN_CODE_BLOCK_PATCH_SYMBOL] = state;
+		prototype.renderToken = function styledCodeBlockRenderToken(this: any, token: any, width: number, nextTokenType?: string, styleContext?: unknown): string[] {
+			if (token?.type === "code" && settingBoolean("styledCodeBlocks", true, state?.activeCtx?.cwd)) {
+				const codeLines = renderStyledCodeBlock(token, width, this?.theme, state?.activeCtx);
+				if (nextTokenType && nextTokenType !== "space") return [...codeLines, ""];
+				return codeLines;
+			}
+			return state!.originalRenderToken.call(this, token, width, nextTokenType, styleContext);
+		};
+	}
+
+	pi.on("session_start", (_event: any, ctx: ExtensionContext) => {
+		state!.activeCtx = ctx;
+	});
+	pi.on("session_shutdown", () => {
+		if (prototype[MARKDOWN_CODE_BLOCK_PATCH_SYMBOL] === state) {
+			prototype.renderToken = state!.originalRenderToken as unknown;
+			delete prototype[MARKDOWN_CODE_BLOCK_PATCH_SYMBOL];
 		}
 		state!.activeCtx = undefined;
 	});
@@ -2761,6 +2864,7 @@ export default async function toolRenderer(pi: ExtensionAPI): Promise<void> {
 	installToolChromePatch();
 	registerToolChromeEvents(pi);
 	installWorkingIndicator(pi);
+	installMarkdownCodeBlockRenderer(pi);
 	installCompactionSummaryRenderer(pi, CompactionSummaryMessageComponent);
 
 	const agent = await import("@mariozechner/pi-coding-agent");
