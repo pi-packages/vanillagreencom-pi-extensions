@@ -244,7 +244,10 @@ pub(super) fn build_item_tabs(
             .iter()
             .map(|ext| {
                 let info = installed.get(&ext.name);
-                let suffix = ext.version.clone().map(|v| format!("v{v}"));
+                // Pi packages don't bump package.json#version on every change
+                // (it's an npm convention we don't actively use), so showing
+                // it here is misleading next to the hash-based outdated dot.
+                let suffix = None;
                 SelectItem {
                     label: ext.name.clone(),
                     description: if ext.description.is_empty() {
