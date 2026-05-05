@@ -407,14 +407,14 @@
         {
           "key": "toolChrome",
           "label": "Global tool chrome",
-          "description": "Optional global chrome for default boxed tool rows. off preserves current compact renderers; transparent/outlines affect only the container presentation.",
+          "description": "Global chrome for tool rows. outlines adds muted full-width horizontal rules above and below tool output; transparent removes default tool backgrounds without rules; off preserves Pi defaults.",
           "type": "enum",
           "enumValues": [
             "off",
             "transparent",
             "outlines"
           ],
-          "default": "off",
+          "default": "outlines",
           "category": "Chrome",
           "apply": "live"
         },

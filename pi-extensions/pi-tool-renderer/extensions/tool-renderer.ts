@@ -2086,7 +2086,7 @@ const OPENAI_STYLE_TOOL_NAMES = new Set([
 type ToolChromeMode = "off" | "transparent" | "outlines";
 
 function toolChromeMode(cwd?: string): ToolChromeMode {
-	return settingEnum("toolChrome", ["off", "transparent", "outlines"] as const, "off", cwd);
+	return settingEnum("toolChrome", ["off", "transparent", "outlines"] as const, "outlines", cwd);
 }
 
 function isMcpToolName(name: string): boolean {
@@ -2563,6 +2563,21 @@ function applyToolChromeTheme(theme: any, cwd?: string): void {
 	}
 }
 
+let activeToolChromeCtx: ExtensionContext | undefined;
+
+function mutedHorizontalRule(theme: any, width: number): string {
+	const rule = "─".repeat(Math.max(1, width));
+	try {
+		return theme?.fg?.("borderMuted", rule) ?? rule;
+	} catch {
+		try {
+			return theme?.fg?.("muted", rule) ?? rule;
+		} catch {
+			return rule;
+		}
+	}
+}
+
 function installToolChromePatch(): void {
 	const proto = Container?.prototype as any;
 	if (!proto || proto[TOOL_CHROME_PATCH_SYMBOL]) return;
@@ -2581,7 +2596,8 @@ function installToolChromePatch(): void {
 		if (start > end) return rendered;
 		const core = rendered.slice(start, end + 1).map((line) => truncateToWidth(line, Math.max(1, width), ""));
 		if (mode === "transparent") return core;
-		const rule = "─".repeat(Math.max(1, width));
+		const activeTheme = activeToolChromeCtx?.hasUI ? activeToolChromeCtx.ui.theme : undefined;
+		const rule = mutedHorizontalRule(activeTheme, width);
 		return [rule, ...core, rule];
 	};
 	proto[TOOL_CHROME_PATCH_SYMBOL] = true;
@@ -2589,10 +2605,15 @@ function installToolChromePatch(): void {
 
 function registerToolChromeEvents(pi: ExtensionAPI): void {
 	pi.on("session_start", (_event, ctx) => {
+		activeToolChromeCtx = ctx;
 		if (ctx.hasUI) applyToolChromeTheme(ctx.ui.theme, ctx.cwd);
 	});
 	pi.on("turn_start", (_event, ctx) => {
+		activeToolChromeCtx = ctx;
 		if (ctx.hasUI) applyToolChromeTheme(ctx.ui.theme, ctx.cwd);
+	});
+	pi.on("session_shutdown", () => {
+		activeToolChromeCtx = undefined;
 	});
 }
 
