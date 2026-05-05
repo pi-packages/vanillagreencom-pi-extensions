@@ -3141,8 +3141,11 @@ function registerReadOnly(pi: ExtensionAPI, agent: any, cwd: string, toolName: "
 			clearBlink(context);
 			const output = textContent(result);
 			const count = output.trim() ? lineCount(output) : 0;
-			const noun = toolName === "grep" ? "match" : toolName === "ls" ? "entr" : "file";
-			const label = toolName === "ls" ? `${count} ${noun}${count === 1 ? "y" : "ies"}` : `${count} ${noun}${count === 1 ? "" : "s"}`;
+			const label = toolName === "grep"
+				? `${count} match${count === 1 ? "" : "es"}`
+				: toolName === "ls"
+					? `${count} entr${count === 1 ? "y" : "ies"}`
+					: `${count} file${count === 1 ? "" : "s"}`;
 			let summary = count === 0 ? theme.fg("muted", toolName === "grep" ? "no matches" : toolName === "ls" ? "empty" : "no files") : theme.fg("success", label);
 			if (resultTruncated(result)) summary += theme.fg("warning", " · truncated");
 			const mode = searchOutputMode(context?.cwd ?? cwd);
