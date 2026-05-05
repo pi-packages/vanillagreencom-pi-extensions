@@ -63,7 +63,7 @@ export function renderExaResultList(label: string, target: string | undefined, r
 		const expanded = Boolean(options?.expanded);
 		const sources: ExaRenderableResult[] = Array.isArray(details?.results) ? details.results : [];
 		const contentId = typeof details?.contentId === "string" ? details.contentId : undefined;
-		const contentIdLineLast = !expanded || sources.length === 0;
+		const contentIdLineLast = sources.length === 0;
 		if (contentId) lines.push(`${tree(theme, contentIdLineLast ? "└" : "├")}${muted(theme, "content id ")}${accent(theme, contentId)}`);
 		if (!expanded && sources.length > 0) {
 			lines.push(`${tree(theme, "└")}${muted(theme, `… ${sources.length} source${sources.length === 1 ? "" : "s"} · Ctrl+O to expand`)}`);
