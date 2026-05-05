@@ -11,7 +11,7 @@ const INSTALL_SYMBOL = Symbol.for("vstack.pi-session-manager.installed");
 const VSTACK_MODAL_LOCK_SYMBOL = Symbol.for("vstack.pi.modal-lock");
 const PACKAGE_ID = "pi-session-manager";
 const LEGACY_STATUS_KEY = "session-manager";
-const DEFAULT_SHORTCUT = "ctrl+shift+r";
+const DEFAULT_SHORTCUT = "alt+shift+r";
 const DEFAULT_WIDTH = 112;
 const DEFAULT_ROWS = 12;
 const POPUP_PADDING_X = 2;
@@ -1252,7 +1252,7 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 					ctx.ui.notify("Session manager can open after the current turn finishes", "warning");
 					return;
 				}
-				pi.sendUserMessage("/sessions");
+				ctx.ui.setEditorText("/sessions");
 			},
 		});
 	}

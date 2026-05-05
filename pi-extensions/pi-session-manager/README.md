@@ -39,7 +39,7 @@ No SQLite, FTS, or native runtime dependencies are used; Pi's `SessionManager.li
 | `Ctrl+P` | Toggle full session path in row metadata. |
 | `Esc` / `Ctrl+C` | Clear search, cancel rename/delete, or close. |
 
-The global shortcut defaults to `Ctrl+Shift+R`; set `shortcutKey` to `none` to disable it.
+The global shortcut defaults to `Alt+Shift+R` — it pre-fills `/sessions` into the prompt; press Enter to open the manager. Set `shortcutKey` to `none` to disable it.
 
 ## Settings
 
@@ -48,7 +48,7 @@ Settings are exposed through `pi-extension-manager` under `vstack.extensionManag
 | Key | Default | Notes |
 | --- | --- | --- |
 | `enabled` | `true` | Registers commands and shortcut after reload. |
-| `shortcutKey` | `ctrl+shift+r` | Opens `/sessions` when Pi is idle; set to `none` to disable. |
+| `shortcutKey` | `alt+shift+r` | Pre-fills `/sessions` into the prompt when Pi is idle; press Enter to open. Set to `none` to disable. |
 | `defaultScope` | `current` | Initial Current/All tab when opening `/sessions`. |
 | `defaultSort` | `threaded` | `threaded`, `recent`, or `relevance`. |
 | `visibleRows` | `12` | List rows before scrolling. |

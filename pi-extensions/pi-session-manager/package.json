@@ -34,7 +34,7 @@
           "label": "Manager shortcut",
           "description": "Keyboard shortcut that opens /sessions when Pi is idle. Set to none to disable.",
           "type": "string",
-          "default": "ctrl+shift+r",
+          "default": "alt+shift+r",
           "category": "General",
           "apply": "reload",
           "requiresReload": true
