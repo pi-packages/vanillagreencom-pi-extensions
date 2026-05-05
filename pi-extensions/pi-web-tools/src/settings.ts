@@ -26,6 +26,7 @@ export interface WebToolsSettings {
 	browserCookieAccess: boolean;
 	githubClone: { enabled: boolean; maxRepoSizeMB: number };
 	htmlExtraction: { jinaFallback: boolean };
+	browserCookies: { preferredBrowser: "auto" | "firefox" | "zen" | "chrome" | "chromium"; profile?: string };
 	video: { enabled: boolean };
 	shortcuts: { curator: string; activity: string };
 	apiKeys: Partial<Record<ResolvedWebProvider | "openai" | "jina", string>>;
@@ -51,6 +52,7 @@ export const DEFAULT_SETTINGS: Omit<WebToolsSettings, "apiKeys" | "warnings" | "
 	browserCookieAccess: false,
 	githubClone: { enabled: true, maxRepoSizeMB: 350 },
 	htmlExtraction: { jinaFallback: true },
+	browserCookies: { preferredBrowser: "auto" },
 	video: { enabled: true },
 	shortcuts: { curator: "ctrl+shift+s", activity: "ctrl+shift+w" },
 };
@@ -245,6 +247,7 @@ export function loadSettings(cwd = process.cwd()): WebToolsSettings {
 	}
 	const githubClone = nested(raw, "githubClone");
 	const htmlExtraction = nested(raw, "htmlExtraction");
+	const browserCookies = nested(raw, "browserCookies");
 	const video = nested(raw, "video");
 	const shortcuts = nested(raw, "shortcuts");
 	const sharedSecrets = ["exaApiKey", "perplexityApiKey", "geminiApiKey", "openaiApiKey"].filter((key) => typeof raw[key] === "string");
@@ -277,6 +280,10 @@ export function loadSettings(cwd = process.cwd()): WebToolsSettings {
 		},
 		htmlExtraction: {
 			jinaFallback: typeof htmlExtraction.jinaFallback === "boolean" ? htmlExtraction.jinaFallback : DEFAULT_SETTINGS.htmlExtraction.jinaFallback,
+		},
+		browserCookies: {
+			preferredBrowser: (["auto", "firefox", "zen", "chrome", "chromium"] as const).includes((browserCookies.preferredBrowser as any)) ? (browserCookies.preferredBrowser as any) : DEFAULT_SETTINGS.browserCookies.preferredBrowser,
+			profile: typeof browserCookies.profile === "string" && browserCookies.profile.trim() ? browserCookies.profile.trim() : undefined,
 		},
 		video: { enabled: typeof video.enabled === "boolean" ? video.enabled : DEFAULT_SETTINGS.video.enabled },
 		shortcuts: {

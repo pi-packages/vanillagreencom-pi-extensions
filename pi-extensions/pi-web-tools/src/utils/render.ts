@@ -66,6 +66,7 @@ export function providerDisplayName(provider: unknown): string {
 	if (value === "exa") return "Exa";
 	if (value === "github") return "GitHub";
 	if (value === "gemini") return "Gemini";
+	if (value === "gemini-web") return "Gemini Web";
 	if (value === "perplexity") return "Perplexity";
 	if (value === "openai-native") return "OpenAI Native";
 	if (value === "openai" || value === "openai-codex" || value === "codex") return "Codex";

@@ -2,6 +2,8 @@ import { StringEnum } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Type, type Static } from "typebox";
 import { ExaClient } from "../providers/exa.js";
+import { GeminiApiClient } from "../providers/gemini-api.js";
+import { geminiWebSearch } from "../providers/gemini-web.js";
 import { nativeOpenAiNotice } from "../providers/openai-native.js";
 import { PerplexityClient } from "../providers/perplexity.js";
 import { resolveWebProvider } from "../provider-selection.js";
@@ -95,6 +97,30 @@ export function createWebSearchToolDefinition(pi: ExtensionAPI, getSettings: (cw
 				return {
 					content: [{ type: "text", text: body }],
 					details: { provider: "perplexity", answer, results: all },
+				};
+			}
+			if (resolution.provider === "gemini") {
+				const all = [] as any[];
+				let answer: string | undefined;
+				let sourceLabel = "gemini";
+				for (const query of queries) {
+					let response;
+					if (settings.apiKeys.gemini) {
+						const client = new GeminiApiClient({ apiKey: settings.apiKeys.gemini });
+						response = await client.search({ query, includeDomains: params.includeDomains, excludeDomains: params.excludeDomains }, signal);
+					} else if (settings.browserCookieAccess) {
+						response = await geminiWebSearch({ query }, { preferredBrowser: settings.browserCookies.preferredBrowser, browserProfile: settings.browserCookies.profile, signal });
+						sourceLabel = "gemini-web";
+					} else {
+						throw new Error("Gemini provider requires GEMINI_API_KEY or browserCookieAccess=true with a signed-in Firefox/Zen/Chrome.");
+					}
+					if (!answer && response.answer) answer = response.answer;
+					for (const result of response.results) all.push({ ...result });
+				}
+				const body = answer ? `${answer}\n\n${sourceList(all)}` : `Provider: ${sourceLabel}\nResults: ${all.length}\n${sourceList(all)}`;
+				return {
+					content: [{ type: "text", text: body }],
+					details: { provider: sourceLabel, answer, results: all },
 				};
 			}
 			if (resolution.provider !== "exa") throw new Error(`${resolution.provider} direct execution is staged for a follow-up; use provider=exa or openai-native.`);
