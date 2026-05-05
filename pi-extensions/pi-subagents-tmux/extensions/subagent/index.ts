@@ -30,7 +30,7 @@ import {
 	type TruncationResult,
 	withFileMutationQueue,
 } from "@mariozechner/pi-coding-agent";
-import { Container, Markdown, matchesKey, Spacer, Text, truncateToWidth, visibleWidth, wrapTextWithAnsi, type TUI } from "@mariozechner/pi-tui";
+import { type Component, Container, Markdown, matchesKey, Spacer, Text, truncateToWidth, visibleWidth, wrapTextWithAnsi, type TUI } from "@mariozechner/pi-tui";
 import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents, formatAgentList } from "./agents.js";
 
@@ -1750,6 +1750,29 @@ function dashboardFrame(lines: string[], width: number, theme: Theme): string[] 
 	return simpleFrame(lines, width, theme);
 }
 
+function toolChromeRule(theme: Theme, width: number): string {
+	const rule = "─".repeat(Math.max(1, width));
+	try {
+		return (theme.fg as (token: string, text: string) => string)("borderMuted", rule);
+	} catch {
+		try {
+			return theme.fg("muted", rule);
+		} catch {
+			return rule;
+		}
+	}
+}
+
+function framedMessage(content: string, theme: Theme): Component {
+	return {
+		invalidate() {},
+		render(width: number): string[] {
+			const rule = toolChromeRule(theme, width);
+			return [rule, ...content.split("\n"), rule];
+		},
+	};
+}
+
 function dashboardTranscriptLabel(items: SubagentDashboardItem[], cwd: string): string {
 	const refs = [...new Set(items.map((item) => dashboardTraceRef(item)).filter(Boolean))];
 	if (refs.length === 0) return "transcripts available";
@@ -3200,9 +3223,9 @@ export default function (pi: ExtensionAPI) {
 			if (completions.length === 1) {
 				const detail = completions[0]!;
 				const status = paneCompletionStatus(detail.status, theme);
-				return new Text(`${paneCompletionIcon(detail.status, theme)} ${theme.fg("accent", theme.bold(detail.agent))} ${status}`, 0, 0);
+				return framedMessage(`${paneCompletionIcon(detail.status, theme)} ${theme.fg("accent", theme.bold(detail.agent))} ${status}`, theme);
 			}
-			if (completions.length > 1) return new Text(`${theme.fg("success", "✓")} ${theme.fg("toolTitle", theme.bold(`${completions.length} subagents completed`))}`, 0, 0);
+			if (completions.length > 1) return framedMessage(`${theme.fg("success", "✓")} ${theme.fg("toolTitle", theme.bold(`${completions.length} subagents completed`))}`, theme);
 		}
 		return renderPaneCompletionMessage(message as { content: string; details?: unknown }, options as { expanded?: boolean } | undefined, theme);
 	});
