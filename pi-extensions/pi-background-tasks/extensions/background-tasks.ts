@@ -639,7 +639,7 @@ class RenderedLines {
 	render(width: number): string[] {
 		if (this.cachedLines && this.cachedWidth === width) return this.cachedLines;
 		const targetWidth = Math.max(1, width);
-		this.cachedLines = this.text.split(/\r?\n/).map((line) => truncateToWidth(line, targetWidth, ""));
+		this.cachedLines = wrapAnsiLines(this.text, targetWidth);
 		this.cachedWidth = width;
 		return this.cachedLines;
 	}

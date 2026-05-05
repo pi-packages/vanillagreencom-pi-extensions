@@ -184,12 +184,12 @@ function subagentBranch(theme: Theme, branch: "├" | "└" | "│", cwd?: strin
 		if (branch === "│") return theme.fg("muted", "|  ");
 		return theme.fg("muted", branch === "└" ? "`-- " : "|-- ");
 	}
-	if (branch === "│") return theme.fg("muted", "  │ ");
-	return theme.fg("muted", `  ${branch}─ `);
+	if (branch === "│") return theme.fg("muted", "│  ");
+	return theme.fg("muted", `${branch}─ `);
 }
 
 function subagentStem(theme: Theme, isLast: boolean, cwd?: string): string {
-	return isLast ? theme.fg("muted", subagentTreeStyle(cwd) === "ascii" ? "    " : "     ") : subagentBranch(theme, "│", cwd);
+	return isLast ? theme.fg("muted", subagentTreeStyle(cwd) === "ascii" ? "    " : "   ") : subagentBranch(theme, "│", cwd);
 }
 
 function padAnsi(text: string, width: number): string {
@@ -4373,12 +4373,9 @@ export default function (pi: ExtensionAPI) {
 				return wrappedText(text);
 			}
 			if (args.tasks && args.tasks.length > 0) {
-				const tasks = args.tasks as Array<{ agent: string; task?: string }>;
-				const text =
-					theme.fg("accent", "● ") +
-					theme.fg("toolTitle", theme.bold(`${tasks.length} agent${tasks.length === 1 ? "" : "s"} launching`)) +
-					theme.fg("muted", ` [${scope}]`);
-				return wrappedText(text);
+				// Suppressed: renderResult renders the tree once results land, so the
+				// renderCall preview would just stack a duplicate header above it.
+				return new Container();
 			}
 			const agentName = args.agent || "...";
 			const preview = args.task ? oneLinePreview(args.task, 56) : "...";
@@ -4680,21 +4677,11 @@ export default function (pi: ExtensionAPI) {
 						if (outputPath) lines.push(`${stem}${outputPath}`);
 						const transcript = transcriptLine(r);
 						if (transcript) lines.push(`${stem}${transcript}`);
-						const taskUsage = formatUsageStats(r.usage, r.model);
-						if (taskUsage) lines.push(`${stem}${theme.fg("dim", taskUsage)}`);
 					}
-
-					const usageStr = formatUsageStats(aggregateUsage(details.results));
-					if (usageStr) lines.push("", theme.fg("dim", `Total: ${usageStr}`));
 					return wrappedText(lines.join("\n"));
 				}
 
-				let text = `${headerText}\n${treeText}`;
-				if (!isRunning) {
-					const usageStr = formatUsageStats(aggregateUsage(details.results));
-					if (usageStr) text += `\n${theme.fg("dim", `Total: ${usageStr}`)}`;
-				}
-				return wrappedText(text);
+				return wrappedText(`${headerText}\n${treeText}`);
 			}
 
 			const text = result.content[0];
