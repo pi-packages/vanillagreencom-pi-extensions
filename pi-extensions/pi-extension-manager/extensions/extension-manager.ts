@@ -7,11 +7,12 @@
  * /extensions settings subcommand.
  */
 
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, Theme } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, Theme, ThemeColor } from "@mariozechner/pi-coding-agent";
 import { matchesKey, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
+import { spawnSync } from "node:child_process";
 
 const INSTALL_SYMBOL = Symbol.for("vstack.pi-extension-manager.installed");
 const MANAGER_ID = "pi-extension-manager";
@@ -216,7 +217,12 @@ interface ManagerActionResetSettings {
 	itemId: string;
 }
 
-type ManagerAction = ManagerActionEdit | ManagerActionSet | ManagerActionToggleItem | ManagerActionToggleProvider | ManagerActionResetSetting | ManagerActionResetSettings | { type: "close" } | undefined;
+interface ManagerActionUninstallPackage {
+	type: "uninstall-package";
+	itemId: string;
+}
+
+type ManagerAction = ManagerActionEdit | ManagerActionSet | ManagerActionToggleItem | ManagerActionToggleProvider | ManagerActionResetSetting | ManagerActionResetSettings | ManagerActionUninstallPackage | { type: "close" } | undefined;
 
 function expandHome(input: string): string {
 	if (input === "~") return homedir();
@@ -1134,6 +1140,97 @@ function makeInitialUiState(initialTab: TopTab): ManagerUiState {
 	};
 }
 
+type UninstallMethod =
+	| { kind: "vstack"; packageName: string; scope: Scope }
+	| { kind: "npm"; npmName: string; scope: Scope; cwd: string }
+	| { kind: "orphan"; packageName: string; scope: Scope };
+
+interface UninstallPlan {
+	item: InventoryItem;
+	method: UninstallMethod;
+	command: string;
+	description: string;
+}
+
+function planUninstall(item: InventoryItem, inventory: Inventory, ctx: ExtensionCommandContext | ExtensionContext): UninstallPlan | undefined {
+	if (item.kind !== "package" || !item.packageName) return undefined;
+	const sourceIndex = loadSourceIndex(inventory.settingsFiles);
+	const scopeFlag = item.scope === "user" ? " --global" : "";
+	if (sourceIndex[item.packageName]) {
+		return {
+			item,
+			method: { kind: "vstack", packageName: item.packageName, scope: item.scope },
+			command: `vstack remove ${item.packageName}${scopeFlag}`,
+			description: "Installed via vstack — runs the vstack remove command (deletes the package directory, the settings.json entry, and the source-index entry).",
+		};
+	}
+	const npmName = npmPackageNameFromSource(item.sourceName);
+	if (npmName) {
+		const gFlag = item.scope === "user" ? " -g" : "";
+		return {
+			item,
+			method: { kind: "npm", npmName, scope: item.scope, cwd: ctx.cwd },
+			command: `npm uninstall${gFlag} ${npmName}`,
+			description: "Installed via npm — runs npm uninstall, then strips the npm: entry from Pi settings.json.",
+		};
+	}
+	return {
+		item,
+		method: { kind: "orphan", packageName: item.packageName, scope: item.scope },
+		command: `(strip ${item.sourceName} from ${item.scope} settings.json)`,
+		description: "No vstack source-index entry and no npm: prefix — only the Pi settings.json entry will be removed.",
+	};
+}
+
+function removePackageEntryFromSettings(item: InventoryItem, files: SettingsFile[]): boolean {
+	const file = findSettingsFile(files, item.scope);
+	if (!Array.isArray(file.json.packages)) return false;
+	const before = file.json.packages.length;
+	const next = file.json.packages.filter((entry) => {
+		const normalized = normalizePackageEntry(entry, file.baseDir);
+		if (!normalized) return true;
+		if (normalized.resolved === item.sourcePath) return false;
+		if (normalized.source === item.sourceName) return false;
+		return true;
+	});
+	if (next.length === before) return false;
+	if (next.length === 0) delete file.json.packages;
+	else file.json.packages = next;
+	writeSettingsFile(file);
+	return true;
+}
+
+function runUninstall(plan: UninstallPlan, inventory: Inventory): { ok: boolean; message: string } {
+	if (plan.method.kind === "vstack") {
+		const args = ["remove", plan.method.packageName];
+		if (plan.method.scope === "user") args.push("--global");
+		const result = spawnSync("vstack", args, { encoding: "utf8" });
+		if (result.error) return { ok: false, message: `Failed to launch vstack: ${stringifyError(result.error)}` };
+		if ((result.status ?? 1) !== 0) {
+			const stderr = (result.stderr ?? "").trim() || (result.stdout ?? "").trim() || `exit ${result.status}`;
+			return { ok: false, message: `vstack remove failed: ${stderr}` };
+		}
+		return { ok: true, message: `Removed via vstack: ${plan.item.displayName}.` };
+	}
+	if (plan.method.kind === "npm") {
+		const args = ["uninstall"];
+		if (plan.method.scope === "user") args.push("-g");
+		args.push(plan.method.npmName);
+		const result = spawnSync("npm", args, { encoding: "utf8", cwd: plan.method.cwd });
+		if (result.error) return { ok: false, message: `Failed to launch npm: ${stringifyError(result.error)}` };
+		if ((result.status ?? 1) !== 0) {
+			const stderr = (result.stderr ?? "").trim() || (result.stdout ?? "").trim() || `exit ${result.status}`;
+			return { ok: false, message: `npm uninstall failed: ${stderr}` };
+		}
+		const stripped = removePackageEntryFromSettings(plan.item, inventory.settingsFiles);
+		return { ok: true, message: `npm uninstall ${plan.method.npmName} succeeded${stripped ? "; removed Pi settings entry." : " (no settings entry to remove)."}` };
+	}
+	const stripped = removePackageEntryFromSettings(plan.item, inventory.settingsFiles);
+	return stripped
+		? { ok: true, message: `Removed ${plan.item.sourceName} from ${plan.item.scope} settings.json.` }
+		: { ok: false, message: `Could not find a matching entry for ${plan.item.sourceName} in ${plan.item.scope} settings.json.` };
+}
+
 async function openManager(pi: ExtensionAPI, ctx: ExtensionCommandContext | ExtensionContext, initialTab: TopTab = TAB_ALL): Promise<void> {
 	const releaseModalLock = acquireVstackModalLock();
 	try {
@@ -1210,6 +1307,34 @@ async function openManager(pi: ExtensionAPI, ctx: ExtensionCommandContext | Exte
 		}
 		if (action.type === "toggle-provider") {
 			toggleProvider(pi, ctx, inventory, action.provider);
+			continue;
+		}
+		if (action.type === "uninstall-package") {
+			const item = inventory.items.find((candidate) => candidate.id === action.itemId);
+			if (!item) continue;
+			if (item.packageName === MANAGER_ID) {
+				ctx.ui.notify("Refusing to uninstall pi-extension-manager from inside itself.", "warning");
+				continue;
+			}
+			const plan = planUninstall(item, inventory, ctx);
+			if (!plan) {
+				ctx.ui.notify(`${item.displayName} is not an uninstallable package.`, "warning");
+				continue;
+			}
+			const body = [
+				`Package: ${plan.item.packageName}`,
+				`Scope: ${plan.item.scope}`,
+				`Source: ${plan.item.sourceName}`,
+				"",
+				plan.description,
+				"",
+				`Will run: ${plan.command}`,
+			].join("\n");
+			const confirmed = await ctx.ui.confirm(`Uninstall ${plan.item.displayName}?`, body);
+			if (!confirmed) continue;
+			const result = runUninstall(plan, inventory);
+			if (result.ok) ctx.ui.notify(`${result.message} Run /reload to apply.`, "warning");
+			else ctx.ui.notify(result.message, "error");
 			continue;
 		}
 	}
@@ -1468,8 +1593,8 @@ function createManagerComponent(
 		if (ui.showAudit) {
 			if (matchesKey(data, "up")) return scrollDiagnostics(-1);
 			if (matchesKey(data, "down")) return scrollDiagnostics(1);
-			if (matchesKey(data, "pageup")) return scrollDiagnostics(-10);
-			if (matchesKey(data, "pagedown")) return scrollDiagnostics(10);
+			if (matchesKey(data, "pageUp")) return scrollDiagnostics(-10);
+			if (matchesKey(data, "pageDown")) return scrollDiagnostics(10);
 			if (matchesKey(data, "home")) {
 				ui.diagnosticsScroll = 0;
 				requestRender();
@@ -1510,14 +1635,14 @@ function createManagerComponent(
 			requestRender();
 			return;
 		}
-		if (matchesKey(data, "pageup")) {
+		if (matchesKey(data, "pageUp")) {
 			if (ui.pane === "settings") ui.settingSelected -= getLayout().settingsRows;
 			else ui.selected -= getLayout().listRows;
 			clamp();
 			requestRender();
 			return;
 		}
-		if (matchesKey(data, "pagedown")) {
+		if (matchesKey(data, "pageDown")) {
 			if (ui.pane === "settings") ui.settingSelected += getLayout().settingsRows;
 			else ui.selected += getLayout().listRows;
 			clamp();
@@ -1589,6 +1714,9 @@ function createManagerComponent(
 			return;
 		}
 		if (matchesKey(data, "alt+t") && selected) return done({ type: "toggle-provider", provider: selected.provider });
+		if (matchesKey(data, "alt+u") && selected && selected.kind === "package") {
+			return done({ type: "uninstall-package", itemId: selected.id });
+		}
 		if ((matchesKey(data, "enter") || matchesKey(data, "return")) && selected) {
 			if (ui.pane === "settings" && settings.length > 0) {
 				const schema = settings[ui.settingSelected];
@@ -1766,7 +1894,7 @@ function renderExtensions(inventory: Inventory, ui: ManagerUiState, width: numbe
 		searchLine,
 		`${theme.fg("muted", "View")}: ${theme.fg("text", view)}  ${theme.fg("muted", "Filters")}: kind ${ui.kindFilter} · provider ${ui.providerFilter} · state ${ui.stateFilter} · scope ${ui.scopeFilter}`,
 		"",
-		`${ansiYellow("Alt+K/P/S/O")} ${theme.fg("dim", "filters · ")}${ansiYellow("Alt+R")} ${theme.fg("dim", "raw resources · ")}${ansiYellow("Alt+T")} ${theme.fg("dim", "toggle provider · ")}${ansiYellow("delete")} ${theme.fg("dim", "reset setting · ")}${ansiYellow("ctrl+x")} ${theme.fg("dim", "reset extension · ")}${ansiYellow("←/→")} ${theme.fg("dim", "pane")}`,
+		`${ansiYellow("Alt+K/P/S/O")} ${theme.fg("dim", "filters · ")}${ansiYellow("Alt+R")} ${theme.fg("dim", "raw resources · ")}${ansiYellow("Alt+T")} ${theme.fg("dim", "toggle provider · ")}${ansiYellow("Alt+U")} ${theme.fg("dim", "uninstall package · ")}${ansiYellow("delete")} ${theme.fg("dim", "reset setting · ")}${ansiYellow("ctrl+x")} ${theme.fg("dim", "reset extension · ")}${ansiYellow("←/→")} ${theme.fg("dim", "pane")}`,
 		divider(width, theme),
 	];
 	for (let i = 0; i < rows; i += 1) {
@@ -1904,7 +2032,7 @@ function renderInspector(inventory: Inventory, item: InventoryItem | undefined, 
 	return lines.flatMap((line) => wrapLine(line, width)).slice(0, safeViewportRows);
 }
 
-function stateColor(state: ExtensionState): string {
+function stateColor(state: ExtensionState): ThemeColor {
 	if (state === "active") return "success";
 	if (state === "disabled") return "warning";
 	if (state === "broken") return "error";
@@ -2177,13 +2305,13 @@ function createQuickSettingsComponent(pi: ExtensionAPI, ctx: ExtensionCommandCon
 			requestRender();
 			return;
 		}
-		if (matchesKey(data, "pageup")) {
+		if (matchesKey(data, "pageUp")) {
 			ui.selected -= getLayout().listRows;
 			clamp();
 			requestRender();
 			return;
 		}
-		if (matchesKey(data, "pagedown")) {
+		if (matchesKey(data, "pageDown")) {
 			ui.selected += getLayout().listRows;
 			clamp();
 			requestRender();
