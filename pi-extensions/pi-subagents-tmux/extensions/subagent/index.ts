@@ -2767,37 +2767,38 @@ function renderPaneCompletionMessage(message: { content: string; details?: unkno
 function formatTaskRecordResult(record: PaneTaskRecord, verbose = false): string {
 	const files = record.filesChanged?.length ? record.filesChanged.map((file) => `- ${file}`).join("\n") : "None reported";
 	const validation = record.validation?.length ? record.validation.map((item) => `- ${item}`).join("\n") : "None reported";
+	const metaParts = [
+		`Status: **${record.status}**`,
+		record.completedAt ? `Completed: ${record.completedAt}` : `Created: ${record.createdAt}`,
+	];
 	const lines = [
-		`# Subagent result: ${record.agent}`,
+		`## ${record.agent} · ${record.taskId}`,
+		metaParts.join(" · "),
 		"",
-		`| Field | Value |`,
-		`| --- | --- |`,
-		`| Status | ${record.status} |`,
-		`| Task ID | \`${record.taskId}\` |`,
-		`| Created | ${record.createdAt} |`,
-		record.completedAt ? `| Completed | ${record.completedAt} |` : "",
-		"",
-		"## Task",
-		record.task || "(task text unavailable)",
-		"",
-		"## Summary",
+		"### Summary",
 		record.summary || "No summary yet.",
 		"",
-		"## Files Changed",
+		"### Files Changed",
 		files,
 		"",
-		"## Validation",
+		"### Validation",
 		validation,
-		record.notes ? `\n## Notes\n${record.notes}` : "",
+		record.notes ? `\n### Notes\n${record.notes}` : "",
 	];
-	const artifactLines = [
-		record.outboxFile ? `Expected completion file: ${verbose ? record.outboxFile : compactPath(record.outboxFile)}` : "",
-		record.completionSourcePath ? `Completion source: ${verbose ? record.completionSourcePath : compactPath(record.completionSourcePath)}` : "",
-		record.completionArchivePath ? `Completion archive: ${verbose ? record.completionArchivePath : compactPath(record.completionArchivePath)}` : "",
-		record.transcriptPath ? `Transcript: ${verbose ? record.transcriptPath : compactPath(record.transcriptPath)}` : "",
-		record.inboxFile ? `Inbox file: ${verbose ? record.inboxFile : compactPath(record.inboxFile)}` : "",
-	].filter(Boolean);
-	if (artifactLines.length > 0) lines.push("", verbose ? "## Artifacts" : "## Artifact paths", ...artifactLines);
+	if (verbose) {
+		lines.push("", "### Task", record.task || "(task text unavailable)");
+		const artifactLines = [
+			record.completionArchivePath ? `Archive: ${record.completionArchivePath}` : record.completionSourcePath ? `Source: ${record.completionSourcePath}` : "",
+			record.transcriptPath ? `Transcript: ${record.transcriptPath}` : "",
+		].filter(Boolean);
+		if (artifactLines.length > 0) lines.push("", "### Artifacts", ...artifactLines);
+	} else {
+		const artifactLines = [
+			record.completionArchivePath ? `Archive: ${compactPath(record.completionArchivePath)}` : "",
+			record.transcriptPath ? `Transcript: ${compactPath(record.transcriptPath)}` : "",
+		].filter(Boolean);
+		if (artifactLines.length > 0) lines.push("", ...artifactLines);
+	}
 	return lines.filter(Boolean).join("\n");
 }
 
@@ -3121,6 +3122,7 @@ export default function (pi: ExtensionAPI) {
 	if (!settingBoolean("enabled", true)) return;
 
 	const childAgentName = process.env.PI_SUBAGENT_CHILD_AGENT;
+	let pendingChildCompletion: { agent: string; taskId: string; status: string; outboxFile: string } | undefined;
 	let completionPoller: ReturnType<typeof setInterval> | undefined;
 	let completionPollInFlight = false;
 	let childInboxPoller: ReturnType<typeof setInterval> | undefined;
@@ -3346,6 +3348,7 @@ export default function (pi: ExtensionAPI) {
 			};
 			await fs.promises.mkdir(path.dirname(outboxFile), { recursive: true, mode: 0o700 });
 			await fs.promises.writeFile(outboxFile, JSON.stringify(completion, null, 2), { encoding: "utf-8", mode: 0o600 });
+			pendingChildCompletion = { agent: childAgentName, taskId, status: params.status, outboxFile };
 			return {
 				content: [{ type: "text", text: `Completed ${childAgentName} task ${taskId} (${params.status}).` }],
 				details: { agent: childAgentName, taskId, status: params.status, outboxFile },
@@ -3354,15 +3357,28 @@ export default function (pi: ExtensionAPI) {
 		renderCall(_args, _theme, _context) {
 			return new Container();
 		},
-		renderResult(result, { expanded }, theme, context) {
-			const raw = result.content?.find?.((part: any) => part?.type === "text")?.text ?? "";
-			const details = result.details as { agent?: string; taskId?: string; status?: string; outboxFile?: string } | undefined;
-			if (context?.isError) return new Text(`${theme.fg("error", ICONS.times)} ${theme.fg("toolTitle", "Subagent completion failed")}\n${theme.fg("muted", raw)}`, 0, 0);
-			const agentLabel = details?.agent ? `${details.agent.charAt(0).toUpperCase()}${details.agent.slice(1)}` : "Subagent";
-			const headline = `${theme.fg("success", ICONS.check)} ${theme.fg("toolTitle", theme.bold(`${agentLabel} complete`))}${theme.fg("muted", " · now waiting")}`;
-			if (expanded && details?.outboxFile) return new Text(`${headline}\n${theme.fg("dim", `Outbox: ${compactPath(details.outboxFile)}`)}`, 0, 0);
-			return new Text(headline, 0, 0);
+		renderResult(_result, _options, _theme, _context) {
+			// Silent: completion line is emitted post-turn from the agent_end hook so
+			// it appears after the agent's final message instead of mid-stream.
+			return new Container();
 		},
+	});
+
+	pi.registerMessageRenderer("subagent-self-completion", (message, options, theme) => {
+		const details = message.details as { agent?: string; status?: string; outboxFile?: string } | undefined;
+		const agentLabel = details?.agent ? `${details.agent.charAt(0).toUpperCase()}${details.agent.slice(1)}` : "Subagent";
+		const statusWord = details?.status === "failed" ? "failed" : details?.status === "blocked" ? "blocked" : "complete";
+		const icon = details?.status === "failed"
+			? theme.fg("error", ICONS.times)
+			: details?.status === "blocked"
+				? theme.fg("warning", ICONS.warning)
+				: theme.fg("success", ICONS.check);
+		const tail = statusWord === "complete" ? " · now waiting" : "";
+		const headline = `${icon} ${theme.fg("toolTitle", theme.bold(`${agentLabel} ${statusWord}`))}${theme.fg("muted", tail)}`;
+		if (options?.expanded && details?.outboxFile) {
+			return framedMessage(`${headline}\n${theme.fg("dim", `Outbox: ${compactPath(details.outboxFile)}`)}`, theme);
+		}
+		return framedMessage(headline, theme);
 	});
 
 	pi.on("session_start", async (_event, ctx) => {
@@ -3456,16 +3472,23 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("agent_end", async (_event, ctx) => {
-		if (!childAgentName || !childCurrentTaskFile) return;
-		const doneFile = path.join(runtimeDirForContext(ctx), "done", safeFileName(childAgentName), path.basename(childCurrentTaskFile));
-		try {
-			await fs.promises.mkdir(path.dirname(doneFile), { recursive: true, mode: 0o700 });
-			await fs.promises.rename(childCurrentTaskFile, doneFile);
-		} catch {
-			// Keep the processing file as evidence if archival fails.
+		if (!childAgentName) return;
+		if (childCurrentTaskFile) {
+			const doneFile = path.join(runtimeDirForContext(ctx), "done", safeFileName(childAgentName), path.basename(childCurrentTaskFile));
+			try {
+				await fs.promises.mkdir(path.dirname(doneFile), { recursive: true, mode: 0o700 });
+				await fs.promises.rename(childCurrentTaskFile, doneFile);
+			} catch {
+				// Keep the processing file as evidence if archival fails.
+			}
+			childCurrentTaskFile = undefined;
 		}
-		childCurrentTaskFile = undefined;
 		ctx.ui.setStatus("subagent", `${childAgentName} idle`);
+		if (pendingChildCompletion) {
+			const details = pendingChildCompletion;
+			pendingChildCompletion = undefined;
+			pi.sendMessage({ customType: "subagent-self-completion", content: "", details, display: true });
+		}
 	});
 
 	pi.on("session_shutdown", () => {
@@ -4339,7 +4362,7 @@ export default function (pi: ExtensionAPI) {
 			if (args.tasks && args.tasks.length > 0) {
 				const tasks = args.tasks as Array<{ agent: string; task?: string }>;
 				const text =
-					theme.fg("accent", `${ICONS.circleFilled} `) +
+					theme.fg("accent", "● ") +
 					theme.fg("toolTitle", theme.bold(`${tasks.length} agent${tasks.length === 1 ? "" : "s"} launching`)) +
 					theme.fg("muted", ` [${scope}]`);
 				return new Text(text, 0, 0);
@@ -4587,14 +4610,21 @@ export default function (pi: ExtensionAPI) {
 					: failCount > 0
 						? `${successCount}/${total} agent${pluralN(total)} completed`
 						: queuedPaneCount === total
-							? `${total} agent${pluralN(total)} queued`
+							? `${total} agent${pluralN(total)} launched`
 							: queuedPaneCount > 0
-								? `${oneshotCompletedCount} completed, ${queuedPaneCount} queued`
+								? `${total} agents launched (${oneshotCompletedCount} oneshot, ${queuedPaneCount} pane)`
 								: `${total} agent${pluralN(total)} completed`;
+				const hint = isRunning
+					? ""
+					: queuedPaneCount > 0
+						? theme.fg("muted", " · see dashboard for live status")
+						: expanded
+							? ""
+							: theme.fg("muted", " (Ctrl+O to inspect)");
 				const headerText =
-					theme.fg("accent", `${ICONS.circleFilled} `) +
+					theme.fg("accent", "● ") +
 					theme.fg("toolTitle", theme.bold(headerLabel)) +
-					(expanded ? "" : theme.fg("muted", " (Ctrl+O to inspect)"));
+					hint;
 				const rowIcon = (r: SingleResult) => {
 					if (r.exitCode === -1) return theme.fg("warning", `${ICONS.hourglass} `);
 					if (r.exitCode > 0) return theme.fg("error", `${ICONS.times} `);
