@@ -32,7 +32,7 @@ function answerPreviewLines(answer: string, theme: any, expanded: boolean, hasRe
 		const last = index === chunks.length - 1;
 		const branch = last && !hasResults ? "└" : index === 0 ? "├" : "│";
 		const prefix = "";
-		const value = chunk.startsWith("… answer truncated") ? muted(theme, chunk) : accent(theme, chunk || " ");
+		const value = chunk.startsWith("… truncated") ? muted(theme, chunk) : accent(theme, chunk || " ");
 		return `${tree(theme, branch)}${muted(theme, prefix)}${value}`;
 	});
 }
