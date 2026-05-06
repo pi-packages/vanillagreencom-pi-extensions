@@ -1,9 +1,9 @@
 # pi-qol
 
-![Session search popup](assets/session-search.png)
-
-![/context usage breakdown](assets/context-usage.png)
 ![QOL extension settings panel](assets/settings-panel.png)
+
+![Session search popup](assets/session-search.png)
+![/context usage breakdown](assets/context-usage.png)
 
 Quality-of-life extension for Pi.
 
