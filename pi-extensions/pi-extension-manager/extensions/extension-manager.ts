@@ -1749,13 +1749,12 @@ function createManagerComponent(
 			? `${theme.fg("dim", "editing value · ")}${ansiYellow("enter")} ${theme.fg("dim", "save · ")}${ansiYellow("esc")} ${theme.fg("dim", "cancel · ")}${ansiYellow("backspace")} ${theme.fg("dim", "delete · ")}${ansiYellow("ctrl+u")} ${theme.fg("dim", "clear")}`
 			: ui.showAudit
 			? `${theme.fg("dim", "diagnostics · ")}${ansiYellow("↑↓")} ${theme.fg("dim", "scroll · ")}${ansiYellow("-/=")} ${theme.fg("dim", "page · ")}${ansiYellow("Alt+A")} ${theme.fg("dim", "back · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`
-			: `${ansiYellow("tab")} ${theme.fg("dim", "switch tabs · ")}${ansiYellow("↑↓")} ${theme.fg("dim", "navigate · ")}${ansiYellow("-/=")} ${theme.fg("dim", "page · ")}${ansiYellow("enter")} ${theme.fg("dim", "toggle/edit · ")}${ansiYellow("delete")} ${theme.fg("dim", "reset setting · ")}${ansiYellow("ctrl+x")} ${theme.fg("dim", "reset extension · ")}${ansiYellow("Alt+A")} ${theme.fg("dim", "diagnostics · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`;
-		lines.push(...wrapLine(primaryHint, bodyWidth));
-		lines.push("");
-		lines.push(divider(bodyWidth, theme));
-		const availableRows = Math.max(1, layout.innerRows - lines.length);
+			: `${ansiYellow("tab")} ${theme.fg("dim", "switch tabs · ")}${ansiYellow("↑↓")} ${theme.fg("dim", "navigate · ")}${ansiYellow("-/=")} ${theme.fg("dim", "page · ")}${ansiYellow("Alt+A")} ${theme.fg("dim", "diagnostics · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`;
+		const footerLines = ["", ...wrapLine(primaryHint, bodyWidth)];
+		const availableRows = Math.max(1, layout.innerRows - lines.length - footerLines.length);
 		if (ui.showAudit) lines.push(...renderDiagnosticsViewport(inventory, ui, bodyWidth, theme, availableRows));
-		else lines.push(...renderExtensions(inventory, ui, bodyWidth, theme, layout));
+		else lines.push(...renderExtensions(inventory, ui, bodyWidth, theme, layout, footerLines.length));
+		lines.push(...footerLines);
 		return frame(lines, safeWidth, theme, layout.innerRows, "Extension Manager");
 	}
 
@@ -1882,7 +1881,7 @@ function renderDiagnostics(inventory: Inventory, width: number, theme: Theme): s
 	return lines.flatMap((line) => wrapLine(line, width));
 }
 
-function renderExtensions(inventory: Inventory, ui: ManagerUiState, width: number, theme: Theme, layout: PopupLayout): string[] {
+function renderExtensions(inventory: Inventory, ui: ManagerUiState, width: number, theme: Theme, layout: PopupLayout, footerRows = 0): string[] {
 	const list = filteredItems(inventory.items, ui);
 	const selected = list[ui.selected];
 	const leftWidth = Math.max(Math.min(LEFT_MIN_WIDTH, Math.floor(width * 0.45)), Math.min(LEFT_MAX_WIDTH, Math.floor(width * 0.38)));
@@ -1895,8 +1894,8 @@ function renderExtensions(inventory: Inventory, ui: ManagerUiState, width: numbe
 	const searchLine = theme.bg("toolPendingBg", pad(searchText, width));
 	const filterLine = `${theme.fg("muted", "View")}: ${theme.fg("text", view)}  ${theme.fg("muted", "Filters")}: kind ${ui.kindFilter} · provider ${ui.providerFilter} · state ${ui.stateFilter} · scope ${ui.scopeFilter}`;
 	const hintLine = `${ansiYellow("Alt+K/P/S/O")} ${theme.fg("dim", "filters · ")}${ansiYellow("Alt+R")} ${theme.fg("dim", "raw resources · ")}${ansiYellow("Alt+T")} ${theme.fg("dim", "toggle provider · ")}${ansiYellow("Alt+U")} ${theme.fg("dim", "uninstall package · ")}${ansiYellow("delete")} ${theme.fg("dim", "reset setting · ")}${ansiYellow("ctrl+x")} ${theme.fg("dim", "reset extension · ")}${ansiYellow("←/→")} ${theme.fg("dim", "pane")}`;
-	const lines = ["", searchLine, ...wrapLine(filterLine, width), "", ...wrapLine(hintLine, width), divider(width, theme)];
-	const tableRows = Math.max(1, rows - Math.max(0, lines.length - 6));
+	const lines = [searchLine, ...wrapLine(filterLine, width), "", ...wrapLine(hintLine, width), divider(width, theme)];
+	const tableRows = Math.max(1, rows - Math.max(0, lines.length - 5) - footerRows);
 	for (let i = 0; i < tableRows; i += 1) {
 		lines.push(`${pad(left[i] ?? "", leftWidth)} ${theme.fg("dim", "│")} ${truncateToWidth(right[i] ?? "", rightWidth, "")}`);
 	}
