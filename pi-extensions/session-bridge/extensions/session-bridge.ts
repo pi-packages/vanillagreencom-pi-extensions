@@ -453,16 +453,16 @@ export default function sessionBridge(pi: ExtensionAPI) {
 		}
 	}
 
-	pi.registerCommand("bridge-status", {
+	pi.registerCommand("bridge:status", {
 		description: "Show the session bridge socket and registry location",
 		handler: async (_args, ctx) => {
 			currentCtx = ctx;
-			await writeRegistry("bridge-status");
+			await writeRegistry("bridge:status");
 			ctx.ui.notify(`Bridge socket: ${socketPath}\nRegistry: ${registryPath}`, "info");
 		},
 	});
 
-	pi.registerCommand("bridge-ping", {
+	pi.registerCommand("bridge:ping", {
 		description: "Emit a session-bridge ping event (useful for external bridge tests)",
 		handler: async (args, ctx) => {
 			currentCtx = ctx;
@@ -483,8 +483,8 @@ export default function sessionBridge(pi: ExtensionAPI) {
 	pi.on("input", async (event: any, ctx: ExtensionContext) => {
 		currentCtx = ctx;
 		publish("input", event);
-		if (typeof event.text === "string" && event.text.startsWith("/bridge-ping")) {
-			const text = event.text.slice("/bridge-ping".length).trim() || "pong";
+		if (typeof event.text === "string" && event.text.startsWith("/bridge:ping")) {
+			const text = event.text.slice("/bridge:ping".length).trim() || "pong";
 			publish("bridge_pong", { text, source: event.source });
 			if (ctx.hasUI) ctx.ui.notify(`Bridge ping: ${text}`, "info");
 			return { action: "handled" as const };

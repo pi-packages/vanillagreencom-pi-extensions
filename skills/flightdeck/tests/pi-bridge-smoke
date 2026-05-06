@@ -120,16 +120,16 @@ note "  protocol=$proto session=$session_id socket=$socket_path"
 
 # --- Step 4: pi-bridge commands --------------------------------------------
 # The bridge extension registers slash-commands inside the pi session
-# (e.g., bridge-status, bridge-ping). `pi-bridge commands` returns the
+# (e.g., bridge:status, bridge:ping). `pi-bridge commands` returns the
 # session's full command list including these — proves the extension
 # is loaded and active.
 note "step 4: pi-bridge commands lists bridge slash-commands"
 commands=$("$PI_BRIDGE_BIN" commands --pid "$PI_PID" 2>/dev/null)
-if ! grep -q '"bridge-status\(:[0-9][0-9]*\)\?"\|"bridge-ping\(:[0-9][0-9]*\)\?"' <<< "$commands"; then
+if ! grep -q '"bridge:status\(:[0-9][0-9]*\)\?"\|"bridge:ping\(:[0-9][0-9]*\)\?"' <<< "$commands"; then
   red "  commands output (first 40 lines):"; printf '%s\n' "$commands" | head -n 40 >&2
-  fail "expected bridge-status/bridge-ping commands not present"
+  fail "expected bridge:status/bridge:ping commands not present"
 fi
-note "  bridge-status / bridge-ping present"
+note "  bridge:status / bridge:ping present"
 
 # --- Step 5: pi-bridge request + emit + history -----------------------------
 note "step 5: pi-bridge raw request + socket-scoped emit/history"

@@ -56,8 +56,8 @@ The bridge directory is created `0700`; instance files are `0600`.
 
 | Command | Action |
 | --- | --- |
-| `/bridge-status` | Show socket and registry paths. |
-| `/bridge-ping [text]` | Emit a `bridge_pong` event; default text is `pong`. |
+| `/bridge:status` | Show socket and registry paths. |
+| `/bridge:ping [text]` | Emit a `bridge_pong` event; default text is `pong`. |
 
 ## `pi-bridge` CLI
 
@@ -119,11 +119,11 @@ Clients receive events by default. Send `subscribe` with `enabled:false` to supp
 ```bash
 pi-bridge state --pid <pid>
 pi-bridge emit --pid <pid> "hello"
-pi-bridge send --pid <pid> "/bridge-ping hello"
+pi-bridge send --pid <pid> "/bridge:ping hello"
 pi-bridge history --pid <pid> 20
 ```
 
-`/bridge-ping` is handled by the extension and emits `bridge_pong` without calling a model.
+`/bridge:ping` is handled by the extension and emits `bridge_pong` without calling a model.
 
 ## Security
 
