@@ -200,9 +200,11 @@ function padAnsi(text: string, width: number): string {
 
 const ANSI_GREEN_FG = "\x1b[32m";
 const ANSI_YELLOW_FG = "\x1b[33m";
+const ANSI_MAGENTA_FG = "\x1b[35m";
 const ANSI_FG_RESET = "\x1b[39m";
 function ansiGreen(text: string): string { return `${ANSI_GREEN_FG}${text}${ANSI_FG_RESET}`; }
 function ansiYellow(text: string): string { return `${ANSI_YELLOW_FG}${text}${ANSI_FG_RESET}`; }
+function ansiMagenta(text: string): string { return `${ANSI_MAGENTA_FG}${text}${ANSI_FG_RESET}`; }
 
 function simpleFrame(lines: string[], width: number, theme: Theme, title = ""): string[] {
 	if (width < 8) return lines.map((line) => truncateToWidth(line, width, ""));
@@ -993,10 +995,11 @@ function chatTimestamp(ms: number): string {
 }
 
 function chatRoleColor(name: string, theme: Theme): string {
-	// Orchestrator gets accent (matches the "this is you" framing). Subagents
-	// share the success token so they read consistently green across rows.
+	// Orchestrator stays on accent (theme primary). Agents render in ANSI 5
+	// (magenta) so the chat splits visually into 'you' (accent) vs 'agents'
+	// (theme.ansiMagenta -> hypr-generated picks up its accentSecondary).
 	if (name === "@orch") return theme.fg("accent", theme.bold(name));
-	return theme.fg("success", theme.bold(name));
+	return ansiMagenta(theme.bold(name));
 }
 
 function chatKindBadge(kind: ChatMessage["kind"], theme: Theme): string {
