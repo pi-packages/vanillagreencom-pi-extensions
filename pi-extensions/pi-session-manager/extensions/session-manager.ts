@@ -14,8 +14,10 @@ const LEGACY_STATUS_KEY = "session-manager";
 const DEFAULT_SHORTCUT = "alt+shift+r";
 const DEFAULT_WIDTH = 112;
 const DEFAULT_ROWS = 12;
+const POPUP_HEIGHT_RATIO = 0.9;
 const POPUP_PADDING_X = 2;
 const POPUP_PADDING_Y = 1;
+const POPUP_MARGIN_ROWS = 1;
 const ROW_META_MAX_WIDTH = 44;
 const ANSI_PATTERN = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/g;
 const ANSI_GREEN_FG = "\x1b[32m";
@@ -564,7 +566,7 @@ class SessionManagerOverlay implements Focusable {
 		private readonly theme: Theme,
 		private readonly keybindings: KeybindingsManager,
 		private readonly done: (action: SessionAction) => void,
-		private readonly requestRenderFn: () => void,
+		private readonly tui: { requestRender(): void; terminal?: { rows?: number } },
 		initialScope?: Scope,
 	) {
 		this.scope = initialScope ?? settingScope(ctx.cwd);
@@ -576,7 +578,31 @@ class SessionManagerOverlay implements Focusable {
 	}
 
 	private get visibleRows(): number {
-		return Math.max(5, Math.min(30, Math.floor(settingNumber("visibleRows", DEFAULT_ROWS, this.ctx.cwd))));
+		const configured = Math.max(1, Math.min(30, Math.floor(settingNumber("visibleRows", DEFAULT_ROWS, this.ctx.cwd))));
+		return Math.min(configured, this.responsiveVisibleRows());
+	}
+
+	private maxPopupRows(): number {
+		const terminalRows = Number(this.tui.terminal?.rows ?? process.stdout.rows ?? 30);
+		const safeRows = Number.isFinite(terminalRows) && terminalRows > 0 ? terminalRows : 30;
+		return Math.max(1, Math.floor(safeRows * POPUP_HEIGHT_RATIO) - POPUP_MARGIN_ROWS * 2);
+	}
+
+	private footerRowCount(): number {
+		return this.mode === "confirm-delete" || this.mode === "confirm-delete-all" || this.mode === "rename" ? 1 : 2;
+	}
+
+	private detailRowCount(): number {
+		return this.filtered[this.selectedIndex]?.session ? 7 : 4;
+	}
+
+	private responsiveVisibleRows(): number {
+		// Fixed chrome around the scrollable session list:
+		// top/bottom borders, padding, tabs, search/subheader, dividers, detail pane,
+		// blank footer spacer, and footer help. The list is the only section that
+		// should shrink on shorter terminals; allow it to collapse all the way to 1 row.
+		const chromeRows = 11 + this.detailRowCount() + this.footerRowCount();
+		return Math.max(1, this.maxPopupRows() - chromeRows);
 	}
 
 	private notify(kind: "info" | "error", text: string): void {
@@ -584,7 +610,7 @@ class SessionManagerOverlay implements Focusable {
 	}
 
 	private requestRender(): void {
-		this.requestRenderFn();
+		this.tui.requestRender();
 	}
 
 	private async reload(): Promise<void> {
@@ -1186,7 +1212,7 @@ async function openManager(ctx: ExtensionCommandContext, pi: ExtensionAPI): Prom
 	const releaseModalLock = acquireVstackModalLock();
 	try {
 		const result = await ctx.ui.custom<SessionAction | undefined>(
-			(tui, theme, keybindings, done) => new SessionManagerOverlay(ctx, pi, theme, keybindings, (action) => done(action), () => tui.requestRender()),
+			(tui, theme, keybindings, done) => new SessionManagerOverlay(ctx, pi, theme, keybindings, (action) => done(action), tui),
 			{
 				overlay: true,
 				overlayOptions: {
