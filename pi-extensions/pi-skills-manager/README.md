@@ -4,6 +4,23 @@
 
 Dedicated Pi skills manager for vstack packages. It provides one `/skill` manager view for browsing, previewing, creating, editing, renaming, deleting, and enabling/disabling skills while preserving Pi's native `/skill:<name>` invocation and autocomplete behavior.
 
+## Install
+
+Via [npm](https://www.npmjs.com/package/@vanillagreen/pi-skills-manager):
+
+```bash
+pi install npm:@vanillagreen/pi-skills-manager
+```
+
+Via [vstack](https://github.com/vanillagreencom/vstack):
+
+```bash
+cargo install --git https://github.com/vanillagreencom/vstack.git vstack
+vstack add vanillagreencom/vstack --pi-extension pi-skills-manager --harness pi -y
+```
+
+Restart Pi after installation.
+
 ## Commands
 
 | Command | Action |

@@ -4,6 +4,23 @@
 
 OMP-style large-output policy for Pi tool results.
 
+## Install
+
+Via [npm](https://www.npmjs.com/package/@vanillagreen/pi-output-policy):
+
+```bash
+pi install npm:@vanillagreen/pi-output-policy
+```
+
+Via [vstack](https://github.com/vanillagreencom/vstack):
+
+```bash
+cargo install --git https://github.com/vanillagreencom/vstack.git vstack
+vstack add vanillagreencom/vstack --pi-extension pi-output-policy --harness pi -y
+```
+
+Restart Pi after installation.
+
 ## What it does
 
 - Preserves oversized output under `~/.pi/agent/vstack/pi-output-policy/sessions/<session-id>/artifacts/` when possible; never under the project `.pi/` directory.

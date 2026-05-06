@@ -4,6 +4,23 @@
 
 Polished session manager overlay for Pi. It complements Pi's built-in `/resume` picker with vstack settings, inline management actions, and guarded rendering for long or control-character-heavy session text.
 
+## Install
+
+Via [npm](https://www.npmjs.com/package/@vanillagreen/pi-session-manager):
+
+```bash
+pi install npm:@vanillagreen/pi-session-manager
+```
+
+Via [vstack](https://github.com/vanillagreencom/vstack):
+
+```bash
+cargo install --git https://github.com/vanillagreencom/vstack.git vstack
+vstack add vanillagreencom/vstack --pi-extension pi-session-manager --harness pi -y
+```
+
+Restart Pi after installation.
+
 ## What it provides
 
 - Browse current-project sessions or all sessions.

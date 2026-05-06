@@ -1,10 +1,25 @@
 # pi-agents-tmux
 
-[![pi-agents-tmux demo](https://raw.githubusercontent.com/vanillagreencom/vstack/main/pi-extensions/pi-agents-tmux/assets/agents-tmux-demo.gif)](https://raw.githubusercontent.com/vanillagreencom/vstack/main/pi-extensions/pi-agents-tmux/assets/agents-tmux-demo.mp4)
-
-[▶ Watch the full demo (MP4)](https://raw.githubusercontent.com/vanillagreencom/vstack/main/pi-extensions/pi-agents-tmux/assets/agents-tmux-demo.mp4)
+https://github.com/user-attachments/assets/36192e57-a6e4-47f9-b47c-dd26920906ae
 
 Pi package for delegating work to specialized agents from a running Pi session.
+
+## Install
+
+Via [npm](https://www.npmjs.com/package/@vanillagreen/pi-agents-tmux):
+
+```bash
+pi install npm:@vanillagreen/pi-agents-tmux
+```
+
+Via [vstack](https://github.com/vanillagreencom/vstack):
+
+```bash
+cargo install --git https://github.com/vanillagreencom/vstack.git vstack
+vstack add vanillagreencom/vstack --pi-extension pi-agents-tmux --harness pi -y
+```
+
+Restart Pi after installation.
 
 ## What it provides
 

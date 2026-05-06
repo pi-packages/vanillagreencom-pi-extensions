@@ -7,6 +7,23 @@
 
 Quality-of-life extension for Pi.
 
+## Install
+
+Via [npm](https://www.npmjs.com/package/@vanillagreen/pi-qol):
+
+```bash
+pi install npm:@vanillagreen/pi-qol
+```
+
+Via [vstack](https://github.com/vanillagreencom/vstack):
+
+```bash
+cargo install --git https://github.com/vanillagreencom/vstack.git vstack
+vstack add vanillagreencom/vstack --pi-extension pi-qol --harness pi -y
+```
+
+Restart Pi after installation.
+
 ## What it provides
 
 - Compact statusline and `π` prompt editor: shows repo/project, branch/dirty state, model, thinking level, context window size, and remaining context percent while replacing Pi's default footer/editor chrome.

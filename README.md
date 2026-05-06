@@ -327,22 +327,22 @@ All Pi packages declare `vstack.extensionManager.settings` metadata including an
 
 | Extension | Purpose |
 |---|---|
-| [`pi-extension-manager`](pi-extensions/pi-extension-manager/README.md) | Pi-styled extension inventory, full settings shell, and quick inline settings editor (`/extensions`). |
-| [`pi-claude-bridge`](pi-extensions/pi-claude-bridge/README.md) | Claude Code provider bridge (`claude-bridge/*`) with vstack-controlled Pi prompt-context forwarding. |
-| [`pi-skills-manager`](pi-extensions/pi-skills-manager/README.md) | Dedicated `/skill` shell for browsing, creating, editing, and toggling Pi skills; expands `[skill] <name>` markers before sending prompts. |
-| [`pi-background-tasks`](pi-extensions/pi-background-tasks/README.md) | Non-blocking shell tasks via `bg_task`/`bg_status` plus a `/bg` dashboard so long-running commands do not block the turn. |
-| [`pi-questions`](pi-extensions/pi-questions/README.md) | Structured multi-tab popup questions for the model with bridge-driven replies. |
-| [`pi-session-bridge`](pi-extensions/session-bridge/README.md) | Unix-socket JSONL side channel + `pi-bridge` CLI for external control, event streaming, prompt sending, and answering `pi-questions`. |
 | [`pi-agents-tmux`](pi-extensions/pi-agents-tmux/README.md) | Delegate work to `.pi/agents` / `.claude/agents` with isolated context and persistent tmux panes (`subagent`, `get_subagent_result`, `steer_subagent`, `/agents`). |
+| [`pi-background-tasks`](pi-extensions/pi-background-tasks/README.md) | Non-blocking shell tasks via `bg_task`/`bg_status` plus a `/bg` dashboard so long-running commands do not block the turn. |
+| [`pi-caveman`](pi-extensions/pi-caveman/README.md) | Native Pi caveman communication mode via `before_agent_start` prompt injection (`/caveman`). |
+| [`pi-claude-bridge`](pi-extensions/pi-claude-bridge/README.md) | Claude Code provider bridge (`claude-bridge/*`) with vstack-controlled Pi prompt-context forwarding. |
+| [`pi-codex-minimal-tools`](pi-extensions/pi-codex-minimal-tools/README.md) | Adds Codex-style `view_image`, `apply_patch`, native OpenAI `image_generation` without replacing Pi's native file/shell/edit tools. |
+| [`pi-extension-manager`](pi-extensions/pi-extension-manager/README.md) | Pi-styled extension inventory, full settings shell, and quick inline settings editor (`/extensions`). |
+| [`pi-output-policy`](pi-extensions/pi-output-policy/README.md) | OMP-style large-output policy: shell minimization, head/tail truncation, spill-file preservation, UI-safe caps. |
 | [`pi-prompt-stash`](pi-extensions/pi-prompt-stash/README.md) | Per-session prompt stash history with stash/pop editor (`Alt+S`). |
 | [`pi-qol`](pi-extensions/pi-qol/README.md) | Compact statusline/`π` prompt, multiline input, image chips, session naming/search/handoff, custom compaction, thinking timer. |
+| [`pi-questions`](pi-extensions/pi-questions/README.md) | Structured multi-tab popup questions for the model with bridge-driven replies. |
+| [`pi-session-bridge`](pi-extensions/session-bridge/README.md) | Unix-socket JSONL side channel + `pi-bridge` CLI for external control, event streaming, prompt sending, and answering `pi-questions`. |
 | [`pi-session-manager`](pi-extensions/pi-session-manager/README.md) | Polished session browser (`/sessions`) for searching, resuming, renaming, and deleting Pi sessions. |
-| [`pi-codex-minimal-tools`](pi-extensions/pi-codex-minimal-tools/README.md) | Adds Codex-style `view_image`, `apply_patch`, native OpenAI `image_generation` without replacing Pi's native file/shell/edit tools. |
-| [`pi-web-tools`](pi-extensions/pi-web-tools/README.md) | First-party web stack: provider-toggled `web_search`, Exa deep research, and `web_fetch` extraction with HTML chrome strip + Jina fallback, GitHub clone cache, scanned-PDF vision OCR, YouTube/local video understanding, and Exa Code `/context` for `code_search`. See also [`EXA.md`](pi-extensions/pi-web-tools/EXA.md). |
-| [`pi-output-policy`](pi-extensions/pi-output-policy/README.md) | OMP-style large-output policy: shell minimization, head/tail truncation, spill-file preservation, UI-safe caps. |
-| [`pi-tool-renderer`](pi-extensions/pi-tool-renderer/README.md) | Compact Claude/opencode-style renderers for built-in `read`/`bash`/search/mutation tools while preserving original execution. |
+| [`pi-skills-manager`](pi-extensions/pi-skills-manager/README.md) | Dedicated `/skill` shell for browsing, creating, editing, and toggling Pi skills; expands `[skill] <name>` markers before sending prompts. |
 | [`pi-task-panel`](pi-extensions/pi-task-panel/README.md) | Persistent structured task panel above the status line plus `/tasks` commands and `tasks_write` tool. |
-| [`pi-caveman`](pi-extensions/pi-caveman/README.md) | Native Pi caveman communication mode via `before_agent_start` prompt injection (`/caveman`). |
+| [`pi-tool-renderer`](pi-extensions/pi-tool-renderer/README.md) | Compact Claude/opencode-style renderers for built-in `read`/`bash`/search/mutation tools while preserving original execution. |
+| [`pi-web-tools`](pi-extensions/pi-web-tools/README.md) | First-party web stack: provider-toggled `web_search`, Exa deep research, and `web_fetch` extraction with HTML chrome strip + Jina fallback, GitHub clone cache, scanned-PDF vision OCR, YouTube/local video understanding, and Exa Code `/context` for `code_search`. See also [`EXA.md`](pi-extensions/pi-web-tools/EXA.md). |
 
 See also: [Pi extension settings audit](docs/pi-extension-settings-audit.md).
 

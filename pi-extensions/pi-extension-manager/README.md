@@ -4,6 +4,23 @@
 
 Pi extension inventory and settings manager for vstack-installed packages.
 
+## Install
+
+Via [npm](https://www.npmjs.com/package/@vanillagreen/pi-extension-manager):
+
+```bash
+pi install npm:@vanillagreen/pi-extension-manager
+```
+
+Via [vstack](https://github.com/vanillagreencom/vstack):
+
+```bash
+cargo install --git https://github.com/vanillagreencom/vstack.git vstack
+vstack add vanillagreencom/vstack --pi-extension pi-extension-manager --harness pi -y
+```
+
+Restart Pi after installation.
+
 ## Commands
 
 | Command | Action |

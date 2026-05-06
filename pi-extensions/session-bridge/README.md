@@ -6,26 +6,20 @@ Pi package that keeps the normal interactive Pi TUI visible while exposing a str
 
 ## Install
 
-Via vstack:
+Via [npm](https://www.npmjs.com/package/@vanillagreen/pi-session-bridge):
 
 ```bash
-vstack add vanillagreencom/vstack
+pi install npm:@vanillagreen/pi-session-bridge
 ```
 
-Select Pi as the target harness and choose **pi-session-bridge** from the **Pi Extensions** tab. Non-interactive single-package install:
+Via [vstack](https://github.com/vanillagreencom/vstack):
 
 ```bash
+cargo install --git https://github.com/vanillagreencom/vstack.git vstack
 vstack add vanillagreencom/vstack --pi-extension pi-session-bridge --harness pi -y
 ```
 
-Item filters (`--pi-extension`/`--skill`/`--agent`/`--hook`) restrict the install to only the kinds named. vstack registers the package in Pi's `settings.json`.
-
-Manual install:
-
-```bash
-pi install /path/to/pi-extensions/session-bridge      # global
-pi install -l /path/to/pi-extensions/session-bridge   # project
-```
+Restart Pi after installation.
 
 ## What it provides
 

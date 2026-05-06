@@ -18,6 +18,23 @@ Implemented features:
 
 `web_search` moved to the `pi-web-tools` package. Old `pi-codex-minimal-tools` web-search settings are ignored after this migration.
 
+## Install
+
+Via [npm](https://www.npmjs.com/package/@vanillagreen/pi-codex-minimal-tools):
+
+```bash
+pi install npm:@vanillagreen/pi-codex-minimal-tools
+```
+
+Via [vstack](https://github.com/vanillagreencom/vstack):
+
+```bash
+cargo install --git https://github.com/vanillagreencom/vstack.git vstack
+vstack add vanillagreencom/vstack --pi-extension pi-codex-minimal-tools --harness pi -y
+```
+
+Restart Pi after installation.
+
 ## Commands
 
 | Command | Action |

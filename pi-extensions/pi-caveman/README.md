@@ -4,6 +4,23 @@
 
 Native Pi caveman communication mode: fewer output tokens, same technical accuracy.
 
+## Install
+
+Via [npm](https://www.npmjs.com/package/@vanillagreen/pi-caveman):
+
+```bash
+pi install npm:@vanillagreen/pi-caveman
+```
+
+Via [vstack](https://github.com/vanillagreencom/vstack):
+
+```bash
+cargo install --git https://github.com/vanillagreencom/vstack.git vstack
+vstack add vanillagreencom/vstack --pi-extension pi-caveman --harness pi -y
+```
+
+Restart Pi after installation.
+
 ## Commands
 
 | Command | Action |

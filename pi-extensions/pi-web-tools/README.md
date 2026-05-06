@@ -16,6 +16,23 @@ Implemented in this package:
 - `get_web_content` retrieval for stored full content.
 - `/web-tools` opens the extension-manager settings popup (with `/web-tools:doctor` and `/web-tools:provider:<name>` for diagnostics and session-scoped provider switching).
 
+## Install
+
+Via [npm](https://www.npmjs.com/package/@vanillagreen/pi-web-tools):
+
+```bash
+pi install npm:@vanillagreen/pi-web-tools
+```
+
+Via [vstack](https://github.com/vanillagreencom/vstack):
+
+```bash
+cargo install --git https://github.com/vanillagreencom/vstack.git vstack
+vstack add vanillagreencom/vstack --pi-extension pi-web-tools --harness pi -y
+```
+
+Restart Pi after installation.
+
 ## Commands
 
 | Command | Action |

@@ -4,6 +4,23 @@
 
 Per-session prompt stash history for Pi.
 
+## Install
+
+Via [npm](https://www.npmjs.com/package/@vanillagreen/pi-prompt-stash):
+
+```bash
+pi install npm:@vanillagreen/pi-prompt-stash
+```
+
+Via [vstack](https://github.com/vanillagreencom/vstack):
+
+```bash
+cargo install --git https://github.com/vanillagreencom/vstack.git vstack
+vstack add vanillagreencom/vstack --pi-extension pi-prompt-stash --harness pi -y
+```
+
+Restart Pi after installation.
+
 ## Commands
 
 | Command | Action |

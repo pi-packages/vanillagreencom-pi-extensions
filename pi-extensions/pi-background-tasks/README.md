@@ -6,6 +6,23 @@
 ![Full dashboard](https://raw.githubusercontent.com/vanillagreencom/vstack/main/pi-extensions/pi-background-tasks/assets/dashboard.png)
 Pi package for explicit, non-blocking background shell tasks.
 
+## Install
+
+Via [npm](https://www.npmjs.com/package/@vanillagreen/pi-background-tasks):
+
+```bash
+pi install npm:@vanillagreen/pi-background-tasks
+```
+
+Via [vstack](https://github.com/vanillagreencom/vstack):
+
+```bash
+cargo install --git https://github.com/vanillagreencom/vstack.git vstack
+vstack add vanillagreencom/vstack --pi-extension pi-background-tasks --harness pi -y
+```
+
+Restart Pi after installation.
+
 ## What it provides
 
 - `bg_task` tool for spawning, listing, tailing logs, stopping, and clearing tracked tasks.

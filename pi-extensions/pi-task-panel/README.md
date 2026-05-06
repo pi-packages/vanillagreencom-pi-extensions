@@ -5,6 +5,23 @@
 
 Persistent structured task panel above the Pi status line/editor.
 
+## Install
+
+Via [npm](https://www.npmjs.com/package/@vanillagreen/pi-task-panel):
+
+```bash
+pi install npm:@vanillagreen/pi-task-panel
+```
+
+Via [vstack](https://github.com/vanillagreencom/vstack):
+
+```bash
+cargo install --git https://github.com/vanillagreencom/vstack.git vstack
+vstack add vanillagreencom/vstack --pi-extension pi-task-panel --harness pi -y
+```
+
+Restart Pi after installation.
+
 ## Commands
 
 | Command | Action |

@@ -5,6 +5,23 @@
 
 Compact renderers for Pi tools, plus an optional `tool_batch` composite tool.
 
+## Install
+
+Via [npm](https://www.npmjs.com/package/@vanillagreen/pi-tool-renderer):
+
+```bash
+pi install npm:@vanillagreen/pi-tool-renderer
+```
+
+Via [vstack](https://github.com/vanillagreencom/vstack):
+
+```bash
+cargo install --git https://github.com/vanillagreencom/vstack.git vstack
+vstack add vanillagreencom/vstack --pi-extension pi-tool-renderer --harness pi -y
+```
+
+Restart Pi after installation.
+
 ## Defaults
 
 - Re-registers `read`, `bash`, and available `grep`/`find`/`ls` with compact self-rendered rows while delegating execution to Pi's original tools.

@@ -4,6 +4,23 @@
 
 Structured inline questions for Pi, with multi-tab categories and `pi-bridge` answer/reject support.
 
+## Install
+
+Via [npm](https://www.npmjs.com/package/@vanillagreen/pi-questions):
+
+```bash
+pi install npm:@vanillagreen/pi-questions
+```
+
+Via [vstack](https://github.com/vanillagreencom/vstack):
+
+```bash
+cargo install --git https://github.com/vanillagreencom/vstack.git vstack
+vstack add vanillagreencom/vstack --pi-extension pi-questions --harness pi -y
+```
+
+Restart Pi after installation.
+
 ## What it provides
 
 - `question` tool for multiple-choice question tabs.
