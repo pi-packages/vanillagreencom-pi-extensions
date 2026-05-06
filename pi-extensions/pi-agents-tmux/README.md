@@ -69,7 +69,7 @@ Bg (non-pane) agents resume by default per parent session: omitting `sessionKey`
 
 The extension routes pi at `runtime/sessions/bg-<agent>-<key>.jsonl`. Same `agent + sessionKey` across delegations resumes the same pi session and retains memory; different keys keep separate histories.
 
-Pane agents already persist via their own pane session file, so `sessionKey` is ignored when the agent has `pane: true`. To explicitly request a *fresh* pane, pass `forceSpawn: true`; the call errors if a live pane already exists and tells you to `/agents stop <name>` first.
+Pane agents already persist via their own pane session file, so `sessionKey` is ignored when the agent has `pane: true`. To explicitly request a *fresh* pane, pass `forceSpawn: true`; the call errors if a live pane already exists and tells you to `/agents:stop <name>` first.
 
 ## Commands
 
@@ -78,15 +78,14 @@ Pane agents already persist via their own pane session file, so `sessionKey` is 
 | `/agents` | Open the browser using project scope. |
 | `/agents project\|user\|both` | Open the browser with an explicit scope. |
 | `/agents show <name> [scope]` | Inspect an agent. |
-| `/agents start <name>` | Start or reuse a persistent pane. |
-| `/agents send <name> <task>` | Queue a task for a persistent pane. |
-| `/agents attach <name>` | Focus an existing pane. |
-| `/agents stop <name>` | Stop a persistent pane. |
+| `/agents:start <name>` | Start or reuse a persistent pane. |
+| `/agents:send <name> <task>` | Queue a task for a persistent pane. |
+| `/agents:attach <name>` | Focus an existing pane. |
+| `/agents:stop <name>` | Stop a persistent pane. |
 | `/agents status` | Show pane status. |
 | `/agents collect` | Collect completed pane results. |
-| `/agents transcripts` | Open/list recent agent transcripts. |
-| `/agents trace <ref>` | Open/show one trace by task id, short id, or trace ref. |
-| `/agents toggle` | Toggle the persistent dashboard. |
+| `/agents:trace <ref>` | Open/show one trace by task id, short id, or trace ref. |
+| `/agents:toggle` | Toggle the persistent dashboard. |
 
 Arguments support autocomplete, including known agent names for `show`, `start`, `send`, `attach`, and `stop`.
 

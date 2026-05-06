@@ -9,19 +9,19 @@ Persistent structured task panel above the Pi status line/editor.
 
 | Command | Action |
 | --- | --- |
-| `/tasks` or `/tasks manage` | Open the interactive manager. |
-| `/tasks add <task>` | Add one task; use `Phase :: task` to assign a phase. |
-| `/tasks edit` | Bulk-edit tasks as plain text. |
-| `/tasks start <task>` | Set a task active. |
-| `/tasks done <task>` | Mark a task completed. |
+| `/tasks` or `/tasks:manage` | Open the interactive manager. |
+| `/tasks:add <task>` | Add one task; use `Phase :: task` to assign a phase. |
+| `/tasks:edit` | Bulk-edit tasks as plain text. |
+| `/tasks:start <task>` | Set a task active. |
+| `/tasks:done <task>` | Mark a task completed. |
 | `/tasks drop <task>` | Mark a task abandoned. |
-| `/tasks remove <task>` | Remove a task. |
+| `/tasks:remove <task>` | Remove a task. |
 | `/tasks hide` | Hide the panel. |
 | `/tasks show` | Show the compact panel. |
 | `/tasks show-all` | Show the expanded panel. |
-| `/tasks clear-completed` | Remove completed tasks. |
-| `/tasks export <path>` | Write tasks to a markdown file. |
-| `/tasks import <path>` | Load tasks from a markdown file. |
+| `/tasks:clear-completed` | Remove completed tasks. |
+| `/tasks:export <path>` | Write tasks to a markdown file. |
+| `/tasks:import <path>` | Load tasks from a markdown file. |
 
 Arguments support autocomplete, including task names for focused actions.
 
@@ -29,7 +29,7 @@ Arguments support autocomplete, including task names for focused actions.
 
 Select with `↑/↓`. `Enter`/`s` starts, `d` marks done, `x` drops/abandons, `r` removes, `c` clears completed tasks, and `e` opens bulk edit.
 
-`/tasks edit` uses plain text (`- task name`) with optional status suffixes: `(active)`, `(done)`, or `(dropped)`.
+`/tasks:edit` uses plain text (`- task name`) with optional status suffixes: `(active)`, `(done)`, or `(dropped)`.
 
 ## Agent tool
 

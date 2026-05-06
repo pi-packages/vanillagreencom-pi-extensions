@@ -25,14 +25,14 @@ Quality-of-life extension for Pi.
 
 | Command | Action |
 | --- | --- |
-| `/qol status` | Show QOL status and key settings. |
+| `/qol` | Open the extension-manager settings popup (falls back to inline status when the manager is not installed). |
 | `/qol notify-test` | Send a test notification. |
-| `/qol rename` | Regenerate the current session name from the first user prompt. |
-| `/qol rename full` | Regenerate the session name from the full conversation. |
+| `/qol:rename` | Regenerate the current session name from the first user prompt. |
+| `/qol:rename:full` | Regenerate the session name from the full conversation. |
 | `/rename [name]` | Set or show the current session's friendly name. |
 | `/context` | Show inline context-window usage, model/context limit, and estimated category breakdowns. |
 | `/search [query]` | Open previous-session search, optionally prefilled with a query. |
-| `/search refresh` | Refresh the session search cache. |
+| `/search:refresh` | Refresh the session search cache. |
 | `/handoff <goal>` | Draft a focused handoff prompt for a new session. |
 
 `/qol` and `/search` arguments support autocomplete.
@@ -65,7 +65,7 @@ Settings are exposed through `pi-extension-manager` under **QOL**.
 - Result/layout knobs: `resultLimit`, `maxVisible`, `messageMaxVisible`, `previewSnippets`, `overlayWidth`, `cacheTtlSeconds`.
 - Summary knobs: `summaryModel`, `summaryMaxTokens`, `summaryInputMaxChars`.
 
-Search rows use Pi's `/resume`-style title: explicit session name, otherwise first user prompt, otherwise filename. The session cache is warmed on session start/first use and, by default, kept until `/search refresh`; set `cacheTtlSeconds` above `0` if you want automatic time-based refreshes.
+Search rows use Pi's `/resume`-style title: explicit session name, otherwise first user prompt, otherwise filename. The session cache is warmed on session start/first use and, by default, kept until `/search:refresh`; set `cacheTtlSeconds` above `0` if you want automatic time-based refreshes.
 
 ### Context usage
 

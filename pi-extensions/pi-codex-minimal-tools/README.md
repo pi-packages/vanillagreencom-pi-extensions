@@ -9,7 +9,7 @@ Implemented features:
 - `view_image` — validate and return a local image file as model image content.
 - `apply_patch` — local Codex-style patch application with the public argument shape `{ input: string }`.
 - `image_generation` — native OpenAI Codex image generation on supported models.
-- `/codex-minimal-tools` — diagnostic command for current settings, model, and active package tools.
+- `/codex-minimal-tools` — opens the extension-manager settings popup when `pi-extension-manager` is installed; otherwise prints status and active package tools inline.
 - Capability gating that only adds/removes this package's tools and preserves Pi native tools.
 - OpenAI-loaded gating: package tools are not registered until OpenAI/OpenAI-Codex models are present.
 - Native-aware OpenAI Codex provider shim for active `image_generation` tools.
@@ -22,15 +22,14 @@ Implemented features:
 
 | Command | Action |
 | --- | --- |
-| `/codex-minimal-tools` | Show current status and diagnostics. |
-| `/codex-minimal-tools doctor` | Run lightweight self-checks. |
-| `/codex-minimal-tools settings` | Show where extension-manager settings live. |
+| `/codex-minimal-tools` | Open the extension-manager settings popup (falls back to inline status when the manager is not installed). |
+| `/codex-minimal-tools:doctor` | Run lightweight self-checks. |
 
 Arguments support autocomplete.
 
 ## Settings
 
-When `pi-extension-manager` is installed, settings appear under **Codex Minimal Tools** in `/extensions` and `/extensions settings`. Values are read from:
+When `pi-extension-manager` is installed, settings appear under **Codex Minimal Tools** in `/extensions` and `/extensions:settings`. Values are read from:
 
 ```json
 {

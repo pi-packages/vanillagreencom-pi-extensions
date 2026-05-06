@@ -14,7 +14,15 @@ Implemented in this package:
 - `web_answer`, `web_find_similar` Exa-first tools.
 - `code_search` defaults to the Exa Code `/context` endpoint and falls back to classic Exa search with code-focused domain hints; renderer surfaces token + source counts and parsed source URLs (Ctrl+O to expand).
 - `get_web_content` retrieval for stored full content.
-- `/web-tools doctor` and `/web-tools provider ...` guidance.
+- `/web-tools` opens the extension-manager settings popup (with `/web-tools:doctor` and `/web-tools:provider:<name>` for diagnostics and session-scoped provider switching).
+
+## Commands
+
+| Command | Action |
+| --- | --- |
+| `/web-tools` | Open the extension-manager settings popup (falls back to inline status when the manager is not installed). |
+| `/web-tools:doctor` | Show Web Tools status and diagnostics. |
+| `/web-tools:provider:<name>` | Set the active web-search provider for this session: `auto`, `exa`, `openai-native`, `perplexity`, or `gemini`. Persist via `pi-web-tools.defaultProvider` in extension-manager settings. |
 
 ## Fetch storage and truncation
 

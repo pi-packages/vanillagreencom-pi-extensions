@@ -10,7 +10,7 @@ Dedicated Pi skills manager for vstack packages. It provides one `/skill` manage
 | --- | --- |
 | `/skill` | Open the skills manager overlay. |
 | `/skill disable` | Disable the manager feature toggle; run `/reload` to unload hooks/commands. |
-| `/skill enable` | Recovery command when disabled; enables the manager and reloads. |
+| `/skill:enable` | Recovery command when disabled; enables the manager and reloads. |
 | `/skill:<name>` | Native Pi skill invocation; handled by Pi, not this manager. |
 
 ## What it does

@@ -22,13 +22,13 @@ Pi package for explicit, non-blocking background shell tasks.
 | Command | Action |
 | --- | --- |
 | `/bg` | Open the dashboard. |
-| `/bg next` | Arm the same one-shot diversion as `Alt+.` for the next bash command. |
-| `/bg run <command>` | Spawn a background shell task. |
-| `/bg list` | Show tracked tasks. |
+| `/bg:next` | Arm the same one-shot diversion as `Alt+.` for the next bash command. |
+| `/bg:run <command>` | Spawn a background shell task. |
+| `/bg:list` | Show tracked tasks. |
 | `/bg log <id\|pid>` | Show a task log tail. |
 | `/bg watch <id\|pid>` | Open the dashboard focused on a task. |
-| `/bg stop <id\|pid>` | Terminate a running task. |
-| `/bg clear` | Remove finished tasks. |
+| `/bg:stop <id\|pid>` | Terminate a running task. |
+| `/bg:clear` | Remove finished tasks. |
 
 Arguments support autocomplete, including task IDs for `log`, `watch`, and `stop`.
 
@@ -43,7 +43,7 @@ Built-in auto-background matches are intentionally conservative:
 - delayed Pi session/tmux monitors such as `sleep 50; pi-bridge history ...`
 - shell loops with `sleep` that appear to monitor Pi session bridge, tmux panes, agent/delegate state, or long finite/open-ended polling loops
 
-Use `Alt+.` or `/bg next` when you know the next bash command should be backgrounded even if it does not match the conservative patterns. The shortcut cannot detach a bash process that has already started, because Pi's built-in bash tool does not expose a public process handle to extensions. If pressed while a tool is already running, it applies to the next bash command that has not yet started.
+Use `Alt+.` or `/bg:next` when you know the next bash command should be backgrounded even if it does not match the conservative patterns. The shortcut cannot detach a bash process that has already started, because Pi's built-in bash tool does not expose a public process handle to extensions. If pressed while a tool is already running, it applies to the next bash command that has not yet started.
 
 Settings:
 
@@ -51,7 +51,7 @@ Settings:
 - `autoBackgroundPatterns` adds newline-separated regular expressions for project-specific monitor commands.
 - `backgroundBashShortcut` changes the default `Alt+.` binding, or set it to `none` to disable.
 - `forcedBackgroundNotifyOnOutput` optionally wakes the agent on output from shortcut-forced background tasks. Exit wakeups are always enabled for forced tasks.
-- `forcedBackgroundWindowSeconds` controls how long `Alt+.`/`/bg next` stays armed.
+- `forcedBackgroundWindowSeconds` controls how long `Alt+.`/`/bg:next` stays armed.
 
 ## Tool usage
 
@@ -69,7 +69,7 @@ Useful `spawn` options:
 
 ## Notes
 
-Tasks are scoped to the current Pi runtime and are stopped on session shutdown. On Unix, shells start in their own process group so `/bg stop` and shutdown terminate child processes as well as the shell. For Pi bridge, session monitoring, and tmux/agent pane monitoring, prefer `bg_task`, `/bg run`, or the built-in auto-backgrounding over raw foreground polling loops.
+Tasks are scoped to the current Pi runtime and are stopped on session shutdown. On Unix, shells start in their own process group so `/bg:stop` and shutdown terminate child processes as well as the shell. For Pi bridge, session monitoring, and tmux/agent pane monitoring, prefer `bg_task`, `/bg:run`, or the built-in auto-backgrounding over raw foreground polling loops.
 
 ## Attribution
 

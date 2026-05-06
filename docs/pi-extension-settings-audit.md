@@ -4,7 +4,7 @@ This audit covers every local vstack Pi package under `pi-extensions/`. Each pac
 
 ## Runtime constraints
 
-Pi's public extension API does not currently expose a native API to inject a third-party tab into the built-in `/settings` UI or to unload already-loaded extension modules. `pi-extension-manager` therefore provides a full Pi-styled settings shell through `/extensions` plus quick inline settings through `/extensions settings`.
+Pi's public extension API does not currently expose a native API to inject a third-party tab into the built-in `/settings` UI or to unload already-loaded extension modules. `pi-extension-manager` therefore provides a full Pi-styled settings shell through `/extensions` plus quick inline settings through `/extensions:settings`.
 
 Settings persist under `vstack.extensionManager.config.<packageName>` in Pi `settings.json` files to avoid colliding with Pi's own top-level `extensions` resource array.
 
@@ -12,13 +12,13 @@ Settings persist under `vstack.extensionManager.config.<packageName>` in Pi `set
 
 ### `pi-extension-manager`
 
-- Toggle: `enabled` disables the full manager UI after reload; `/extensions enable` remains as recovery.
+- Toggle: `enabled` disables the full manager UI after reload; `/extensions:enable` remains as recovery.
 - Useful settings: show/hide built-in tools, default save scope.
 - Apply semantics: inventory settings are live; command registration changes need reload/restart.
 
 ### `pi-skills-manager`
 
-- Toggle: `enabled` registers/unregisters `/skills`, marker expansion, startup skill-list hiding, and skills management UI after reload; `/skills enable` remains as recovery.
+- Toggle: `enabled` registers/unregisters `/skill`, marker expansion, startup skill-list hiding, and skills management UI after reload; `/skill:enable` remains as recovery.
 - Useful settings: hide native `/skill:*` commands, hide startup `[Skills]` block, cleanup partial markers, AI skill generation, default create location, popup dimensions, visible list rows.
 - Apply semantics: search/toggle/create UI settings are live; command registration, native skill-command hiding, and startup-block hiding need reload. Skill enable/disable writes Pi resource filters and requires `/reload` to fully affect model prompt resources.
 

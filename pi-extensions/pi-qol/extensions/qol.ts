@@ -4435,7 +4435,7 @@ export default function qol(pi: ExtensionAPI): void {
 			ctx.ui.notify("Sent QOL notification test.", "info");
 			return;
 		}
-		ctx.ui.notify("Unknown /qol action. Try /qol:status, /qol:rename, /qol:rename:full, or /qol:notify-test.", "warning");
+		ctx.ui.notify("Unknown /qol action. Try /qol, /qol:rename, /qol:rename:full, or /qol notify-test.", "warning");
 	};
 
 	pi.registerCommand("qol", {

@@ -9,8 +9,8 @@ Native Pi caveman communication mode: fewer output tokens, same technical accura
 | Command | Action |
 | --- | --- |
 | `/caveman` | Enable the configured default mode when off; otherwise show status. |
-| `/caveman lite\|full\|ultra\|micro` | Set the session mode. |
-| `/caveman toggle` | Toggle between off and the configured default mode. |
+| `/caveman:lite\|full\|ultra\|micro` | Set the session mode. |
+| `/caveman:toggle` | Toggle between off and the configured default mode. |
 | `/caveman off` | Disable caveman mode. |
 | `/caveman status` | Show current mode and source. |
 
