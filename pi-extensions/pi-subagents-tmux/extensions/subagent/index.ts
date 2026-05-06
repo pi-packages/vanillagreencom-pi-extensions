@@ -794,8 +794,8 @@ function renderActiveAgentDetail(item: SubagentDashboardItem | undefined, ui: Ag
 	const titleLine = `${agentPaneTitle(theme, "Detail", ui.pane === "inspector")} ${theme.fg("accent", theme.bold(item.agent))} ${dashboardStatusText(item, theme)} ${theme.fg("dim", dashboardKindLabel(item.kind))}`;
 	const body: string[] = [];
 	body.push(...wrap(`${theme.fg("muted", "Task ID")}: ${theme.fg("dim", item.taskId)}`));
-	if (item.task) body.push(...wrap(`${theme.fg("muted", "Task")}: ${oneLinePreview(item.task, Math.max(60, safeWidth - 8))}`));
-	if (item.transcriptPath) body.push(...wrap(`${theme.fg("muted", "Transcript")}: ${theme.fg("dim", compactPath(item.transcriptPath))}`));
+	if (item.task) body.push(...wrap(`${theme.fg("muted", "Task")}: ${item.task}`));
+	if (item.transcriptPath) body.push(...wrap(`${theme.fg("muted", "Transcript")}: ${theme.fg("dim", compactPath(item.transcriptPath, { maxChars: Number.POSITIVE_INFINITY }))}`));
 	if (item.usage) {
 		const usageLine = formatUsageStatsForDashboard(item.usage).join(" \u00b7 ");
 		if (usageLine) body.push(...wrap(`${theme.fg("muted", "Usage")}: ${theme.fg("dim", usageLine)}`));
