@@ -22,6 +22,7 @@ import {
 	formatSize,
 	type AgentToolResult,
 	type ExtensionAPI,
+	type ExtensionCommandContext,
 	type ExtensionContext,
 	getMarkdownTheme,
 	type Theme,
@@ -4478,10 +4479,7 @@ export default function (pi: ExtensionAPI) {
 		dashboardCtx = undefined;
 	});
 
-	pi.registerCommand("agents", {
-		description: "Agent browser and persistent pane manager.",
-		getArgumentCompletions: agentsArgumentCompletions,
-		handler: async (args, ctx) => {
+	const agentsHandler = async (args: string, ctx: ExtensionCommandContext) => {
 			const parts = args.trim().split(/\s+/).filter(Boolean);
 			const scopes = new Set<AgentScope>(["user", "project", "both"]);
 			const command = parts[0];
@@ -4652,7 +4650,59 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			pi.sendMessage({ customType: "subagent-agents", content, details: messageDetails, display: true });
-		},
+	};
+
+	pi.registerCommand("agents", {
+		description: "Agent browser and persistent pane manager.",
+		getArgumentCompletions: agentsArgumentCompletions,
+		handler: agentsHandler,
+	});
+
+	const paneAgentNameCompletions = (subcommand: string) => (prefix: string) => {
+		const query = prefix.trimStart().toLowerCase();
+		const needsPane = subcommand !== "show";
+		const items = agentCommandCompletions
+			.filter((agent) => (!needsPane || agent.pane) && (!query || agent.value.toLowerCase().startsWith(query)))
+			.slice(0, 20)
+			.map((agent) => ({ value: agent.value, label: agent.label, description: agent.description }));
+		return items.length > 0 ? items : null;
+	};
+
+	const traceRefCompletions = (prefix: string) => {
+		const query = prefix.trimStart().toLowerCase();
+		const records = Object.values(dashboardState.items).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+		const completions = records
+			.map((item) => ({ ref: dashboardTraceRef(item), item }))
+			.filter(({ ref, item }) => !query || ref.toLowerCase().includes(query) || item.taskId.toLowerCase().includes(query) || item.agent.toLowerCase().startsWith(query))
+			.slice(0, 20)
+			.map(({ ref, item }) => ({ value: ref, label: ref, description: `${item.agent} · ${item.status}${item.message ? ` · ${oneLinePreview(item.message, 60)}` : ""}` }));
+		return completions.length > 0 ? completions : null;
+	};
+
+	for (const sub of ["transcripts", "toggle"] as const) {
+		pi.registerCommand(`agents:${sub}`, {
+			description: sub === "transcripts" ? "List agent transcript refs" : "Toggle the agent dashboard",
+			handler: async (_args, ctx) => agentsHandler(sub, ctx),
+		});
+	}
+
+	for (const sub of ["start", "send", "attach", "stop"] as const) {
+		const description =
+			sub === "start" ? "Start or reuse a persistent pane: /agents:start <name>" :
+			sub === "send" ? "Queue a task for a persistent pane: /agents:send <name> <task>" :
+			sub === "attach" ? "Focus an existing agent pane: /agents:attach <name>" :
+			"Stop an agent pane: /agents:stop <name>";
+		pi.registerCommand(`agents:${sub}`, {
+			description,
+			getArgumentCompletions: paneAgentNameCompletions(sub),
+			handler: async (args, ctx) => agentsHandler(`${sub} ${args}`.trim(), ctx),
+		});
+	}
+
+	pi.registerCommand("agents:trace", {
+		description: "View an agent trace by ref/task id: /agents:trace <ref>",
+		getArgumentCompletions: traceRefCompletions,
+		handler: async (args, ctx) => agentsHandler(`trace ${args}`.trim(), ctx),
 	});
 
 	const toggleDashboardMode = async (ctx: ExtensionContext) => {

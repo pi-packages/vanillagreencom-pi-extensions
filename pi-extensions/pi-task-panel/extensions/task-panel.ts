@@ -858,6 +858,8 @@ export default function taskPanel(pi: ExtensionAPI): void {
 		if (postManageAction === "edit") await editTasks(ctx);
 	}
 
+	let lastShownPanel: "compact" | "expanded" = state.panel === "expanded" ? "expanded" : "compact";
+
 	function handleTasksCommand(args: string, ctx: ExtensionCommandContext): Promise<void> | void {
 		const trimmed = args.trim();
 		if (!trimmed || trimmed === "manage") return manage(ctx);
@@ -875,9 +877,18 @@ export default function taskPanel(pi: ExtensionAPI): void {
 			case "drop": message = mutate(ctx, () => markStatus(state, rest, "abandoned", ctx.cwd)?.content ?? `No task matched: ${rest}`); break;
 			case "remove": message = mutate(ctx, () => removeTask(state, rest, ctx.cwd) ? `Removed ${rest}` : `No task matched: ${rest}`); break;
 			case "clear-completed": message = mutate(ctx, () => { const before = state.tasks.length; state.tasks = state.tasks.filter((task) => task.status !== "completed"); updatePanelAfterTaskChange(state, ctx.cwd); return `Removed ${before - state.tasks.length} completed task(s)`; }); break;
-			case "hide": message = mutate(ctx, () => { state.panel = "hidden"; return "Task panel hidden"; }); break;
-			case "show": message = mutate(ctx, () => { state.panel = "compact"; return `Task panel showing ${Math.max(1, Math.floor(settingNumber("maxCompactTasks", 4, ctx.cwd)))} task(s)`; }); break;
-			case "show-all": message = mutate(ctx, () => { state.panel = "expanded"; return "Task panel showing all tasks"; }); break;
+			case "hide": message = mutate(ctx, () => { if (state.panel !== "hidden") lastShownPanel = state.panel; state.panel = "hidden"; return "Task panel hidden"; }); break;
+			case "show": message = mutate(ctx, () => { state.panel = "compact"; lastShownPanel = "compact"; return `Task panel showing ${Math.max(1, Math.floor(settingNumber("maxCompactTasks", 4, ctx.cwd)))} task(s)`; }); break;
+			case "show-all": message = mutate(ctx, () => { state.panel = "expanded"; lastShownPanel = "expanded"; return "Task panel showing all tasks"; }); break;
+			case "toggle": message = mutate(ctx, () => {
+				if (state.panel === "hidden") {
+					state.panel = lastShownPanel;
+					return lastShownPanel === "expanded" ? "Task panel showing all tasks" : `Task panel showing ${Math.max(1, Math.floor(settingNumber("maxCompactTasks", 4, ctx.cwd)))} task(s)`;
+				}
+				lastShownPanel = state.panel;
+				state.panel = "hidden";
+				return "Task panel hidden";
+			}); break;
 			case "export": { const out = rest || join(ctx.cwd, ".pi", "tasks.md"); writeFileSafe(resolve(ctx.cwd, out), toEditableText(state)); message = `Exported tasks to ${out}`; break; }
 			case "import": { const input = resolve(ctx.cwd, rest || join(".pi", "tasks.md")); state = parseEditableText(readFileSync(input, "utf8"), ctx.cwd); message = mutate(ctx, () => `Imported ${state.tasks.length} task(s)`); break; }
 			case "edit": return editTasks(ctx);
@@ -890,6 +901,54 @@ export default function taskPanel(pi: ExtensionAPI): void {
 		description: "Persistent task panel and task list manager.",
 		getArgumentCompletions: (prefix: string) => commandArgumentCompletions(prefix, state),
 		handler: async (args, ctx) => handleTasksCommand(args, ctx),
+	});
+
+	const taskNameCompletions = (prefix: string) => {
+		const query = prefix.trimStart().toLowerCase();
+		const items = sortTasks(state.tasks)
+			.filter((task) => !query || task.content.toLowerCase().includes(query))
+			.slice(0, 20)
+			.map((task) => ({ value: task.content, label: task.content, description: editableStatusLabel(task.status) }));
+		return items.length > 0 ? items : null;
+	};
+
+	const noArgSubs = [
+		{ sub: "edit", description: "Bulk edit tasks as plain text" },
+		{ sub: "manage", description: "Open the interactive task manager" },
+		{ sub: "clear-completed", description: "Remove completed tasks" },
+		{ sub: "toggle", description: "Show or hide the mini task panel" },
+	] as const;
+	for (const { sub, description } of noArgSubs) {
+		pi.registerCommand(`tasks:${sub}`, {
+			description,
+			handler: async (_args, ctx) => handleTasksCommand(sub, ctx),
+		});
+	}
+
+	pi.registerCommand("tasks:add", {
+		description: "Add a task. Use 'Phase :: task' to assign a phase.",
+		handler: async (args, ctx) => handleTasksCommand(`add ${args}`.trim(), ctx),
+	});
+
+	for (const sub of ["start", "done", "remove"] as const) {
+		const description =
+			sub === "start" ? "Set a task as active: /tasks:start <task>" :
+			sub === "done" ? "Mark a task completed: /tasks:done <task>" :
+			"Remove a task: /tasks:remove <task>";
+		pi.registerCommand(`tasks:${sub}`, {
+			description,
+			getArgumentCompletions: taskNameCompletions,
+			handler: async (args, ctx) => handleTasksCommand(`${sub} ${args}`.trim(), ctx),
+		});
+	}
+
+	pi.registerCommand("tasks:export", {
+		description: "Write tasks to a markdown file: /tasks:export <path>",
+		handler: async (args, ctx) => handleTasksCommand(`export ${args}`.trim(), ctx),
+	});
+	pi.registerCommand("tasks:import", {
+		description: "Load tasks from a markdown file: /tasks:import <path>",
+		handler: async (args, ctx) => handleTasksCommand(`import ${args}`.trim(), ctx),
 	});
 
 	pi.registerMessageRenderer(TASK_COMPLETE_MESSAGE_TYPE, (message: any, _options: any, theme: Theme) => {

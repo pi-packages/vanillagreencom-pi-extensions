@@ -11,15 +11,14 @@ type Mode = "off" | "lite" | "full" | "ultra" | "micro";
 type VstackConfig = Record<string, unknown>;
 
 const MODE_VALUES: readonly Mode[] = ["off", "lite", "full", "ultra", "micro"];
-const COMMAND_COMPLETIONS = [
-	{ value: "lite", label: "lite", description: "Professional, no fluff" },
-	{ value: "full", label: "full", description: "Classic caveman" },
-	{ value: "ultra", label: "ultra", description: "Maximum compression" },
-	{ value: "micro", label: "micro", description: "Prompt-minimized compression" },
-	{ value: "toggle", label: "toggle", description: "Toggle caveman mode on/off" },
-	{ value: "off", label: "off", description: "Disable caveman mode" },
-	{ value: "status", label: "status", description: "Show current caveman mode" },
-] as const;
+
+const SUBCOMMAND_DESCRIPTIONS: Record<string, string> = {
+	lite: "Caveman lite — professional, no fluff",
+	full: "Caveman full — classic caveman",
+	ultra: "Caveman ultra — maximum compression",
+	micro: "Caveman micro — prompt-minimized compression",
+	toggle: "Toggle caveman mode on/off",
+};
 
 interface CavemanState {
 	mode: Mode;
@@ -183,39 +182,43 @@ export default function caveman(pi: ExtensionAPI): void {
 	});
 	pi.on("session_shutdown", (_event, ctx) => ctx.ui.setStatus(STATUS_KEY, undefined));
 
+	const applySubcommand = async (sub: string, ctx: ExtensionContext) => {
+		activeCtx = ctx;
+		const arg = sub.trim().toLowerCase();
+		if (arg === "status") {
+			ctx.ui.notify(statusText(state), "info");
+			return;
+		}
+		if (!arg && state.mode !== "off") {
+			ctx.ui.notify(statusText(state), "info");
+			return;
+		}
+		const mode = arg === "toggle" ? (state.mode === "off" ? defaultMode(ctx.cwd) : "off") : normalizeMode(arg || defaultMode(ctx.cwd));
+		if (!mode) {
+			ctx.ui.notify("Unknown caveman mode. Try lite, full, ultra, micro, toggle, off, or status.", "warning");
+			return;
+		}
+		if (!settingBoolean("sessionOverrideAllowed", true, ctx.cwd)) {
+			ctx.ui.notify("Session override disabled in caveman settings.", "warning");
+			return;
+		}
+		state = { mode, source: "session", updatedAt: new Date().toISOString() };
+		persist();
+		syncStatus(ctx);
+		ctx.ui.notify(mode === "off" ? "Caveman off." : `Caveman ${mode} active.`, "info");
+	};
+
 	pi.registerCommand("caveman", {
 		description: "Token-efficient caveman response mode.",
-		getArgumentCompletions: (prefix: string) => {
-			const normalized = prefix.trim().toLowerCase();
-			const items = COMMAND_COMPLETIONS.filter((item) => item.value.startsWith(normalized));
-			return items.length > 0 ? items : null;
-		},
-		handler: async (args, ctx) => {
-			activeCtx = ctx;
-			const arg = args.trim().toLowerCase();
-			if (arg === "status") {
-				ctx.ui.notify(statusText(state), "info");
-				return;
-			}
-			if (!arg && state.mode !== "off") {
-				ctx.ui.notify(statusText(state), "info");
-				return;
-			}
-			const mode = arg === "toggle" ? (state.mode === "off" ? defaultMode(ctx.cwd) : "off") : normalizeMode(arg || defaultMode(ctx.cwd));
-			if (!mode) {
-				ctx.ui.notify("Unknown caveman mode. Try lite, full, ultra, micro, toggle, off, or status.", "warning");
-				return;
-			}
-			if (!settingBoolean("sessionOverrideAllowed", true, ctx.cwd)) {
-				ctx.ui.notify("Session override disabled in caveman settings.", "warning");
-				return;
-			}
-			state = { mode, source: "session", updatedAt: new Date().toISOString() };
-			persist();
-			syncStatus(ctx);
-			ctx.ui.notify(mode === "off" ? "Caveman off." : `Caveman ${mode} active.`, "info");
-		},
+		handler: async (args, ctx) => applySubcommand(args, ctx),
 	});
+
+	for (const sub of ["lite", "full", "ultra", "micro", "toggle"] as const) {
+		pi.registerCommand(`caveman:${sub}`, {
+			description: SUBCOMMAND_DESCRIPTIONS[sub],
+			handler: async (_args, ctx) => applySubcommand(sub, ctx),
+		});
+	}
 
 	pi.on("before_agent_start", (event, ctx) => {
 		activeCtx = ctx;

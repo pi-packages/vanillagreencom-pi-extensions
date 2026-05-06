@@ -4430,6 +4430,10 @@ export default function qol(pi: ExtensionAPI): void {
 			getArgumentCompletions: getSessionSearchArgumentCompletions,
 			handler: handleSearchCommand,
 		});
+		pi.registerCommand("search:refresh", {
+			description: "Refresh the session search index",
+			handler: async (_args, ctx) => handleSearchCommand("refresh", ctx),
+		});
 		const shortcut = sessionSearchShortcut();
 		if (shortcut) {
 			pi.registerShortcut(shortcut, {
@@ -4439,6 +4443,32 @@ export default function qol(pi: ExtensionAPI): void {
 		}
 	}
 
+	const dispatchQol = async (sub: string, rest: string, ctx: ExtensionCommandContext) => {
+		const restLower = rest.toLowerCase();
+		if (sub === "status") {
+			ctx.ui.notify(statusMessage(ctx), "info");
+			return;
+		}
+		if (sub === "rename") {
+			if (!restLower) {
+				await attemptAutoRename(ctx, { force: true, notify: true });
+				return;
+			}
+			if (restLower === "full") {
+				await attemptAutoRename(ctx, { force: true, fullConversation: true, notify: true });
+				return;
+			}
+			ctx.ui.notify("Unknown /qol rename mode. Try /qol:rename or /qol:rename:full.", "warning");
+			return;
+		}
+		if (sub === "notify-test") {
+			sendQolNotification(ctx, "test", "QOL notification test", "info", `test:${Date.now()}`);
+			ctx.ui.notify("Sent QOL notification test.", "info");
+			return;
+		}
+		ctx.ui.notify("Unknown /qol action. Try /qol:status, /qol:rename, /qol:rename:full, or /qol:notify-test.", "warning");
+	};
+
 	pi.registerCommand("qol", {
 		description: "QOL helpers and settings.",
 		getArgumentCompletions: getQolArgumentCompletions,
@@ -4447,29 +4477,15 @@ export default function qol(pi: ExtensionAPI): void {
 			const firstSpace = trimmed.search(/\s/);
 			const sub = (firstSpace < 0 ? trimmed : trimmed.slice(0, firstSpace)).toLowerCase() || "status";
 			const rest = firstSpace < 0 ? "" : trimmed.slice(firstSpace + 1).trim();
-			const restLower = rest.toLowerCase();
-			if (sub === "status") {
-				ctx.ui.notify(statusMessage(ctx), "info");
-				return;
-			}
-			if (sub === "rename") {
-				if (!restLower) {
-					await attemptAutoRename(ctx, { force: true, notify: true });
-					return;
-				}
-				if (restLower === "full") {
-					await attemptAutoRename(ctx, { force: true, fullConversation: true, notify: true });
-					return;
-				}
-				ctx.ui.notify("Unknown /qol rename mode. Try /qol rename or /qol rename full.", "warning");
-				return;
-			}
-			if (sub === "notify-test") {
-				sendQolNotification(ctx, "test", "QOL notification test", "info", `test:${Date.now()}`);
-				ctx.ui.notify("Sent QOL notification test.", "info");
-				return;
-			}
-			ctx.ui.notify("Unknown /qol action. Try /qol status, /qol rename, /qol rename full, or /qol notify-test.", "warning");
+			await dispatchQol(sub, rest, ctx);
 		},
+	});
+	pi.registerCommand("qol:rename", {
+		description: "Generate a session name from the first user message",
+		handler: async (_args, ctx) => dispatchQol("rename", "", ctx),
+	});
+	pi.registerCommand("qol:rename:full", {
+		description: "Generate a session name from the full conversation",
+		handler: async (_args, ctx) => dispatchQol("rename", "full", ctx),
 	});
 }

@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { calculateImageRows, getCapabilities, getImageDimensions, getCellDimensions, Image, setCapabilities, Text, type Component } from "@mariozechner/pi-tui";
 import { hasOpenAiModelsLoaded } from "./activation.js";
 import { computeNextActiveTools, computeToolCapabilities, modelKey, PACKAGE_TOOL_NAMES, type ModelLike } from "./capabilities.js";
@@ -162,35 +162,29 @@ function statusLines(pi: ExtensionAPI, ctx: ExtensionContext): string[] {
 }
 
 function registerDiagnosticCommand(pi: ExtensionAPI): void {
+	const showDoctor = (ctx: ExtensionCommandContext) => {
+		const settings = loadSettings(ctx.cwd);
+		const lines = statusLines(pi, ctx as ExtensionContext);
+		lines.push(`image output dir: ${settings.imageOutputDir}`);
+		lines.push(`OPENAI_API_KEY: ${process.env.OPENAI_API_KEY ? "present" : "not set"}`);
+		const diagnostics = settingsDiagnostics(ctx.cwd);
+		if (diagnostics.length > 0) lines.push("settings diagnostics:", ...diagnostics.map((line) => `- ${line}`));
+		ctx.ui.notify(lines.join("\n"), "info");
+	};
 	pi.registerCommand("codex-minimal-tools", {
 		description: "Show Codex Minimal Tools status and diagnostics.",
-		getArgumentCompletions(prefix: string) {
-			const items = [
-				{ value: "doctor", label: "doctor", description: "Run lightweight self-checks" },
-				{ value: "settings", label: "settings", description: "Explain extension-manager settings location" },
-			];
-			const query = prefix.trim().toLowerCase();
-			const filtered = items.filter((item) => item.value.startsWith(query));
-			return filtered.length > 0 ? filtered : null;
-		},
 		handler: async (args: string, ctx) => {
 			const subcommand = args.trim().split(/\s+/, 1)[0]?.toLowerCase();
-			if (subcommand === "settings") {
-				ctx.ui.notify("Codex Minimal Tools settings are under /extensions or /extensions settings when pi-extension-manager is installed. Config key: vstack.extensionManager.config[\"pi-codex-minimal-tools\"].", "info");
-				return;
-			}
 			if (subcommand === "doctor") {
-				const settings = loadSettings(ctx.cwd);
-				const lines = statusLines(pi, ctx);
-				lines.push(`image output dir: ${settings.imageOutputDir}`);
-				lines.push(`OPENAI_API_KEY: ${process.env.OPENAI_API_KEY ? "present" : "not set"}`);
-				const diagnostics = settingsDiagnostics(ctx.cwd);
-				if (diagnostics.length > 0) lines.push("settings diagnostics:", ...diagnostics.map((line) => `- ${line}`));
-				ctx.ui.notify(lines.join("\n"), "info");
+				showDoctor(ctx);
 				return;
 			}
-			ctx.ui.notify(statusLines(pi, ctx).join("\n"), "info");
+			ctx.ui.notify(statusLines(pi, ctx as ExtensionContext).join("\n"), "info");
 		},
+	});
+	pi.registerCommand("codex-minimal-tools:doctor", {
+		description: "Run lightweight self-checks",
+		handler: async (_args: string, ctx) => showDoctor(ctx),
 	});
 }
 

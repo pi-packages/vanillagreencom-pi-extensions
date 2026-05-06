@@ -1710,6 +1710,18 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 		},
 	});
 
+	const taskIdCompletions = (prefix: string) => {
+		const query = prefix.trimStart().toLowerCase();
+		const items = sortedTasks()
+			.filter((task) => !query || task.id.toLowerCase().startsWith(query) || String(task.pid).startsWith(query))
+			.map((task) => ({
+				description: `${summarizeTaskStatus(task.status, task.exitCode)} · ${task.command}`,
+				label: task.id,
+				value: task.id,
+			}));
+		return items.length > 0 ? items : null;
+	};
+
 	pi.registerCommand(BG_COMMAND, {
 		description: "Background shell task dashboard and controls.",
 		getArgumentCompletions(prefix) {
@@ -1783,6 +1795,50 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 				`Unknown /${BG_COMMAND} action. Try run <command>, list, log <id>, watch <id>, stop <id>, or clear.`,
 				"warning",
 			);
+		},
+	});
+
+	pi.registerCommand(`${BG_COMMAND}:list`, {
+		description: "Show tracked background tasks",
+		handler: async (_args, ctx) => {
+			activeCtx = ctx;
+			ctx.ui.notify(formatTaskListText(), "info");
+		},
+	});
+	pi.registerCommand(`${BG_COMMAND}:next`, {
+		description: "Move the next bash command to a background task",
+		handler: async (_args, ctx) => {
+			activeCtx = ctx;
+			armForcedBackground(ctx, "command");
+		},
+	});
+	pi.registerCommand(`${BG_COMMAND}:clear`, {
+		description: "Remove finished background tasks",
+		handler: async (_args, ctx) => {
+			activeCtx = ctx;
+			ctx.ui.notify(`Removed ${clearFinishedTasks()} finished background task(s).`, "info");
+		},
+	});
+	pi.registerCommand(`${BG_COMMAND}:run`, {
+		description: "Spawn a background shell task: /bg:run <command>",
+		handler: async (args, ctx) => {
+			activeCtx = ctx;
+			const command = args.trim();
+			if (!command) {
+				ctx.ui.notify("Usage: /bg:run <command>", "warning");
+				return;
+			}
+			const task = spawnTask({ command, cwd: ctx.cwd });
+			ctx.ui.notify(`Started ${task.id} (pid ${task.pid}) in the background.`, "info");
+		},
+	});
+	pi.registerCommand(`${BG_COMMAND}:stop`, {
+		description: "Terminate a running background task: /bg:stop <id>",
+		getArgumentCompletions: taskIdCompletions,
+		handler: async (args, ctx) => {
+			activeCtx = ctx;
+			const stopped = requestStop(resolveTask(args.trim()), "user");
+			ctx.ui.notify(stopped.message, stopped.ok ? "info" : "warning");
 		},
 	});
 

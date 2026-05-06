@@ -15,6 +15,7 @@ import {
 	SettingsManager,
 	stripFrontmatter,
 	type ExtensionAPI,
+	type ExtensionCommandContext,
 	type ExtensionContext,
 	type PackageSource,
 	type ResolvedResource,
@@ -1438,25 +1439,25 @@ export default function skillsManager(pi: ExtensionAPI): void {
 	let registry: SkillRegistry = EMPTY_REGISTRY;
 	const enabledAtLoad = settingBoolean("enabled", true);
 
-	const recoveryArgumentCompletions = (prefix: string) => {
-		const query = prefix.trimStart().toLowerCase();
-		const recoveryItems = [{ value: "enable", label: "enable", description: "Re-enable the skills manager" }];
-		const filtered = recoveryItems.filter((item) => item.value.startsWith(query));
-		return filtered.length > 0 ? filtered : null;
-	};
 	if (!enabledAtLoad) {
+		const enableRecovery = async (ctx: ExtensionCommandContext) => {
+			updatePackageConfig(ctx.cwd, { enabled: true });
+			ctx.ui.notify("Skills Manager enabled. Reloading...", "info");
+			await ctx.reload();
+		};
 		pi.registerCommand("skill", {
 			description: "Skills manager recovery command.",
-			getArgumentCompletions: recoveryArgumentCompletions,
 			handler: async (args, ctx) => {
 				if (args.trim().toLowerCase() !== "enable") {
-					ctx.ui.notify("Skills Manager is disabled. Run /skill enable, then /reload.", "warning");
+					ctx.ui.notify("Skills Manager is disabled. Run /skill:enable, then /reload.", "warning");
 					return;
 				}
-				updatePackageConfig(ctx.cwd, { enabled: true });
-				ctx.ui.notify("Skills Manager enabled. Reloading...", "info");
-				await ctx.reload();
+				await enableRecovery(ctx);
 			},
+		});
+		pi.registerCommand("skill:enable", {
+			description: "Re-enable the skills manager",
+			handler: async (_args, ctx) => enableRecovery(ctx),
 		});
 		return;
 	}

@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { computeNextActiveTools, statusLines } from "./active-tools.js";
 import { INSTALL_SYMBOL } from "./activation.js";
 import { rewriteNativeOpenAiWebSearch } from "./native-openai.js";
@@ -53,37 +53,42 @@ function syncActiveTools(pi: ExtensionAPI, ctx: ExtensionContext): void {
 }
 
 function registerDiagnosticCommand(pi: ExtensionAPI): void {
+	const showStatus = (ctx: ExtensionCommandContext) => {
+		const settings = currentSettings(ctx.cwd);
+		const lines = statusLines(contextModel(ctx as ExtensionContext), settings);
+		if (settings.warnings.length) lines.push("warnings:", ...settings.warnings.map((line) => `- ${line}`));
+		ctx.ui.notify(lines.join("\n"), "info");
+	};
+	const setProvider = (next: WebProvider, ctx: ExtensionCommandContext) => {
+		if (!WEB_PROVIDERS.includes(next)) {
+			ctx.ui.notify(`Unknown provider: ${next}. Use auto, exa, openai-native, perplexity, or gemini.`, "error");
+			return;
+		}
+		providerOverride = next;
+		syncActiveTools(pi, ctx as ExtensionContext);
+		ctx.ui.notify(`Web Tools provider set to ${next} for this session. Persist via vstack.extensionManager.config[\"pi-web-tools\"].defaultProvider.`, "info");
+	};
 	pi.registerCommand("web-tools", {
-		description: "Show Web Tools status or set provider. Usage: /web-tools doctor | provider [auto|exa|openai-native|perplexity|gemini]",
-		getArgumentCompletions(prefix: string) {
-			const items = ["doctor", "settings", "provider", "provider auto", "provider exa", "provider openai-native", "provider perplexity", "provider gemini"].map((value) => ({ value, label: value }));
-			const query = prefix.trim().toLowerCase();
-			const filtered = items.filter((item) => item.value.startsWith(query));
-			return filtered.length ? filtered : null;
-		},
+		description: "Show Web Tools status or set provider. Usage: /web-tools:doctor | /web-tools:provider:<name>",
 		handler: async (args: string, ctx) => {
 			const parts = args.trim().split(/\s+/).filter(Boolean);
-			const settings = currentSettings(ctx.cwd);
-			if (parts[0] === "settings") {
-				ctx.ui.notify("Web Tools settings live under vstack.extensionManager.config[\"pi-web-tools\"]. Use env vars or PI_WEB_TOOLS_CONFIG_FILE for API keys.", "info");
-				return;
-			}
 			if (parts[0] === "provider" && parts[1]) {
-				const next = parts[1] as WebProvider;
-				if (!WEB_PROVIDERS.includes(next)) {
-					ctx.ui.notify(`Unknown provider: ${parts[1]}. Use auto, exa, openai-native, perplexity, or gemini.`, "error");
-					return;
-				}
-				providerOverride = next;
-				syncActiveTools(pi, ctx);
-				ctx.ui.notify(`Web Tools provider set to ${next} for this session. Persist via vstack.extensionManager.config[\"pi-web-tools\"].defaultProvider.`, "info");
+				setProvider(parts[1] as WebProvider, ctx);
 				return;
 			}
-			const lines = statusLines(contextModel(ctx), settings);
-			if (settings.warnings.length) lines.push("warnings:", ...settings.warnings.map((line) => `- ${line}`));
-			ctx.ui.notify(lines.join("\n"), "info");
+			showStatus(ctx);
 		},
 	});
+	pi.registerCommand("web-tools:doctor", {
+		description: "Show Web Tools status and diagnostics",
+		handler: async (_args: string, ctx) => showStatus(ctx),
+	});
+	for (const provider of WEB_PROVIDERS) {
+		pi.registerCommand(`web-tools:provider:${provider}`, {
+			description: `Set web search provider to ${provider} (session)`,
+			handler: async (_args: string, ctx) => setProvider(provider, ctx),
+		});
+	}
 }
 
 export default function webTools(pi: ExtensionAPI): void {

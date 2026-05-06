@@ -2452,35 +2452,34 @@ export default function extensionManager(pi: ExtensionAPI): void {
 	]);
 
 	if (loadConfig.config[MANAGER_ID]?.enabled === false) {
+		const enableRecovery = async (ctx: ExtensionCommandContext) => {
+			const files = loadSettingsFiles(ctx as ExtensionContext);
+			const scope = defaultWriteScope(undefined, files, mergedManagerState(files));
+			const file = findSettingsFile(files, scope);
+			updateManagerState(file, (state) => {
+				state.config[MANAGER_ID] = { ...(state.config[MANAGER_ID] ?? {}), enabled: true };
+			});
+			ctx.ui.notify("Extension manager enabled. Run /reload to restore the full UI.", "info");
+		};
 		pi.registerCommand("extensions", {
 			description: "Extension manager recovery command.",
-			getArgumentCompletions: (prefix) => {
-				const query = prefix.trimStart().toLowerCase();
-				return "enable".startsWith(query) ? [{ value: "enable", label: "enable", description: "Re-enable the extension manager UI" }] : null;
-			},
 			handler: async (args, ctx) => {
 				if (args.trim().toLowerCase() !== "enable") {
-					ctx.ui.notify("Extension manager UI is disabled. Run /extensions enable, then /reload, to restore it.", "warning");
+					ctx.ui.notify("Extension manager UI is disabled. Run /extensions:enable, then /reload, to restore it.", "warning");
 					return;
 				}
-				const files = loadSettingsFiles(ctx as ExtensionContext);
-				const scope = defaultWriteScope(undefined, files, mergedManagerState(files));
-				const file = findSettingsFile(files, scope);
-				updateManagerState(file, (state) => {
-					state.config[MANAGER_ID] = { ...(state.config[MANAGER_ID] ?? {}), enabled: true };
-				});
-				ctx.ui.notify("Extension manager enabled. Run /reload to restore the full UI.", "info");
+				await enableRecovery(ctx);
 			},
+		});
+		pi.registerCommand("extensions:enable", {
+			description: "Re-enable the extension manager UI",
+			handler: async (_args, ctx) => enableRecovery(ctx),
 		});
 		return;
 	}
 
 	pi.registerCommand("extensions", {
 		description: "Browse, toggle, inspect, and configure Pi extension-like resources.",
-		getArgumentCompletions: (prefix) => {
-			const query = prefix.trimStart().toLowerCase();
-			return "settings".startsWith(query) ? [{ value: "settings", label: "settings", description: "Open the quick extension settings editor" }] : null;
-		},
 		handler: async (args, ctx) => {
 			const trimmed = args.trim().toLowerCase();
 			if (trimmed === "settings") {
@@ -2489,6 +2488,11 @@ export default function extensionManager(pi: ExtensionAPI): void {
 			}
 			await openManager(pi, ctx, TAB_ALL);
 		},
+	});
+
+	pi.registerCommand("extensions:settings", {
+		description: "Open the quick extension settings editor",
+		handler: async (_args, ctx) => openQuickSettings(pi, ctx),
 	});
 
 
