@@ -2567,6 +2567,7 @@ async function runPersistentPaneAgent(
 	parentThinkingLevel: string | undefined,
 	step: number | undefined,
 	pi: ExtensionAPI,
+	forceSpawn = false,
 ): Promise<SingleResult> {
 	const agent = agents.find((a) => a.name === agentName);
 	if (!agent) {
@@ -2581,6 +2582,31 @@ async function runPersistentPaneAgent(
 			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
 			step,
 		};
+	}
+
+	if (forceSpawn) {
+		const registry = await readPaneRegistry(runtimeRoot);
+		const existing = registry[agent.name];
+		if (existing && (await paneExists(existing.paneId))) {
+			const stderr = [
+				`Cannot forceSpawn ${agent.name}: a live pane already exists for this agent.`,
+				"vstack does not support multiple panes for the same agent. Either:",
+				`  - Drop forceSpawn and the call will reuse the existing pane (queue this task into ${existing.windowName}), or`,
+				`  - Run \`/agents stop ${agent.name}\` first to tear down the live pane, then retry with forceSpawn for a fresh session.`,
+			].join("\n");
+			return {
+				agent: agent.name,
+				agentSource: agent.source,
+				task,
+				exitCode: 1,
+				messages: [],
+				stderr,
+				stopReason: "error",
+				errorMessage: stderr,
+				usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
+				step,
+			};
+		}
 	}
 
 	const queued = await queuePersistentPaneTask(runtimeRoot, parentSessionId, defaultCwd, agent, task, cwd, parentModel, parentThinkingLevel, pi);
@@ -2867,6 +2893,13 @@ const SubagentParams = Type.Object({
 		Type.Boolean({ description: "Prompt before running project-local agents. Default: false.", default: false }),
 	),
 	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process (single mode)" })),
+	forceSpawn: Type.Optional(
+		Type.Boolean({
+			description:
+				"For pane-mode agents only. When true and a live pane already exists for the target agent, the call errors instead of reusing the pane. Use this only when you explicitly want a fresh agent session; the error message guides you to either keep delegating to the existing pane or stop it via /agents stop <name> before retrying.",
+			default: false,
+		}),
+	),
 });
 
 const GetSubagentResultParams = Type.Object({
@@ -4297,6 +4330,7 @@ export default function (pi: ExtensionAPI) {
 								parentThinkingLevel,
 								i + 1,
 								pi,
+								params.forceSpawn ?? false,
 							)
 						: await runSingleAgent(
 								ctx.cwd,
@@ -4450,6 +4484,7 @@ export default function (pi: ExtensionAPI) {
 								parentThinkingLevel,
 								undefined,
 								pi,
+								params.forceSpawn ?? false,
 							)
 						: await runSingleAgent(
 								ctx.cwd,
@@ -4524,6 +4559,7 @@ export default function (pi: ExtensionAPI) {
 							parentThinkingLevel,
 							undefined,
 							pi,
+							params.forceSpawn ?? false,
 						)
 					: await runSingleAgent(
 							ctx.cwd,
