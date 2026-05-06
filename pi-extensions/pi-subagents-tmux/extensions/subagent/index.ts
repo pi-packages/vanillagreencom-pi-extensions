@@ -644,23 +644,33 @@ function renderAgentPromptViewport(agent: AgentConfig, ui: AgentBrowserUiState, 
 function renderAgentInspector(agent: AgentConfig | undefined, statuses: Map<string, AgentPaneStatus>, ui: AgentBrowserUiState, width: number, rows: number, theme: Theme): string[] {
 	if (!agent) return [`${agentPaneTitle(theme, "Inspector", ui.pane === "inspector")} ${theme.fg("dim", "Select an agent to inspect it.")}`];
 	const status = statuses.get(agent.name);
-	const lines: string[] = [
+	const safeWidth = Math.max(8, width);
+	const pushWrapped = (target: string[], text: string) => {
+		const wrapped = wrapTextWithAnsi(text, safeWidth);
+		target.push(...(wrapped.length > 0 ? wrapped : [""]));
+	};
+	const lines: string[] = [];
+	pushWrapped(
+		lines,
 		`${agentPaneTitle(theme, "Inspector", ui.pane === "inspector")} ${agentEntityTitle(theme, agent.name)} ${theme.fg(agentStatusColor(agentStatus(agent, status)), agentStatus(agent, status))}`,
-		...wrapTextWithAnsi(agent.description || "No description.", width).slice(0, 3),
-		"",
+	);
+	lines.push(...wrapTextWithAnsi(agent.description || "No description.", safeWidth).slice(0, 3));
+	lines.push("");
+	pushWrapped(
+		lines,
 		`${theme.fg("muted", "Kind")}: ${agent.pane ? "persistent pane" : "bg"}    ${theme.fg("muted", "Scope")}: ${agent.source}`,
-		`${theme.fg("muted", "Model")}: ${agent.model ?? "default"}`,
-		`${theme.fg("muted", "Tools")}: ${agent.tools?.join(", ") ?? "default"}`,
-		`${theme.fg("muted", "Path")}: ${compactAgentPath(agent.filePath)}`,
-		`${theme.fg("muted", "State")}: ${agentStatusLabel(agent, status, theme)}`,
-	];
+	);
+	pushWrapped(lines, `${theme.fg("muted", "Model")}: ${agent.model ?? "default"}`);
+	pushWrapped(lines, `${theme.fg("muted", "Tools")}: ${agent.tools?.join(", ") ?? "default"}`);
+	pushWrapped(lines, `${theme.fg("muted", "Path")}: ${compactAgentPath(agent.filePath)}`);
+	pushWrapped(lines, `${theme.fg("muted", "State")}: ${agentStatusLabel(agent, status, theme)}`);
 	if (status?.entry) {
-		lines.push(`${theme.fg("muted", "Pane")}: ${status.entry.windowName}`);
-		lines.push(`${theme.fg("muted", "Last task")}: ${status.entry.lastTaskAt ?? "never"}`);
+		pushWrapped(lines, `${theme.fg("muted", "Pane")}: ${status.entry.windowName}`);
+		pushWrapped(lines, `${theme.fg("muted", "Last task")}: ${status.entry.lastTaskAt ?? "never"}`);
 	}
 	lines.push("", theme.fg("muted", theme.bold("System Prompt")));
 	const promptRows = Math.max(1, rows - lines.length);
-	lines.push(...renderAgentPromptViewport(agent, ui, width, promptRows, theme));
+	lines.push(...renderAgentPromptViewport(agent, ui, safeWidth, promptRows, theme));
 	return lines.slice(0, rows);
 }
 
@@ -685,15 +695,13 @@ function renderAgentsBody(
 	const right = renderAgentInspector(selected, statuses, ui, rightWidth, bodyRows, theme);
 	const rows = bodyRows;
 	const searchLine = theme.bg("toolPendingBg", agentPad(` > ${ui.search}${theme.inverse(" ")}`, width));
-	const lines = [
-		searchLine,
-		`${theme.fg("muted", "View")}: ${theme.fg("text", "agents")}  ${theme.fg("muted", "Filters")}: scope ${ui.scope} · ${agents.length}/${discovery.agents.length} shown · ${paneCount} pane · ${liveCount} live`,
-		agentDivider(width, theme),
-	];
+	const filterLine = `${theme.fg("muted", "View")}: ${theme.fg("text", "agents")}  ${theme.fg("muted", "Filters")}: scope ${ui.scope} · ${agents.length}/${discovery.agents.length} shown · ${paneCount} pane · ${liveCount} live`;
+	const filterLines = wrapTextWithAnsi(filterLine, width);
+	const lines = [searchLine, ...filterLines, agentDivider(width, theme)];
 	for (let i = 0; i < rows; i += 1) {
 		lines.push(`${agentPad(left[i] ?? "", leftWidth)} ${theme.fg("dim", "│")} ${truncateToWidth(right[i] ?? "", rightWidth, "")}`);
 	}
-	lines.push(truncateToWidth(agentLegend(theme), width, ""));
+	lines.push(...wrapTextWithAnsi(agentLegend(theme), width));
 	return lines;
 }
 
