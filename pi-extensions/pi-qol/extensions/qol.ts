@@ -1761,8 +1761,8 @@ function qcuScaleCategories(rawCategories: Array<Omit<QolContextCategory, "token
 	return categories;
 }
 
-function qcuExtractProjectSubagents(systemPrompt: string): { agents: QolContextDetailItem[]; tokens: number } {
-	const marker = "## Project Subagents";
+function qcuExtractProjectAgents(systemPrompt: string): { agents: QolContextDetailItem[]; tokens: number } {
+	const marker = systemPrompt.includes("## Project Agents") ? "## Project Agents" : "## Project Subagents";
 	const start = systemPrompt.indexOf(marker);
 	if (start < 0) return { agents: [], tokens: 0 };
 	const rest = systemPrompt.slice(start);
@@ -1794,14 +1794,14 @@ function buildQolContextUsageDetails(pi: ExtensionAPI, ctx: ExtensionCommandCont
 	const systemPrompt = ctx.getSystemPrompt?.() ?? "";
 	const contextFiles = qcuUniqDetails(qcuDetailsFromItems(qcuPromptOptionArray(promptOptions, ["contextFiles", "agentsFiles", "memoryFiles"]), "context"));
 	const skills = qcuSkillDetails(pi, promptOptions);
-	const extractedSubagents = qcuExtractProjectSubagents(systemPrompt);
-	const customAgents = qcuUniqDetails([...qcuDetailsFromItems(qcuPromptOptionArray(promptOptions, ["customAgents", "agents", "agentSnippets"]), "agent"), ...extractedSubagents.agents]);
+	const extractedAgents = qcuExtractProjectAgents(systemPrompt);
+	const customAgents = qcuUniqDetails([...qcuDetailsFromItems(qcuPromptOptionArray(promptOptions, ["customAgents", "agents", "agentSnippets"]), "agent"), ...extractedAgents.agents]);
 	const { builtinTools, extensionTools, mcpTools, rawBuiltinToolTokens, rawExtensionToolTokens, rawMcpToolTokens } = qcuToolDetails(pi);
 	const { compactSummaries, rawCompactTokens, rawMessageTokens, stats } = qcuBuildMessageStats(ctx);
 	const rawCompactSummaryTokens = rawCompactTokens > 0 ? rawCompactTokens : qcuTokenSum(compactSummaries);
 	const rawContextFiles = qcuTokenSum(contextFiles);
 	const rawSkills = qcuTokenSum(skills);
-	const rawCustomAgents = Math.max(qcuTokenSum(customAgents), extractedSubagents.tokens);
+	const rawCustomAgents = Math.max(qcuTokenSum(customAgents), extractedAgents.tokens);
 	const rawSystemPromptTotal = qcuEstimateTokens(systemPrompt);
 	const rawSystemPrompt = Math.max(0, rawSystemPromptTotal - rawContextFiles - rawSkills - rawCustomAgents);
 	const categories = qcuScaleCategories([

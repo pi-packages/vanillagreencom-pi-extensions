@@ -40,7 +40,7 @@ Settings persist under `vstack.extensionManager.config.<packageName>` in Pi `set
 - Useful settings: bridge directory, event history limit, max request line bytes, heartbeat interval, startup notification, status badge.
 - Apply semantics: notification/status are live; socket/protocol settings require restart/reload.
 
-### `pi-subagents-tmux`
+### `pi-agents-tmux`
 
 - Toggle: `enabled` registers/unregisters the `subagent`, `get_subagent_result`, and `steer_subagent` tools, `/agents` command, dashboard shortcut, and persistent pane polling after reload.
 - Useful settings: max parallel tasks, max one-shot concurrency, dashboard display, result truncation/full-output preservation, parent/child poll intervals, forced session-bridge loading for panes.

@@ -238,8 +238,8 @@ pub fn discover_pi_extensions(dir: &Path) -> Result<Vec<PiExtension>> {
 const PI_EXTENSION_RENAMES: &[(&str, &[&str])] = &[
     // `prompt-stash` was renamed to match vstack's Pi package naming convention.
     ("pi-prompt-stash", &["prompt-stash"]),
-    // `pi-subagents` was renamed once the package grew persistent tmux panes.
-    ("pi-subagents-tmux", &["pi-subagents"]),
+    // The agents package was renamed as its UI standardized on /agents wording.
+    ("pi-agents-tmux", &["pi-subagents-tmux", "pi-subagents"]),
 ];
 
 /// Legacy package names that should be removed from the same scope before the
@@ -306,7 +306,7 @@ fn remove_same_scope_legacy_packages(name: &str, global: bool) -> Result<()> {
 ///
 /// Steps:
 /// 1. Remove any same-scope vstack legacy package names for this package
-///    (for example `pi-subagents` → `pi-subagents-tmux`). Renamed Pi
+///    (for example `pi-subagents-tmux` → `pi-agents-tmux`). Renamed Pi
 ///    packages can register the same tools, and Pi treats them as distinct
 ///    packages, so leaving the legacy package installed crashes startup.
 /// 2. If the SAME extension (or one of its legacy names) is already installed
@@ -957,20 +957,25 @@ mod tests {
     }
 
     #[test]
-    fn install_pi_subagents_tmux_migrates_legacy_pi_subagents() {
+    fn install_pi_agents_tmux_migrates_legacy_subagent_packages() {
         let sandbox = std::env::temp_dir().join(format!(
-            "vstack_pi_subagents_migrate_{}",
+            "vstack_pi_agents_migrate_{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&sandbox);
         std::fs::create_dir_all(&sandbox).unwrap();
-        let legacy_src = sandbox.join("src").join("pi-subagents");
-        let current_src = sandbox.join("src").join("pi-subagents-tmux");
-        write_mini_source(&legacy_src, "pi-subagents");
-        write_mini_source(&current_src, "pi-subagents-tmux");
+        let oldest_src = sandbox.join("src").join("pi-subagents");
+        let legacy_src = sandbox.join("src").join("pi-subagents-tmux");
+        let current_src = sandbox.join("src").join("pi-agents-tmux");
+        write_mini_source(&oldest_src, "pi-subagents");
+        write_mini_source(&legacy_src, "pi-subagents-tmux");
+        write_mini_source(&current_src, "pi-agents-tmux");
         let pi_dir = sandbox.join("agent");
 
         with_pi_dir(&pi_dir, || {
+            let oldest = PiExtension::from_dir(&oldest_src).unwrap();
+            let oldest_dest = install_pi_extension(&oldest, true).unwrap().unwrap();
+            assert!(oldest_dest.exists());
             let legacy = PiExtension::from_dir(&legacy_src).unwrap();
             let legacy_dest = install_pi_extension(&legacy, true).unwrap().unwrap();
             assert!(legacy_dest.exists());
@@ -978,6 +983,10 @@ mod tests {
             let current = PiExtension::from_dir(&current_src).unwrap();
             let current_dest = install_pi_extension(&current, true).unwrap().unwrap();
             assert!(current_dest.exists());
+            assert!(
+                !oldest_dest.exists(),
+                "oldest legacy package dir should be removed during rename migration"
+            );
             assert!(
                 !legacy_dest.exists(),
                 "legacy package dir should be removed during rename migration"
@@ -993,10 +1002,14 @@ mod tests {
                 .iter()
                 .filter_map(|e| e.as_str())
                 .collect();
-            assert!(pkgs.contains(&"./packages/pi-subagents-tmux"));
+            assert!(pkgs.contains(&"./packages/pi-agents-tmux"));
+            assert!(
+                !pkgs.contains(&"./packages/pi-subagents-tmux"),
+                "legacy settings entry should be removed, got {pkgs:?}"
+            );
             assert!(
                 !pkgs.contains(&"./packages/pi-subagents"),
-                "legacy settings entry should be removed, got {pkgs:?}"
+                "oldest legacy settings entry should be removed, got {pkgs:?}"
             );
         });
 

@@ -920,6 +920,7 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 	const dashboardShortcut = settingString("dashboardShortcut", DEFAULT_BG_SHORTCUT);
 	const widgetToggleShortcut = settingString("widgetToggleShortcut", DEFAULT_WIDGET_TOGGLE_SHORTCUT);
 	let widgetMode: "compact" | "expanded" | "hidden" = settingEnum("widgetDefaultMode", ["compact", "expanded", "hidden"] as const, "compact");
+	let lastVisibleWidgetMode: "compact" | "expanded" = widgetMode === "expanded" ? "expanded" : "compact";
 	let taskCounter = 0;
 	let shuttingDown = false;
 	const tasks = new Map<string, ManagedTask>();
@@ -1805,10 +1806,14 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 	}
 	if (widgetToggleShortcut !== "none") {
 		pi.registerShortcut(widgetToggleShortcut, {
-			description: "Cycle background task mini-dashboard compact/expanded/hidden",
+			description: "Toggle background task mini-dashboard",
 			handler: async (ctx) => {
 				activeCtx = ctx as ExtensionContext;
-				widgetMode = widgetMode === "compact" ? "expanded" : widgetMode === "expanded" ? "hidden" : "compact";
+				if (widgetMode === "hidden") widgetMode = lastVisibleWidgetMode;
+				else {
+					lastVisibleWidgetMode = widgetMode;
+					widgetMode = "hidden";
+				}
 				syncWidget(ctx as ExtensionContext);
 			},
 		});

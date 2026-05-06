@@ -1,13 +1,13 @@
 {
-  "name": "pi-subagents-tmux",
+  "name": "pi-agents-tmux",
   "version": "0.1.0",
-  "description": "Pi extension for delegating work to project or user agents, including persistent tmux subagent panes.",
+  "description": "Pi extension for delegating work to project or user agents, including persistent tmux agent panes.",
   "license": "MIT",
   "keywords": [
     "pi-package",
     "pi",
     "coding-agent",
-    "subagents",
+    "agents",
     "tmux"
   ],
   "pi": {
@@ -29,12 +29,12 @@
   ],
   "vstack": {
     "extensionManager": {
-      "displayName": "Subagents (tmux)",
+      "displayName": "Agents (tmux)",
       "settings": [
         {
           "key": "enabled",
-          "label": "Enable subagents",
-          "description": "Register the subagent tool, /agents command, and persistent pane polling.",
+          "label": "Enable agents",
+          "description": "Register the agent tool, /agents command, and persistent pane polling.",
           "type": "boolean",
           "default": true,
           "category": "General",
@@ -44,7 +44,7 @@
         {
           "key": "maxParallelTasks",
           "label": "Max parallel tasks",
-          "description": "Maximum number of tasks accepted in one parallel subagent call.",
+          "description": "Maximum number of tasks accepted in one parallel agent call.",
           "type": "number",
           "default": 8,
           "category": "Execution",
@@ -53,7 +53,7 @@
         {
           "key": "maxConcurrency",
           "label": "Max concurrency",
-          "description": "Maximum number of one-shot subagent processes to run at the same time.",
+          "description": "Maximum number of one-shot agent processes to run at the same time.",
           "type": "number",
           "default": 4,
           "category": "Execution",
@@ -61,8 +61,8 @@
         },
         {
           "key": "dashboard",
-          "label": "Show subagent dashboard",
-          "description": "Render a persistent subagent activity card above the editor with active/completed agents, pane ids, bridge state, summaries, and artifact hints.",
+          "label": "Show agent dashboard",
+          "description": "Render a persistent agent activity card above the editor with active/completed agents, pane ids, bridge state, summaries, and artifact hints.",
           "type": "boolean",
           "default": true,
           "category": "Rendering",
@@ -80,7 +80,7 @@
         {
           "key": "dashboardMaxItems",
           "label": "Dashboard max items",
-          "description": "Maximum subagent rows shown in the persistent dashboard.",
+          "description": "Maximum agent rows shown in the persistent dashboard.",
           "type": "number",
           "default": 6,
           "category": "Rendering",
@@ -98,7 +98,7 @@
         {
           "key": "dashboardShortcut",
           "label": "Dashboard display shortcut",
-          "description": "Keyboard shortcut that cycles the subagent dashboard through hidden → compact → normal → expanded → hidden. Use none to disable.",
+          "description": "Keyboard shortcut that cycles the agent dashboard through hidden \u2192 compact \u2192 normal \u2192 expanded \u2192 hidden. Use none to disable.",
           "type": "string",
           "default": "alt+a",
           "category": "Keyboard",
@@ -108,7 +108,7 @@
         {
           "key": "popupShortcut",
           "label": "Agents popup shortcut",
-          "description": "Keyboard shortcut that opens the full /agents subagent browser popup. Use none to disable.",
+          "description": "Keyboard shortcut that opens the full /agents agent browser popup. Use none to disable.",
           "type": "string",
           "default": "alt+shift+a",
           "category": "Keyboard",
@@ -118,7 +118,7 @@
         {
           "key": "treeStyle",
           "label": "Tree connector style",
-          "description": "Connector glyphs for subagent result rows. Unicode is prettier; ASCII uses |--/`-- for maximum terminal compatibility.",
+          "description": "Connector glyphs for agent result rows. Unicode is prettier; ASCII uses |--/`-- for maximum terminal compatibility.",
           "type": "enum",
           "enumValues": [
             "unicode",
@@ -131,7 +131,7 @@
         {
           "key": "collapsedItemCount",
           "label": "Collapsed item count",
-          "description": "Number of recent text/tool items shown in collapsed subagent results.",
+          "description": "Number of recent text/tool items shown in collapsed agent results.",
           "type": "number",
           "default": 10,
           "category": "Rendering",
@@ -139,8 +139,8 @@
         },
         {
           "key": "truncateResults",
-          "label": "Truncate subagent results",
-          "description": "Apply Pi-sized inline caps to subagent tool output and details, with full-output preservation when enabled.",
+          "label": "Truncate agent results",
+          "description": "Apply Pi-sized inline caps to agent tool output and details, with full-output preservation when enabled.",
           "type": "boolean",
           "default": true,
           "category": "Output",
@@ -149,7 +149,7 @@
         {
           "key": "resultMaxBytes",
           "label": "Result max bytes",
-          "description": "Maximum inline bytes kept for each subagent result before truncation.",
+          "description": "Maximum inline bytes kept for each agent result before truncation.",
           "type": "number",
           "default": 102400,
           "category": "Output",
@@ -158,7 +158,7 @@
         {
           "key": "resultMaxLines",
           "label": "Result max lines",
-          "description": "Maximum inline lines kept for each subagent result before truncation.",
+          "description": "Maximum inline lines kept for each agent result before truncation.",
           "type": "number",
           "default": 4000,
           "category": "Output",
@@ -166,8 +166,8 @@
         },
         {
           "key": "preserveFullOutput",
-          "label": "Preserve full subagent output",
-          "description": "Write oversized full subagent output to the session runtime and include the artifact path in tool results.",
+          "label": "Preserve full agent output",
+          "description": "Write oversized full agent output to the session runtime and include the artifact path in tool results.",
           "type": "boolean",
           "default": true,
           "category": "Output",
@@ -208,22 +208,22 @@
         {
           "kind": "tool",
           "name": "subagent",
-          "description": "Delegate tasks to isolated Pi subagents."
+          "description": "Delegate tasks to isolated Pi agents."
         },
         {
           "kind": "tool",
           "name": "get_subagent_result",
-          "description": "Retrieve persistent pane subagent task results by taskId or latest agent task."
+          "description": "Retrieve persistent pane agent task results by taskId or latest agent task."
         },
         {
           "kind": "tool",
           "name": "steer_subagent",
-          "description": "Steer a live persistent pane subagent through pi-session-bridge or queue a fallback steering note."
+          "description": "Steer a live persistent pane agent through pi-session-bridge or queue a fallback steering note."
         },
         {
           "kind": "command",
           "name": "/agents",
-          "description": "List, inspect, and manage subagent panes."
+          "description": "List, inspect, and manage agent panes."
         }
       ]
     }

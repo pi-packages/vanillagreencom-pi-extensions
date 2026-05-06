@@ -12,7 +12,7 @@ Pi package for explicit, non-blocking background shell tasks.
 - `bg_status` compatibility tool for list/log/stop by PID.
 - `/bg` dashboard and task-control command.
 - `Alt+.` arms a one-shot diversion so the next not-yet-started bash command runs as a background task instead of blocking the turn.
-- `Alt+H` toggles the inline mini-dashboard compact/expanded; `Alt+Shift+H` opens the full dashboard.
+- `Alt+H` toggles the inline mini-dashboard shown/hidden; `Alt+Shift+H` opens the full dashboard.
 - Automatic diversion of clearly long-running bash monitors such as `watch`, `tail -f`, `journalctl -f`, and session/tmux polling loops.
 - Persistent log files under `${PI_BG_TASK_DIR:-$TMPDIR/vstack-pi-bg}`; truncated log output includes the full log path.
 - Wakeups when a task exits, and optional wakeups when output matches a substring or `/regex/flags` pattern.

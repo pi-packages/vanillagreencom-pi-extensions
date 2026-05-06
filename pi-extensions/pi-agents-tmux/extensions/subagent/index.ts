@@ -1,7 +1,7 @@
 /**
- * Subagent Tool - Delegate tasks to specialized agents
+ * Agent delegation tool - delegate tasks to specialized agents.
  *
- * Spawns a separate `pi` process for each subagent invocation,
+ * Spawns a separate `pi` process for each agent invocation,
  * giving it an isolated context window.
  *
  * Supports three modes:
@@ -9,7 +9,7 @@
  *   - Parallel: { tasks: [{ agent: "name", task: "..." }, ...] }
  *   - Chain: { chain: [{ agent: "name", task: "... {previous} ..." }, ...] }
  *
- * Uses JSON mode to capture structured output from subagents.
+ * Uses JSON mode to capture structured output from agents.
  */
 
 import { spawn, spawnSync } from "node:child_process";
@@ -34,12 +34,14 @@ import { type Component, Container, Markdown, matchesKey, Spacer, truncateToWidt
 import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents, formatAgentList } from "./agents.js";
 
-const INSTALL_SYMBOL = Symbol.for("vstack.pi-subagents-tmux.installed");
+const PACKAGE_ID = "pi-agents-tmux";
+const LEGACY_PACKAGE_ID = "pi-subagents-tmux";
+const INSTALL_SYMBOL = Symbol.for("vstack.pi-agents-tmux.installed");
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
 const COLLAPSED_ITEM_COUNT = 10;
 const PANE_LAUNCHER_VERSION = 8;
-const SUBAGENT_WIDGET_KEY = "vstack-subagents-dashboard";
+const SUBAGENT_WIDGET_KEY = "vstack-agents-dashboard";
 const FIRST_AGENT_COLUMN_ROWS = 3;
 const NEXT_AGENT_COLUMN_ROWS = 4;
 const DETAIL_STRING_MAX_CHARS = 8 * 1024;
@@ -94,7 +96,7 @@ function runtimeSessionId(ctx: ExtensionContext): string {
 }
 
 function sessionRuntimeDir(sessionId: string): string {
-	return path.join(piUserDir(), "vstack", "pi-subagents-tmux", "sessions", safeFileName(sessionId));
+	return path.join(piUserDir(), "vstack", PACKAGE_ID, "sessions", safeFileName(sessionId));
 }
 
 function runtimeDirForContext(ctx: ExtensionContext): string {
@@ -123,8 +125,10 @@ function readVstackConfig(cwd?: string): VstackConfig {
 		if (!fs.existsSync(settingsPath)) continue;
 		try {
 			const parsed = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
-			const config = parsed?.vstack?.extensionManager?.config?.["pi-subagents-tmux"];
-			if (config && typeof config === "object" && !Array.isArray(config)) Object.assign(merged, config);
+			for (const packageId of [LEGACY_PACKAGE_ID, PACKAGE_ID]) {
+				const config = parsed?.vstack?.extensionManager?.config?.[packageId];
+				if (config && typeof config === "object" && !Array.isArray(config)) Object.assign(merged, config);
+			}
 		} catch {
 			// Ignore malformed optional manager config.
 		}
@@ -1324,7 +1328,7 @@ function createAgentsBrowserComponent(
 		if (ui.tab === "active") {
 			const footer = `${ansiYellow("tab")} ${theme.fg("dim", "view · ")}${ansiYellow("↑↓")} ${theme.fg("dim", "step · ")}${ansiYellow("-/=")} ${theme.fg("dim", "page · ")}${ansiYellow("←/→")} ${theme.fg("dim", "pane · ")}${ansiYellow("ctrl+e")} ${theme.fg("dim", "edit · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`;
 			const lines = [tabLine, "", ...renderActiveTabBody(activeItems, runtimeRoot, ui, bodyWidth, theme, layout), agentDivider(bodyWidth, theme), ...wrapTextWithAnsi(footer, bodyWidth)];
-			return agentFrame(lines, safeWidth, theme, layout.innerRows, "Subagents");
+			return agentFrame(lines, safeWidth, theme, layout.innerRows, "Agents");
 		}
 		clamp();
 		const footer = `${ansiYellow("tab")} ${theme.fg("dim", "view · ")}${ansiYellow("↑↓")} ${theme.fg("dim", "step · ")}${ansiYellow("-/=")} ${theme.fg("dim", "page · ")}${ansiYellow("←/→")} ${theme.fg("dim", "pane · ")}${ansiYellow("enter")} ${theme.fg("dim", "insert · ")}${ansiYellow("ctrl+p/o/x")} ${theme.fg("dim", "pane ops · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`;
@@ -1335,7 +1339,7 @@ function createAgentsBrowserComponent(
 			agentDivider(bodyWidth, theme),
 			...wrapTextWithAnsi(footer, bodyWidth),
 		];
-		return agentFrame(lines, safeWidth, theme, layout.innerRows, "Subagents");
+		return agentFrame(lines, safeWidth, theme, layout.innerRows, "Agents");
 	}
 
 	return { handleInput, invalidate() {}, render };
@@ -1395,7 +1399,7 @@ async function openAgentsBrowser(
 		}
 		try {
 			if (action.type === "insert") {
-				ctx.ui.pasteToEditor(`Use subagent ${agent.name} to: `);
+				ctx.ui.pasteToEditor(`Use agent ${agent.name} to: `);
 				return;
 			}
 			if (action.type === "start") {
@@ -1443,7 +1447,7 @@ function formatToolCall(
 		case "bash": {
 			const command = (args.command as string) || "...";
 			const compactCommand = command.replace(/\s+/g, " ").trim();
-			const preview = /pi-subagents-tmux\/sessions\/.*\/outbox\//.test(compactCommand)
+			const preview = /pi-(?:sub)?agents-tmux\/sessions\/.*\/outbox\//.test(compactCommand)
 				? "complete_subagent (legacy shell completion)"
 				: /^sleep\s+\d+\b/.test(compactCommand)
 					? compactCommand.replace(/^sleep\s+/, "wait ")
@@ -1936,7 +1940,7 @@ function truncateForDetails(text: string, cwd?: string): string {
 	if (!settingBoolean("truncateResults", true, cwd)) return text;
 	const truncation = truncateHead(text, resultLimits(cwd));
 	if (!truncation.truncated) return truncation.content;
-	return `${truncation.content}\n\n[Output truncated in subagent details: showing ${truncation.outputLines} of ${truncation.totalLines} lines (${formatSize(
+	return `${truncation.content}\n\n[Output truncated in agent details: showing ${truncation.outputLines} of ${truncation.totalLines} lines (${formatSize(
 		truncation.outputBytes,
 	)} of ${formatSize(truncation.totalBytes)}).]`;
 }
@@ -2206,7 +2210,7 @@ async function paneContainingProcess(pid: number): Promise<string | undefined> {
 async function getPrimaryPaneId(): Promise<string> {
 	// Prefer the pane that actually contains this Pi process. TMUX_PANE can be
 	// stale after session/tab reuse and can point at another tmux tab, which would
-	// make subagent panes split into and steer from the wrong place.
+	// make agent panes split into and steer from the wrong place.
 	const currentPane = await paneContainingProcess(process.pid);
 	if (currentPane && (await paneExists(currentPane))) return currentPane;
 	if (process.env.TMUX_PANE && (await paneExists(process.env.TMUX_PANE))) return process.env.TMUX_PANE;
@@ -2407,7 +2411,7 @@ function emitSubagentEvent(pi: ExtensionAPI, event: string, payload: Record<stri
 	try {
 		const bus = (pi as unknown as { events?: { emit?: (name: string, payload: unknown) => void } }).events;
 		bus?.emit?.(event, {
-			package: "pi-subagents-tmux",
+			package: PACKAGE_ID,
 			...payload,
 			timestamp: new Date().toISOString(),
 		});
@@ -2508,6 +2512,18 @@ function agentsCommandBullet(theme: Theme): string {
 	return theme.fg("accent", "● ");
 }
 
+function agentWord(theme: Theme): string {
+	return theme.fg("accent", theme.bold("Agent"));
+}
+
+function agentStatus(theme: Theme, label: string, tone: "success" | "warning" | "error" | "muted" = "muted"): string {
+	return theme.fg(tone, label);
+}
+
+function agentStatusLine(theme: Theme, agent: string, label: string, tone: "success" | "warning" | "error" | "muted", suffix = ""): string {
+	return `${agentsCommandBullet(theme)}${agentWord(theme)} ${ansiMagenta(theme.bold(agent))} ${agentStatus(theme, label, tone)}${suffix}`;
+}
+
 function agentsCommandArtifactLine(theme: Theme, branch: "├" | "└", label: string, filePath: string | undefined, width: number): string {
 	const prefix = `${subagentBranch(theme, branch)}${theme.fg("muted", `${label} `)}`;
 	const maxChars = Math.max(24, width - visibleWidth(prefix) - 1);
@@ -2536,7 +2552,7 @@ function renderAgentsCommandMessage(message: { content: string; details?: unknow
 				const rule = toolChromeRule(theme, width);
 				const taskSuffix = details.taskId ? `${theme.fg("dim", " · ")}${theme.fg("muted", shortTaskId(details.taskId))}` : "";
 				const lines = [
-					`${agentsCommandBullet(theme)}${theme.fg("toolTitle", theme.bold("/agents send "))}${ansiMagenta(theme.bold(details.agent!))}${theme.fg("dim", " · ")}${theme.fg("warning", "queued")}${taskSuffix}`,
+					agentStatusLine(theme, details.agent!, "Queued task", "warning", taskSuffix),
 					agentsCommandArtifactLine(theme, "├", "inbox", details.inboxFile, width),
 					agentsCommandArtifactLine(theme, "├", "completion", details.outboxFile, width),
 					agentsCommandArtifactLine(theme, "└", "transcript", details.transcriptPath, width),
@@ -2549,7 +2565,7 @@ function renderAgentsCommandMessage(message: { content: string; details?: unknow
 	if (action === "start" && details?.agent) {
 		return framedMessage(
 			[
-				`${agentsCommandBullet(theme)}${theme.fg("toolTitle", theme.bold("/agents start "))}${ansiMagenta(theme.bold(details.agent))}${theme.fg("dim", ` · ${details.windowName ?? "pane"}`)}`,
+				agentStatusLine(theme, details.agent, "started", "success", theme.fg("dim", ` · ${details.windowName ?? "pane"}`)),
 				`${subagentBranch(theme, "└")}${theme.fg("muted", "session ")}${theme.fg("toolOutput", compactPath(details.sessionFile))}`,
 			].join("\n"),
 			theme,
@@ -2557,11 +2573,11 @@ function renderAgentsCommandMessage(message: { content: string; details?: unknow
 	}
 
 	if (action === "attach" && details?.agent) {
-		return framedMessage(`${agentsCommandBullet(theme)}${theme.fg("toolTitle", theme.bold("/agents attach "))}${ansiMagenta(theme.bold(details.agent))}`, theme);
+		return framedMessage(agentStatusLine(theme, details.agent, "attached", "success"), theme);
 	}
 
 	if (action === "stop" && details?.agent) {
-		return framedMessage(`${theme.fg("success", ICONS.check)} ${theme.fg("toolTitle", theme.bold("/agents stop "))}${ansiMagenta(theme.bold(details.agent))}`, theme);
+		return framedMessage(agentStatusLine(theme, details.agent, "stopped", "success"), theme);
 	}
 
 	if (action === "collect") {
@@ -2592,7 +2608,7 @@ function dashboardTranscriptLabel(items: SubagentDashboardItem[], cwd: string): 
 function shortRuntimeSessionIdFromPath(filePath: string | undefined): string {
 	if (!filePath) return "session";
 	const parts = path.normalize(filePath).split(path.sep).filter(Boolean);
-	const rootIndex = parts.lastIndexOf("pi-subagents-tmux");
+	const rootIndex = Math.max(parts.lastIndexOf(PACKAGE_ID), parts.lastIndexOf(LEGACY_PACKAGE_ID));
 	const sessionsIndex = rootIndex >= 0 ? parts.indexOf("sessions", rootIndex + 1) : parts.lastIndexOf("sessions");
 	const parentSession = sessionsIndex >= 0 ? parts[sessionsIndex + 1] : undefined;
 	return parentSession ? oneLinePreview(parentSession, 8) : "session";
@@ -2614,7 +2630,7 @@ function dashboardTraceRef(item: Pick<SubagentDashboardItem, "agent" | "taskId" 
 function dashboardTranscriptRef(filePath: string | undefined): string {
 	if (!filePath) return "";
 	const parts = path.normalize(filePath).split(path.sep).filter(Boolean);
-	const rootIndex = parts.lastIndexOf("pi-subagents-tmux");
+	const rootIndex = Math.max(parts.lastIndexOf(PACKAGE_ID), parts.lastIndexOf(LEGACY_PACKAGE_ID));
 	const sessionsIndex = rootIndex >= 0 ? parts.indexOf("sessions", rootIndex + 1) : parts.lastIndexOf("sessions");
 	const parentSession = sessionsIndex >= 0 ? parts[sessionsIndex + 1] : undefined;
 	const shortSession = parentSession ? oneLinePreview(parentSession, 8) : "session";
@@ -2657,7 +2673,7 @@ function renderDashboardWidgetLines(state: SubagentDashboardState, theme: Theme,
 		failed ? theme.fg("error", `${failed} attention`) : "",
 	].filter(Boolean);
 	if (headerParts.length === 0) headerParts.push(`${items.length} ready`);
-	const title = `${theme.fg("customMessageLabel", theme.bold("Subagents"))} ${theme.fg("muted", headerParts.join(" · "))}${hint}`;
+	const title = `${theme.fg("customMessageLabel", theme.bold("Agents"))} ${theme.fg("muted", headerParts.join(" · "))}${hint}`;
 	const lines = [title];
 	const aggregateDashboardUsage = (entries: SubagentDashboardItem[]): UsageStats | undefined => {
 		const total: UsageStats = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 };
@@ -2906,7 +2922,7 @@ async function ensurePersistentPane(
 
 		const selectedModel = parentModel ?? agent.model;
 		const paths = await writeLauncher(runtimeRoot, parentSessionId, cwd, agent, selectedModel, parentThinkingLevel);
-		const windowName = `subagent:${agent.name}`;
+		const windowName = `agent:${agent.name}`;
 		primaryPaneId = await getPrimaryPaneId();
 		layoutGroup = nextLayoutGroup(registry);
 		const groupEntries = groupedPaneEntries(registry).get(layoutGroup) ?? [];
@@ -3022,7 +3038,7 @@ function formatCompletionDetails(detail: PaneCompletionDetails): string {
 	const files = detail.filesChanged.length ? detail.filesChanged.map((file) => `- ${file}`).join("\n") : "None reported";
 	const validation = detail.validation.length ? detail.validation.map((item) => `- ${item}`).join("\n") : "None reported";
 	return [
-		`# Subagent completion: ${detail.agent}`,
+		`# Agent completion: ${detail.agent}`,
 		`Task ID: ${detail.taskId}`,
 		`Status: ${detail.status}`,
 		`Source: ${detail.sourcePath}`,
@@ -3045,7 +3061,7 @@ function formatCompletionDetails(detail: PaneCompletionDetails): string {
 
 function formatCompletionGroup(completions: PaneCompletionDetails[]): string {
 	if (completions.length === 1) return formatCompletionDetails(completions[0]);
-	return [`# Subagent completions (${completions.length})`, "", ...completions.map(formatCompletionDetails)].join("\n\n---\n\n");
+	return [`# Agent completions (${completions.length})`, "", ...completions.map(formatCompletionDetails)].join("\n\n---\n\n");
 }
 
 async function pollPaneCompletions(runtimeRoot: string, pi: ExtensionAPI, triggerTurn = true): Promise<number> {
@@ -3478,7 +3494,7 @@ async function runSingleAgent(
 		currentResult.exitCode = exitCode;
 		if (wasAborted) {
 			currentResult.stopReason = "aborted";
-			currentResult.errorMessage = "Subagent was aborted";
+			currentResult.errorMessage = "Agent was aborted";
 			emitSubagentEvent(pi, "subagents:failed", {
 				mode: "oneshot",
 				agent: agent.name,
@@ -3488,7 +3504,7 @@ async function runSingleAgent(
 				runtimeRoot,
 				transcriptPath,
 			});
-			throw new Error("Subagent was aborted");
+			throw new Error("Agent was aborted");
 		}
 		const failed = exitCode !== 0 || currentResult.stopReason === "error" || currentResult.stopReason === "aborted";
 		emitSubagentEvent(pi, failed ? "subagents:failed" : "subagents:completed", {
@@ -3602,6 +3618,13 @@ function paneCompletionStatus(status: PaneTaskStatus, theme: Theme): string {
 	return theme.fg("muted", status);
 }
 
+function paneCompletionTone(status: PaneTaskStatus): "success" | "warning" | "error" | "muted" {
+	if (status === "completed") return "success";
+	if (status === "blocked" || status === "queued") return "warning";
+	if (status === "failed") return "error";
+	return "muted";
+}
+
 function renderPaneCompletionMessage(message: { content: string; details?: unknown }, options: { expanded?: boolean } | undefined, theme: Theme) {
 	const details = message.details as PaneCompletionMessageDetails | undefined;
 	const completions = details?.completions ?? [];
@@ -3610,23 +3633,17 @@ function renderPaneCompletionMessage(message: { content: string; details?: unkno
 	if (!expanded) {
 		const lines: string[] = [];
 		for (const detail of completions) {
-			lines.push(
-				`${paneCompletionIcon(detail.status, theme)} ${ansiMagenta(theme.bold(detail.agent))} ${paneCompletionStatus(detail.status, theme)} ${theme.fg("dim", `${shortTaskId(detail.taskId)} · Ctrl+O`)}`,
-			);
+			lines.push(agentStatusLine(theme, detail.agent, detail.status, paneCompletionTone(detail.status), theme.fg("dim", ` · ${shortTaskId(detail.taskId)} · Ctrl+O`)));
 			lines.push(`${subagentBranch(theme, "└")}${theme.fg("toolOutput", oneLinePreview(detail.summary, 120) || "No summary provided.")}`);
 		}
 		return framedMessage(lines.join("\n"), theme);
 	}
 
 	const container = new Container();
-	container.addChild(wrappedText(theme.fg("toolTitle", theme.bold(`Subagent completion${completions.length === 1 ? "" : "s"} (${completions.length})`))));
+	container.addChild(wrappedText(theme.fg("toolTitle", theme.bold(`Agent completion${completions.length === 1 ? "" : "s"} (${completions.length})`))));
 	for (const [index, detail] of completions.entries()) {
 		if (index > 0) container.addChild(new Spacer(1));
-		container.addChild(
-			wrappedText(
-				`${paneCompletionIcon(detail.status, theme)} ${ansiMagenta(theme.bold(detail.agent))} ${theme.fg("muted", detail.taskId)} ${paneCompletionStatus(detail.status, theme)}`,
-			),
-		);
+		container.addChild(wrappedText(agentStatusLine(theme, detail.agent, detail.status, paneCompletionTone(detail.status), theme.fg("dim", ` · ${detail.taskId}`))));
 		container.addChild(wrappedText(theme.fg("muted", "─── Summary ───")));
 		container.addChild(wrappedText(detail.summary || "No summary provided."));
 		container.addChild(wrappedText(theme.fg("muted", "─── Files Changed ───")));
@@ -3703,8 +3720,8 @@ function recordTimestamp(record: PaneTaskRecord): number {
 
 function formatTranscriptIndex(records: PaneTaskRegistry, cwd: string): string {
 	const sorted = Object.values(records).filter((record) => record.taskId && record.agent).sort((a, b) => recordTimestamp(b) - recordTimestamp(a));
-	if (sorted.length === 0) return "No subagent transcripts found for this session.";
-	const lines = ["# Subagent transcripts", "", "| Ref | Agent | Status | When | Summary |", "| --- | --- | --- | --- | --- |"];
+	if (sorted.length === 0) return "No agent transcripts found for this session.";
+	const lines = ["# Agent transcripts", "", "| Ref | Agent | Status | When | Summary |", "| --- | --- | --- | --- | --- |"];
 	for (const record of sorted.slice(0, 40)) {
 		const ref = recordTraceRef(record);
 		const when = record.completedAt ?? record.createdAt ?? "";
@@ -3881,7 +3898,7 @@ async function openTraceViewer(ctx: ExtensionContext, title: string, items: Trac
 
 function transcriptIndexItems(records: PaneTaskRegistry, cwd: string): TraceViewerItem[] {
 	const sorted = Object.values(records).filter((record) => record.taskId && record.agent).sort((a, b) => recordTimestamp(b) - recordTimestamp(a));
-	const lines = ["Recent subagent traces", "", "Use ←/→ to select a trace tab; Enter opens its transcript file.", ""];
+	const lines = ["Recent agent traces", "", "Use ←/→ to select a trace tab; Enter opens its transcript file.", ""];
 	for (const record of sorted.slice(0, 80)) {
 		const ref = recordTraceRef(record);
 		lines.push(ref);
@@ -3890,7 +3907,7 @@ function transcriptIndexItems(records: PaneTaskRegistry, cwd: string): TraceView
 		lines.push("");
 	}
 	return [
-		{ label: "Index", type: "index", text: sorted.length ? lines.join("\n") : "No subagent transcripts found for this session." },
+		{ label: "Index", type: "index", text: sorted.length ? lines.join("\n") : "No agent transcripts found for this session." },
 		...sorted.slice(0, 20).map((record) => ({
 			agent: record.agent,
 			createdAt: record.completedAt ?? record.createdAt,
@@ -3976,7 +3993,7 @@ function renderToolTarget(value: string | undefined, theme: Theme, fallback = "t
 function getSubagentTargetLabel(args: { agent?: string; taskId?: string }): string {
 	if (args.agent) return `${args.agent} result`;
 	if (args.taskId) return `task ${oneLinePreview(args.taskId, 28)} result`;
-	return "subagent result";
+	return "agent result";
 }
 
 function steerDiagnostics(details: SteerSubagentDetails): string[] {
@@ -4101,9 +4118,9 @@ export default function (pi: ExtensionAPI) {
 				{ value: "attach ", label: "attach <name>", description: "Focus an existing agent pane" },
 				{ value: "stop ", label: "stop <name>", description: "Stop an agent pane" },
 				{ value: "status", label: "status", description: "Show persistent pane status" },
-				{ value: "transcripts", label: "transcripts", description: "List subagent transcript refs" },
-				{ value: "trace ", label: "trace <ref>", description: "View a subagent trace by ref/task id" },
-				{ value: "toggle", label: "toggle", description: "Toggle the subagent dashboard" },
+				{ value: "transcripts", label: "transcripts", description: "List agent transcript refs" },
+				{ value: "trace ", label: "trace <ref>", description: "View an agent trace by ref/task id" },
+				{ value: "toggle", label: "toggle", description: "Toggle the agent dashboard" },
 			];
 			const filtered = topLevel.filter((item) => item.value.trim().startsWith(first) || item.label.startsWith(first));
 			return filtered.length > 0 ? filtered : null;
@@ -4148,10 +4165,9 @@ export default function (pi: ExtensionAPI) {
 			const completions = details?.completions ?? [];
 			if (completions.length === 1) {
 				const detail = completions[0]!;
-				const status = paneCompletionStatus(detail.status, theme);
-				return framedMessage(`${paneCompletionIcon(detail.status, theme)} ${ansiMagenta(theme.bold(detail.agent))} ${status}`, theme);
+				return framedMessage(agentStatusLine(theme, detail.agent, detail.status, paneCompletionTone(detail.status)), theme);
 			}
-			if (completions.length > 1) return framedMessage(`${theme.fg("success", ICONS.check)} ${theme.fg("toolTitle", theme.bold(`${completions.length} subagents completed`))}`, theme);
+			if (completions.length > 1) return framedMessage(`${theme.fg("success", ICONS.check)} ${theme.fg("toolTitle", theme.bold(`${completions.length} agents completed`))}`, theme);
 		}
 		return renderPaneCompletionMessage(message as { content: string; details?: unknown }, options as { expanded?: boolean } | undefined, theme);
 	});
@@ -4265,12 +4281,12 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		renderShell: "self",
 		name: "complete_subagent",
-		label: "Complete Subagent Task",
-		description: "Child-pane-only helper that writes the persistent subagent completion record without exposing outbox JSON mechanics in the visible pane.",
+		label: "Complete Agent Task",
+		description: "Child-pane-only helper that writes the persistent agent completion record without exposing outbox JSON mechanics in the visible pane.",
 		parameters: CompleteSubagentParams,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			if (!childAgentName) return { content: [{ type: "text", text: "complete_subagent is only available inside a persistent subagent pane." }], isError: true };
-			if (!childCurrentTaskFile) return { content: [{ type: "text", text: "No active subagent task file is being processed." }], isError: true };
+			if (!childAgentName) return { content: [{ type: "text", text: "complete_subagent is only available inside a persistent agent pane." }], isError: true };
+			if (!childCurrentTaskFile) return { content: [{ type: "text", text: "No active agent task file is being processed." }], isError: true };
 			const taskId = path.basename(childCurrentTaskFile, path.extname(childCurrentTaskFile));
 			const runtimeRoot = runtimeDirForContext(ctx);
 			const outboxFile = completionPath(runtimeRoot, childAgentName, taskId);
@@ -4303,15 +4319,11 @@ export default function (pi: ExtensionAPI) {
 
 	pi.registerMessageRenderer("subagent-self-completion", (message, options, theme) => {
 		const details = message.details as { agent?: string; status?: string; outboxFile?: string } | undefined;
-		const agentLabel = details?.agent ? `${details.agent.charAt(0).toUpperCase()}${details.agent.slice(1)}` : "Subagent";
-		const statusWord = details?.status === "failed" ? "failed" : details?.status === "blocked" ? "blocked" : "complete";
-		const icon = details?.status === "failed"
-			? theme.fg("error", ICONS.times)
-			: details?.status === "blocked"
-				? theme.fg("error", ICONS.times)
-				: theme.fg("success", ICONS.check);
-		const tail = statusWord === "complete" ? " · now waiting" : "";
-		const headline = `${icon} ${theme.fg("toolTitle", theme.bold(`${agentLabel} ${statusWord}`))}${theme.fg("muted", tail)}`;
+		const agent = details?.agent ?? "unknown";
+		const statusWord = details?.status === "failed" ? "failed" : details?.status === "blocked" ? "blocked" : "completed";
+		const tone = details?.status === "failed" || details?.status === "blocked" ? "error" : "success";
+		const tail = statusWord === "completed" ? theme.fg("muted", " · now waiting") : "";
+		const headline = agentStatusLine(theme, agent, statusWord, tone, tail);
 		if (options?.expanded && details?.outboxFile) {
 			return framedMessage(`${headline}\n${theme.fg("dim", `Outbox: ${compactPath(details.outboxFile)}`)}`, theme);
 		}
@@ -4329,11 +4341,11 @@ export default function (pi: ExtensionAPI) {
 		const runtimeRoot = runtimeDirForContext(ctx);
 
 		if (childAgentName) {
-			ctx.ui.setTitle(`pi subagent - ${childAgentName}`);
-			setCurrentTmuxPaneTitle(`subagent:${childAgentName}`);
-			childTitlePoller = setInterval(() => setCurrentTmuxPaneTitle(`subagent:${childAgentName}`), 1000);
+			ctx.ui.setTitle(`pi agent - ${childAgentName}`);
+			setCurrentTmuxPaneTitle(`agent:${childAgentName}`);
+			childTitlePoller = setInterval(() => setCurrentTmuxPaneTitle(`agent:${childAgentName}`), 1000);
 			childTitlePoller.unref?.();
-			ctx.ui.setStatus("subagent", `${childAgentName} idle`);
+			ctx.ui.setStatus("agent", `${childAgentName} idle`);
 			if (ctx.hasUI) ctx.ui.setWidget("subagent-marker", undefined);
 			const pollInbox = () => {
 				if (childPollInFlight || !ctx.isIdle()) return;
@@ -4360,7 +4372,7 @@ export default function (pi: ExtensionAPI) {
 
 					const prompt = await fs.promises.readFile(processing, "utf-8");
 					childCurrentTaskFile = processing;
-					ctx.ui.setStatus("subagent", `${childAgentName} running ${file}`);
+					ctx.ui.setStatus("agent", `${childAgentName} running ${file}`);
 					pi.sendUserMessage(prompt);
 				})().finally(() => {
 					childPollInFlight = false;
@@ -4371,7 +4383,7 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 
-		ctx.ui.setStatus("subagent", undefined);
+		ctx.ui.setStatus("agent", undefined);
 		await migrateLegacyProjectRuntime(ctx.cwd, runtimeRoot);
 		try {
 			const records = await readTaskRegistry(runtimeRoot);
@@ -4449,7 +4461,7 @@ export default function (pi: ExtensionAPI) {
 			}
 			childCurrentTaskFile = undefined;
 		}
-		ctx.ui.setStatus("subagent", `${childAgentName} idle`);
+		ctx.ui.setStatus("agent", `${childAgentName} idle`);
 		if (pendingChildCompletion) {
 			const details = pendingChildCompletion;
 			pendingChildCompletion = undefined;
@@ -4467,7 +4479,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("agents", {
-		description: "Subagent browser and persistent pane manager.",
+		description: "Agent browser and persistent pane manager.",
 		getArgumentCompletions: agentsArgumentCompletions,
 		handler: async (args, ctx) => {
 			const parts = args.trim().split(/\s+/).filter(Boolean);
@@ -4537,7 +4549,7 @@ export default function (pi: ExtensionAPI) {
 					messageDetails = { action: "stop", agent: stoppedAgent };
 				} else if (command === "collect") {
 					const collected = await pollPaneCompletions(runtimeRoot, pi, false);
-					content = `Collected ${collected} subagent completion file${collected === 1 ? "" : "s"}.`;
+					content = `Collected ${collected} agent completion file${collected === 1 ? "" : "s"}.`;
 					messageDetails = { action: "collect", count: collected };
 				} else if (command === "status") {
 					const registry = await readPaneRegistry(runtimeRoot);
@@ -4547,12 +4559,12 @@ export default function (pi: ExtensionAPI) {
 							return `- ${entry.agent}: ${live ? "live" : "dead"} ${entry.windowName} model=${entry.model ?? "default"} lastTask=${entry.lastTaskAt ?? "never"}`;
 						}),
 					);
-					content = [`# Persistent subagent panes`, "", lines.join("\n") || "No persistent panes registered."].join("\n");
+					content = [`# Persistent agent panes`, "", lines.join("\n") || "No persistent panes registered."].join("\n");
 					messageDetails = { action: "status", count: lines.length };
 				} else if (command === "transcripts") {
 					const records = await readTaskRegistry(runtimeRoot);
 					if (ctx.hasUI) {
-						await openTraceViewer(ctx as ExtensionContext, "Subagent transcripts", transcriptIndexItems(records, ctx.cwd));
+						await openTraceViewer(ctx as ExtensionContext, "Agent transcripts", transcriptIndexItems(records, ctx.cwd));
 						return;
 					}
 					sendMarkdown(formatTranscriptIndex(records, ctx.cwd));
@@ -4562,7 +4574,7 @@ export default function (pi: ExtensionAPI) {
 					if (!ref) throw new Error("Usage: /agents trace <ref>");
 					const records = await readTaskRegistry(runtimeRoot);
 					const record = resolveTraceRecord(records, ref);
-					if (!record) throw new Error(`No subagent trace matched: ${ref}`);
+					if (!record) throw new Error(`No agent trace matched: ${ref}`);
 					if (ctx.hasUI) {
 						await openTraceViewer(ctx as ExtensionContext, `Trace ${recordTraceRef(record)}`, await traceViewerItems(record));
 						return;
@@ -4572,7 +4584,7 @@ export default function (pi: ExtensionAPI) {
 				} else if (command === "toggle") {
 					dashboardState.visible = !dashboardState.visible;
 					syncDashboard(ctx as ExtensionContext);
-					content = `Subagent dashboard ${dashboardState.visible ? `shown (${dashboardState.mode})` : "hidden"}.`;
+					content = `Agent dashboard ${dashboardState.visible ? `shown (${dashboardState.mode})` : "hidden"}.`;
 					messageDetails = { action: "toggle", status: dashboardState.visible ? `shown (${dashboardState.mode})` : "hidden" };
 				} else {
 					let showName: string | undefined;
@@ -4616,7 +4628,7 @@ export default function (pi: ExtensionAPI) {
 					} else {
 						const formatted = formatAgentList(scopedDiscovery.agents);
 						content = [
-							`# Available subagents (${scope})`,
+							`# Available agents (${scope})`,
 							`Project agent dirs: ${scopedDiscovery.projectAgentsDir ?? "none"}`,
 							"",
 							formatted.text
@@ -4660,12 +4672,12 @@ export default function (pi: ExtensionAPI) {
 	};
 	const shortcut = dashboardShortcut();
 	if (shortcut !== "none") {
-		pi.registerShortcut(shortcut, { description: "Cycle subagent dashboard display", handler: async (ctx) => toggleDashboardMode(ctx as ExtensionContext) });
+		pi.registerShortcut(shortcut, { description: "Cycle agent dashboard display", handler: async (ctx) => toggleDashboardMode(ctx as ExtensionContext) });
 	}
 	const popup = popupShortcut();
 	if (popup !== "none") {
 		pi.registerShortcut(popup, {
-			description: "Open the /agents subagent browser popup",
+			description: "Open the /agents browser popup",
 			handler: async (ctx) => {
 				const extCtx = ctx as ExtensionContext;
 				dashboardCtx = extCtx;
@@ -4682,8 +4694,8 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		renderShell: "self",
 		name: "get_subagent_result",
-		label: "Get Subagent Result",
-		description: "Retrieve status/results for persistent pane subagent tasks by taskId or latest agent task. This is a recovery/status tool for pane tasks and does not change Flightdeck or Orchestration ownership.",
+		label: "Get Agent Result",
+		description: "Retrieve status/results for persistent pane agent tasks by taskId or latest agent task. This is a recovery/status tool for pane tasks and does not change Flightdeck or Orchestration ownership.",
 		parameters: GetSubagentResultParams,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			if (!params.taskId && !params.agent) {
@@ -4707,7 +4719,7 @@ export default function (pi: ExtensionAPI) {
 
 			if (!record) {
 				const selector = params.taskId ? `taskId ${params.taskId}` : `agent ${params.agent}`;
-				return { content: [{ type: "text", text: `No persistent subagent task record found for ${selector}.` }], details: { agent: params.agent, taskId: params.taskId } satisfies GetSubagentResultDetails, isError: true };
+				return { content: [{ type: "text", text: `No persistent agent task record found for ${selector}.` }], details: { agent: params.agent, taskId: params.taskId } satisfies GetSubagentResultDetails, isError: true };
 			}
 			const recordKind: DashboardKind = record.paneId ? "pane" : "oneshot";
 			updateDashboard({
@@ -4735,22 +4747,21 @@ export default function (pi: ExtensionAPI) {
 		renderResult(result, _options, theme, context) {
 			const raw = result.content?.find?.((part: any) => part?.type === "text")?.text ?? "";
 			const details = result.details as GetSubagentResultDetails | undefined;
-			const status = details?.status ? theme.fg(details.status === "completed" ? "success" : details.status === "failed" ? "error" : "warning", details.status) : undefined;
-			if (context?.isError) return wrappedText(`${theme.fg("error", ICONS.times)} ${theme.fg("toolTitle", "Subagent result lookup failed")}\n${theme.fg("muted", raw)}`);
-			const target = details?.agent ? details.agent : "subagent";
-			const suffix = status;
+			if (context?.isError) return wrappedText(`${theme.fg("error", ICONS.times)} ${theme.fg("toolTitle", "Agent result lookup failed")}\n${theme.fg("muted", raw)}`);
+			const target = details?.agent ? details.agent : "unknown";
+			const tone = details?.status === "completed" ? "success" : details?.status === "failed" ? "error" : "warning";
 			// One-liner only, expanded or not. The full task record is reachable
-			// via `/agents trace <ref>` and is also surfaced as the subagent-
+			// via `/agents trace <ref>` and is also surfaced as the agent-
 			// completion message - rendering it again here just duplicates output.
-			return wrappedText(`${theme.fg("success", ICONS.check)} ${theme.fg("toolTitle", theme.bold(`result ${target}`))}${suffix ? ` ${theme.fg("dim", "·")} ${suffix}` : ""}`);
+			return wrappedText(agentStatusLine(theme, target, details?.status ?? "result", tone));
 		},
 	});
 
 	pi.registerTool({
 		renderShell: "self",
 		name: "steer_subagent",
-		label: "Steer Subagent",
-		description: "Send a steering message to a persistent pane subagent via pi-session-bridge. Bridge targeting requires the agent's child session to live under this parent session's runtime; otherwise an inbox-file fallback is queued instead.",
+		label: "Steer Agent",
+		description: "Send a steering message to a persistent pane agent via pi-session-bridge. Bridge targeting requires the agent's child session to live under this parent session's runtime; otherwise an inbox-file fallback is queued instead.",
 		parameters: SteerSubagentParams,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const runtimeRoot = sessionRuntimeDir(runtimeSessionId(ctx));
@@ -4785,7 +4796,7 @@ export default function (pi: ExtensionAPI) {
 			const entry = registry[agentName];
 			if (!entry) return { content: [{ type: "text", text: `No persistent pane registry entry for ${agentName} in runtime ${runtimeRoot}.` }], isError: true };
 			if (!paneSessionBelongsToRuntime(runtimeRoot, entry)) return { content: [{ type: "text", text: `Refusing to steer ${agentName}: pane session file is outside this runtime. Session: ${entry.sessionFile}. Runtime: ${runtimeRoot}` }], isError: true };
-			if (!(await paneExists(entry.paneId))) return { content: [{ type: "text", text: `Subagent ${agentName} is not live.` }], isError: true };
+			if (!(await paneExists(entry.paneId))) return { content: [{ type: "text", text: `Agent ${agentName} is not live.` }], isError: true };
 
 			const deliverAs = params.deliverAs ?? "steer";
 			const metadata = await ensurePaneBridgeMetadata(runtimeRoot, entry);
@@ -4876,12 +4887,12 @@ export default function (pi: ExtensionAPI) {
 		renderResult(result, { expanded }, theme, context) {
 			const raw = result.content?.find?.((part: any) => part?.type === "text")?.text ?? "";
 			const details = result.details as SteerSubagentDetails | undefined;
-			if (context?.isError) return wrappedText(`${theme.fg("error", ICONS.times)} ${theme.fg("toolTitle", "Steer subagent failed")}\n${theme.fg("muted", raw)}`);
+			if (context?.isError) return wrappedText(`${theme.fg("error", ICONS.times)} ${theme.fg("toolTitle", "Steer agent failed")}\n${theme.fg("muted", raw)}`);
 			if (!details) return wrappedText(raw);
 			if (expanded) return wrappedText(raw);
-			const status = details.bridge ? theme.fg("success", "bridge") : theme.fg("warning", "inbox fallback");
-			const icon = details.bridge ? ICONS.check : ICONS.warning;
-			return wrappedText(`${theme.fg(details.bridge ? "success" : "warning", icon)} ${theme.fg("toolTitle", theme.bold(`steered ${details.agent}`))} via ${status}`);
+			const status = details.bridge ? "steered" : "queued steering";
+			const via = details.bridge ? theme.fg("success", "bridge") : theme.fg("warning", "inbox fallback");
+			return wrappedText(`${agentStatusLine(theme, details.agent, status, details.bridge ? "success" : "warning")} ${theme.fg("dim", "via")} ${via}`);
 		},
 	});
 
@@ -4901,16 +4912,16 @@ export default function (pi: ExtensionAPI) {
 			.join("\n");
 
 		return {
-			systemPrompt: `${event.systemPrompt}\n\n## Project Subagents\nUse the \`subagent\` tool when isolated context, specialist review, reconnaissance, planning, or parallel read-only investigation would help. Project-local agents are loaded from .pi/agents, with .claude/agents as a compatibility source. Agents with \`pane=true\` run in persistent tmux panes and can also be managed with \`/agents start|send|attach|stop|status\`. For persistent panes, save the returned taskId, use \`get_subagent_result\` to recover missed completions, and use \`steer_subagent\` only for mid-run correction. Available project subagents:\n${agentLines}\n\nDefault \`agentScope\` is \"project\". Use \"both\" only when user-level agents are explicitly needed.`,
+			systemPrompt: `${event.systemPrompt}\n\n## Project Agents\nUse the \`subagent\` tool when isolated context, specialist review, reconnaissance, planning, or parallel read-only investigation would help. Project-local agents are loaded from .pi/agents, with .claude/agents as a compatibility source. Agents with \`pane=true\` run in persistent tmux panes and can also be managed with \`/agents start|send|attach|stop|status\`. For persistent panes, save the returned taskId, use \`get_subagent_result\` to recover missed completions, and use \`steer_subagent\` only for mid-run correction. Available project agents:\n${agentLines}\n\nDefault \`agentScope\` is \"project\". Use \"both\" only when user-level agents are explicitly needed.`,
 		};
 	});
 
 	pi.registerTool({
 		renderShell: "self",
 		name: "subagent",
-		label: "Subagent",
+		label: "Agent",
 		description: [
-			"Delegate tasks to specialized subagents with isolated context.",
+			"Delegate tasks to specialized agents with isolated context.",
 			"Modes: single (agent + task), parallel (tasks array), chain (sequential with {previous} placeholder).",
 			`Results are truncated by default to ${DEFAULT_RESULT_MAX_LINES} lines or ${formatSize(DEFAULT_RESULT_MAX_BYTES)}; full oversized output is saved under the session runtime when enabled.`,
 			'Default agent scope is "project" (.pi/agents plus .claude/agents compatibility).',
@@ -5320,7 +5331,7 @@ export default function (pi: ExtensionAPI) {
 			const scope: AgentScope = args.agentScope ?? "project";
 			if (args.chain && args.chain.length > 0) {
 				let text =
-					theme.fg("toolTitle", theme.bold("subagent ")) +
+					theme.fg("toolTitle", theme.bold("agents ")) +
 					theme.fg("accent", `chain (${args.chain.length} steps)`) +
 					theme.fg("muted", ` [${scope}]`);
 				for (let i = 0; i < Math.min(args.chain.length, 3); i++) {
@@ -5345,10 +5356,7 @@ export default function (pi: ExtensionAPI) {
 			}
 			const agentName = args.agent || "...";
 			const preview = args.task ? oneLinePreview(args.task, 56) : "...";
-			let text =
-				theme.fg("accent", "● ") +
-				theme.fg("toolTitle", theme.bold("subagent ")) +
-				ansiMagenta(theme.bold(agentName));
+			let text = `${agentsCommandBullet(theme)}${agentWord(theme)} ${ansiMagenta(theme.bold(agentName))}`;
 			if (scope !== "project") text += theme.fg("dim", ` · ${scope}`);
 			text += `\n${subagentBranch(theme, "└", _context?.cwd)}${theme.fg("dim", preview)}`;
 			return wrappedText(text);
@@ -5375,7 +5383,7 @@ export default function (pi: ExtensionAPI) {
 			const queuedPaneLine = (r: SingleResult) => {
 				if (!r.taskId || !r.paneId) return "";
 				const hint = theme.fg("dim", " · Ctrl+O");
-				return `${theme.fg("accent", "● ")}${theme.fg("toolTitle", theme.bold("subagent "))}${ansiMagenta(theme.bold(r.agent))}${theme.fg("dim", " · ")}${theme.fg("warning", "queued")}${theme.fg("dim", " · pane")}${hint}`;
+				return agentStatusLine(theme, r.agent, "Queued task", "warning", `${theme.fg("dim", " · pane")}${hint}`);
 			};
 			const addFinalResponseMarkdown = (container: Container, finalOutput: string, toolCalls: DisplayItem[]) => {
 				if (!finalOutput.trim()) {
@@ -5418,7 +5426,7 @@ export default function (pi: ExtensionAPI) {
 
 				if (expanded) {
 					const container = new Container();
-					let header = `${theme.fg("accent", "● ")}${theme.fg("toolTitle", theme.bold("subagent "))}${ansiMagenta(theme.bold(r.agent))}${theme.fg("dim", " · ")}${isQueued ? theme.fg("warning", "queued") : isError ? theme.fg("error", "failed") : theme.fg("success", "completed")}${theme.fg("dim", ` · ${isQueued ? "pane" : "bg"}`)}`;
+					let header = agentStatusLine(theme, r.agent, isQueued ? "Queued task" : isError ? "failed" : "completed", isQueued ? "warning" : isError ? "error" : "success", theme.fg("dim", ` · ${isQueued ? "pane" : "bg"}`));
 					if (isError && r.stopReason) header += ` ${theme.fg("error", `[${r.stopReason}]`)}`;
 					header += truncationBadge(r);
 					container.addChild(wrappedText(header));
@@ -5453,7 +5461,7 @@ export default function (pi: ExtensionAPI) {
 					return container;
 				}
 
-				let text = queued || `${theme.fg("accent", "● ")}${theme.fg("toolTitle", theme.bold("subagent "))}${ansiMagenta(theme.bold(r.agent))}${theme.fg("dim", " · ")}${isError ? theme.fg("error", "failed") : theme.fg("success", "completed")}${theme.fg("dim", " · bg")}${theme.fg("dim", " · Ctrl+O")}`;
+				let text = queued || agentStatusLine(theme, r.agent, isError ? "failed" : "completed", isError ? "error" : "success", `${theme.fg("dim", " · bg")}${theme.fg("dim", " · Ctrl+O")}`);
 				if (isError && r.stopReason) text += ` ${theme.fg("error", `[${r.stopReason}]`)}`;
 				text += truncationBadge(r);
 				if (queued) text += `\n${subagentBranch(theme, "└", cwd)}${theme.fg("dim", r.task ? oneLinePreview(r.task, 120) : "queued task")}`;

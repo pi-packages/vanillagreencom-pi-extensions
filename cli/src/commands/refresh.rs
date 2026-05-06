@@ -8,6 +8,17 @@ use crate::pi_extension::PiExtension;
 use crate::project_config::ProjectConfig;
 use crate::skill::Skill;
 use anyhow::Result;
+
+fn source_pi_extension_for_lock_name<'a>(
+    pi_extensions: &'a [PiExtension],
+    name: &str,
+) -> Option<&'a PiExtension> {
+    pi_extensions.iter().find(|e| e.name == name).or_else(|| {
+        pi_extensions
+            .iter()
+            .find(|e| crate::pi_extension::legacy_names_for(&e.name).contains(&name))
+    })
+}
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -234,7 +245,7 @@ pub fn refresh_items_in_scope(
         .filter(|(_, e)| e.kind == ItemKind::PiExtension)
         .filter(|(n, _)| pass(n))
     {
-        let Some(ext) = pi_extensions.iter().find(|e| &e.name == name) else {
+        let Some(ext) = source_pi_extension_for_lock_name(pi_extensions, name) else {
             continue;
         };
         let _ = crate::pi_extension::install_pi_extension(ext, global);
@@ -379,6 +390,20 @@ fn run_one(global: bool) -> Result<()> {
     let now = config::now_iso();
     let fallback_source = source_dirs.first().map(|p| p.display().to_string());
     let mut repaired_sources = 0usize;
+    let mut renamed_pi_entries = 0usize;
+    for ext in &all_pi_extensions {
+        for legacy in crate::pi_extension::legacy_names_for(&ext.name) {
+            if lock.entries.contains_key(&ext.name) {
+                let _ = lock.remove(legacy);
+                continue;
+            }
+            if let Some(mut entry) = lock.remove(legacy) {
+                entry.name = ext.name.clone();
+                lock.add(entry);
+                renamed_pi_entries += 1;
+            }
+        }
+    }
     for entry in lock.entries.values_mut() {
         if resolve_single_source(&entry.source).is_none() {
             if let Some(replacement) = &fallback_source {
@@ -396,6 +421,12 @@ fn run_one(global: bool) -> Result<()> {
         eprintln!(
             "  Repaired {} lock entry source path(s) (previous source missing)",
             repaired_sources
+        );
+    }
+    if renamed_pi_entries > 0 {
+        eprintln!(
+            "  Migrated {} Pi package lock entry name(s)",
+            renamed_pi_entries
         );
     }
 

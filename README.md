@@ -226,7 +226,7 @@ Global install behavior:
 
 ### Pi notes
 
-- **Agents.** Pi has no built-in subagent mechanism, so `.pi/agents/*.md` files are inert until a loader extension is installed. `pi-subagents-tmux` provides that loader; `pi-session-bridge` is a separate TUI side-channel for external controllers.
+- **Agents.** Pi has no built-in subagent mechanism, so `.pi/agents/*.md` files are inert until a loader extension is installed. `pi-agents-tmux` provides that loader; `pi-session-bridge` is a separate TUI side-channel for external controllers.
 - **Hooks.** No native Pi hook runtime, so safety hook prose is appended to the agent body instead of running as commands.
 - **Extensions.** `vstack add` copies the package into `<scope>/packages/<name>`, registers `./packages/<name>` in that scope's `settings.json` (preserving unrelated entries), and symlinks each `package.json` `bin` entry to `<scope>/bin/<cli-name>`. Add `<scope>/bin` to `PATH` for bare-name invocation. `vstack remove` cleans all three.
 - **Extension scope is exclusive.** Pi loads global + project scopes simultaneously, so duplicate registration would crash startup. Installing into one scope when the other already has it is skipped with a notice — `vstack remove [--global]` first to switch.
@@ -331,7 +331,7 @@ All Pi packages declare `vstack.extensionManager.settings` metadata including an
 | [`pi-background-tasks`](pi-extensions/pi-background-tasks/README.md) | Non-blocking shell tasks via `bg_task`/`bg_status` plus a `/bg` dashboard so long-running commands do not block the turn. |
 | [`pi-questions`](pi-extensions/pi-questions/README.md) | Structured multi-tab popup questions for the model with bridge-driven replies. |
 | [`pi-session-bridge`](pi-extensions/session-bridge/README.md) | Unix-socket JSONL side channel + `pi-bridge` CLI for external control, event streaming, prompt sending, and answering `pi-questions`. |
-| [`pi-subagents-tmux`](pi-extensions/pi-subagents-tmux/README.md) | Delegate work to `.pi/agents` / `.claude/agents` with isolated context and persistent tmux panes (`subagent`, `get_subagent_result`, `steer_subagent`, `/agents`). |
+| [`pi-agents-tmux`](pi-extensions/pi-agents-tmux/README.md) | Delegate work to `.pi/agents` / `.claude/agents` with isolated context and persistent tmux panes (`subagent`, `get_subagent_result`, `steer_subagent`, `/agents`). |
 | [`pi-prompt-stash`](pi-extensions/pi-prompt-stash/README.md) | Per-session prompt stash history with stash/pop editor (`Alt+S`). |
 | [`pi-qol`](pi-extensions/pi-qol/README.md) | Compact statusline/`π` prompt, multiline input, image chips, session naming/search/handoff, custom compaction, thinking timer. |
 | [`pi-session-manager`](pi-extensions/pi-session-manager/README.md) | Polished session browser (`/sessions`) for searching, resuming, renaming, and deleting Pi sessions. |
