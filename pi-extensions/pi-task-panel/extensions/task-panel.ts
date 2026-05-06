@@ -790,8 +790,8 @@ export default function taskPanel(pi: ExtensionAPI): void {
 						if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) { done(undefined); return; }
 						if (matchesKey(data, "up")) { move(-1); return; }
 						if (matchesKey(data, "down")) { move(1); return; }
-						if (matchesKey(data, "pageup")) { move(-MANAGE_TASK_ROWS); return; }
-						if (matchesKey(data, "pagedown")) { move(MANAGE_TASK_ROWS); return; }
+						if (matchesKey(data, "-") || matchesKey(data, "pageup")) { move(-MANAGE_TASK_ROWS); return; }
+						if (matchesKey(data, "=") || matchesKey(data, "pagedown")) { move(MANAGE_TASK_ROWS); return; }
 						if (matchesKey(data, "home")) { move(-Number.MAX_SAFE_INTEGER); return; }
 						if (matchesKey(data, "end")) { move(Number.MAX_SAFE_INTEGER); return; }
 						if (matchesKey(data, "return") || matchesKey(data, "enter") || data === "s") {
@@ -829,7 +829,7 @@ export default function taskPanel(pi: ExtensionAPI): void {
 						syncSelection();
 						const tasks = taskList();
 						const lines = [
-							`${ansiYellow("↑↓")} ${theme.fg("dim", "select · ")}${ansiYellow("enter/s")} ${theme.fg("dim", "start · ")}${ansiYellow("d")} ${theme.fg("dim", "done · ")}${ansiYellow("x")} ${theme.fg("dim", "drop · ")}${ansiYellow("r")} ${theme.fg("dim", "remove · ")}${ansiYellow("c")} ${theme.fg("dim", "clear done · ")}${ansiYellow("e")} ${theme.fg("dim", "edit · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`,
+							`${ansiYellow("↑↓")} ${theme.fg("dim", "select · ")}${ansiYellow("-/=")} ${theme.fg("dim", "page · ")}${ansiYellow("enter/s")} ${theme.fg("dim", "start · ")}${ansiYellow("d")} ${theme.fg("dim", "done · ")}${ansiYellow("x")} ${theme.fg("dim", "drop · ")}${ansiYellow("r")} ${theme.fg("dim", "remove · ")}${ansiYellow("c")} ${theme.fg("dim", "clear done · ")}${ansiYellow("e")} ${theme.fg("dim", "edit · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`,
 							"",
 						];
 						if (tasks.length === 0) {

@@ -39,7 +39,7 @@ Browse mode:
 
 Preview mode:
 
-- `↑/↓`, `PageUp/PageDown`, `Home/End` scroll.
+- `↑/↓`, `-/=`, `Home/End` scroll.
 - `Enter` inserts an enabled native `/skill:<name>` command.
 - `Ctrl+X` enables/disables.
 - `Ctrl+E` edits, `Ctrl+R` renames, and `Backspace`/`Delete` deletes your own skills.

@@ -902,12 +902,12 @@ class SessionManagerOverlay implements Focusable {
 			this.requestRender();
 			return;
 		}
-		if (this.keybindings.matches(data, "tui.select.pageUp")) {
+		if (matchesKey(data, "-") || this.keybindings.matches(data, "tui.select.pageUp")) {
 			this.setSelection(this.selectedIndex - this.visibleRows);
 			this.requestRender();
 			return;
 		}
-		if (this.keybindings.matches(data, "tui.select.pageDown")) {
+		if (matchesKey(data, "=") || this.keybindings.matches(data, "tui.select.pageDown")) {
 			this.setSelection(this.selectedIndex + this.visibleRows);
 			this.requestRender();
 			return;
@@ -1171,7 +1171,7 @@ class SessionManagerOverlay implements Focusable {
 		if (this.mode === "confirm-delete" || this.mode === "confirm-delete-all") return [`${ansiYellow("Enter")} ${error("confirm")} · ${ansiYellow("Esc")} ${error("cancel")}`];
 		if (this.mode === "rename") return [`${ansiYellow("Enter")} ${warning("save")} · ${ansiYellow("Esc")} ${warning("cancel")} · ${warning("empty name clears title")}`];
 		return [
-			`${ansiYellow("↑↓")} ${dim("move · ")}${ansiYellow("Enter")} ${dim("resume · ")}${ansiYellow("Ctrl+R")} ${dim("rename · ")}${ansiYellow("Ctrl+D")} ${dim("delete · ")}${ansiYellow("Ctrl+X")} ${dim("delete all")}`,
+			`${ansiYellow("↑↓")} ${dim("move · ")}${ansiYellow("-/=")} ${dim("page · ")}${ansiYellow("Enter")} ${dim("resume · ")}${ansiYellow("Ctrl+R")} ${dim("rename · ")}${ansiYellow("Ctrl+D")} ${dim("delete · ")}${ansiYellow("Ctrl+X")} ${dim("delete all")}`,
 			`${ansiYellow("Tab")} ${dim("scope · ")}${ansiYellow("Ctrl+S")} ${dim("sort · ")}${ansiYellow("Ctrl+N")} ${dim("names · ")}${ansiYellow("Ctrl+P")} ${dim("path · ")}${ansiYellow("Esc")} ${dim("close")}`,
 		];
 	}

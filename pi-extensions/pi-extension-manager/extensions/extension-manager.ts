@@ -1518,8 +1518,11 @@ function createManagerComponent(
 
 	function diagnosticsMaxScroll(): number {
 		const width = frameContentWidth(DEFAULT_WIDTH);
-		const visibleRows = Math.max(1, getLayout().innerRows - 5);
-		return Math.max(0, renderDiagnostics(inventory, width, theme).length - visibleRows);
+		return Math.max(0, renderDiagnostics(inventory, width, theme).length - diagnosticsPageRows());
+	}
+
+	function diagnosticsPageRows(): number {
+		return Math.max(1, getLayout().innerRows - 5);
 	}
 
 	function scrollDiagnostics(delta: number): void {
@@ -1593,8 +1596,8 @@ function createManagerComponent(
 		if (ui.showAudit) {
 			if (matchesKey(data, "up")) return scrollDiagnostics(-1);
 			if (matchesKey(data, "down")) return scrollDiagnostics(1);
-			if (matchesKey(data, "pageUp")) return scrollDiagnostics(-10);
-			if (matchesKey(data, "pageDown")) return scrollDiagnostics(10);
+			if (matchesKey(data, "-") || matchesKey(data, "pageUp")) return scrollDiagnostics(-diagnosticsPageRows());
+			if (matchesKey(data, "=") || matchesKey(data, "pageDown")) return scrollDiagnostics(diagnosticsPageRows());
 			if (matchesKey(data, "home")) {
 				ui.diagnosticsScroll = 0;
 				requestRender();
@@ -1635,14 +1638,14 @@ function createManagerComponent(
 			requestRender();
 			return;
 		}
-		if (matchesKey(data, "pageUp")) {
+		if (matchesKey(data, "-") || matchesKey(data, "pageUp")) {
 			if (ui.pane === "settings") ui.settingSelected -= getLayout().settingsRows;
 			else ui.selected -= getLayout().listRows;
 			clamp();
 			requestRender();
 			return;
 		}
-		if (matchesKey(data, "pageDown")) {
+		if (matchesKey(data, "=") || matchesKey(data, "pageDown")) {
 			if (ui.pane === "settings") ui.settingSelected += getLayout().settingsRows;
 			else ui.selected += getLayout().listRows;
 			clamp();
@@ -1745,8 +1748,8 @@ function createManagerComponent(
 		const primaryHint = ui.editing
 			? `${theme.fg("dim", "editing value · ")}${ansiYellow("enter")} ${theme.fg("dim", "save · ")}${ansiYellow("esc")} ${theme.fg("dim", "cancel · ")}${ansiYellow("backspace")} ${theme.fg("dim", "delete · ")}${ansiYellow("ctrl+u")} ${theme.fg("dim", "clear")}`
 			: ui.showAudit
-			? `${theme.fg("dim", "diagnostics · ")}${ansiYellow("↑↓")} ${theme.fg("dim", "scroll · ")}${ansiYellow("PgUp/PgDn")} ${theme.fg("dim", "scroll · ")}${ansiYellow("Alt+A")} ${theme.fg("dim", "back · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`
-			: `${ansiYellow("tab")} ${theme.fg("dim", "switch tabs · ")}${ansiYellow("↑↓")} ${theme.fg("dim", "navigate · ")}${ansiYellow("enter")} ${theme.fg("dim", "toggle/edit · ")}${ansiYellow("delete")} ${theme.fg("dim", "reset setting · ")}${ansiYellow("ctrl+x")} ${theme.fg("dim", "reset extension · ")}${ansiYellow("Alt+A")} ${theme.fg("dim", "diagnostics · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`;
+			? `${theme.fg("dim", "diagnostics · ")}${ansiYellow("↑↓")} ${theme.fg("dim", "scroll · ")}${ansiYellow("-/=")} ${theme.fg("dim", "page · ")}${ansiYellow("Alt+A")} ${theme.fg("dim", "back · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`
+			: `${ansiYellow("tab")} ${theme.fg("dim", "switch tabs · ")}${ansiYellow("↑↓")} ${theme.fg("dim", "navigate · ")}${ansiYellow("-/=")} ${theme.fg("dim", "page · ")}${ansiYellow("enter")} ${theme.fg("dim", "toggle/edit · ")}${ansiYellow("delete")} ${theme.fg("dim", "reset setting · ")}${ansiYellow("ctrl+x")} ${theme.fg("dim", "reset extension · ")}${ansiYellow("Alt+A")} ${theme.fg("dim", "diagnostics · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`;
 		lines.push(...wrapLine(primaryHint, bodyWidth));
 		lines.push("");
 		lines.push(divider(bodyWidth, theme));
@@ -2314,13 +2317,13 @@ function createQuickSettingsComponent(pi: ExtensionAPI, ctx: ExtensionCommandCon
 			requestRender();
 			return;
 		}
-		if (matchesKey(data, "pageUp")) {
+		if (matchesKey(data, "-") || matchesKey(data, "pageUp")) {
 			ui.selected -= getLayout().listRows;
 			clamp();
 			requestRender();
 			return;
 		}
-		if (matchesKey(data, "pageDown")) {
+		if (matchesKey(data, "=") || matchesKey(data, "pageDown")) {
 			ui.selected += getLayout().listRows;
 			clamp();
 			requestRender();
@@ -2373,7 +2376,7 @@ function createQuickSettingsComponent(pi: ExtensionAPI, ctx: ExtensionCommandCon
 			: theme.bg("toolPendingBg", pad(` > ${ui.search}${theme.inverse(" ")}`, bodyWidth));
 		const footer = ui.editing
 			? `${theme.fg("dim", "editing value · ")}${ansiYellow("enter")} ${theme.fg("dim", "save · ")}${ansiYellow("esc")} ${theme.fg("dim", "cancel · ")}${ansiYellow("backspace")} ${theme.fg("dim", "delete · ")}${ansiYellow("ctrl+u")} ${theme.fg("dim", "clear")}`
-			: `${ansiYellow("tab")} ${theme.fg("dim", "switch extension tabs · ")}${ansiYellow("↑↓")} ${theme.fg("dim", "navigate · ")}${ansiYellow("enter")} ${theme.fg("dim", "edit/toggle · ")}${ansiYellow("delete")} ${theme.fg("dim", "reset setting · ")}${ansiYellow("ctrl+x")} ${theme.fg("dim", "reset extension · ")}${ansiYellow("backspace")} ${theme.fg("dim", "clear · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`;
+			: `${ansiYellow("tab")} ${theme.fg("dim", "switch extension tabs · ")}${ansiYellow("↑↓")} ${theme.fg("dim", "navigate · ")}${ansiYellow("-/=")} ${theme.fg("dim", "page · ")}${ansiYellow("enter")} ${theme.fg("dim", "edit/toggle · ")}${ansiYellow("delete")} ${theme.fg("dim", "reset setting · ")}${ansiYellow("ctrl+x")} ${theme.fg("dim", "reset extension · ")}${ansiYellow("backspace")} ${theme.fg("dim", "clear · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`;
 		lines.push(renderTabBar(tabs, ui.tab, bodyWidth, theme));
 		lines.push("");
 		lines.push(searchLine);

@@ -94,8 +94,8 @@ Arguments support autocomplete, including known agent names for `show`, `start`,
 
 - Type to search by name, description, source, path, model, tools, or pane status.
 - `Tab` / `Shift+Tab` switches scope tabs: project, user, both.
-- `↑/↓`, `PageUp/PageDown`, `Home/End` navigate the list; `←/→` switches focus between list and inspector.
-- In the inspector, `↑/↓`, `PageUp/PageDown`, `Home/End` scroll the system prompt preview.
+- `↑/↓`, `-/=`, `Home/End` navigate the list; `←/→` switches focus between list and inspector.
+- In the inspector, `↑/↓`, `-/=`, `Home/End` scroll the system prompt preview.
 - `Enter` inserts `Use subagent <name> to: ` into the editor.
 - For `pane: true` agents, `Ctrl+P` starts/reuses a pane, `Ctrl+O` attaches, and `Ctrl+X` stops it.
 - `Esc` clears search or closes.

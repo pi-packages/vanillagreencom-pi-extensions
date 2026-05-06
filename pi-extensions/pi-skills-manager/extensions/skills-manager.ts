@@ -918,7 +918,7 @@ class ScrollableSkillPreview implements Component {
 	private footer(innerWidth: number, visibleHeight: number, totalLines: number): string {
 		const maxScroll = Math.max(0, totalLines - visibleHeight);
 		const scroll = maxScroll > 0 ? this.theme.fg("dim", ` • ${this.scrollOffset + 1}-${Math.min(totalLines, this.scrollOffset + visibleHeight)}/${totalLines}`) : "";
-		const hints: Array<[string, string]> = [["↑↓", "scroll"]];
+		const hints: Array<[string, string]> = [["↑↓", "scroll"], ["-/=", "page"]];
 		if (this.skill.enabled) hints.push(["enter", "insert"]);
 		hints.push(["ctrl+x", "enable/disable"]);
 		if (isDeletableSkill(this.skill)) hints.push(["ctrl+e", "edit"], ["ctrl+r", "rename"], ["backspace", "delete"]);
@@ -941,8 +941,8 @@ class ScrollableSkillPreview implements Component {
 		const maxScroll = Math.max(0, total - visibleHeight);
 		if (matchesKey(data, Key.up)) this.scrollOffset = Math.max(0, this.scrollOffset - 1);
 		else if (matchesKey(data, Key.down)) this.scrollOffset = Math.min(maxScroll, this.scrollOffset + 1);
-		else if (matchesKey(data, Key.pageUp)) this.scrollOffset = Math.max(0, this.scrollOffset - visibleHeight);
-		else if (matchesKey(data, Key.pageDown)) this.scrollOffset = Math.min(maxScroll, this.scrollOffset + visibleHeight);
+		else if (matchesKey(data, "-") || matchesKey(data, Key.pageUp)) this.scrollOffset = Math.max(0, this.scrollOffset - visibleHeight);
+		else if (matchesKey(data, "=") || matchesKey(data, Key.pageDown)) this.scrollOffset = Math.min(maxScroll, this.scrollOffset + visibleHeight);
 		else if (matchesKey(data, Key.home)) this.scrollOffset = 0;
 		else if (matchesKey(data, Key.end)) this.scrollOffset = maxScroll;
 	}
@@ -1309,7 +1309,7 @@ class SkillsManagerDialog implements Focusable {
 		root.addChild(list);
 		root.addChild(new Spacer(1));
 		const selected = this.getSelectedSkill();
-		const actions: Array<[string, string]> = [["↑↓", "select"]];
+		const actions: Array<[string, string]> = [["↑↓", "select"], ["-/=", "page"]];
 		if (!selected) actions.push(["enter", "create"], ["esc", "close"]);
 		else { if (selected.enabled) actions.push(["enter", "insert"]); actions.push(["tab", "preview"], ["ctrl+x", "enable/disable"]); if (!this.browseQuery && isDeletableSkill(selected)) actions.push(["backspace", "delete"]); actions.push(["esc", "close"]); }
 		root.addChild(new Text(skillKeyHints(this.theme, actions), 1, 0));
@@ -1380,6 +1380,8 @@ class SkillsManagerDialog implements Focusable {
 	private handleBrowseInput(data: string): void {
 		if (matchesKey(data, Key.up)) { this.selectedIndex = this.selectedIndex === 0 ? this.filteredSkills.length : this.selectedIndex - 1; return; }
 		if (matchesKey(data, Key.down)) { this.selectedIndex = this.selectedIndex === this.filteredSkills.length ? 0 : this.selectedIndex + 1; return; }
+		if (matchesKey(data, "-") || matchesKey(data, Key.pageUp)) { this.selectedIndex = Math.max(0, this.selectedIndex - this.listRows); return; }
+		if (matchesKey(data, "=") || matchesKey(data, Key.pageDown)) { this.selectedIndex = Math.min(this.filteredSkills.length, this.selectedIndex + this.listRows); return; }
 		if (matchesKey(data, Key.enter)) { if (this.selectedIndex === 0) { this.enterCreateMode(); return; } const skill = this.getSelectedSkill(); if (!skill) return; if (!skill.enabled) this.ctx.ui.notify("Enable this skill first with ctrl+x", "info"); else this.done(skill); return; }
 		if (matchesKey(data, Key.tab)) { const skill = this.getSelectedSkill(); if (skill) this.openPreview(skill); return; }
 		if (matchesKey(data, Key.ctrl("x"))) { const skill = this.getSelectedSkill(); if (skill) void this.toggleSkill(skill); return; }

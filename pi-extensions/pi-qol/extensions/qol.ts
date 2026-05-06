@@ -3190,11 +3190,11 @@ class QolSessionSearchComponent {
 			state.selected = Math.min(state.results.length - 1, state.selected + 1);
 			return;
 		}
-		if (matchesKey(data, "pageup")) {
+		if (matchesKey(data, "-") || matchesKey(data, "pageup")) {
 			state.selected = Math.max(0, state.selected - 10);
 			return;
 		}
-		if (matchesKey(data, "pagedown")) {
+		if (matchesKey(data, "=") || matchesKey(data, "pagedown")) {
 			state.selected = Math.min(state.results.length - 1, state.selected + 10);
 			return;
 		}
@@ -3264,11 +3264,11 @@ class QolSessionSearchComponent {
 			state.selected = Math.min(state.messages.length - 1, state.selected + 1);
 			return;
 		}
-		if (matchesKey(data, "pageup")) {
+		if (matchesKey(data, "-") || matchesKey(data, "pageup")) {
 			state.selected = Math.max(0, state.selected - 10);
 			return;
 		}
-		if (matchesKey(data, "pagedown")) {
+		if (matchesKey(data, "=") || matchesKey(data, "pagedown")) {
 			state.selected = Math.min(state.messages.length - 1, state.selected + 10);
 			return;
 		}
@@ -3420,7 +3420,7 @@ class QolSessionSearchComponent {
 			if (state.results.length > maxVisible) lines.push(empty(), row(dim(`${state.selected + 1}/${state.results.length} ${state.query.trim() ? "matches" : "recent sessions"}`)));
 		}
 		lines.push(divider(), empty());
-		lines.push(row(`${ansiYellow("↑↓")} ${dim("sessions")}  ${ansiYellow("enter")} ${dim("prompts")}  ${ansiYellow("ctrl+u")} ${dim("clear")}  ${ansiYellow("esc")} ${dim("close")}`));
+		lines.push(row(`${ansiYellow("↑↓")} ${dim("sessions")}  ${ansiYellow("-/=")} ${dim("page")}  ${ansiYellow("enter")} ${dim("prompts")}  ${ansiYellow("ctrl+u")} ${dim("clear")}  ${ansiYellow("esc")} ${dim("close")}`));
 		lines.push(bottom());
 		return lines;
 	}
@@ -3460,7 +3460,7 @@ class QolSessionSearchComponent {
 		}
 		if (state.messages.length > maxVisible) lines.push(empty(), row(dim(`${state.selected + 1}/${state.messages.length} user prompts`)));
 		lines.push(divider(), empty());
-		lines.push(row(`${ansiYellow("↑↓")} ${dim("prompts")}  ${ansiYellow("enter")} ${dim("prompt actions")}  ${ansiYellow("r")} ${dim("resume session")}  ${ansiYellow("esc")} ${dim("sessions")}`));
+		lines.push(row(`${ansiYellow("↑↓")} ${dim("prompts")}  ${ansiYellow("-/=")} ${dim("page")}  ${ansiYellow("enter")} ${dim("prompt actions")}  ${ansiYellow("r")} ${dim("resume session")}  ${ansiYellow("esc")} ${dim("sessions")}`));
 		lines.push(bottom());
 		return lines;
 	}

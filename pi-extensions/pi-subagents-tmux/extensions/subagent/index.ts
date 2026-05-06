@@ -3773,7 +3773,7 @@ function traceViewerLines(state: TraceViewerState, width: number, rows: number, 
 	const innerWidth = Math.max(1, width - 4);
 	const frameRows = Math.max(8, rows);
 	const item = state.items[state.selected] ?? state.items[0];
-	const help = `${ansiYellow("tab/←→")} ${theme.fg("dim", "sections · ")}${ansiYellow("↑↓")} ${theme.fg("dim", "scroll · ")}${ansiYellow("enter")} ${theme.fg("dim", "open · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`;
+	const help = `${ansiYellow("tab/←→")} ${theme.fg("dim", "sections · ")}${ansiYellow("↑↓")} ${theme.fg("dim", "scroll · ")}${ansiYellow("-/=")} ${theme.fg("dim", "page · ")}${ansiYellow("enter")} ${theme.fg("dim", "open · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`;
 	const tabs = renderTraceTabBar(state.items, state.selected, innerWidth, theme);
 	const meta = [
 		item?.ref ? theme.fg("accent", item.ref) : "",
@@ -3860,11 +3860,12 @@ async function openTraceViewer(ctx: ExtensionContext, title: string, items: Trac
 	let notice = "";
 	await ctx.ui.custom<void>((tui, theme, _kb, done) => ({
 		handleInput(data: string) {
+			const tracePageRows = Math.max(1, Math.min(30, Math.max(12, Math.floor(tui.terminal.rows * 0.72))) - 10);
 			if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) return done();
 			if (matchesKey(data, "up")) { state.scroll = Math.max(0, state.scroll - 1); tui.requestRender(); return; }
 			if (matchesKey(data, "down")) { state.scroll += 1; tui.requestRender(); return; }
-			if (matchesKey(data, "pageup") || matchesKey(data, "page_up")) { state.scroll = Math.max(0, state.scroll - 12); tui.requestRender(); return; }
-			if (matchesKey(data, "pagedown") || matchesKey(data, "page_down")) { state.scroll += 12; tui.requestRender(); return; }
+			if (matchesKey(data, "-") || matchesKey(data, "pageup") || matchesKey(data, "page_up")) { state.scroll = Math.max(0, state.scroll - tracePageRows); tui.requestRender(); return; }
+			if (matchesKey(data, "=") || matchesKey(data, "pagedown") || matchesKey(data, "page_down")) { state.scroll += tracePageRows; tui.requestRender(); return; }
 			if (matchesKey(data, "left")) { state.selected = (state.selected + state.items.length - 1) % state.items.length; state.scroll = 0; tui.requestRender(); return; }
 			if (matchesKey(data, "right") || matchesKey(data, "tab")) { state.selected = (state.selected + 1) % state.items.length; state.scroll = 0; tui.requestRender(); return; }
 			if (matchesKey(data, "enter") || matchesKey(data, "return")) { notice = openFileInExternalEditor(state.items[state.selected]?.path, ctx.cwd); tui.requestRender(); return; }

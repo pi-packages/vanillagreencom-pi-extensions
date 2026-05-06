@@ -27,7 +27,7 @@ No SQLite, FTS, or native runtime dependencies are used; Pi's `SessionManager.li
 | Key | Action |
 | --- | --- |
 | `↑` / `↓` | Move selection. |
-| `PageUp` / `PageDown` | Page the list. |
+| `-` / `=` | Page the list. |
 | `Home` / `End` | Jump to first/last result. |
 | `Enter` | Resume selected session. |
 | `Ctrl+R` | Rename selected session inline. |
