@@ -401,6 +401,9 @@ const AGENTS_POPUP_PADDING_X = 2;
 const AGENTS_POPUP_PADDING_Y = 1;
 const AGENTS_POPUP_FRAME_ROWS = 2 + AGENTS_POPUP_PADDING_Y * 2;
 const VSTACK_MODAL_LOCK_SYMBOL = Symbol.for("vstack.pi.modal-lock");
+type AgentBrowserTabId = "active" | AgentScope;
+type AgentBrowserTabDef = { id: AgentBrowserTabId; label: string };
+const ACTIVE_BROWSER_TAB: AgentBrowserTabDef = { id: "active", label: "Active" };
 const AGENT_SCOPE_TABS: Array<{ id: AgentScope; label: string }> = [
 	{ id: "project", label: "Project" },
 	{ id: "user", label: "User" },
@@ -413,17 +416,21 @@ type AgentBrowserAction =
 	| { type: "insert"; agentName: string }
 	| { type: "reload" }
 	| { type: "start"; agentName: string }
-	| { type: "stop"; agentName: string };
+	| { type: "stop"; agentName: string }
+	| { type: "openTranscript"; transcriptPath: string };
 
 type AgentPaneStatus = { entry?: PaneRegistryEntry; live: boolean };
 
 interface AgentBrowserUiState {
 	inspectorScroll: number;
 	pane: "list" | "inspector";
+	tab: AgentBrowserTabId;
 	scope: AgentScope;
 	search: string;
 	selected: number;
 	scroll: number;
+	activeSelected: number;
+	activeScroll: number;
 }
 
 interface AgentBrowserLayout {
@@ -492,6 +499,14 @@ function scopeNext(scope: AgentScope, delta: number): AgentScope {
 	const scopes: AgentScope[] = ["project", "user", "both"];
 	const index = Math.max(0, scopes.indexOf(scope));
 	return scopes[(index + delta + scopes.length) % scopes.length]!;
+}
+
+function tabNext(current: AgentBrowserTabId, hasActive: boolean, delta: number): AgentBrowserTabId {
+	const tabs: AgentBrowserTabId[] = hasActive
+		? ["active", "project", "user", "both"]
+		: ["project", "user", "both"];
+	const index = Math.max(0, tabs.indexOf(current));
+	return tabs[(index + delta + tabs.length) % tabs.length]!;
 }
 
 async function loadAgentPaneStatuses(runtimeRoot: string): Promise<Map<string, AgentPaneStatus>> {
@@ -571,6 +586,18 @@ function renderAgentScopeTabs(active: AgentScope, width: number, theme: Theme): 
 		return agentInactivePill(theme, label);
 	};
 	return truncateToWidth(AGENT_SCOPE_TABS.map(partFor).join(" "), width, "");
+}
+
+function renderAgentBrowserTabs(active: AgentBrowserTabId, hasActive: boolean, width: number, theme: Theme): string {
+	const tabs: AgentBrowserTabDef[] = hasActive
+		? [ACTIVE_BROWSER_TAB, ...AGENT_SCOPE_TABS]
+		: AGENT_SCOPE_TABS;
+	const partFor = (tab: AgentBrowserTabDef): string => {
+		const label = ` ${truncateToWidth(tab.label, 18, "…")} `;
+		if (tab.id === active) return agentActivePill(theme, label);
+		return agentInactivePill(theme, label);
+	};
+	return truncateToWidth(tabs.map(partFor).join(" "), width, "");
 }
 
 function agentStatus(agent: AgentConfig, status: AgentPaneStatus | undefined): "live" | "dead" | "pane" | "one-shot" {
@@ -674,6 +701,143 @@ function renderAgentInspector(agent: AgentConfig | undefined, statuses: Map<stri
 	return lines.slice(0, rows);
 }
 
+function activeDashboardItems(items: SubagentDashboardItem[]): SubagentDashboardItem[] {
+	// Items the popup considers "active": pane agents (whose pane stays
+	// resident across tasks) plus bg agents whose latest task hasn't
+	// finished yet. Sort by startedAt for stable order.
+	return items
+		.filter((item) => {
+			if (item.kind === "pane") return true;
+			return item.status === "running" || item.status === "queued";
+		})
+		.sort((a, b) => {
+			const aKey = a.startedAt ?? a.taskId;
+			const bKey = b.startedAt ?? b.taskId;
+			if (aKey === bKey) return 0;
+			return aKey < bKey ? -1 : 1;
+		});
+}
+
+function readTranscriptTail(transcriptPath: string | undefined, maxLines: number): string[] {
+	if (!transcriptPath) return [];
+	try {
+		const raw = fs.readFileSync(transcriptPath, "utf-8");
+		const lines = raw.split(/\r?\n/);
+		// Pi sessions and our wrapped transcripts are JSONL. Try to render
+		// each line as a compact "<role>: <text>" preview when it parses,
+		// otherwise pass through raw so we never silently drop content.
+		const rendered: string[] = [];
+		for (const line of lines) {
+			if (!line.trim()) continue;
+			let event: any;
+			try { event = JSON.parse(line); } catch { rendered.push(line); continue; }
+			const inner = event?.event && typeof event.event === "object" ? event.event : event;
+			const msg = inner?.message;
+			if (msg && typeof msg === "object") {
+				const role = msg.role || inner.type || "?";
+				const content = Array.isArray(msg.content) ? msg.content : [];
+				const textPart = content.find((c: any) => c?.type === "text");
+				const tool = content.find((c: any) => c?.type === "toolCall");
+				if (tool) rendered.push(`${role}: [tool] ${tool.name ?? "?"} ${JSON.stringify(tool.arguments ?? {}).slice(0, 80)}`);
+				else if (textPart?.text) rendered.push(`${role}: ${oneLinePreview(String(textPart.text), 200)}`);
+				else if (typeof msg.content === "string") rendered.push(`${role}: ${oneLinePreview(msg.content, 200)}`);
+				else rendered.push(`${role}: (${inner.type ?? "message"})`);
+				continue;
+			}
+			if (typeof inner?.type === "string") {
+				rendered.push(inner.type);
+				continue;
+			}
+			rendered.push(line);
+		}
+		return rendered.slice(-maxLines);
+	} catch {
+		return [];
+	}
+}
+
+function renderActiveAgentList(items: SubagentDashboardItem[], ui: AgentBrowserUiState, width: number, theme: Theme, listRows: number): string[] {
+	const lines = [`${agentPaneTitle(theme, "Active", ui.pane === "list")} ${theme.fg("dim", `(${items.length})`)}`];
+	if (items.length === 0) {
+		lines.push(theme.fg("dim", "No active agents in this session."));
+		return lines;
+	}
+	if (ui.activeScroll > 0) lines.push(theme.fg("dim", `\u2191 ${ui.activeScroll} earlier`));
+	const visible = items.slice(ui.activeScroll, ui.activeScroll + listRows);
+	for (const [index, item] of visible.entries()) {
+		const absoluteIndex = ui.activeScroll + index;
+		const selected = absoluteIndex === ui.activeSelected;
+		const icon = dashboardStatusIcon(item.status, theme);
+		const name = theme.fg(selected ? "accent" : "text", theme.bold(item.agent));
+		const kind = theme.fg("dim", dashboardKindLabel(item.kind));
+		const row = `${icon} ${name} ${theme.fg("dim", "\u00b7")} ${kind}`;
+		const prefix = selected ? theme.fg("accent", "> ") : "  ";
+		lines.push(truncateToWidth(`${prefix}${row}`, width, ""));
+	}
+	const after = items.length - ui.activeScroll - visible.length;
+	if (after > 0) lines.push(theme.fg("dim", `\u2193 ${after} more`));
+	return lines;
+}
+
+function renderActiveAgentDetail(item: SubagentDashboardItem | undefined, ui: AgentBrowserUiState, width: number, rows: number, theme: Theme): string[] {
+	if (!item) return [`${agentPaneTitle(theme, "Detail", ui.pane === "inspector")} ${theme.fg("dim", "Select an agent to inspect.")}`];
+	const safeWidth = Math.max(8, width);
+	const push = (target: string[], text: string) => {
+		const wrapped = wrapTextWithAnsi(text, safeWidth);
+		target.push(...(wrapped.length > 0 ? wrapped : [""]));
+	};
+	const lines: string[] = [];
+	push(lines, `${agentPaneTitle(theme, "Detail", ui.pane === "inspector")} ${theme.fg("accent", theme.bold(item.agent))} ${dashboardStatusText(item, theme)} ${theme.fg("dim", dashboardKindLabel(item.kind))}`);
+	push(lines, `${theme.fg("muted", "Task ID")}: ${theme.fg("dim", item.taskId)}`);
+	if (item.task) push(lines, `${theme.fg("muted", "Task")}: ${oneLinePreview(item.task, Math.max(60, safeWidth - 8))}`);
+	if (item.transcriptPath) push(lines, `${theme.fg("muted", "Transcript")}: ${theme.fg("dim", compactPath(item.transcriptPath))}`);
+	if (item.usage) {
+		const usageLine = formatUsageStatsForDashboard(item.usage).join(" \u00b7 ");
+		if (usageLine) push(lines, `${theme.fg("muted", "Usage")}: ${theme.fg("dim", usageLine)}`);
+	}
+	if (item.message) {
+		lines.push("");
+		push(lines, theme.fg("muted", theme.bold("Latest Message")));
+		const wrapped = wrapTextWithAnsi(item.message, safeWidth);
+		lines.push(...wrapped.slice(0, 6));
+	}
+	lines.push("");
+	push(lines, `${theme.fg("muted", theme.bold("Transcript Tail"))} ${theme.fg("dim", "(Ctrl+E opens full in $EDITOR)")}`);
+	const tail = readTranscriptTail(item.transcriptPath, 400);
+	if (tail.length === 0) {
+		push(lines, theme.fg("dim", "(transcript empty or unavailable)"));
+	} else {
+		const visibleRows = Math.max(1, rows - lines.length);
+		const offset = Math.max(0, Math.min(ui.inspectorScroll, Math.max(0, tail.length - visibleRows)));
+		const slice = tail.slice(offset, offset + visibleRows);
+		for (const line of slice) push(lines, theme.fg("toolOutput", line));
+		const after = Math.max(0, tail.length - offset - slice.length);
+		if (after > 0) push(lines, theme.fg("dim", `\u2193 ${after} more lines`));
+		if (offset > 0) push(lines, theme.fg("dim", `\u2191 ${offset} earlier lines`));
+	}
+	return lines.slice(0, rows);
+}
+
+function renderActiveTabBody(items: SubagentDashboardItem[], ui: AgentBrowserUiState, width: number, theme: Theme, layout: AgentBrowserLayout): string[] {
+	const maxLeftWidth = Math.max(10, width - 13);
+	const desiredLeftWidth = Math.min(AGENTS_LEFT_MAX_WIDTH, Math.floor(width * 0.32), maxLeftWidth);
+	const leftWidth = Math.max(10, Math.min(maxLeftWidth, Math.max(Math.min(AGENTS_LEFT_MIN_WIDTH, maxLeftWidth), desiredLeftWidth)));
+	const rightWidth = Math.max(1, width - leftWidth - 3);
+	const bodyRows = layout.bodyRows;
+	const left = renderActiveAgentList(items, ui, leftWidth, theme, layout.listRows);
+	const right = renderActiveAgentDetail(items[ui.activeSelected], ui, rightWidth, bodyRows, theme);
+	const lines: string[] = [];
+	const headerLine = `${theme.fg("muted", "View")}: ${theme.fg("text", "active")}  ${theme.fg("muted", "Items")}: ${items.length}`;
+	lines.push(...wrapTextWithAnsi(headerLine, width));
+	lines.push(agentDivider(width, theme));
+	for (let i = 0; i < bodyRows; i += 1) {
+		lines.push(`${agentPad(left[i] ?? "", leftWidth)} ${theme.fg("dim", "\u2502")} ${truncateToWidth(right[i] ?? "", rightWidth, "")}`);
+	}
+	const legend = `${theme.fg("muted", "Active")}: ${theme.fg("warning", "running/waiting")} \u00b7 ${theme.fg("success", "completed")} \u00b7 ${theme.fg("error", "failed")} \u00b7 Ctrl+E open transcript in $EDITOR`;
+	lines.push(...wrapTextWithAnsi(legend, width));
+	return lines;
+}
+
 function renderAgentsBody(
 	discovery: ReturnType<typeof discoverAgents>,
 	agents: AgentConfig[],
@@ -713,6 +877,7 @@ function createAgentsBrowserComponent(
 	requestRender: () => void,
 	getLayout: () => AgentBrowserLayout,
 	done: (action: AgentBrowserAction) => void,
+	getActiveItems: () => SubagentDashboardItem[],
 ) {
 	const filtered = () => filterAgentsForBrowser(discovery.agents, ui.search, statuses);
 	const selectedAgent = () => filtered()[ui.selected];
@@ -724,8 +889,20 @@ function createAgentsBrowserComponent(
 		if (ui.selected >= ui.scroll + layout.listRows) ui.scroll = ui.selected - layout.listRows + 1;
 		ui.scroll = Math.max(0, Math.min(ui.scroll, Math.max(0, list.length - layout.listRows)));
 	};
-	const switchScope = (delta: number) => {
-		ui.scope = scopeNext(ui.scope, delta);
+	const hasActiveTab = () => getActiveItems().length > 0;
+	const switchTab = (delta: number) => {
+		const next = tabNext(ui.tab, hasActiveTab(), delta);
+		if (next === "active") {
+			ui.tab = "active";
+			ui.activeSelected = 0;
+			ui.activeScroll = 0;
+			ui.inspectorScroll = 0;
+			ui.pane = "list";
+			requestRender();
+			return;
+		}
+		ui.tab = next;
+		ui.scope = next;
 		ui.selected = 0;
 		ui.scroll = 0;
 		ui.inspectorScroll = 0;
@@ -750,14 +927,61 @@ function createAgentsBrowserComponent(
 
 	function handleInput(data: string): void {
 		if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
-			if (ui.search) { ui.search = ""; ui.selected = 0; ui.scroll = 0; requestRender(); return; }
+			if (ui.tab !== "active" && ui.search) { ui.search = ""; ui.selected = 0; ui.scroll = 0; requestRender(); return; }
 			done({ type: "close" });
 			return;
 		}
-		if (matchesKey(data, "tab")) return switchScope(1);
-		if (matchesKey(data, "shift+tab")) return switchScope(-1);
+		if (matchesKey(data, "tab")) return switchTab(1);
+		if (matchesKey(data, "shift+tab")) return switchTab(-1);
 		if (matchesKey(data, "left")) { ui.pane = "list"; requestRender(); return; }
 		if (matchesKey(data, "right")) { ui.pane = "inspector"; requestRender(); return; }
+		if (matchesKey(data, "ctrl+e")) {
+			if (ui.tab === "active") {
+				const item = getActiveItems()[ui.activeSelected];
+				if (item?.transcriptPath) {
+					done({ type: "openTranscript", transcriptPath: item.transcriptPath });
+					return;
+				}
+			}
+			return;
+		}
+		if (ui.tab === "active") {
+			const items = getActiveItems();
+			const layout = getLayout();
+			const clampActive = () => {
+				ui.activeSelected = Math.max(0, Math.min(ui.activeSelected, Math.max(0, items.length - 1)));
+				if (ui.activeSelected < ui.activeScroll) ui.activeScroll = ui.activeSelected;
+				if (ui.activeSelected >= ui.activeScroll + layout.listRows) ui.activeScroll = ui.activeSelected - layout.listRows + 1;
+				ui.activeScroll = Math.max(0, Math.min(ui.activeScroll, Math.max(0, items.length - layout.listRows)));
+			};
+			if (matchesKey(data, "up")) {
+				if (ui.pane === "inspector") ui.inspectorScroll = Math.max(0, ui.inspectorScroll - 1);
+				else { ui.activeSelected -= 1; ui.inspectorScroll = 0; clampActive(); }
+				requestRender();
+				return;
+			}
+			if (matchesKey(data, "down")) {
+				if (ui.pane === "inspector") ui.inspectorScroll += 1;
+				else { ui.activeSelected += 1; ui.inspectorScroll = 0; clampActive(); }
+				requestRender();
+				return;
+			}
+			if (matchesKey(data, "pageup")) {
+				if (ui.pane === "inspector") ui.inspectorScroll = Math.max(0, ui.inspectorScroll - Math.max(1, layout.bodyRows));
+				else { ui.activeSelected -= layout.listRows; ui.inspectorScroll = 0; clampActive(); }
+				requestRender();
+				return;
+			}
+			if (matchesKey(data, "pagedown")) {
+				if (ui.pane === "inspector") ui.inspectorScroll += Math.max(1, layout.bodyRows);
+				else { ui.activeSelected += layout.listRows; ui.inspectorScroll = 0; clampActive(); }
+				requestRender();
+				return;
+			}
+			if (matchesKey(data, "home")) { if (ui.pane === "inspector") ui.inspectorScroll = 0; else { ui.activeSelected = 0; ui.activeScroll = 0; } requestRender(); return; }
+			if (matchesKey(data, "end")) { if (ui.pane === "inspector") ui.inspectorScroll = Number.MAX_SAFE_INTEGER; else { ui.activeSelected = Math.max(0, items.length - 1); clampActive(); } requestRender(); return; }
+			return;
+		}
 		if (matchesKey(data, "up")) {
 			if (ui.pane === "inspector") ui.inspectorScroll -= 1;
 			else { ui.selected -= 1; ui.inspectorScroll = 0; clamp(); }
@@ -796,13 +1020,22 @@ function createAgentsBrowserComponent(
 	}
 
 	function render(width: number): string[] {
-		clamp();
 		const layout = getLayout();
 		const safeWidth = Math.max(1, width);
 		const bodyWidth = agentFrameContentWidth(safeWidth);
-		const footer = `${ansiYellow("tab")} ${theme.fg("dim", "scope · ")}${ansiYellow("↑↓")} ${theme.fg("dim", "navigate/scroll · ")}${ansiYellow("←/→")} ${theme.fg("dim", "pane · ")}${ansiYellow("enter")} ${theme.fg("dim", "insert · ")}${ansiYellow("ctrl+p/o/x")} ${theme.fg("dim", "pane · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`;
+		const activeItems = getActiveItems();
+		const hasActive = activeItems.length > 0;
+		if (ui.tab === "active" && !hasActive) ui.tab = ui.scope;
+		const tabLine = renderAgentBrowserTabs(ui.tab, hasActive, bodyWidth, theme);
+		if (ui.tab === "active") {
+			const footer = `${ansiYellow("tab")} ${theme.fg("dim", "view · ")}${ansiYellow("↑↓")} ${theme.fg("dim", "navigate · ")}${ansiYellow("←/→")} ${theme.fg("dim", "pane · ")}${ansiYellow("ctrl+e")} ${theme.fg("dim", "transcript in $EDITOR · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`;
+			const lines = [tabLine, "", ...renderActiveTabBody(activeItems, ui, bodyWidth, theme, layout), agentDivider(bodyWidth, theme), footer];
+			return agentFrame(lines, safeWidth, theme, layout.innerRows, "Subagents");
+		}
+		clamp();
+		const footer = `${ansiYellow("tab")} ${theme.fg("dim", "view · ")}${ansiYellow("↑↓")} ${theme.fg("dim", "navigate/scroll · ")}${ansiYellow("←/→")} ${theme.fg("dim", "pane · ")}${ansiYellow("enter")} ${theme.fg("dim", "insert · ")}${ansiYellow("ctrl+p/o/x")} ${theme.fg("dim", "pane · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`;
 		const lines = [
-			renderAgentScopeTabs(ui.scope, bodyWidth, theme),
+			tabLine,
 			"",
 			...renderAgentsBody(discovery, filtered(), statuses, ui, bodyWidth, theme, layout),
 			agentDivider(bodyWidth, theme),
@@ -822,10 +1055,22 @@ async function openAgentsBrowser(
 	parentSessionId: string,
 	parentModel: string | undefined,
 	parentThinkingLevel: string | undefined,
+	getActiveItems: () => SubagentDashboardItem[],
 ): Promise<void> {
 	const releaseModalLock = acquireVstackModalLock();
 	try {
-	const ui: AgentBrowserUiState = { inspectorScroll: 0, pane: initialAgentName ? "inspector" : "list", scope: initialScope, search: "", selected: 0, scroll: 0 };
+	const initialActive = getActiveItems().length > 0 && !initialAgentName;
+	const ui: AgentBrowserUiState = {
+		inspectorScroll: 0,
+		pane: initialAgentName ? "inspector" : "list",
+		tab: initialActive ? "active" : initialScope,
+		scope: initialScope,
+		search: "",
+		selected: 0,
+		scroll: 0,
+		activeSelected: 0,
+		activeScroll: 0,
+	};
 	while (true) {
 		const discovery = discoverAgents(ctx.cwd, ui.scope);
 		if (initialAgentName) {
@@ -838,12 +1083,17 @@ async function openAgentsBrowser(
 		}
 		const statuses = await loadAgentPaneStatuses(runtimeRoot);
 		const action = await ctx.ui.custom<AgentBrowserAction>(
-			(tui: TUI, theme: Theme, _keybindings, done) => createAgentsBrowserComponent(discovery, statuses, ui, theme, () => tui.requestRender(), () => agentBrowserLayout(tui.terminal.rows), done),
+			(tui: TUI, theme: Theme, _keybindings, done) => createAgentsBrowserComponent(discovery, statuses, ui, theme, () => tui.requestRender(), () => agentBrowserLayout(tui.terminal.rows), done, getActiveItems),
 			{ overlay: true, overlayOptions: { anchor: "center", maxHeight: AGENTS_BROWSER_MAX_HEIGHT, width: AGENTS_BROWSER_WIDTH } },
 		);
 		initialAgentName = undefined;
 		if (!action || action.type === "close") return;
 		if (action.type === "reload") continue;
+		if (action.type === "openTranscript") {
+			const message = openFileInExternalEditor(action.transcriptPath, ctx.cwd);
+			ctx.ui.notify(message, "info");
+			continue;
+		}
 		const agent = discovery.agents.find((candidate) => candidate.name === action.agentName);
 		if (!agent) {
 			ctx.ui.notify(`Unknown agent: ${action.agentName}`, "error");
@@ -3923,7 +4173,7 @@ export default function (pi: ExtensionAPI) {
 					}
 
 					if (ctx.hasUI) {
-						await openAgentsBrowser(ctx, scope, showName, runtimeRoot, parentSessionId, parentModel, parentThinkingLevel);
+						await openAgentsBrowser(ctx, scope, showName, runtimeRoot, parentSessionId, parentModel, parentThinkingLevel, () => activeDashboardItems(Object.values(dashboardState.items)));
 						return;
 					}
 
@@ -4007,7 +4257,7 @@ export default function (pi: ExtensionAPI) {
 				const parentThinkingLevel = pi.getThinkingLevel();
 				const parentSessionId = runtimeSessionId(extCtx);
 				const runtimeRoot = sessionRuntimeDir(parentSessionId);
-				await openAgentsBrowser(extCtx, "project", undefined, runtimeRoot, parentSessionId, parentModel, parentThinkingLevel);
+				await openAgentsBrowser(extCtx, "project", undefined, runtimeRoot, parentSessionId, parentModel, parentThinkingLevel, () => activeDashboardItems(Object.values(dashboardState.items)));
 			},
 		});
 	}
