@@ -984,6 +984,31 @@ function maybeBg(theme: any, token: string, text: string, enabled: boolean): str
 	return enabled ? theme.bg(token, text) : text;
 }
 
+function bgParts(theme: any, token: string): { open: string; close: string } {
+	const marker = "\uE000";
+	try {
+		if (theme?.bg) return ansiPartsFromStyled(theme.bg(token, marker));
+	} catch {
+		// Keep rendering readable if the active theme cannot provide this token.
+	}
+	return { open: "", close: "" };
+}
+
+function sgrClearsBackground(code: string): boolean {
+	const match = code.match(/^\x1b\[([0-9;]*)m$/);
+	if (!match) return false;
+	const params = match[1] ? match[1].split(";").map((value) => Number.parseInt(value || "0", 10)) : [0];
+	return params.some((value) => value === 0 || value === 49);
+}
+
+function applyFullLineBg(theme: any, token: string, text: string, enabled: boolean): string {
+	if (!enabled) return text;
+	const { open, close } = bgParts(theme, token);
+	if (!open) return text;
+	const reapplied = text.replace(/\x1b\[[0-9;]*m/g, (code) => (sgrClearsBackground(code) ? `${code}${open}` : code));
+	return `${open}${reapplied}${close}`;
+}
+
 function styleAnsiVisibleRanges(
 	text: string,
 	ranges: Array<[number, number]>,
@@ -1395,7 +1420,10 @@ function renderUnifiedLine(
 	const signToken = line.type === "add" ? "toolDiffAdded" : line.type === "del" ? "toolDiffRemoved" : "toolDiffContext";
 	const gutter = `${theme.fg("muted", `${formatNum(line.oldNum, numWidth)} ${formatNum(line.newNum, numWidth)}`)} ${theme.fg(signToken, sign)} `;
 	const contentWidth = Math.max(10, width - visibleLength(gutter));
-	return `${gutter}${truncateAnsi(colorDiffText(line, highlightedLineBody(line, theme, path, cwd), theme, ranges, cwd), contentWidth)}`;
+	const rendered = `${gutter}${truncateAnsi(colorDiffText(line, highlightedLineBody(line, theme, path, cwd), theme, ranges, cwd), contentWidth)}`;
+	const padded = padVisible(rendered, width);
+	const bgToken = line.type === "add" ? DIFF_ADD_BG_TOKEN : line.type === "del" ? DIFF_DEL_BG_TOKEN : undefined;
+	return bgToken ? applyFullLineBg(theme, bgToken, padded, diffBackgroundEnabled(cwd)) : padded;
 }
 
 function renderUnifiedDiff(diff: StructuredDiff, rows: StructuredDiffLine[], width: number, theme: any, path?: string, cwd?: string): string[] {
@@ -1470,7 +1498,9 @@ function renderDiffHalf(
 	const prefix = `${formatNum(num, numWidth)} ${sign} `;
 	const raw = `${prefix}${body}`;
 	const shiftedRanges = ranges.map(([start, end]): [number, number] => [start + prefix.length, end + prefix.length]);
-	return padVisible(truncateAnsi(colorDiffText(line, raw, theme, shiftedRanges, cwd), width), width);
+	const padded = padVisible(truncateAnsi(colorDiffText(line, raw, theme, shiftedRanges, cwd), width), width);
+	const bgToken = line.type === "add" ? DIFF_ADD_BG_TOKEN : line.type === "del" ? DIFF_DEL_BG_TOKEN : undefined;
+	return bgToken ? applyFullLineBg(theme, bgToken, padded, diffBackgroundEnabled(cwd)) : padded;
 }
 
 function shouldUseSplitDiff(diff: StructuredDiff, rows: StructuredDiffLine[], width: number): boolean {
