@@ -557,7 +557,6 @@ class SessionManagerOverlay implements Focusable {
 	private scope: Scope;
 	private sortMode: SortMode;
 	private nameFilter: NameFilter = "all";
-	private showPath = false;
 	private currentSessionPath: string | undefined;
 
 	constructor(
@@ -889,12 +888,6 @@ class SessionManagerOverlay implements Focusable {
 			return;
 		}
 
-		if (this.keybindings.matches(data, "app.session.togglePath")) {
-			this.showPath = !this.showPath;
-			this.requestRender();
-			return;
-		}
-
 		if (this.keybindings.matches(data, "app.session.rename")) {
 			const selected = this.selected();
 			if (selected) this.startRename(selected);
@@ -1018,8 +1011,7 @@ class SessionManagerOverlay implements Focusable {
 		const title = accent(this.theme.bold(" Session Manager")); // nf-fa-star
 		const sortText = `${muted("sort:")} ${accent(this.sortMode)}`;
 		const nameText = `${muted("names:")} ${accent(this.nameFilter)}`;
-		const pathText = `${muted("path:")} ${this.showPath ? accent("on") : muted("off")}`;
-		const right = `${sortText}  ${nameText}  ${pathText}`;
+		const right = `${sortText}  ${nameText}`;
 		const available = Math.max(0, inner - visibleWidth(right) - 1);
 		const left = truncateToWidth(title, available, "");
 		return left + " ".repeat(Math.max(1, inner - visibleWidth(left) - visibleWidth(right))) + right;
@@ -1123,7 +1115,6 @@ class SessionManagerOverlay implements Focusable {
 		const rightParts = [
 			`${session.messageCount} msg`,
 			formatAge(session.modified),
-			this.showPath ? shortenPath(session.path) : this.scope === "all" && session.cwd ? shortenPath(session.cwd) : "",
 		].filter(Boolean);
 		const rightRaw = rightParts.join(" · ");
 		const rightMax = Math.min(ROW_META_MAX_WIDTH, Math.max(14, Math.floor(inner * 0.38)));
@@ -1160,16 +1151,18 @@ class SessionManagerOverlay implements Focusable {
 		const scope = this.scope === "current" ? "current project" : "all sessions";
 		const shown = `${this.filtered.length}/${this.sessions.length}`;
 		const search = oneLine(this.searchInput.getValue());
-		const state = `${shown} shown · ${scope} · ${this.sortMode} sort · ${this.nameFilter === "named" ? "named only" : "all names"}${this.showPath ? " · paths on" : ""}${search ? ` · query “${truncateToWidth(search, 28, "…")}”` : ""}`;
-		lines.push(ui.row(ui.dim(state)));
 		if (!selected) {
+			const state = `${shown} shown · ${scope} · ${this.sortMode} sort · ${this.nameFilter === "named" ? "named only" : "all names"}${search ? ` · query “${truncateToWidth(search, 28, "…")}”` : ""}`;
+			lines.push(ui.row(ui.dim(state)));
 			return lines;
 		}
 
-		const locationLabel = this.showPath ? "file" : "cwd";
-		const location = this.showPath ? selected.path : selected.cwd || selected.path;
-		const locationPrefix = ui.dim(`${locationLabel.padEnd(7)} `);
+		const locationPrefix = ui.dim("Session Path: ");
+		const location = selected.path;
 		lines.push(ui.row(locationPrefix + ui.muted(truncateToWidth(shortenPath(location), Math.max(10, inner - visibleWidth(locationPrefix)), "…"))));
+
+		const state = `${shown} shown · ${scope} · ${this.sortMode} sort · ${this.nameFilter === "named" ? "named only" : "all names"}${search ? ` · query “${truncateToWidth(search, 28, "…")}”` : ""}`;
+		lines.push(ui.row(ui.dim(state)));
 
 		const snippet = oneLine(this.searchInput.getValue()) ? selectedNode?.snippet : undefined;
 		if (snippet) {
@@ -1184,8 +1177,8 @@ class SessionManagerOverlay implements Focusable {
 		if (this.mode === "confirm-delete" || this.mode === "confirm-delete-all") return [`${ansiYellow("Enter")} ${error("confirm")} · ${ansiYellow("Esc")} ${error("cancel")}`];
 		if (this.mode === "rename") return [`${ansiYellow("Enter")} ${warning("save")} · ${ansiYellow("Esc")} ${warning("cancel")} · ${warning("empty name clears title")}`];
 		return [
-			`${ansiYellow("↑↓")} ${dim("move · ")}${ansiYellow("-/=")} ${dim("page · ")}${ansiYellow("Enter")} ${dim("resume · ")}${ansiYellow("Ctrl+R")} ${dim("rename · ")}${ansiYellow("Ctrl+D")} ${dim("delete · ")}${ansiYellow("Ctrl+X")} ${dim("delete all")}`,
-			`${ansiYellow("Tab")} ${dim("scope · ")}${ansiYellow("Ctrl+S")} ${dim("sort · ")}${ansiYellow("Ctrl+N")} ${dim("names · ")}${ansiYellow("Ctrl+P")} ${dim("path · ")}${ansiYellow("Esc")} ${dim("close")}`,
+			`${ansiYellow("-/=")} ${dim("page · ")}${ansiYellow("Enter")} ${dim("resume · ")}${ansiYellow("Ctrl+R")} ${dim("rename · ")}${ansiYellow("Ctrl+D")} ${dim("delete · ")}${ansiYellow("Ctrl+X")} ${dim("delete all")}`,
+			`${ansiYellow("Tab")} ${dim("scope · ")}${ansiYellow("Ctrl+S")} ${dim("sort · ")}${ansiYellow("Ctrl+N")} ${dim("names · ")}${ansiYellow("Esc")} ${dim("close")}`,
 		];
 	}
 
