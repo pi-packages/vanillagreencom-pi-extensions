@@ -35,7 +35,7 @@ type SortMode = "threaded" | "recent" | "relevance";
 type NameFilter = "all" | "named";
 type Mode = "browse" | "loading" | "rename" | "confirm-delete" | "confirm-delete-all" | "deleting";
 
-type SessionAction = { type: "resume"; path: string; title: string } | { type: "cancel" };
+type SessionAction = { type: "resume"; path: string; title: string; keepCurrentModel?: boolean } | { type: "cancel" };
 type SessionManagerContext = ExtensionCommandContext | ExtensionContext;
 const pendingSessionManagerActions = new Map<string, SessionAction>();
 let pendingSessionManagerActionCounter = 0;
@@ -913,6 +913,12 @@ class SessionManagerOverlay implements Focusable {
 			return;
 		}
 
+		if (matchesKey(data, "alt+m")) {
+			const selected = this.selected();
+			if (selected) this.done({ type: "resume", path: selected.path, title: sessionResumeTitle(selected), keepCurrentModel: true });
+			return;
+		}
+
 		if (this.keybindings.matches(data, "tui.select.confirm")) {
 			const selected = this.selected();
 			if (selected) this.done({ type: "resume", path: selected.path, title: sessionResumeTitle(selected) });
@@ -1182,8 +1188,8 @@ class SessionManagerOverlay implements Focusable {
 		if (this.mode === "confirm-delete" || this.mode === "confirm-delete-all") return [];
 		if (this.mode === "rename") return [warning("empty name clears title")];
 		return [
-			`${ansiYellow("-/=")} ${dim("page · ")}${ansiYellow("alt+r")} ${dim("rename · ")}${ansiYellow("alt+d")} ${dim("delete · ")}${ansiYellow("alt+x")} ${dim("delete all")}`,
-			`${ansiYellow("tab")} ${dim("scope · ")}${ansiYellow("alt+s")} ${dim("sort · ")}${ansiYellow("alt+n")} ${dim("names")}`,
+			`${ansiYellow("-/=")} ${dim("page · ")}${ansiYellow("enter")} ${dim("resume · ")}${ansiYellow("alt+m")} ${dim("resume+model · ")}${ansiYellow("alt+r")} ${dim("rename")}`,
+			`${ansiYellow("tab")} ${dim("scope · ")}${ansiYellow("alt+s")} ${dim("sort · ")}${ansiYellow("alt+n")} ${dim("names · ")}${ansiYellow("alt+d")} ${dim("delete · ")}${ansiYellow("alt+x")} ${dim("delete all")}`,
 		];
 	}
 
@@ -1222,7 +1228,7 @@ function queueSessionManagerCommandAction(ctx: SessionManagerContext, action: Se
 	ctx.ui.notify(`${action.title || basename(action.path)} — press Enter to resume`, "info");
 }
 
-async function runSessionManagerAction(ctx: SessionManagerContext, action: SessionAction): Promise<boolean> {
+async function runSessionManagerAction(ctx: SessionManagerContext, pi: ExtensionAPI, action: SessionAction): Promise<boolean> {
 	if (action.type !== "resume") return true;
 	const switchSession = (ctx as { switchSession?: ExtensionCommandContext["switchSession"] }).switchSession;
 	if (typeof switchSession !== "function") return false;
@@ -1231,10 +1237,17 @@ async function runSessionManagerAction(ctx: SessionManagerContext, action: Sessi
 		return true;
 	}
 	const targetTitle = action.title || basename(action.path);
+	const currentModel = action.keepCurrentModel ? ctx.model : undefined;
+	const currentThinking = action.keepCurrentModel && typeof pi.getThinkingLevel === "function" ? pi.getThinkingLevel() : undefined;
 	const result = await switchSession.call(ctx, action.path, {
 		withSession: async (replacementCtx) => {
+			if (currentModel) {
+				const ok = await pi.setModel(currentModel);
+				if (ok && currentThinking) pi.setThinkingLevel(currentThinking as any);
+				replacementCtx.ui.notify(ok ? `Using current model: ${currentModel.provider}/${currentModel.id}` : `Could not keep current model: ${currentModel.provider}/${currentModel.id}`, ok ? "info" : "warning");
+			}
 			clearLegacySessionStatus(replacementCtx);
-			replacementCtx.ui.notify(`Resumed ${targetTitle}`, "info");
+			replacementCtx.ui.notify(`Resumed ${targetTitle}${currentModel ? " with current model" : ""}`, "info");
 		},
 	});
 	if (result.cancelled) ctx.ui.notify("Session switch cancelled", "info");
@@ -1253,7 +1266,7 @@ async function handleSessionsCommand(_args: string, ctx: SessionManagerContext, 
 		return;
 	}
 	const action = await openManager(ctx, pi);
-	if (!(await runSessionManagerAction(ctx, action))) queueSessionManagerCommandAction(ctx, action);
+	if (!(await runSessionManagerAction(ctx, pi, action))) queueSessionManagerCommandAction(ctx, action);
 }
 
 export default function sessionManagerExtension(pi: ExtensionAPI): void {
@@ -1280,7 +1293,7 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 					return;
 				}
 				pendingSessionManagerActions.delete(id);
-				if (!(await runSessionManagerAction(ctx, action))) ctx.ui.notify("Session resume is unavailable in this context.", "error");
+				if (!(await runSessionManagerAction(ctx, pi, action))) ctx.ui.notify("Session resume is unavailable in this context.", "error");
 				return;
 			}
 			await handleSessionsCommand(args, ctx, pi);
@@ -1296,7 +1309,7 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 				return;
 			}
 			pendingSessionManagerActions.delete(id);
-			if (!(await runSessionManagerAction(ctx, action))) ctx.ui.notify("Session resume is unavailable in this context.", "error");
+			if (!(await runSessionManagerAction(ctx, pi, action))) ctx.ui.notify("Session resume is unavailable in this context.", "error");
 		},
 	});
 

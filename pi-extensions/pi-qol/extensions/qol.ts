@@ -1371,6 +1371,32 @@ function compactionProfileInstructions(profile: QolSummaryProfile): string {
 	return "Be complete but not verbose. Preserve enough detail for a future assistant to continue without the old transcript.";
 }
 
+function stripThinkingForSummary(messages: Message[]): Message[] {
+	return messages.map((message) => {
+		if (message.role !== "assistant" || !Array.isArray(message.content)) return message;
+		return {
+			...message,
+			content: message.content.filter((part: any) => part?.type !== "thinking"),
+		};
+	});
+}
+
+function serializeMessagesForSummary(messages: AgentMessage[]): string {
+	return serializeConversation(stripThinkingForSummary(convertToLlm(messages)));
+}
+
+function customMessageContentToText(content: unknown): string {
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return "";
+	const parts: string[] = [];
+	for (const part of content) {
+		if (part?.type === "text" && typeof part.text === "string") parts.push(part.text);
+		else if (part?.type === "image") parts.push(`[image${typeof part.mimeType === "string" ? ` ${part.mimeType}` : ""}]`);
+		else if (part?.type) parts.push(`[${String(part.type)}]`);
+	}
+	return parts.join("\n").trim();
+}
+
 function buildSummaryPrompt(options: {
 	conversationText: string;
 	customInstructions?: string;
@@ -1497,7 +1523,7 @@ async function handleQolCompaction(event: any, ctx: ExtensionContext): Promise<a
 	const tokensBefore = typeof preparation.tokensBefore === "number" ? preparation.tokensBefore : 0;
 	compactionNotify(ctx, `QOL compaction: summarizing ${messages.length} message(s), ${tokensBefore.toLocaleString()} token(s).`, "info");
 	try {
-		const conversationText = serializeConversation(convertToLlm(messages));
+		const conversationText = serializeMessagesForSummary(messages);
 		const result = await generateQolSummary(ctx, {
 			conversationText,
 			customInstructions: event.customInstructions,
@@ -1529,10 +1555,10 @@ async function handleQolCompaction(event: any, ctx: ExtensionContext): Promise<a
 }
 
 function summarizeEntryForBranch(entry: any): string[] {
-	if (entry?.type === "message" && entry.message) return [serializeConversation(convertToLlm([entry.message]))];
+	if (entry?.type === "message" && entry.message) return [serializeMessagesForSummary([entry.message])];
 	if (entry?.type === "compaction" && typeof entry.summary === "string") return [`[Compaction summary]: ${entry.summary}`];
 	if (entry?.type === "branch_summary" && typeof entry.summary === "string") return [`[Branch summary]: ${entry.summary}`];
-	if (entry?.type === "custom_message") return [`[Custom message${entry.customType ? `:${entry.customType}` : ""}]: ${typeof entry.content === "string" ? entry.content : JSON.stringify(entry.data ?? {})}`];
+	if (entry?.type === "custom_message") return [`[Custom message${entry.customType ? `:${entry.customType}` : ""}]: ${customMessageContentToText(entry.content) || "[empty]"}`];
 	return [];
 }
 
@@ -2131,39 +2157,6 @@ function getQuestionService(): QuestionServiceLike | undefined {
 	return undefined;
 }
 
-function entryToHandoffMessage(entry: SessionEntry): AgentMessage | undefined {
-	if (entry.type === "message") return entry.message;
-	if (entry.type === "compaction") {
-		return {
-			role: "compactionSummary",
-			summary: entry.summary,
-			tokensBefore: entry.tokensBefore,
-			timestamp: new Date(entry.timestamp).getTime(),
-		};
-	}
-	return undefined;
-}
-
-function getHandoffMessages(branch: SessionEntry[]): AgentMessage[] {
-	let compactionIndex = -1;
-	for (let i = branch.length - 1; i >= 0; i -= 1) {
-		if (branch[i]?.type === "compaction") {
-			compactionIndex = i;
-			break;
-		}
-	}
-	if (compactionIndex < 0) return branch.map(entryToHandoffMessage).filter((message): message is AgentMessage => message !== undefined);
-
-	const compaction = branch[compactionIndex];
-	const firstKeptIndex = compaction?.type === "compaction" ? branch.findIndex((entry) => entry.id === compaction.firstKeptEntryId) : -1;
-	const compactedBranch = [
-		compaction,
-		...(firstKeptIndex >= 0 ? branch.slice(firstKeptIndex, compactionIndex) : []),
-		...branch.slice(compactionIndex + 1),
-	];
-	return compactedBranch.map(entryToHandoffMessage).filter((message): message is AgentMessage => message !== undefined);
-}
-
 async function runHandoff(args: string, ctx: ExtensionCommandContext): Promise<void> {
 	if (!ctx.hasUI) {
 		ctx.ui.notify("handoff requires interactive mode", "error");
@@ -2181,15 +2174,15 @@ async function runHandoff(args: string, ctx: ExtensionCommandContext): Promise<v
 		return;
 	}
 
-	const messages = getHandoffMessages(ctx.sessionManager.getBranch());
+	const built = (ctx.sessionManager as any).buildSessionContext?.();
+	const messages = Array.isArray(built?.messages) ? built.messages as AgentMessage[] : [];
 
 	if (messages.length === 0) {
 		ctx.ui.notify("No conversation to hand off", "error");
 		return;
 	}
 
-	const llmMessages = convertToLlm(messages);
-	const conversationText = serializeConversation(llmMessages);
+	const conversationText = serializeMessagesForSummary(messages);
 	const currentSessionFile = ctx.sessionManager.getSessionFile();
 
 	const releaseModalLock = acquireVstackModalLock();
@@ -2377,6 +2370,7 @@ interface QolSessionSearchPendingMessage {
 interface QolSessionPaletteAction {
 	type: "cancel" | "resume" | "fork" | "copy" | "summarize" | "newSession";
 	customPrompt?: string;
+	keepCurrentModel?: boolean;
 	message?: QolSessionUserMessage;
 	result?: QolSessionSearchResult;
 }
@@ -3561,6 +3555,11 @@ class QolSessionSearchComponent {
 			if (hit) this.done({ result: hit.result, type: "resume" });
 			return;
 		}
+		if (matchesKey(data, "alt+m")) {
+			const hit = state.results[state.selected];
+			if (hit) this.done({ keepCurrentModel: true, result: hit.result, type: "resume" });
+			return;
+		}
 		if (matchesKey(data, "alt+i")) {
 			const hit = state.results[state.selected];
 			if (hit) this.openContextConfirm("summarize", hit.result, hit.message, "search");
@@ -3655,6 +3654,10 @@ class QolSessionSearchComponent {
 			this.done({ result: state.result, type: "resume" });
 			return;
 		}
+		if (matchesKey(data, "alt+m")) {
+			this.done({ keepCurrentModel: true, result: state.result, type: "resume" });
+			return;
+		}
 		if (matchesKey(data, "alt+c")) {
 			const message = state.messages[state.selected];
 			if (message) this.done({ message, result: state.result, type: "copy" });
@@ -3717,6 +3720,10 @@ class QolSessionSearchComponent {
 		}
 		if (matchesKey(data, "alt+r")) {
 			this.done({ result: state.result, type: "resume" });
+			return;
+		}
+		if (matchesKey(data, "alt+m")) {
+			this.done({ keepCurrentModel: true, result: state.result, type: "resume" });
 			return;
 		}
 		if (matchesKey(data, "alt+i")) {
@@ -3801,10 +3808,10 @@ class QolSessionSearchComponent {
 
 		lines.push(divider());
 		if (compact) {
-			lines.push(row(`${ansiYellow("alt+c/f/r/i/n/a")} ${dim("actions")}  ${ansiYellow("tab")} ${dim("scope")}`));
+			lines.push(row(`${ansiYellow("alt+c/f/r/m/i/n/a")} ${dim("actions")}  ${ansiYellow("tab")} ${dim("scope")}`));
 		} else {
 			lines.push(row(`${ansiYellow("-/=")} ${dim("page")}  ${ansiYellow("alt+c")} ${dim("copy")}  ${ansiYellow("alt+f")} ${dim("fork")}  ${ansiYellow("alt+r")} ${dim("resume")}`));
-			lines.push(row(`${ansiYellow("alt+i")} ${dim("inject+ctx")}  ${ansiYellow("alt+n")} ${dim("new+ctx")}  ${ansiYellow("alt+a")} ${dim("actions")}  ${ansiYellow("tab")} ${dim("scope")}`));
+			lines.push(row(`${ansiYellow("alt+m")} ${dim("resume+model")}  ${ansiYellow("alt+i")} ${dim("inject+ctx")}  ${ansiYellow("alt+n")} ${dim("new+ctx")}  ${ansiYellow("alt+a")} ${dim("actions")}  ${ansiYellow("tab")} ${dim("scope")}`));
 		}
 		lines.push(bottom());
 		return lines;
@@ -3930,7 +3937,7 @@ class QolSessionSearchComponent {
 		}
 		lines.push(divider(), empty());
 		lines.push(row(`${ansiYellow("-/=")} ${dim("page")}  ${ansiYellow("alt+c")} ${dim("copy")}  ${ansiYellow("alt+f")} ${dim("fork")}  ${ansiYellow("alt+r")} ${dim("resume")}`));
-		lines.push(row(`${ansiYellow("alt+i")} ${dim("inject+ctx")}  ${ansiYellow("alt+n")} ${dim("new+ctx")}`));
+		lines.push(row(`${ansiYellow("alt+m")} ${dim("resume+model")}  ${ansiYellow("alt+i")} ${dim("inject+ctx")}  ${ansiYellow("alt+n")} ${dim("new+ctx")}`));
 		lines.push(bottom());
 		return lines;
 	}
@@ -3959,7 +3966,7 @@ class QolSessionSearchComponent {
 			for (const line of wrapVisible(dim(help), inner, 2)) lines.push(row(line));
 		}
 		lines.push(empty(), divider(), empty());
-		lines.push(row(`${ansiYellow("alt+c")} ${dim("copy")}  ${ansiYellow("alt+f")} ${dim("fork")}  ${ansiYellow("alt+r")} ${dim("resume")}`));
+		lines.push(row(`${ansiYellow("alt+c")} ${dim("copy")}  ${ansiYellow("alt+f")} ${dim("fork")}  ${ansiYellow("alt+r")} ${dim("resume")}  ${ansiYellow("alt+m")} ${dim("resume+model")}`));
 		lines.push(row(`${ansiYellow("alt+i")} ${dim("inject+ctx")}  ${ansiYellow("alt+n")} ${dim("new+ctx")}`));
 		lines.push(bottom());
 		return lines;
@@ -4131,7 +4138,7 @@ function messagesForSessionSummary(sessionPath: string): AgentMessage[] {
 async function buildSessionSearchContextMessage(ctx: ExtensionContext, result: QolSessionSearchResult, customPrompt?: string, signal?: AbortSignal): Promise<QolSessionSearchPendingMessage> {
 	const messages = messagesForSessionSummary(result.path);
 	const fallbackText = result.allMessagesText || result.firstMessage;
-	const conversationText = messages.length > 0 ? serializeConversation(convertToLlm(messages)) : fallbackText;
+	const conversationText = messages.length > 0 ? serializeMessagesForSummary(messages) : fallbackText;
 	if (!conversationText.trim()) throw new Error("Selected session has no text content to summarize");
 	const focus = customPrompt?.trim();
 	const summary = await generateQolSummary(ctx, {
@@ -4229,17 +4236,24 @@ function queueSessionSearchCommandAction(ctx: ExtensionContext, action: QolSessi
 	ctx.ui.notify(`${sessionDisplayName(action.result!)} — press Enter to ${action.type === "fork" ? "fork" : "resume"}`, "info");
 }
 
-async function runSessionSearchResumeOrFork(ctx: ExtensionContext, action: QolSessionPaletteAction): Promise<boolean> {
+async function runSessionSearchResumeOrFork(pi: ExtensionAPI, ctx: ExtensionContext, action: QolSessionPaletteAction): Promise<boolean> {
 	if (!action.result || (action.type !== "resume" && action.type !== "fork")) return true;
 	const commandCtx = asCommandContext(ctx);
 	if (typeof commandCtx.switchSession !== "function") return false;
 	const targetTitle = sessionDisplayName(action.result);
 	const selectedMessage = action.type === "fork" ? action.message : undefined;
+	const currentModel = action.keepCurrentModel ? ctx.model : undefined;
+	const currentThinking = action.keepCurrentModel && typeof pi.getThinkingLevel === "function" ? pi.getThinkingLevel() : undefined;
 	let replacementStarted = false;
 	try {
 		const result = await commandCtx.switchSession(action.result.path, {
 			withSession: async (replacementCtx: any) => {
 				replacementStarted = true;
+				if (currentModel) {
+					const ok = await pi.setModel(currentModel);
+					if (ok && currentThinking) pi.setThinkingLevel(currentThinking as any);
+					replacementCtx.ui.notify(ok ? `Using current model: ${currentModel.provider}/${currentModel.id}` : `Could not keep current model: ${currentModel.provider}/${currentModel.id}`, ok ? "info" : "warning");
+				}
 				if (selectedMessage) {
 					const manager = replacementCtx.sessionManager as any;
 					if (selectedMessage.entryId && selectedMessage.parentId && typeof manager?.branch === "function") manager.branch(selectedMessage.parentId);
@@ -4251,7 +4265,7 @@ async function runSessionSearchResumeOrFork(ctx: ExtensionContext, action: QolSe
 					timer.unref?.();
 					return;
 				}
-				replacementCtx.ui.notify(`Resumed session: ${targetTitle}`, "info");
+				replacementCtx.ui.notify(`Resumed session: ${targetTitle}${currentModel ? " with current model" : ""}`, "info");
 			},
 		});
 		if (result.cancelled) ctx.ui.notify(selectedMessage ? "Fork cancelled" : "Resume cancelled", "info");
@@ -4327,7 +4341,7 @@ async function openQolSessionSearch(pi: ExtensionAPI, ctx: ExtensionContext, ini
 	}
 	if (!action || action.type === "cancel" || !action.result) return;
 	if (action.type === "resume" || action.type === "fork") {
-		if (!(await runSessionSearchResumeOrFork(ctx, action))) queueSessionSearchCommandAction(ctx, action);
+		if (!(await runSessionSearchResumeOrFork(pi, ctx, action))) queueSessionSearchCommandAction(ctx, action);
 		return;
 	}
 	if (action.type === "copy") {
@@ -4953,7 +4967,7 @@ export default function qol(pi: ExtensionAPI): void {
 					return;
 				}
 				qolSessionSearchPendingActions.delete(id);
-				if (!(await runSessionSearchResumeOrFork(ctx, action))) ctx.ui.notify("Session resume/fork is unavailable in this context.", "error");
+				if (!(await runSessionSearchResumeOrFork(pi, ctx, action))) ctx.ui.notify("Session resume/fork is unavailable in this context.", "error");
 			},
 		});
 		const shortcut = sessionSearchShortcut();
