@@ -1,8 +1,8 @@
 ---
 description: Cut a new vstack GitHub feature release with CLI version/tag sync
-argument-hint: "<patch|minor|major> [release notes hint]"
+argument-hint: "[patch|minor|major]"
 ---
-Cut a new vstack GitHub feature release. Requested bump / notes hint: `$ARGUMENTS`.
+Cut a new vstack GitHub feature release. Optional bump override: `$ARGUMENTS`.
 
 ## Intent
 Review all repository changes since the latest GitHub release, ensure docs/tests are current, bump the CLI version, create a matching GitHub release/tag, and leave the local repo clean and pushed.
