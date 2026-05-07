@@ -3839,13 +3839,13 @@ class QolSessionSearchComponent {
 		for (let i = start; i < end; i++) {
 			const hit = state.results[i]!;
 			const selected = i === state.selected;
-			const titleText = truncateToWidth(sessionResumeTitle(hit.result), Math.max(8, leftWidth - 18), "…");
-			const titleMatched = styleSessionSnippet(titleText, state.query, this.theme);
 			const promptDate = new Date(promptRecencyTime(hit));
-			const title = `${selected ? this.theme.bold(titleMatched) : this.theme.bold(titleMatched)} ${dim(`· #${hit.message.index} · ${formatSessionSearchDate(promptDate)}`)}`;
-			leftLines.push(fixed(title, leftWidth, selected));
+			const metadata = dim(`#${hit.message.index} · ${formatSessionSearchDate(promptDate)}`);
+			const titleText = truncateToWidth(sessionResumeTitle(hit.result), Math.max(8, leftWidth - visibleWidth(metadata) - 1), "…");
+			const title = accent(titleText);
 			const snippet = styleSessionSnippet(hit.snippet || hit.message.text, state.query, this.theme);
-			leftLines.push(fixed(`${dim("match:")} ${snippet}`, leftWidth, selected));
+			leftLines.push(fixed(selected ? this.theme.bold(snippet) : snippet, leftWidth, selected));
+			leftLines.push(fixed(`${title} ${metadata}`, leftWidth, selected));
 			if (i < end - 1) leftLines.push(fixed(dim("─".repeat(Math.max(8, leftWidth))), leftWidth));
 		}
 		const output: string[] = [];
