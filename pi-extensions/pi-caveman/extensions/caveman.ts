@@ -9,19 +9,21 @@ const STATE_TYPE = "vstack-caveman:state";
 const STATUS_KEY = "caveman";
 const CONFIG_ID = "@vanillagreen/pi-caveman";
 
-interface CavemanBridge {
-	isActive(): boolean;
-	getMode(): Mode;
-	getLastActiveMode(): ActiveMode;
-	isStatusBadgeEnabled(cwd?: string): boolean;
-	subscribe(listener: () => void): () => void;
-}
-
 type Mode = "off" | "lite" | "full" | "ultra" | "micro";
 type ActiveMode = Exclude<Mode, "off">;
 type VstackConfig = Record<string, unknown>;
 
 const MODE_VALUES: readonly Mode[] = ["off", "lite", "full", "ultra", "micro"];
+
+interface CavemanBridge {
+	isActive(): boolean;
+	getMode(): Mode;
+	getConfiguredMode(cwd?: string): Mode;
+	getLastActiveMode(): ActiveMode;
+	hasSessionOverride(): boolean;
+	isStatusBadgeEnabled(cwd?: string): boolean;
+	subscribe(listener: () => void): () => void;
+}
 
 const SUBCOMMAND_DESCRIPTIONS: Record<string, string> = {
 	lite: "Caveman lite — professional, no fluff",
@@ -32,10 +34,17 @@ const SUBCOMMAND_DESCRIPTIONS: Record<string, string> = {
 };
 
 interface CavemanState {
-	mode: Mode;
+	override: Mode | null;
 	lastActiveMode: ActiveMode;
-	source: "default" | "session";
 	updatedAt: string;
+}
+
+interface PersistedState {
+	override?: Mode | null;
+	lastActiveMode?: Mode;
+	updatedAt?: string;
+	mode?: Mode;
+	source?: "default" | "session";
 }
 
 function expandHome(input: string): string {
@@ -97,16 +106,24 @@ function normalizeActiveMode(input: string | undefined): ActiveMode | undefined 
 	return mode && mode !== "off" ? mode : undefined;
 }
 
-function defaultMode(cwd?: string): ActiveMode {
-	return normalizeActiveMode(settingString("defaultMode", "full", cwd)) ?? "full";
+function configuredMode(cwd?: string): Mode {
+	const config = readVstackConfig(cwd);
+	const explicit = normalizeMode(typeof config.mode === "string" ? config.mode : undefined);
+	if (explicit) return explicit;
+	const legacyEnabled = typeof config.enabled === "boolean" ? config.enabled : false;
+	if (!legacyEnabled) return "off";
+	return normalizeActiveMode(typeof config.defaultMode === "string" ? config.defaultMode : undefined) ?? "full";
+}
+
+function effectiveMode(state: CavemanState, cwd?: string): Mode {
+	return state.override ?? configuredMode(cwd);
 }
 
 function initialState(cwd?: string): CavemanState {
-	const fallback = defaultMode(cwd);
+	const configured = configuredMode(cwd);
 	return {
-		mode: settingBoolean("enabled", false, cwd) ? fallback : "off",
-		lastActiveMode: fallback,
-		source: "default",
+		override: null,
+		lastActiveMode: configured === "off" ? "full" : configured,
 		updatedAt: new Date().toISOString(),
 	};
 }
@@ -167,22 +184,34 @@ function restoreState(ctx: ExtensionContext): CavemanState {
 	let state = initialState(ctx.cwd);
 	for (const entry of ctx.sessionManager.getBranch()) {
 		if (entry.type !== "custom" || entry.customType !== STATE_TYPE) continue;
-		const data = entry.data as Partial<CavemanState> | undefined;
-		const mode = normalizeMode(data?.mode);
-		if (!mode) continue;
-		const lastActiveMode = normalizeActiveMode(data?.lastActiveMode) ?? (mode !== "off" ? mode : state.lastActiveMode);
+		const data = entry.data as PersistedState | undefined;
+		if (!data) continue;
+		let override: Mode | null;
+		if (data.override === null) {
+			override = null;
+		} else if (typeof data.override === "string") {
+			override = normalizeMode(data.override) ?? null;
+		} else if (typeof data.mode === "string") {
+			const legacyMode = normalizeMode(data.mode);
+			override = data.source === "session" && legacyMode ? legacyMode : null;
+		} else {
+			override = state.override;
+		}
+		const lastActiveMode = normalizeActiveMode(data.lastActiveMode)
+			?? (override && override !== "off" ? override : state.lastActiveMode);
 		state = {
-			mode,
+			override,
 			lastActiveMode,
-			source: data?.source === "default" ? "default" : "session",
-			updatedAt: data?.updatedAt ?? new Date().toISOString(),
+			updatedAt: data.updatedAt ?? new Date().toISOString(),
 		};
 	}
 	return state;
 }
 
-function statusText(state: CavemanState): string {
-	return state.mode === "off" ? "Caveman off." : `Caveman ${state.mode} active.`;
+function statusText(state: CavemanState, cwd?: string): string {
+	const mode = effectiveMode(state, cwd);
+	const suffix = state.override === null ? " (default)" : " (session)";
+	return mode === "off" ? `Caveman off${suffix}.` : `Caveman ${mode} active${suffix}.`;
 }
 
 export default function caveman(pi: ExtensionAPI): void {
@@ -201,9 +230,11 @@ export default function caveman(pi: ExtensionAPI): void {
 
 	const host = globalThis as unknown as Record<PropertyKey, unknown>;
 	const bridge: CavemanBridge = {
-		isActive: () => state.mode !== "off",
-		getMode: () => state.mode,
+		isActive: () => effectiveMode(state, activeCtx?.cwd) !== "off",
+		getMode: () => effectiveMode(state, activeCtx?.cwd),
+		getConfiguredMode: (cwd) => configuredMode(cwd ?? activeCtx?.cwd),
 		getLastActiveMode: () => state.lastActiveMode,
+		hasSessionOverride: () => state.override !== null,
 		isStatusBadgeEnabled: (cwd) => settingBoolean("showStatusBadge", true, cwd),
 		subscribe: (listener) => {
 			listeners.add(listener);
@@ -216,7 +247,8 @@ export default function caveman(pi: ExtensionAPI): void {
 	const syncStatus = (ctx?: ExtensionContext) => {
 		const runCtx = ctx ?? activeCtx;
 		if (!runCtx?.hasUI) return;
-		runCtx.ui.setStatus(STATUS_KEY, settingBoolean("showStatusBadge", true, runCtx.cwd) ? statusLabel(state.mode) : undefined);
+		const mode = effectiveMode(state, runCtx.cwd);
+		runCtx.ui.setStatus(STATUS_KEY, settingBoolean("showStatusBadge", true, runCtx.cwd) ? statusLabel(mode) : undefined);
 	};
 
 	pi.on("session_start", (_event, ctx) => {
@@ -240,29 +272,31 @@ export default function caveman(pi: ExtensionAPI): void {
 		activeCtx = ctx;
 		const arg = sub.trim().toLowerCase();
 		if (arg === "status") {
-			ctx.ui.notify(statusText(state), "info");
+			ctx.ui.notify(statusText(state, ctx.cwd), "info");
 			return;
 		}
-		let mode: Mode | undefined;
+		const current = effectiveMode(state, ctx.cwd);
+		let nextOverride: Mode;
 		if (!arg || arg === "toggle") {
-			mode = state.mode === "off" ? state.lastActiveMode || defaultMode(ctx.cwd) : "off";
+			nextOverride = current === "off" ? state.lastActiveMode : "off";
 		} else {
-			mode = normalizeMode(arg);
-		}
-		if (!mode) {
-			ctx.ui.notify("Unknown caveman mode. Try lite, full, ultra, micro, toggle, off, or status.", "warning");
-			return;
+			const parsed = normalizeMode(arg);
+			if (!parsed) {
+				ctx.ui.notify("Unknown caveman mode. Try lite, full, ultra, micro, toggle, off, or status.", "warning");
+				return;
+			}
+			nextOverride = parsed;
 		}
 		if (!settingBoolean("sessionOverrideAllowed", true, ctx.cwd)) {
 			ctx.ui.notify("Session override disabled in caveman settings.", "warning");
 			return;
 		}
-		const lastActiveMode: ActiveMode = mode === "off" ? state.lastActiveMode : mode;
-		state = { mode, lastActiveMode, source: "session", updatedAt: new Date().toISOString() };
+		const lastActiveMode: ActiveMode = nextOverride === "off" ? state.lastActiveMode : nextOverride;
+		state = { override: nextOverride, lastActiveMode, updatedAt: new Date().toISOString() };
 		persist();
 		syncStatus(ctx);
 		notifyListeners();
-		ctx.ui.notify(mode === "off" ? "Caveman off." : `Caveman ${mode} active.`, "info");
+		ctx.ui.notify(nextOverride === "off" ? "Caveman off." : `Caveman ${nextOverride} active.`, "info");
 	};
 
 	pi.registerCommand("caveman", {
@@ -279,15 +313,15 @@ export default function caveman(pi: ExtensionAPI): void {
 
 	pi.on("before_agent_start", (event, ctx) => {
 		activeCtx = ctx;
-		if (state.source === "default") state = initialState(ctx.cwd);
-		if (state.mode === "off") {
+		const mode = effectiveMode(state, ctx.cwd);
+		if (mode === "off") {
 			syncStatus(ctx);
 			return undefined;
 		}
 		const clarity = settingBoolean("autoClarityEscape", true, ctx.cwd) && shouldClarityEscape(event.prompt ?? "");
-		const prompt = instructions(state.mode, ctx.cwd, clarity);
+		const prompt = instructions(mode, ctx.cwd, clarity);
 		if (clarity && !settingBoolean("resumeAfterClarityEscape", true, ctx.cwd)) {
-			state = { mode: "off", lastActiveMode: state.lastActiveMode, source: "session", updatedAt: new Date().toISOString() };
+			state = { override: "off", lastActiveMode: state.lastActiveMode, updatedAt: new Date().toISOString() };
 			persist();
 			notifyListeners();
 		}

@@ -21,26 +21,18 @@
       "displayName": "Caveman",
       "settings": [
         {
-          "key": "enabled",
-          "label": "Enable caveman by default",
-          "description": "Start sessions in the configured default caveman mode unless a session override says otherwise.",
-          "type": "boolean",
-          "default": false,
-          "category": "Mode",
-          "apply": "session"
-        },
-        {
-          "key": "defaultMode",
-          "label": "Default mode",
-          "description": "Mode used when enabling caveman with no explicit mode.",
+          "key": "mode",
+          "label": "Mode",
+          "description": "Default caveman mode. Off disables caveman; lite/full/ultra/micro enable the matching style. Session /caveman overrides win until session ends.",
           "type": "enum",
           "enumValues": [
+            "off",
             "lite",
             "full",
             "ultra",
             "micro"
           ],
-          "default": "full",
+          "default": "off",
           "category": "Mode",
           "apply": "live"
         },

@@ -27,7 +27,9 @@ const CAVEMAN_ICON_INACTIVE = "\u{f19e0}";
 interface CavemanBridge {
 	isActive(): boolean;
 	getMode(): string;
+	getConfiguredMode?(cwd?: string): string;
 	getLastActiveMode(): string;
+	hasSessionOverride?(): boolean;
 	isStatusBadgeEnabled?(cwd?: string): boolean;
 	subscribe(listener: () => void): () => void;
 }
