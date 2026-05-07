@@ -901,26 +901,18 @@ export default function flightdeck(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("flightdeck", {
+		description: "Send /skill:flightdeck to the agent (loads the flightdeck skill into the master).",
+		handler: async (_args, _ctx) => {
+			pi.sendUserMessage("/skill:flightdeck");
+		},
+	});
+	pi.registerCommand("flightdeck:dashboard", {
 		description: "Open the flightdeck mission-control popup.",
 		handler: async (_args, ctx) => openPopup(pi, ctx),
 	});
-	pi.registerCommand("flightdeck:dashboard", {
+	pi.registerCommand("flightdeck:toggle", {
 		description: "Cycle the persistent flightdeck dashboard widget hidden → compact → expanded.",
 		handler: async (_args, ctx) => cycleDashboard(ctx as ExtensionContext),
-	});
-	pi.registerCommand("flightdeck:status", {
-		description: "Print a one-line flightdeck status summary.",
-		handler: async (_args, ctx) => {
-			const snapshot = cache.lastSnapshot ?? refreshSnapshot(ctx.cwd);
-			if (!snapshot) {
-				ctx.ui.notify("flightdeck: no tmux session detected", "warning");
-				return;
-			}
-			const issues = Object.values(snapshot.master?.issues ?? {});
-			const paused = snapshot.master?.paused_for_user;
-			const summary = `${issues.length} issue(s); daemon=${snapshot.daemon.pidAlive ? "ok" : "down"}${paused ? `; PAUSED on ${paused.issue_id ?? "?"} (${paused.reason ?? ""})` : ""}`;
-			ctx.ui.notify(summary, paused ? "warning" : "info");
-		},
 	});
 
 	const popupShortcut = settingString("popupShortcut", "f6");

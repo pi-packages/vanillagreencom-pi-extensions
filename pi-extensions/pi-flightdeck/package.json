@@ -184,7 +184,17 @@
         {
           "kind": "command",
           "name": "/flightdeck",
+          "description": "Send /skill:flightdeck to the agent."
+        },
+        {
+          "kind": "command",
+          "name": "/flightdeck:dashboard",
           "description": "Open the flightdeck mission-control popup."
+        },
+        {
+          "kind": "command",
+          "name": "/flightdeck:toggle",
+          "description": "Cycle the persistent flightdeck dashboard widget."
         }
       ]
     }
