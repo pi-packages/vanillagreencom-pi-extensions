@@ -2233,9 +2233,14 @@ function createQuickSettingsComponent(pi: ExtensionAPI, ctx: ExtensionCommandCon
 		lines.push(searchLine);
 		lines.push("");
 		lines.push(divider(bodyWidth, theme));
+		const footerLines = [divider(bodyWidth, theme), ...wrapLine(footer, bodyWidth)];
+		const fillBeforeFooter = (): void => {
+			while (lines.length + footerLines.length < layout.innerRows) lines.push("");
+		};
 		if (visible.length === 0) {
 			lines.push(theme.fg("muted", "No matching settings."));
-			lines.push(divider(bodyWidth, theme), ...wrapLine(footer, bodyWidth));
+			fillBeforeFooter();
+			lines.push(...footerLines);
 			return frame(lines, safeWidth, theme, layout.innerRows, "Extension Settings");
 		}
 		let lastPackage = "";
@@ -2261,7 +2266,8 @@ function createQuickSettingsComponent(pi: ExtensionAPI, ctx: ExtensionCommandCon
 		const moreBefore = ui.scroll > 0 ? `↑ ${ui.scroll}` : "";
 		const moreAfter = ui.scroll + layout.listRows < filtered().length ? `↓ ${filtered().length - ui.scroll - layout.listRows}` : "";
 		if (moreBefore || moreAfter) lines.push("", theme.fg("dim", [moreBefore, moreAfter].filter(Boolean).join(" · ")));
-		lines.push(divider(bodyWidth, theme), ...wrapLine(footer, bodyWidth));
+		fillBeforeFooter();
+		lines.push(...footerLines);
 		return frame(lines, safeWidth, theme, layout.innerRows, "Extension Settings");
 	}
 
