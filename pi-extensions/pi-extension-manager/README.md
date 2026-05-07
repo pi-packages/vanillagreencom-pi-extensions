@@ -2,7 +2,7 @@
 
 ![Extension Manager browser](https://raw.githubusercontent.com/vanillagreencom/vstack/main/pi-extensions/pi-extension-manager/assets/extension-manager.png)
 
-Pi extension inventory and settings manager for vstack-installed packages.
+Pi package manager and separate settings editor for vstack-installed Pi packages.
 
 ## Install
 
@@ -25,22 +25,21 @@ Restart Pi after installation.
 
 | Command | Action |
 | --- | --- |
-| `/extensions` | Open the package/resource browser. |
-| `/extensions:settings` | Open the quick settings editor for packages that expose vstack settings. |
+| `/extensions` | Open the package manager: browse packages, enable/disable, inspect install source, uninstall, and run available updates. |
+| `/extensions:settings` | Open the settings editor for packages that expose vstack settings. |
 | `/extensions:enable` | Recovery command available only when the manager is disabled; re-enable it, then run `/reload`. |
 
 ## UI notes
 
-- `/extensions` opens on the `All` tab. Selecting a package shows its overview, resources, and settings in the inspector.
-- `Alt+Shift+E` and `F11` open the extension manager popup; `Alt+Shift+S` and `F12` open the quick settings popup.
-- Package tabs show one package plus its child resources.
-- `Alt+R` toggles the raw resource list; `Alt+A` opens diagnostics/audit; `Tab` and `Shift+Tab` cycle tabs.
-- `Delete` resets the selected setting; `Ctrl+X` resets settings for the selected extension/package.
-- `/extensions:settings` starts with `All`, then one tab per package with settings. Type to filter, `Enter` to toggle/edit, `Esc` to cancel.
-- Inline setting editors support cursor movement: `←`/`→`, `Home`/`End`, `Alt+←`/`Alt+→` word movement, `Backspace`/`Delete`, and `Ctrl+U` clear.
+- `/extensions` shows installed packages only. Selecting a package shows status, source path, install source (`NPM`, `Vstack`, or `Unknown`), versions, update state, and declared extension entrypoints.
+- Active/inactive/broken status is shown with `●`/`○`/`×`; packages with a newer version show `Update Needed`.
+- `alt+x` enables/disables the selected package, `alt+u` updates a package when an update is available, `alt+d` uninstalls, and `alt+a` opens diagnostics/audit. In diagnostics, `backspace` returns to the package list.
+- `alt+shift+e` and `F11` open the extension manager popup; `alt+shift+s` and `F12` open the settings popup.
+- `/extensions:settings` starts with `All`, then one tab per package with settings. Type to filter, `Enter` to toggle/edit, and `Esc` to cancel. The popup keeps a fixed height and pads blank space under short filtered lists.
+- Inline setting editors support cursor movement: `←`/`→`, `Home`/`End`, `alt+←`/`alt+→` word movement, `Backspace`/`Delete`, and `Ctrl+U` clear.
 
 Settings are stored under `vstack.extensionManager` in Pi `settings.json` files so they do not collide with Pi's top-level `extensions` array.
 
 ## Runtime limits
 
-Pi does not currently expose APIs to add a native tab to its built-in settings UI or unload an already-loaded extension module. Package/provider enable-disable therefore takes effect after `/reload` or restart when live unloading is not possible. Tool enable-disable is applied live with `pi.setActiveTools()`.
+Pi does not currently expose APIs to add a native tab to its built-in settings UI or unload an already-loaded extension module. Package enable/disable and package updates therefore take effect after `/reload` or restart when live unloading is not possible.

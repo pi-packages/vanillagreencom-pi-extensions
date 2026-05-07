@@ -46,7 +46,7 @@ Arguments support autocomplete.
 
 ## Settings
 
-When `pi-extension-manager` is installed, settings appear under **Codex Minimal Tools** in `/extensions` and `/extensions:settings`. Values are read from:
+When `pi-extension-manager` is installed, settings appear under **Codex Minimal Tools** in `/extensions:settings`. Values are read from:
 
 ```json
 {
