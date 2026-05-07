@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
 export const PACKAGE_ID = "@vanillagreen/pi-web-tools";
-export const WEB_PROVIDERS = ["auto", "exa", "openai-native", "perplexity", "gemini"] as const;
+export const WEB_PROVIDERS = ["auto", "exa", "perplexity", "gemini", "exa-mcp", "duckduckgo", "openai-native"] as const;
 export type WebProvider = (typeof WEB_PROVIDERS)[number];
 export type ResolvedWebProvider = Exclude<WebProvider, "auto">;
 
@@ -30,7 +30,7 @@ export interface WebToolsSettings {
 	browserCookies: { preferredBrowser: "auto" | "firefox" | "zen" | "chrome" | "chromium"; profile?: string };
 	video: { enabled: boolean };
 	shortcuts: { curator: string; activity: string };
-	apiKeys: Partial<Record<ResolvedWebProvider | "openai" | "jina", string>>;
+	apiKeys: Partial<Record<Exclude<ResolvedWebProvider, "exa-mcp" | "duckduckgo"> | "openai" | "jina", string>>;
 	privateConfigFile?: string;
 	warnings: string[];
 }
@@ -39,7 +39,7 @@ export const DEFAULT_SETTINGS: Omit<WebToolsSettings, "apiKeys" | "warnings" | "
 	enabled: true,
 	autoEnable: true,
 	defaultProvider: "auto",
-	enabledProviders: ["exa", "openai-native", "perplexity", "gemini"],
+	enabledProviders: ["exa", "perplexity", "gemini", "exa-mcp", "duckduckgo", "openai-native"],
 	nativeOpenAiWebSearch: true,
 	openAiExternalWebAccess: true,
 	exaDeepResearchEnabled: true,
@@ -154,7 +154,7 @@ function enabledProvidersSetting(raw: SettingsRecord): ResolvedWebProvider[] {
 	const allowed = new Set<ResolvedWebProvider>();
 	for (const item of rawList) {
 		const provider = String(item).trim() as ResolvedWebProvider;
-		if (provider === "exa" || provider === "openai-native" || provider === "perplexity" || provider === "gemini") allowed.add(provider);
+		if (provider === "exa" || provider === "perplexity" || provider === "gemini" || provider === "exa-mcp" || provider === "duckduckgo" || provider === "openai-native") allowed.add(provider);
 	}
 	return allowed.size > 0 ? [...allowed] : [...DEFAULT_SETTINGS.enabledProviders];
 }

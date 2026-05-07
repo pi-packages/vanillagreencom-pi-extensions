@@ -7,7 +7,7 @@ For the Exa-specific API map and tool semantics, see [`EXA.md`](./EXA.md).
 
 Implemented in this package:
 
-- `web_search` with provider selection (`auto`, `exa`, `openai-native`, `perplexity`, `gemini`). Direct execution wired for Exa, Perplexity Sonar, Gemini API (Google Search grounding), and Gemini Web (browser-cookie auth). OpenAI-native is handled by a `before_provider_request` rewrite on supported OpenAI/Codex models.
+- `web_search` with provider selection (`auto`, `exa`, `perplexity`, `gemini`, `exa-mcp`, `duckduckgo`, `openai-native`). Direct execution is wired for Exa, Perplexity Sonar, Gemini API (Google Search grounding), Gemini Web (browser-cookie auth), no-key Exa MCP, and no-key DuckDuckGo HTML. OpenAI-native is handled by a `before_provider_request` rewrite on supported OpenAI/Codex models and is last in auto mode because it has no normal Pi tool output.
 - `web_research` using Exa Deep Search with `researchMode: lite|standard|full` plus low-level overrides (`type`, `numResults`, `textMaxCharacters`, domains, dates, additional queries). Accepts inline `query` or `queryFile`, plus `contextFiles`/`contextGlob`.
 - `web_research.outputPath` findings report writing with Pi's file mutation queue. Clean reports default to a raw metadata sidecar (`findings.raw.json`) instead of embedding raw JSON in `findings.md`.
 - `web_fetch` extraction chain: GitHub URLs (shallow clone cache + cached blob/tree/README), URL + local PDF text via `pdftotext` with vision OCR fallback for scanned PDFs (`pdftoppm` rasterization + ImageContent blocks for the host LLM), HTML/text/JSON with Wikipedia-style chrome stripping, Jina Reader auto-fallback on blocked/cookie-walled pages and 403/429/5xx, YouTube + local video understanding via Gemini Web/API (auto-applies `[HH:MM:SS]` directive when the prompt asks for transcripts/lyrics/captions), and Exa `contents` fallback/override for URLs.
@@ -39,7 +39,7 @@ Restart Pi after installation.
 | --- | --- |
 | `/web-tools` | Open the extension-manager settings popup (falls back to inline status when the manager is not installed). |
 | `/web-tools:doctor` | Show Web Tools status and diagnostics. |
-| `/web-tools:provider:<name>` | Set the active web-search provider for this session: `auto`, `exa`, `openai-native`, `perplexity`, or `gemini`. Persist via `pi-web-tools.defaultProvider` in extension-manager settings. |
+| `/web-tools:provider:<name>` | Set the active web-search provider for this session: `auto`, `exa`, `perplexity`, `gemini`, `exa-mcp`, `duckduckgo`, or `openai-native`. Persist via `pi-web-tools.defaultProvider` in extension-manager settings. |
 
 ## Fetch storage and truncation
 
@@ -69,7 +69,7 @@ Settings are read from the vstack extension-manager namespace:
       "config": {
         "@vanillagreen/pi-web-tools": {
           "defaultProvider": "auto",
-          "enabledProviders": "exa,openai-native,perplexity,gemini",
+          "enabledProviders": "exa,perplexity,gemini,exa-mcp,duckduckgo,openai-native",
           "exaDeepResearchEnabled": true,
           "exaAdvancedEnabled": false,
           "htmlExtraction": { "jinaFallback": true },
@@ -88,6 +88,7 @@ Settings are read from the vstack extension-manager namespace:
 Key toggles:
 
 - `exaAdvancedEnabled` is required to expose `web_answer`, `web_find_similar`, and `code_search` to the active toolset (gated to keep the default surface small). Flip it on per-user or per-project to use them.
+- `web_search provider=auto` tries keyed providers first (`exa`, `perplexity`, `gemini`), then no-key fallbacks (`exa-mcp`, `duckduckgo`), then `openai-native` if supported. Put providers in `enabledProviders` to allow or remove them; set `/web-tools:provider:<name>` to force one for the session.
 - `browserCookieAccess` opts in to Gemini Web cookie scraping. With `browserCookies.preferredBrowser` set to `auto` (default) / `firefox` / `zen` / `chrome` / `chromium`, the package reads cookies from Firefox/Zen unencrypted SQLite or Chromium-family DBs (libsecret on Linux, Keychain on macOS, DPAPI master key + AES-GCM on Windows).
 - `pdfOcr.enabled` controls whether `pdftoppm` rasterizes scanned PDFs into ImageContent blocks for vision OCR. Defaults on; set to false to skip rasterization on scanned PDFs.
 - `githubClone.enabled` toggles the GitHub clone cache (default on). Repos exceeding `maxRepoSizeMB` automatically fall back to API-based extraction.

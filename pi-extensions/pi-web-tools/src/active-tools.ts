@@ -1,4 +1,4 @@
-import { exaDeepResearchAvailable, isOpenAiNativeModel, type ModelLike } from "./provider-selection.js";
+import { exaDeepResearchAvailable, isOpenAiNativeModel, resolveWebProviderCandidates, type ModelLike } from "./provider-selection.js";
 import type { WebToolsSettings } from "./settings.js";
 
 export const BASE_TOOL_NAMES = ["web_search", "web_fetch", "get_web_content"] as const;
@@ -20,7 +20,7 @@ export function desiredWebTools(model: ModelLike | undefined, settings: WebTools
 			if (index >= 0) desired.splice(index, 1);
 		}
 	}
-	if (!isOpenAiNativeModel(model) && !settings.apiKeys.exa && !settings.apiKeys.perplexity && !settings.apiKeys.gemini) {
+	if (resolveWebProviderCandidates("auto", settings, model).length === 0) {
 		const index = desired.indexOf("web_search");
 		if (index >= 0) desired.splice(index, 1);
 	}
@@ -44,6 +44,7 @@ export function statusLines(model: ModelLike | undefined, settings: WebToolsSett
 		`autoEnable: ${settings.autoEnable}`,
 		`defaultProvider: ${settings.defaultProvider}`,
 		`enabledProviders: ${settings.enabledProviders.join(",")}`,
+		`auto provider order: ${resolveWebProviderCandidates("auto", settings, model).join(" → ") || "none"}`,
 		`OpenAI native available: ${settings.nativeOpenAiWebSearch && isOpenAiNativeModel(model)}`,
 		`Exa key: ${settings.apiKeys.exa ? "present" : "not set"}`,
 		`Exa deep research: ${exaDeepResearchAvailable(settings) ? "available" : "not available"}`,

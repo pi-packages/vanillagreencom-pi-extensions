@@ -194,6 +194,8 @@ test("provider labels are human-readable", () => {
 	assert.equal(providerDisplayName("session"), "Session");
 	assert.equal(providerDisplayName("resolving…"), "Resolving…");
 	assert.equal(providerLabel("Web Search", "openai-native"), "Web Search (OpenAI Native)");
+	assert.equal(providerLabel("Web Search", "exa-mcp"), "Web Search (Exa MCP)");
+	assert.equal(providerLabel("Web Search", "duckduckgo"), "Web Search (DuckDuckGo)");
 	assert.equal(providerDisplayName("openai-codex"), "Codex");
 	assert.equal(providerDisplayName("gemini"), "Gemini");
 });

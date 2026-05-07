@@ -13,6 +13,7 @@ test("package settings defaults match runtime defaults", () => {
 	const manifestDefaults = Object.fromEntries(settings.map((item) => [item.key, item.default]));
 	assert.equal(manifestDefaults.enabled, DEFAULT_SETTINGS.enabled);
 	assert.equal(manifestDefaults.defaultProvider, DEFAULT_SETTINGS.defaultProvider);
+	assert.equal(manifestDefaults.enabledProviders, DEFAULT_SETTINGS.enabledProviders.join(","));
 	assert.equal(manifestDefaults.nativeOpenAiWebSearch, DEFAULT_SETTINGS.nativeOpenAiWebSearch);
 	assert.equal(manifestDefaults["githubClone.enabled"], DEFAULT_SETTINGS.githubClone.enabled);
 });

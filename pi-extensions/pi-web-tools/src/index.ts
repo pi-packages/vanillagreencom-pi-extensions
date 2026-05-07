@@ -72,7 +72,7 @@ function registerDiagnosticCommand(pi: ExtensionAPI): void {
 	};
 	const setProvider = (next: WebProvider, ctx: ExtensionCommandContext) => {
 		if (!WEB_PROVIDERS.includes(next)) {
-			ctx.ui.notify(`Unknown provider: ${next}. Use auto, exa, openai-native, perplexity, or gemini.`, "error");
+			ctx.ui.notify(`Unknown provider: ${next}. Use ${WEB_PROVIDERS.join(", ")}.`, "error");
 			return;
 		}
 		providerOverride = next;

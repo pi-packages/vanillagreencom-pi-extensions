@@ -51,9 +51,11 @@
           "enumValues": [
             "auto",
             "exa",
-            "openai-native",
             "perplexity",
-            "gemini"
+            "gemini",
+            "exa-mcp",
+            "duckduckgo",
+            "openai-native"
           ],
           "default": "auto",
           "category": "Providers",
@@ -62,9 +64,9 @@
         {
           "key": "enabledProviders",
           "label": "Enabled providers",
-          "description": "Comma-separated provider allow-list: exa,openai-native,perplexity,gemini.",
+          "description": "Comma-separated provider allow-list: exa,perplexity,gemini,exa-mcp,duckduckgo,openai-native.",
           "type": "string",
-          "default": "exa,openai-native,perplexity,gemini",
+          "default": "exa,perplexity,gemini,exa-mcp,duckduckgo,openai-native",
           "category": "Providers",
           "apply": "live"
         },

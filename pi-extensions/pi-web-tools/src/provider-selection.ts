@@ -9,6 +9,7 @@ export interface ModelLike {
 export interface ProviderAvailability {
 	exaDirect: boolean;
 	exaMcp: boolean;
+	duckduckgo: boolean;
 	openAiNative: boolean;
 	perplexity: boolean;
 	geminiApi: boolean;
@@ -28,7 +29,8 @@ export function isOpenAiNativeModel(model: ModelLike | undefined): boolean {
 export function providerAvailability(settings: WebToolsSettings, model?: ModelLike): ProviderAvailability {
 	return {
 		exaDirect: Boolean(settings.apiKeys.exa),
-		exaMcp: false,
+		exaMcp: true,
+		duckduckgo: true,
 		openAiNative: settings.nativeOpenAiWebSearch && isOpenAiNativeModel(model),
 		perplexity: Boolean(settings.apiKeys.perplexity),
 		geminiApi: Boolean(settings.apiKeys.gemini),
@@ -36,25 +38,30 @@ export function providerAvailability(settings: WebToolsSettings, model?: ModelLi
 	};
 }
 
-export function resolveWebProvider(requested: WebProvider | undefined, settings: WebToolsSettings, model?: ModelLike): ProviderResolution {
-	const desired = requested ?? settings.defaultProvider;
+export function providerIsAvailable(provider: ResolvedWebProvider, settings: WebToolsSettings, model?: ModelLike): boolean {
 	const enabled = new Set(settings.enabledProviders);
+	if (!enabled.has(provider)) return false;
 	const availability = providerAvailability(settings, model);
-	const available = (provider: ResolvedWebProvider): boolean => {
-		if (!enabled.has(provider)) return false;
-		if (provider === "exa") return availability.exaDirect || availability.exaMcp;
-		if (provider === "openai-native") return availability.openAiNative;
-		if (provider === "perplexity") return availability.perplexity;
-		if (provider === "gemini") return availability.geminiApi || availability.geminiWeb;
-		return false;
-	};
-	if (desired !== "auto") {
-		return available(desired) ? { provider: desired, reason: `${desired} available` } : { reason: `${desired} unavailable or disabled` };
-	}
-	for (const provider of ["exa", "openai-native", "perplexity", "gemini"] as const) {
-		if (available(provider)) return { provider, reason: `auto selected ${provider}` };
-	}
-	return { reason: "no enabled provider has required credentials/capabilities" };
+	if (provider === "exa") return availability.exaDirect;
+	if (provider === "exa-mcp") return availability.exaMcp;
+	if (provider === "duckduckgo") return availability.duckduckgo;
+	if (provider === "openai-native") return availability.openAiNative;
+	if (provider === "perplexity") return availability.perplexity;
+	if (provider === "gemini") return availability.geminiApi || availability.geminiWeb;
+	return false;
+}
+
+export function resolveWebProviderCandidates(requested: WebProvider | undefined, settings: WebToolsSettings, model?: ModelLike): ResolvedWebProvider[] {
+	const desired = requested ?? settings.defaultProvider;
+	if (desired !== "auto") return providerIsAvailable(desired, settings, model) ? [desired] : [];
+	return (["exa", "perplexity", "gemini", "exa-mcp", "duckduckgo", "openai-native"] as const)
+		.filter((provider) => providerIsAvailable(provider, settings, model));
+}
+
+export function resolveWebProvider(requested: WebProvider | undefined, settings: WebToolsSettings, model?: ModelLike): ProviderResolution {
+	const candidates = resolveWebProviderCandidates(requested, settings, model);
+	if (candidates[0]) return { provider: candidates[0], reason: `${requested ?? settings.defaultProvider} selected ${candidates[0]}` };
+	return { reason: `${requested ?? settings.defaultProvider} unavailable or disabled` };
 }
 
 export function exaDeepResearchAvailable(settings: WebToolsSettings): boolean {

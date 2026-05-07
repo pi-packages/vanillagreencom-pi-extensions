@@ -64,6 +64,8 @@ export function providerDisplayName(provider: unknown): string {
 	const value = String(provider ?? "").trim().toLowerCase();
 	if (value.includes("/")) return value.split("/").map((part) => providerDisplayName(part)).join("/");
 	if (value === "exa") return "Exa";
+	if (value === "exa-mcp") return "Exa MCP";
+	if (value === "duckduckgo") return "DuckDuckGo";
 	if (value === "github") return "GitHub";
 	if (value === "gemini") return "Gemini";
 	if (value === "gemini-web") return "Gemini Web";
