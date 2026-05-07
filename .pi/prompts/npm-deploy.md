@@ -1,8 +1,8 @@
 ---
 description: Audit changed Pi extensions, validate, bump, publish to npm, tag, push, refresh, and verify
-argument-hint: "[package-or-instructions]"
+argument-hint: "[package-name]"
 ---
-Run a complete npm deployment pass for vstack Pi extensions. Scope hint: `$ARGUMENTS`.
+Run a complete npm deployment pass for vstack Pi extensions. Optional package filter: `$ARGUMENTS`.
 
 ## Intent
 Find every `pi-extensions/*/package.json` package whose source/docs/package contents changed since its last npm deployment tag, then validate, bump, publish, tag, push, refresh, and verify it. Leave no dirty/untracked files.
@@ -30,7 +30,7 @@ Find every `pi-extensions/*/package.json` package whose source/docs/package cont
    - package files changed since its current version tag,
    - `package.json` version is greater than npm version,
    - npm version exists but matching git tag is missing,
-   - user scope hint names the package.
+   - user package filter names the package.
 
 ## Documentation freshness check
 For each marked package, compare changed code to package docs before publishing:
