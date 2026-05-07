@@ -1268,7 +1268,7 @@ function renderStatusLine(width: number, ctx: ExtensionContext, git: GitState, p
 	const cavemanGlyph = caveman ? (cavemanActive ? CAVEMAN_ICON_ACTIVE : CAVEMAN_ICON_INACTIVE) : "";
 	const cavemanTone = cavemanIconTone(caveman?.getMode() ?? "off", cavemanActive);
 	const cavemanSegment = caveman ? ` / ${cavemanGlyph}` : "";
-	const contextSeparator = caveman ? " / " : "";
+	const contextSeparator = caveman ? "  / " : "";
 	const leftPlain = `${projectChunk}${thinkingChunk}${cavemanSegment}${contextSeparator}${contextChunk.trimStart()}`;
 	const rightPlain = percent === null ? "…%" : `${percent}%`;
 	const percentColor = percent === null ? "muted" : percent <= 15 ? "error" : percent <= 30 ? "warning" : "success";
