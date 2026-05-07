@@ -8,6 +8,7 @@ const BRIDGE_SYMBOL = Symbol.for("vstack.pi.caveman");
 const STATE_TYPE = "vstack-caveman:state";
 const STATUS_KEY = "caveman";
 const CONFIG_ID = "@vanillagreen/pi-caveman";
+const SETTINGS_EVENT = "vstack:extension-settings-changed";
 
 type Mode = "off" | "lite" | "full" | "ultra" | "micro";
 type ActiveMode = Exclude<Mode, "off">;
@@ -310,6 +311,20 @@ export default function caveman(pi: ExtensionAPI): void {
 			handler: async (_args, ctx) => applySubcommand(sub, ctx),
 		});
 	}
+
+	pi.events.on(SETTINGS_EVENT, (data: unknown) => {
+		if (!data || typeof data !== "object") return;
+		const event = data as { extensionId?: unknown; key?: unknown };
+		if (event.extensionId !== CONFIG_ID) return;
+		if (event.key === "mode") {
+			const configured = configuredMode(activeCtx?.cwd);
+			const lastActiveMode: ActiveMode = configured === "off" ? state.lastActiveMode : configured;
+			state = { override: null, lastActiveMode, updatedAt: new Date().toISOString() };
+			persist();
+		}
+		syncStatus(activeCtx);
+		notifyListeners();
+	});
 
 	pi.on("before_agent_start", (event, ctx) => {
 		activeCtx = ctx;
