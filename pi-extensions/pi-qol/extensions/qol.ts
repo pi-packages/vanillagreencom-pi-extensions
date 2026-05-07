@@ -2363,13 +2363,20 @@ interface QolSessionContextConfirmState {
 	type: "summarize" | "newSession";
 }
 
+interface QolSessionForkConfirmState {
+	messages: QolSessionUserMessage[];
+	result: QolSessionSearchResult;
+	returnScreen: "search" | "messages" | "actions";
+	selected: number;
+}
+
 interface QolSessionSearchPendingMessage {
 	content: string;
 	details: Record<string, unknown>;
 }
 
 interface QolSessionPaletteAction {
-	type: "cancel" | "resume" | "copy" | "summarize" | "newSession";
+	type: "cancel" | "resume" | "fork" | "copy" | "summarize" | "newSession";
 	customPrompt?: string;
 	message?: QolSessionUserMessage;
 	result?: QolSessionSearchResult;
@@ -3315,12 +3322,13 @@ function isPrintableInput(data: string): boolean {
 }
 
 class QolSessionSearchComponent {
-	private screen: "search" | "messages" | "actions" | "confirmContext" = "search";
+	private screen: "search" | "messages" | "actions" | "confirmContext" | "confirmFork" = "search";
 	private searchState: QolSessionSearchState;
 	private messagesState: QolSessionMessagesState | undefined;
 	private actionState: QolSessionActionState | undefined;
 	private actionReturnScreen: "search" | "messages" = "messages";
 	private contextConfirmState: QolSessionContextConfirmState | undefined;
+	private forkConfirmState: QolSessionForkConfirmState | undefined;
 
 
 	constructor(
@@ -3373,12 +3381,19 @@ class QolSessionSearchComponent {
 		return Math.max(1, Math.min(configured, responsive));
 	}
 
+	private forkConfirmMaxVisibleRows(): number {
+		const configured = Math.max(1, Math.floor(settingNumber("sessionSearch.messageMaxVisible", 12, this.cwd)));
+		const responsive = Math.max(1, this.maxOverlayRows() - 13);
+		return Math.max(1, Math.min(configured, responsive));
+	}
+
 	render(width: number): string[] {
 		const configured = Math.max(70, Math.floor(settingNumber("sessionSearch.overlayWidth", 104, this.cwd)));
 		const renderWidth = Math.min(Math.max(48, width), configured);
 		if (this.screen === "messages" && this.messagesState) return this.renderMessages(renderWidth, this.messagesState);
 		if (this.screen === "actions" && this.actionState) return this.renderActions(renderWidth, this.actionState);
 		if (this.screen === "confirmContext" && this.contextConfirmState) return this.renderContextConfirm(renderWidth, this.contextConfirmState);
+		if (this.screen === "confirmFork" && this.forkConfirmState) return this.renderForkConfirm(renderWidth, this.forkConfirmState);
 		return this.renderSearch(renderWidth);
 	}
 
@@ -3386,6 +3401,7 @@ class QolSessionSearchComponent {
 		if (this.screen === "messages" && this.messagesState) this.handleMessagesInput(data);
 		else if (this.screen === "actions" && this.actionState) this.handleActionInput(data);
 		else if (this.screen === "confirmContext" && this.contextConfirmState) this.handleContextConfirmInput(data);
+		else if (this.screen === "confirmFork" && this.forkConfirmState) this.handleForkConfirmInput(data);
 		else {
 			this.screen = "search";
 			this.handleSearchInput(data);
@@ -3467,6 +3483,31 @@ class QolSessionSearchComponent {
 		this.done({ customPrompt: this.selectedFocusText(state.message), message: state.message, result: state.result, type: state.type });
 	}
 
+	private openForkConfirm(result: QolSessionSearchResult, message: QolSessionUserMessage, returnScreen: "search" | "messages" | "actions"): void {
+		const messages = userMessagesForResult(result);
+		const preferredIndex = messages.findIndex((candidate) => candidate.index === message.index || (message.entryId && candidate.entryId === message.entryId));
+		this.forkConfirmState = {
+			messages,
+			result,
+			returnScreen,
+			selected: preferredIndex >= 0 ? preferredIndex : 0,
+		};
+		this.screen = "confirmFork";
+	}
+
+	private returnFromForkConfirm(state: QolSessionForkConfirmState): void {
+		this.forkConfirmState = undefined;
+		if (state.returnScreen === "actions" && this.actionState) this.screen = "actions";
+		else if (state.returnScreen === "messages" && this.messagesState) this.screen = "messages";
+		else this.screen = "search";
+	}
+
+	private confirmForkAction(state: QolSessionForkConfirmState): void {
+		const message = state.messages[state.selected];
+		if (!message) return;
+		this.done({ message, result: state.result, type: "fork" });
+	}
+
 	private returnFromActions(): void {
 		this.actionState = undefined;
 		if (this.actionReturnScreen === "messages" && this.messagesState) this.screen = "messages";
@@ -3496,7 +3537,7 @@ class QolSessionSearchComponent {
 		}
 		if (matchesKey(data, "alt+f")) {
 			const hit = state.results[state.selected];
-			if (hit) this.done({ message: hit.message, result: hit.result, type: "resume" });
+			if (hit) this.openForkConfirm(hit.result, hit.message, "search");
 			return;
 		}
 		if (matchesKey(data, "alt+r")) {
@@ -3605,7 +3646,7 @@ class QolSessionSearchComponent {
 		}
 		if (matchesKey(data, "alt+f")) {
 			const message = state.messages[state.selected];
-			if (message) this.done({ message, result: state.result, type: "resume" });
+			if (message) this.openForkConfirm(state.result, message, "messages");
 			return;
 		}
 		if (matchesKey(data, "alt+i")) {
@@ -3655,7 +3696,7 @@ class QolSessionSearchComponent {
 			return;
 		}
 		if (matchesKey(data, "alt+f")) {
-			this.done({ message: state.message, result: state.result, type: "resume" });
+			this.openForkConfirm(state.result, state.message, "actions");
 			return;
 		}
 		if (matchesKey(data, "alt+r")) {
@@ -3681,6 +3722,42 @@ class QolSessionSearchComponent {
 		}
 		if (matchesKey(data, "return") || matchesKey(data, "enter")) {
 			this.confirmContextAction(state);
+		}
+	}
+
+	private handleForkConfirmInput(data: string): void {
+		const state = this.forkConfirmState;
+		if (!state) return;
+		if (matchesKey(data, "escape") || matchesKey(data, "backspace")) {
+			this.returnFromForkConfirm(state);
+			return;
+		}
+		if (matchesKey(data, "return") || matchesKey(data, "enter")) {
+			this.confirmForkAction(state);
+			return;
+		}
+		if (matchesKey(data, "up")) {
+			state.selected = Math.max(0, state.selected - 1);
+			return;
+		}
+		if (matchesKey(data, "down")) {
+			state.selected = Math.min(Math.max(0, state.messages.length - 1), state.selected + 1);
+			return;
+		}
+		if (matchesKey(data, "-") || matchesKey(data, "pageup")) {
+			state.selected = Math.max(0, state.selected - this.forkConfirmMaxVisibleRows());
+			return;
+		}
+		if (matchesKey(data, "=") || matchesKey(data, "pagedown")) {
+			state.selected = Math.min(Math.max(0, state.messages.length - 1), state.selected + this.forkConfirmMaxVisibleRows());
+			return;
+		}
+		if (matchesKey(data, "home") || matchesKey(data, "ctrl+a")) {
+			state.selected = 0;
+			return;
+		}
+		if (matchesKey(data, "end") || matchesKey(data, "ctrl+e")) {
+			state.selected = Math.max(0, state.messages.length - 1);
 		}
 	}
 
@@ -3867,6 +3944,41 @@ class QolSessionSearchComponent {
 		lines.push(empty(), divider(), empty());
 		lines.push(row(`${ansiYellow("alt+c")} ${dim("copy")}  ${ansiYellow("alt+f")} ${dim("fork")}  ${ansiYellow("alt+r")} ${dim("resume")}`));
 		lines.push(row(`${ansiYellow("alt+i")} ${dim("inject+ctx")}  ${ansiYellow("alt+n")} ${dim("new+ctx")}`));
+		lines.push(bottom());
+		return lines;
+	}
+
+	private renderForkConfirm(width: number, state: QolSessionForkConfirmState): string[] {
+		const { bottom, divider, empty, inner, row, selectedRow, top } = boxParts(width, this.theme);
+		const accent = (s: string) => this.theme.fg("accent", s);
+		const dim = (s: string) => this.theme.fg("dim", s);
+		const muted = (s: string) => this.theme.fg("muted", s);
+		const lines: string[] = [top("Fork Session", `${state.selected + 1}/${state.messages.length}`), empty()];
+		const title = truncateToWidth(sessionResumeTitle(state.result), inner, "…");
+		lines.push(row(this.theme.bold(accent(title))));
+		lines.push(row(muted(truncateToWidth(shortPathForUi(state.result.cwd || state.result.path), inner, "…"))));
+		lines.push(empty(), divider(), empty());
+		for (const line of wrapVisible(dim("Choose the prompt to fork from. Pi will open the source session before that prompt and place the prompt in the editor."), inner, 2)) {
+			lines.push(row(line));
+		}
+		lines.push(empty());
+
+		const maxVisible = this.forkConfirmMaxVisibleRows();
+		const start = Math.max(0, Math.min(state.selected - Math.floor(maxVisible / 2), state.messages.length - maxVisible));
+		const end = Math.min(start + maxVisible, state.messages.length);
+		for (let i = start; i < end; i++) {
+			const message = state.messages[i]!;
+			const selected = i === state.selected;
+			const numberPlain = `#${message.index}`;
+			const number = selected ? this.theme.fg("text", numberPlain) : dim(numberPlain);
+			const textWidth = Math.max(12, inner - visibleWidth(number) - 1);
+			const text = truncateToWidth(message.text, textWidth, "…");
+			const messageRow = `${number} ${selected ? this.theme.bold(accent(text)) : text}`;
+			lines.push(selected ? selectedRow(messageRow) : row(messageRow));
+		}
+		if (state.messages.length > maxVisible) lines.push(row(dim(`${state.selected + 1}/${state.messages.length} prompts`)));
+		lines.push(divider(), empty());
+		lines.push(row(`${ansiYellow("enter")} ${dim("fork session")}  ${ansiYellow("up/down")} ${dim("choose prompt")}  ${ansiYellow("backspace")} ${dim("back")}`));
 		lines.push(bottom());
 		return lines;
 	}
@@ -4159,22 +4271,25 @@ async function openQolSessionSearch(pi: ExtensionAPI, ctx: ExtensionContext, ini
 		releaseModalLock();
 	}
 	if (!action || action.type === "cancel" || !action.result) return;
-	if (action.type === "resume") {
+	if (action.type === "resume" || action.type === "fork") {
 		const commandCtx = asCommandContext(ctx);
 		if (typeof commandCtx.switchSession === "function") {
 			const targetTitle = sessionDisplayName(action.result);
-			const selectedMessage = action.message;
+			const selectedMessage = action.type === "fork" ? action.message : undefined;
 			let replacementStarted = false;
 			try {
 				const result = await commandCtx.switchSession(action.result.path, {
 					withSession: async (replacementCtx: any) => {
 						replacementStarted = true;
-						if (selectedMessage?.entryId) {
+						if (selectedMessage) {
 							const manager = replacementCtx.sessionManager as any;
-							if (selectedMessage.parentId && typeof manager?.branch === "function") manager.branch(selectedMessage.parentId);
-							else if (selectedMessage.parentId === null && typeof manager?.resetLeaf === "function") manager.resetLeaf();
+							if (selectedMessage.entryId && selectedMessage.parentId && typeof manager?.branch === "function") manager.branch(selectedMessage.parentId);
+							else if (selectedMessage.entryId && selectedMessage.parentId === null && typeof manager?.resetLeaf === "function") manager.resetLeaf();
 							replacementCtx.ui.setEditorText(selectedMessage.text);
-							replacementCtx.ui.notify(`Fork point ready in ${targetTitle} at prompt #${selectedMessage.index}. Submit to branch from here.`, "info");
+							const timer = setTimeout(() => {
+								replacementCtx.ui.notify(`Forked session: ${targetTitle} at prompt #${selectedMessage.index}. Submit to branch from here.`, "info");
+							}, 0);
+							timer.unref?.();
 							return;
 						}
 						replacementCtx.ui.notify(`Resumed session: ${targetTitle}`, "info");
@@ -4187,7 +4302,7 @@ async function openQolSessionSearch(pi: ExtensionAPI, ctx: ExtensionContext, ini
 			return;
 		}
 		ctx.ui.setEditorText(`/resume ${quoteSessionSearchArg(action.result.path)}`);
-		ctx.ui.notify(`${sessionDisplayName(action.result)} — press Enter to resume`, "info");
+		ctx.ui.notify(`${sessionDisplayName(action.result)} — press Enter to ${action.type === "fork" ? "fork" : "resume"}`, "info");
 		return;
 	}
 	if (action.type === "copy") {
