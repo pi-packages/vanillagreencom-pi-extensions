@@ -122,9 +122,10 @@ test("saveOpenAICodexGeneratedImage writes generated images under the configured
 	const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "pi-codex-minimal-image-"));
 	const encoded = Buffer.from("png-bytes").toString("base64");
 	try {
-		const saved = await saveOpenAICodexGeneratedImage(cwd, { responseId: "resp_123", callId: "ig_456", result: encoded, outputFormat: "png" });
+		const saved = await saveOpenAICodexGeneratedImage(cwd, { responseId: "resp_123", callId: "ig_456", result: encoded, outputFormat: "png", imageModel: "gpt-image-2" });
 		assert.match(saved.relativePath, /^\.pi[/\\]openai-codex-images[/\\][\dTZ-]+-[a-f0-9]{8}\.png$/);
 		assert.equal(saved.latestRelativePath, path.join(".pi", "openai-codex-images", "latest.png"));
+		assert.equal(saved.imageModel, "gpt-image-2");
 		assert.deepEqual(await fs.readFile(saved.absolutePath), Buffer.from("png-bytes"));
 		assert.deepEqual(await fs.readFile(saved.latestAbsolutePath), Buffer.from("png-bytes"));
 	} finally {

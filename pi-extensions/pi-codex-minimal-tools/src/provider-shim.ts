@@ -55,6 +55,7 @@ interface SavedGeneratedImage {
 	responseId: string | undefined;
 	callId: string;
 	outputFormat: string;
+	imageModel?: string;
 	revisedPrompt?: string;
 }
 
@@ -357,7 +358,7 @@ export function buildGeneratedImageDisplayText(savedImage: SavedGeneratedImage, 
 
 export async function saveOpenAICodexGeneratedImage(
 	cwd: string,
-	image: { responseId?: string; callId: string; result: string; outputFormat?: string; revisedPrompt?: string },
+	image: { responseId?: string; callId: string; result: string; outputFormat?: string; imageModel?: string; revisedPrompt?: string },
 ): Promise<SavedGeneratedImage> {
 	const workspaceRoot = await resolveWorkspaceRoot(cwd);
 	const outputFormat = normalizeImageOutputFormat(image.outputFormat);
@@ -386,6 +387,7 @@ export async function saveOpenAICodexGeneratedImage(
 		responseId: image.responseId,
 		callId: image.callId,
 		outputFormat,
+		imageModel: image.imageModel,
 		revisedPrompt: image.revisedPrompt,
 	};
 }
@@ -1137,11 +1139,14 @@ async function* captureGeneratedImages(
 				try {
 					const outputFormat = typeof event.item.output_format === "string" ? event.item.output_format : undefined;
 					const normalizedOutputFormat = normalizeImageOutputFormat(outputFormat);
+					const settings = loadSettings(options.cwd);
+					const imageModel = typeof event.item.model === "string" ? event.item.model : settings.imageModel;
 					const saved = await saveOpenAICodexGeneratedImage(options.cwd, {
 						responseId,
 						callId,
 						result,
 						outputFormat: normalizedOutputFormat,
+						imageModel,
 						revisedPrompt:
 							typeof event.item.revised_prompt === "string" ? event.item.revised_prompt : options.requestPrompt,
 					});
@@ -1411,7 +1416,8 @@ function renderImageGenerationMessage(savedImage: SavedGeneratedImage | undefine
 	const type = savedImage?.outputFormat?.toUpperCase() ?? preview?.mimeType?.replace(/^image\//, "").toUpperCase() ?? "IMAGE";
 	const dimensions = preview?.widthPx && preview?.heightPx ? `${preview.widthPx}x${preview.heightPx}` : undefined;
 	const size = formatImageBytes(preview?.bytes);
-	const meta = [type, dimensions, size].filter(Boolean).join(" · ");
+	const imageModel = savedImage?.imageModel ? `model ${savedImage.imageModel}` : undefined;
+	const meta = [imageModel, type, dimensions, size].filter(Boolean).join(" · ");
 	const label = `${themeFg(theme, "accent", "● ")}${themeFg(theme, "text", themeBold(theme, "Image Generation "))}`;
 	const pathText = savedImage?.relativePath ?? (typeof messageContent === "string" ? messageContent : "generated image");
 	const lines = [`${label}${themeFg(theme, "accent", pathText)}${meta ? themeFg(theme, "dim", ` · ${meta}`) : ""}`];

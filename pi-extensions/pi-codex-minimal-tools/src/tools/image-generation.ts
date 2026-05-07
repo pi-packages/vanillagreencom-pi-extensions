@@ -54,7 +54,7 @@ export async function directImageGeneration(input: ImageGenerationInput, cwd: st
 	if (!base64) throw new Error("OpenAI Images API returned no image data.");
 	const saved = await saveBase64Image({ base64, callId: "direct", cwd, format: input.output_format, responseId: settings.imageModel, settings });
 	return {
-		content: [{ type: "text", text: `Generated image saved to ${saved.path}${saved.latestPath ? ` (latest: ${saved.latestPath})` : ""}.` }],
+		content: [{ type: "text", text: `Generated image with ${settings.imageModel}; saved to ${saved.path}${saved.latestPath ? ` (latest: ${saved.latestPath})` : ""}.` }],
 		details: { saved, revisedPrompt: first?.revised_prompt, mode: "direct-images-api" },
 	};
 }
