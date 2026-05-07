@@ -16,7 +16,7 @@ import { homedir } from "node:os";
 import { spawnSync } from "node:child_process";
 
 const INSTALL_SYMBOL = Symbol.for("vstack.pi-extension-manager.installed");
-const MANAGER_ID = "pi-extension-manager";
+const MANAGER_ID = "@vanillagreen/pi-extension-manager";
 const SETTINGS_EVENT = "vstack:extension-settings-changed";
 const DEFAULT_WIDTH = 124;
 const DEFAULT_WIDTH_PERCENT = "92%";
@@ -454,8 +454,12 @@ function isNewer(latest: string | undefined, current: string | undefined): boole
 	return false;
 }
 
+function localPackageDirName(packageName: string): string {
+	return packageName.startsWith("@vanillagreen/") ? packageName.split("/").pop() || packageName : packageName;
+}
+
 function readSourceRepoVersion(repoRoot: string, packageName: string): string | undefined {
-	const manifestPath = join(repoRoot, "pi-extensions", packageName, "package.json");
+	const manifestPath = join(repoRoot, "pi-extensions", localPackageDirName(packageName), "package.json");
 	if (!existsSync(manifestPath)) return undefined;
 	try {
 		const parsed = JSON.parse(readFileSync(manifestPath, "utf8"));

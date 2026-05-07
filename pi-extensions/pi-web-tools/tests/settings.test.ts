@@ -25,8 +25,8 @@ test("loadSettings merges user/project/private config and env wins", () => {
 	mkdirSync(join(project, ".pi"), { recursive: true });
 	const privatePath = join(root, "private.json");
 	writeFileSync(privatePath, JSON.stringify({ exaApiKey: "private-exa", perplexityApiKey: "private-pplx" }));
-	writeFileSync(join(user, "settings.json"), JSON.stringify({ vstack: { extensionManager: { config: { "pi-web-tools": { autoEnable: false, enabledProviders: "exa,openai-native", webToolsConfigFile: privatePath } } } } }));
-	writeFileSync(join(project, ".pi", "settings.json"), JSON.stringify({ vstack: { extensionManager: { config: { "pi-web-tools": { autoEnable: true, defaultProvider: "exa", githubClone: { maxRepoSizeMB: 100 }, exaResearchModes: { standard: { numResults: 9 } } } } } } }));
+	writeFileSync(join(user, "settings.json"), JSON.stringify({ vstack: { extensionManager: { config: { "@vanillagreen/pi-web-tools": { autoEnable: false, enabledProviders: "exa,openai-native", webToolsConfigFile: privatePath } } } } }));
+	writeFileSync(join(project, ".pi", "settings.json"), JSON.stringify({ vstack: { extensionManager: { config: { "@vanillagreen/pi-web-tools": { autoEnable: true, defaultProvider: "exa", githubClone: { maxRepoSizeMB: 100 }, exaResearchModes: { standard: { numResults: 9 } } } } } } }));
 	const previousDir = process.env.PI_CODING_AGENT_DIR;
 	const previousExa = process.env.EXA_API_KEY;
 	process.env.PI_CODING_AGENT_DIR = user;
@@ -65,7 +65,7 @@ test("loadSettings parses JSON string Exa research mode overrides", () => {
 	const project = join(root, "project");
 	mkdirSync(user, { recursive: true });
 	mkdirSync(join(project, ".pi"), { recursive: true });
-	writeFileSync(join(user, "settings.json"), JSON.stringify({ vstack: { extensionManager: { config: { "pi-web-tools": { exaResearchModes: JSON.stringify({ lite: { numResults: 3, summaryQuery: "fast" } }) } } } } }));
+	writeFileSync(join(user, "settings.json"), JSON.stringify({ vstack: { extensionManager: { config: { "@vanillagreen/pi-web-tools": { exaResearchModes: JSON.stringify({ lite: { numResults: 3, summaryQuery: "fast" } }) } } } } }));
 	const previousDir = process.env.PI_CODING_AGENT_DIR;
 	process.env.PI_CODING_AGENT_DIR = user;
 	try {
@@ -110,7 +110,7 @@ test("loadSettings resolves op:// API key references with op CLI", () => {
 	mkdirSync(bin, { recursive: true });
 	writeFileSync(join(bin, "op"), "#!/usr/bin/env bash\n[ \"$1\" = read ] && [ \"$2\" = 'op://vault/exa/key' ] && { printf resolved-exa; exit 0; }\nexit 1\n");
 	chmodSync(join(bin, "op"), 0o755);
-	writeFileSync(join(user, "settings.json"), JSON.stringify({ vstack: { extensionManager: { config: { "pi-web-tools": { exaApiKey: "op://vault/exa/key" } } } } }));
+	writeFileSync(join(user, "settings.json"), JSON.stringify({ vstack: { extensionManager: { config: { "@vanillagreen/pi-web-tools": { exaApiKey: "op://vault/exa/key" } } } } }));
 	const previousDir = process.env.PI_CODING_AGENT_DIR;
 	const previousPath = process.env.PATH;
 	const previousExa = process.env.EXA_API_KEY;

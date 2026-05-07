@@ -36,7 +36,8 @@ import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents, formatAgentList } from "./agents.js";
 
 const PACKAGE_ID = "pi-agents-tmux";
-const LEGACY_PACKAGE_ID = "pi-subagents-tmux";
+const CONFIG_ID = "@vanillagreen/pi-agents-tmux";
+const SESSION_BRIDGE_PACKAGE_ID = "@vanillagreen/pi-session-bridge";
 const INSTALL_SYMBOL = Symbol.for("vstack.pi-agents-tmux.installed");
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
@@ -127,10 +128,8 @@ function readVstackConfig(cwd?: string): VstackConfig {
 		if (!fs.existsSync(settingsPath)) continue;
 		try {
 			const parsed = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
-			for (const packageId of [LEGACY_PACKAGE_ID, PACKAGE_ID]) {
-				const config = parsed?.vstack?.extensionManager?.config?.[packageId];
-				if (config && typeof config === "object" && !Array.isArray(config)) Object.assign(merged, config);
-			}
+			const config = parsed?.vstack?.extensionManager?.config?.[CONFIG_ID];
+			if (config && typeof config === "object" && !Array.isArray(config)) Object.assign(merged, config);
 		} catch {
 			// Ignore malformed optional manager config.
 		}
@@ -3092,7 +3091,7 @@ function dashboardTranscriptLabel(items: SubagentDashboardItem[], cwd: string): 
 function shortRuntimeSessionIdFromPath(filePath: string | undefined): string {
 	if (!filePath) return "session";
 	const parts = path.normalize(filePath).split(path.sep).filter(Boolean);
-	const rootIndex = Math.max(parts.lastIndexOf(PACKAGE_ID), parts.lastIndexOf(LEGACY_PACKAGE_ID));
+	const rootIndex = parts.lastIndexOf(PACKAGE_ID);
 	const sessionsIndex = rootIndex >= 0 ? parts.indexOf("sessions", rootIndex + 1) : parts.lastIndexOf("sessions");
 	const parentSession = sessionsIndex >= 0 ? parts[sessionsIndex + 1] : undefined;
 	return parentSession ? oneLinePreview(parentSession, 8) : "session";
@@ -3114,7 +3113,7 @@ function dashboardTraceRef(item: Pick<SubagentDashboardItem, "agent" | "taskId" 
 function dashboardTranscriptRef(filePath: string | undefined): string {
 	if (!filePath) return "";
 	const parts = path.normalize(filePath).split(path.sep).filter(Boolean);
-	const rootIndex = Math.max(parts.lastIndexOf(PACKAGE_ID), parts.lastIndexOf(LEGACY_PACKAGE_ID));
+	const rootIndex = parts.lastIndexOf(PACKAGE_ID);
 	const sessionsIndex = rootIndex >= 0 ? parts.indexOf("sessions", rootIndex + 1) : parts.lastIndexOf("sessions");
 	const parentSession = sessionsIndex >= 0 ? parts[sessionsIndex + 1] : undefined;
 	const shortSession = parentSession ? oneLinePreview(parentSession, 8) : "session";
@@ -3224,8 +3223,8 @@ function resolveSessionBridgeExtension(cwd?: string): string | undefined {
 	const projectPackagesDir = path.join(path.dirname(projectSettingsPath(cwd ?? process.cwd())), "packages");
 	const candidates = [
 		process.env.PI_SESSION_BRIDGE_EXTENSION,
-		path.join(piUserDir(), "packages", "pi-session-bridge", "extensions", "session-bridge.ts"),
-		path.join(projectPackagesDir, "pi-session-bridge", "extensions", "session-bridge.ts"),
+		path.join(piUserDir(), "packages", SESSION_BRIDGE_PACKAGE_ID, "extensions", "session-bridge.ts"),
+		path.join(projectPackagesDir, SESSION_BRIDGE_PACKAGE_ID, "extensions", "session-bridge.ts"),
 		path.resolve(cwd ?? process.cwd(), "pi-extensions", "session-bridge", "extensions", "session-bridge.ts"),
 	].filter((candidate): candidate is string => Boolean(candidate));
 	return candidates.find((candidate) => fs.existsSync(candidate));
@@ -3237,9 +3236,9 @@ async function resolvePiBridgeBin(): Promise<string | undefined> {
 	const candidates = [
 		process.env.PI_BRIDGE_BIN,
 		path.join(piUserDir(), "bin", "pi-bridge"),
-		path.join(piUserDir(), "packages", "pi-session-bridge", "bin", "pi-bridge.js"),
+		path.join(piUserDir(), "packages", SESSION_BRIDGE_PACKAGE_ID, "bin", "pi-bridge.js"),
 		path.join(projectBinDir, "pi-bridge"),
-		path.join(projectPackagesDir, "pi-session-bridge", "bin", "pi-bridge.js"),
+		path.join(projectPackagesDir, SESSION_BRIDGE_PACKAGE_ID, "bin", "pi-bridge.js"),
 	].filter((candidate): candidate is string => Boolean(candidate));
 	for (const candidate of candidates) {
 		if (fs.existsSync(candidate)) return candidate;

@@ -16,6 +16,7 @@ const COMPACTION_SUMMARY_RENDERER_PATCH_SYMBOL = Symbol.for("vstack.pi-tool-rend
 const SKILL_INVOCATION_RENDERER_PATCH_SYMBOL = Symbol.for("vstack.pi-tool-renderer.skill-invocation-renderer-patch");
 const MARKDOWN_CODE_BLOCK_PATCH_SYMBOL = Symbol.for("vstack.pi-tool-renderer.markdown-code-block-patch");
 const WORKING_LOADER_ALIGNMENT_PATCH_SYMBOL = Symbol.for("vstack.pi-tool-renderer.working-loader-alignment-patch");
+const CONFIG_ID = "@vanillagreen/pi-tool-renderer";
 
 const ANSI_GREEN = "\x1b[32m";
 const ANSI_RED = "\x1b[31m";
@@ -52,7 +53,7 @@ function readVstackConfig(cwd?: string): VstackConfig {
 		if (!existsSync(path)) continue;
 		try {
 			const parsed = JSON.parse(readFileSync(path, "utf8"));
-			const config = parsed?.vstack?.extensionManager?.config?.["pi-tool-renderer"];
+			const config = parsed?.vstack?.extensionManager?.config?.[CONFIG_ID];
 			if (config && typeof config === "object" && !Array.isArray(config)) Object.assign(merged, config);
 		} catch {
 			// Ignore malformed optional manager config.

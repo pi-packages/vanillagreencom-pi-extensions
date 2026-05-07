@@ -25,6 +25,7 @@ import { dirname, join, resolve } from "node:path";
 const BG_COMMAND = "bg";
 const DEFAULT_BACKGROUND_BASH_SHORTCUT = "alt+.";
 const DEFAULT_BG_SHORTCUT = "alt+shift+h";
+const CONFIG_ID = "@vanillagreen/pi-background-tasks";
 const DEFAULT_WIDGET_TOGGLE_SHORTCUT = "alt+h";
 const BG_MESSAGE_TYPE = "vstack-background-tasks:event";
 const BG_WIDGET_KEY = "vstack-background-tasks";
@@ -170,7 +171,7 @@ function readVstackConfig(cwd?: string): VstackConfig {
 		if (!existsSync(path)) continue;
 		try {
 			const parsed = JSON.parse(readFileSync(path, "utf8"));
-			const config = parsed?.vstack?.extensionManager?.config?.["pi-background-tasks"];
+			const config = parsed?.vstack?.extensionManager?.config?.[CONFIG_ID];
 			if (config && typeof config === "object" && !Array.isArray(config)) Object.assign(merged, config);
 		} catch {
 			// Ignore malformed optional manager config; keep safe defaults.

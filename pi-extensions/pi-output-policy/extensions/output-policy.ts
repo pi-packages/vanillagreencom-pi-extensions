@@ -4,6 +4,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
 const INSTALL_SYMBOL = Symbol.for("vstack.pi-output-policy.installed");
+const CONFIG_ID = "@vanillagreen/pi-output-policy";
 const DEFAULT_SPILL_THRESHOLD_KB = 200;
 const DEFAULT_INLINE_TAIL_KB = 100;
 const DEFAULT_INLINE_TAIL_LINES = 2_000;
@@ -107,7 +108,7 @@ function readVstackConfig(cwd?: string): VstackConfig {
 		if (!existsSync(path)) continue;
 		try {
 			const parsed = JSON.parse(readFileSync(path, "utf8"));
-			const config = parsed?.vstack?.extensionManager?.config?.["pi-output-policy"];
+			const config = parsed?.vstack?.extensionManager?.config?.[CONFIG_ID];
 			if (config && typeof config === "object" && !Array.isArray(config)) Object.assign(merged, config);
 		} catch {
 			// Ignore malformed optional manager config.

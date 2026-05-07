@@ -8,9 +8,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileS
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
-const PACKAGE_ID = "pi-prompt-stash";
-const LEGACY_PACKAGE_ID = "prompt-stash";
-const CONFIG_IDS = [LEGACY_PACKAGE_ID, PACKAGE_ID] as const;
+const PACKAGE_ID = "@vanillagreen/pi-prompt-stash";
 const DEFAULT_STORE_FILE = "prompt-stash.json";
 const STORE_VERSION = 1;
 const POPUP_WIDTH = 92;
@@ -95,10 +93,8 @@ function readVstackConfig(cwd?: string): VstackConfig {
 		if (!existsSync(path)) continue;
 		try {
 			const parsed = JSON.parse(readFileSync(path, "utf8"));
-			for (const id of CONFIG_IDS) {
-				const config = parsed?.vstack?.extensionManager?.config?.[id];
-				if (config && typeof config === "object" && !Array.isArray(config)) Object.assign(merged, config);
-			}
+			const config = parsed?.vstack?.extensionManager?.config?.[PACKAGE_ID];
+			if (config && typeof config === "object" && !Array.isArray(config)) Object.assign(merged, config);
 		} catch {
 			// Ignore malformed optional manager config.
 		}

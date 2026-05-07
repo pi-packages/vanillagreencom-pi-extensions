@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
-export const PACKAGE_ID = "pi-codex-minimal-tools";
+export const PACKAGE_ID = "@vanillagreen/pi-codex-minimal-tools";
 
 export interface CodexMinimalToolsSettings {
 	enabled: boolean;

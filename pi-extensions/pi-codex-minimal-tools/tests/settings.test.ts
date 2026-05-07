@@ -41,8 +41,8 @@ test("loadSettings merges user settings then project settings", () => {
 	const project = join(root, "project");
 	mkdirSync(user, { recursive: true });
 	mkdirSync(join(project, ".pi"), { recursive: true });
-	writeFileSync(join(user, "settings.json"), JSON.stringify({ vstack: { extensionManager: { config: { "pi-codex-minimal-tools": { autoEnable: false, imageOutputDir: "user-images", imageModel: "gpt-image-1" } } } } }));
-	writeFileSync(join(project, ".pi", "settings.json"), JSON.stringify({ vstack: { extensionManager: { config: { "pi-codex-minimal-tools": { autoEnable: true, imageOutputDir: "project-images", imageModel: "bad-model", directImageApiFallback: true } } } } }));
+	writeFileSync(join(user, "settings.json"), JSON.stringify({ vstack: { extensionManager: { config: { "@vanillagreen/pi-codex-minimal-tools": { autoEnable: false, imageOutputDir: "user-images", imageModel: "gpt-image-1" } } } } }));
+	writeFileSync(join(project, ".pi", "settings.json"), JSON.stringify({ vstack: { extensionManager: { config: { "@vanillagreen/pi-codex-minimal-tools": { autoEnable: true, imageOutputDir: "project-images", imageModel: "bad-model", directImageApiFallback: true } } } } }));
 	const previous = process.env.PI_CODING_AGENT_DIR;
 	process.env.PI_CODING_AGENT_DIR = user;
 	try {

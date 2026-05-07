@@ -7,6 +7,7 @@ import { dirname, join, resolve } from "node:path";
 import { Type } from "typebox";
 
 const INSTALL_SYMBOL = Symbol.for("vstack.pi-task-panel.installed");
+const CONFIG_ID = "@vanillagreen/pi-task-panel";
 const STATE_TYPE = "vstack-task-panel:state";
 const TASK_CONTEXT_TYPE = "vstack-task-panel:context";
 const TASK_COMPLETE_MESSAGE_TYPE = "vstack-task-panel:complete";
@@ -86,7 +87,7 @@ function readVstackConfig(cwd?: string): VstackConfig {
 		if (!existsSync(path)) continue;
 		try {
 			const parsed = JSON.parse(readFileSync(path, "utf8"));
-			const config = parsed?.vstack?.extensionManager?.config?.["pi-task-panel"];
+			const config = parsed?.vstack?.extensionManager?.config?.[CONFIG_ID];
 			if (config && typeof config === "object" && !Array.isArray(config)) Object.assign(merged, config);
 		} catch {
 			// Ignore malformed optional manager config.

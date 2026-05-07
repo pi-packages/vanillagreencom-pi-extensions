@@ -9,7 +9,7 @@ import { Input, matchesKey, truncateToWidth, visibleWidth, type Focusable } from
 
 const INSTALL_SYMBOL = Symbol.for("vstack.pi-session-manager.installed");
 const VSTACK_MODAL_LOCK_SYMBOL = Symbol.for("vstack.pi.modal-lock");
-const PACKAGE_ID = "pi-session-manager";
+const PACKAGE_ID = "@vanillagreen/pi-session-manager";
 const LEGACY_STATUS_KEY = "session-manager";
 const DEFAULT_SHORTCUT = "alt+shift+r";
 const DEFAULT_WIDTH = 112;

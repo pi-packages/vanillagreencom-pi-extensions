@@ -176,7 +176,7 @@ function registerDiagnosticCommand(pi: ExtensionAPI): void {
 		const openQuickSettings = host[Symbol.for("vstack.pi.extension-manager.open-quick-settings")];
 		if (typeof openQuickSettings !== "function") return false;
 		try {
-			await (openQuickSettings as (ctx: ExtensionCommandContext, hint?: string) => Promise<void>)(ctx, "pi-codex-minimal-tools");
+			await (openQuickSettings as (ctx: ExtensionCommandContext, hint?: string) => Promise<void>)(ctx, "@vanillagreen/pi-codex-minimal-tools");
 			return true;
 		} catch {
 			return false;

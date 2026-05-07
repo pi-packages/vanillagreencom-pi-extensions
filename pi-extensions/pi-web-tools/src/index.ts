@@ -64,7 +64,7 @@ function registerDiagnosticCommand(pi: ExtensionAPI): void {
 		const openQuickSettings = host[Symbol.for("vstack.pi.extension-manager.open-quick-settings")];
 		if (typeof openQuickSettings !== "function") return false;
 		try {
-			await (openQuickSettings as (ctx: ExtensionCommandContext, hint?: string) => Promise<void>)(ctx, "pi-web-tools");
+			await (openQuickSettings as (ctx: ExtensionCommandContext, hint?: string) => Promise<void>)(ctx, "@vanillagreen/pi-web-tools");
 			return true;
 		} catch {
 			return false;
@@ -77,7 +77,7 @@ function registerDiagnosticCommand(pi: ExtensionAPI): void {
 		}
 		providerOverride = next;
 		syncActiveTools(pi, ctx as ExtensionContext);
-		ctx.ui.notify(`Web Tools provider set to ${next} for this session. Persist via vstack.extensionManager.config[\"pi-web-tools\"].defaultProvider.`, "info");
+		ctx.ui.notify(`Web Tools provider set to ${next} for this session. Persist via vstack.extensionManager.config[\"@vanillagreen/pi-web-tools\"].defaultProvider.`, "info");
 	};
 	pi.registerCommand("web-tools", {
 		description: "Open Web Tools settings (or status/provider). Usage: /web-tools | /web-tools:doctor | /web-tools:provider:<name>",

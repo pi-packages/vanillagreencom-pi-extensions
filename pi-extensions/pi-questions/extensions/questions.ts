@@ -17,6 +17,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 const INSTALL_SYMBOL = Symbol.for("vstack.pi-questions.installed");
+const CONFIG_ID = "@vanillagreen/pi-questions";
 const SERVICE_SYMBOL = Symbol.for("vstack.pi-questions.service");
 const QOL_NOTIFICATION_SERVICE_SYMBOL = Symbol.for("vstack.pi-qol.notification-service");
 const VSTACK_MODAL_LOCK_SYMBOL = Symbol.for("vstack.pi.modal-lock");
@@ -152,7 +153,7 @@ function readVstackConfig(cwd?: string): VstackConfig {
 		if (!existsSync(path)) continue;
 		try {
 			const parsed = JSON.parse(readFileSync(path, "utf8"));
-			const config = parsed?.vstack?.extensionManager?.config?.["pi-questions"];
+			const config = parsed?.vstack?.extensionManager?.config?.[CONFIG_ID];
 			if (config && typeof config === "object" && !Array.isArray(config)) Object.assign(merged, config);
 		} catch {
 			// Ignore malformed optional manager config.

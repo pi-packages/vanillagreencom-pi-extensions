@@ -22,6 +22,7 @@ const PROTOCOL = "pi-session-bridge.v1";
 const INSTALL_SYMBOL = Symbol.for("vstack.pi-session-bridge.installed");
 const STATUS_KEY = "session-bridge";
 const QUESTION_SERVICE_SYMBOL = Symbol.for("vstack.pi-questions.service");
+const CONFIG_ID = "@vanillagreen/pi-session-bridge";
 const DEFAULT_HISTORY_LIMIT = 500;
 const DEFAULT_MAX_LINE_BYTES = 1024 * 1024;
 
@@ -90,7 +91,7 @@ function readVstackConfig(cwd?: string): VstackConfig {
 		if (!fs.existsSync(settingsPath)) continue;
 		try {
 			const parsed = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
-			const config = parsed?.vstack?.extensionManager?.config?.["pi-session-bridge"];
+			const config = parsed?.vstack?.extensionManager?.config?.[CONFIG_ID];
 			if (config && typeof config === "object" && !Array.isArray(config)) Object.assign(merged, config);
 		} catch {
 			// Ignore malformed optional manager config.

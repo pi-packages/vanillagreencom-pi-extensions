@@ -9,6 +9,7 @@ import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 const INSTALL_SYMBOL = Symbol.for("vstack.pi-qol.installed");
+const CONFIG_ID = "@vanillagreen/pi-qol";
 const STATUS_KEY = "qol-attachments";
 const SESSION_SEARCH_STATUS_KEY = "qol-session-search";
 const SESSION_SEARCH_CONTEXT_TYPE = "qol-session-context";
@@ -132,7 +133,7 @@ function readVstackConfig(cwd?: string): VstackConfig {
 		if (!existsSync(path)) continue;
 		try {
 			const parsed = JSON.parse(readFileSync(path, "utf8"));
-			const config = parsed?.vstack?.extensionManager?.config?.["pi-qol"];
+			const config = parsed?.vstack?.extensionManager?.config?.[CONFIG_ID];
 			if (config && typeof config === "object" && !Array.isArray(config)) Object.assign(merged, config);
 		} catch {
 			// Ignore malformed optional manager config.

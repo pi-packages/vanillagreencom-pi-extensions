@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
-export const PACKAGE_ID = "pi-web-tools";
+export const PACKAGE_ID = "@vanillagreen/pi-web-tools";
 export const WEB_PROVIDERS = ["auto", "exa", "openai-native", "perplexity", "gemini"] as const;
 export type WebProvider = (typeof WEB_PROVIDERS)[number];
 export type ResolvedWebProvider = Exclude<WebProvider, "auto">;

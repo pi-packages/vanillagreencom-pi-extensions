@@ -43,7 +43,7 @@ import { homedir } from "node:os";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const PACKAGE_ID = "pi-skills-manager";
+const PACKAGE_ID = "@vanillagreen/pi-skills-manager";
 const INSTALL_SYMBOL = Symbol.for("vstack.pi-skills-manager.installed");
 const STARTUP_PATCH_SYMBOL = Symbol.for("vstack.pi-skills-manager.startup-patch");
 const STARTUP_HIDE_ENABLED_SYMBOL = Symbol.for("vstack.pi-skills-manager.hide-startup-skills");
