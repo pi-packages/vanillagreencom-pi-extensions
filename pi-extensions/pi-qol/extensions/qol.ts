@@ -2375,6 +2375,19 @@ interface QolSessionPaletteAction {
 	result?: QolSessionSearchResult;
 }
 
+function pinSessionModel(sessionPath: string, model: NonNullable<ExtensionContext["model"]>, thinkingLevel?: string): void {
+	const manager = SessionManager.open(sessionPath);
+	const context = manager.buildSessionContext();
+	if (context.model?.provider !== model.provider || context.model?.modelId !== model.id) {
+		manager.appendModelChange(model.provider, model.id);
+	}
+	if (thinkingLevel) {
+		const branch = manager.getBranch();
+		const lastThinking = [...branch].reverse().find((entry: any) => entry?.type === "thinking_level_change") as { thinkingLevel?: string } | undefined;
+		if (lastThinking?.thinkingLevel !== thinkingLevel) manager.appendThinkingLevelChange(thinkingLevel as any);
+	}
+}
+
 let qolSessionSearchCache: QolSessionSearchSession[] = [];
 let qolSessionSearchLoadedAt = 0;
 let qolSessionSearchLoading: Promise<QolSessionSearchSession[]> | undefined;
@@ -4244,16 +4257,13 @@ async function runSessionSearchResumeOrFork(pi: ExtensionAPI, ctx: ExtensionCont
 	const selectedMessage = action.type === "fork" ? action.message : undefined;
 	const currentModel = action.keepCurrentModel ? ctx.model : undefined;
 	const currentThinking = action.keepCurrentModel && typeof pi.getThinkingLevel === "function" ? pi.getThinkingLevel() : undefined;
+	if (currentModel) pinSessionModel(action.result.path, currentModel, currentThinking);
 	let replacementStarted = false;
 	try {
 		const result = await commandCtx.switchSession(action.result.path, {
 			withSession: async (replacementCtx: any) => {
 				replacementStarted = true;
-				if (currentModel) {
-					const ok = await pi.setModel(currentModel);
-					if (ok && currentThinking) pi.setThinkingLevel(currentThinking as any);
-					replacementCtx.ui.notify(ok ? `Using current model: ${currentModel.provider}/${currentModel.id}` : `Could not keep current model: ${currentModel.provider}/${currentModel.id}`, ok ? "info" : "warning");
-				}
+				if (currentModel) replacementCtx.ui.notify(`Using current model: ${currentModel.provider}/${currentModel.id}`, "info");
 				if (selectedMessage) {
 					const manager = replacementCtx.sessionManager as any;
 					if (selectedMessage.entryId && selectedMessage.parentId && typeof manager?.branch === "function") manager.branch(selectedMessage.parentId);

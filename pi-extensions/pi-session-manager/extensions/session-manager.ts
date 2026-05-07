@@ -40,6 +40,19 @@ type SessionManagerContext = ExtensionCommandContext | ExtensionContext;
 const pendingSessionManagerActions = new Map<string, SessionAction>();
 let pendingSessionManagerActionCounter = 0;
 
+function pinSessionModel(sessionPath: string, model: NonNullable<ExtensionContext["model"]>, thinkingLevel?: string): void {
+	const manager = SessionManager.open(sessionPath);
+	const context = manager.buildSessionContext();
+	if (context.model?.provider !== model.provider || context.model?.modelId !== model.id) {
+		manager.appendModelChange(model.provider, model.id);
+	}
+	if (thinkingLevel) {
+		const branch = manager.getBranch();
+		const lastThinking = [...branch].reverse().find((entry: any) => entry?.type === "thinking_level_change") as { thinkingLevel?: string } | undefined;
+		if (lastThinking?.thinkingLevel !== thinkingLevel) manager.appendThinkingLevelChange(thinkingLevel as any);
+	}
+}
+
 interface VstackModalLock {
 	depth: number;
 }
@@ -1239,13 +1252,10 @@ async function runSessionManagerAction(ctx: SessionManagerContext, pi: Extension
 	const targetTitle = action.title || basename(action.path);
 	const currentModel = action.keepCurrentModel ? ctx.model : undefined;
 	const currentThinking = action.keepCurrentModel && typeof pi.getThinkingLevel === "function" ? pi.getThinkingLevel() : undefined;
+	if (currentModel) pinSessionModel(action.path, currentModel, currentThinking);
 	const result = await switchSession.call(ctx, action.path, {
 		withSession: async (replacementCtx) => {
-			if (currentModel) {
-				const ok = await pi.setModel(currentModel);
-				if (ok && currentThinking) pi.setThinkingLevel(currentThinking as any);
-				replacementCtx.ui.notify(ok ? `Using current model: ${currentModel.provider}/${currentModel.id}` : `Could not keep current model: ${currentModel.provider}/${currentModel.id}`, ok ? "info" : "warning");
-			}
+			if (currentModel) replacementCtx.ui.notify(`Using current model: ${currentModel.provider}/${currentModel.id}`, "info");
 			clearLegacySessionStatus(replacementCtx);
 			replacementCtx.ui.notify(`Resumed ${targetTitle}${currentModel ? " with current model" : ""}`, "info");
 		},
