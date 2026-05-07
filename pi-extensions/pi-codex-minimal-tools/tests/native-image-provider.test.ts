@@ -85,6 +85,39 @@ test("processResponsesStream ignores in-progress image_generation_call items", a
 	assert.deepEqual(output.content.filter((block: any) => block.type === "image_generation_call"), []);
 });
 
+test("processResponsesStream preserves image_generation_call items from terminal response output", async () => {
+	const output = createAssistantOutput();
+	const base64 = Buffer.from("png-bytes").toString("base64");
+	const imageItem = {
+		type: "image_generation_call",
+		id: "ig_terminal",
+		status: "completed",
+		result: base64,
+		revised_prompt: "A terminal-output image",
+	};
+
+	await processResponsesStream(
+		asAsyncIterable([
+			{
+				type: "response.completed",
+				response: {
+					id: "resp_terminal",
+					status: "completed",
+					output: [imageItem],
+					usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0, input_tokens_details: { cached_tokens: 0 } },
+				},
+			},
+		]),
+		output,
+		{ push() {} } as any,
+		model,
+	);
+
+	assert.deepEqual(output.content.filter((block: any) => block.type === "image_generation_call"), [
+		{ type: "image_generation_call", item: imageItem },
+	]);
+});
+
 test("saveOpenAICodexGeneratedImage writes generated images under the configured default output dir", async () => {
 	const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "pi-codex-minimal-image-"));
 	const encoded = Buffer.from("png-bytes").toString("base64");

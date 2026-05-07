@@ -4,6 +4,7 @@ export interface NativeToolRewriteResult<T = unknown> {
 }
 
 export interface NativeToolRewriteOptions {
+	imageModel?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -16,14 +17,16 @@ function toolName(tool: Record<string, unknown>): string | undefined {
 	return typeof nested?.name === "string" ? nested.name : undefined;
 }
 
-function imageToolConfig(tool: Record<string, unknown>): Record<string, unknown> {
+function imageToolConfig(tool: Record<string, unknown>, options: NativeToolRewriteOptions): Record<string, unknown> {
 	const parameters = isRecord(tool.parameters) ? tool.parameters : isRecord(isRecord(tool.function) ? tool.function.parameters : undefined) ? (tool.function as Record<string, unknown>).parameters as Record<string, unknown> : {};
 	const config: Record<string, unknown> = { type: "image_generation" };
+	if (typeof options.imageModel === "string" && options.imageModel.trim()) config.model = options.imageModel.trim();
 	for (const key of ["size", "quality", "background", "output_format"]) {
 		const value = parameters[key];
 		if (typeof value === "string") config[key] = value;
 	}
 	if (!config.output_format) config.output_format = "png";
+	if (!config.action) config.action = "generate";
 	return config;
 }
 
@@ -35,7 +38,7 @@ export function rewriteNativeOpenAiTools<T>(payload: T, options: NativeToolRewri
 		const name = toolName(candidate);
 		if (name === "image_generation") {
 			rewritten.push(name);
-			return imageToolConfig(candidate);
+			return imageToolConfig(candidate, options);
 		}
 		return candidate;
 	});

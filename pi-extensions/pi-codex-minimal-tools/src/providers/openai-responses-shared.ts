@@ -397,6 +397,17 @@ export async function processResponsesStream<TApi extends Api>(
 	type OutputState = ReasoningState | MessageState | FunctionCallState;
 
 	const outputStates = new Map<number, OutputState>();
+	const imageGenerationCallIds = new Set<string>();
+
+	const appendImageGenerationCall = (item: unknown): void => {
+		const imageGenerationCall = sanitizeImageGenerationCallItem(item);
+		if (!imageGenerationCall || imageGenerationCallIds.has(imageGenerationCall.id)) return;
+		imageGenerationCallIds.add(imageGenerationCall.id);
+		(output.content as InternalAssistantContent[]).push({
+			type: "image_generation_call",
+			item: imageGenerationCall,
+		});
+	};
 
 	const renderReasoningSummary = (summaryParts: Map<number, { text: string }>): string =>
 		Array.from(summaryParts.entries())
@@ -592,17 +603,17 @@ export async function processResponsesStream<TApi extends Api>(
 				stream.push({ type: "toolcall_end", contentIndex: toolCallIndex, toolCall, partial: output });
 				outputStates.delete(event.output_index);
 			} else if (item.type === "image_generation_call") {
-				const imageGenerationCall = sanitizeImageGenerationCallItem(item);
-				if (imageGenerationCall) {
-					(output.content as InternalAssistantContent[]).push({
-						type: "image_generation_call",
-						item: imageGenerationCall,
-					});
-				}
+				appendImageGenerationCall(item);
 				outputStates.delete(event.output_index);
 			}
 		} else if (event.type === "response.completed") {
 			const response = event.response;
+			const finalOutput = Array.isArray((response as { output?: unknown } | undefined)?.output)
+				? ((response as unknown as { output: unknown[] }).output)
+				: [];
+			for (const item of finalOutput) {
+				if ((item as { type?: unknown } | undefined)?.type === "image_generation_call") appendImageGenerationCall(item);
+			}
 			if (response?.id) output.responseId = response.id;
 			if (response?.usage) {
 				const cachedTokens = response.usage.input_tokens_details?.cached_tokens || 0;

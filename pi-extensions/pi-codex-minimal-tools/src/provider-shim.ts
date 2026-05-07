@@ -1036,6 +1036,13 @@ function isRetryableEarlyWebSocketError(error: unknown): boolean {
 
 async function* mapCodexEvents(events: AsyncIterable<StreamEventShape>): AsyncIterable<StreamEventShape> {
 	let sawTerminalResponse = false;
+	const completedOutputItems = new Set<string>();
+	const outputItemKey = (item: unknown, index?: number): string | undefined => {
+		if (!item || typeof item !== "object") return undefined;
+		const candidate = item as { id?: unknown; type?: unknown };
+		if (typeof candidate.id === "string" && typeof candidate.type === "string") return `${candidate.type}:${candidate.id}`;
+		return typeof candidate.type === "string" && typeof index === "number" ? `${candidate.type}:index:${index}` : undefined;
+	};
 	for await (const event of events) {
 		const type = typeof event.type === "string" ? event.type : undefined;
 		if (!type) continue;
@@ -1051,12 +1058,28 @@ async function* mapCodexEvents(events: AsyncIterable<StreamEventShape>): AsyncIt
 		if (type === "response.done" || type === "response.completed" || type === "response.incomplete") {
 			sawTerminalResponse = true;
 			const response = event.response;
+			const output = Array.isArray(response?.output) ? response.output : [];
+			for (let outputIndex = 0; outputIndex < output.length; outputIndex++) {
+				const item = output[outputIndex];
+				if (!item || typeof item !== "object") continue;
+				const itemType = (item as { type?: unknown }).type;
+				if (itemType !== "image_generation_call" && itemType !== "web_search_call") continue;
+				const key = outputItemKey(item, outputIndex);
+				if (key && completedOutputItems.has(key)) continue;
+				if (key) completedOutputItems.add(key);
+				yield { type: "response.output_item.done", output_index: outputIndex, item } as StreamEventShape;
+			}
 			yield {
 				...event,
 				type: "response.completed",
 				response: response ? { ...response, status: normalizeCodexStatus(response.status) } : response,
 			};
 			return;
+		}
+
+		if (type === "response.output_item.done") {
+			const key = outputItemKey(event.item, typeof event.output_index === "number" ? event.output_index : undefined);
+			if (key) completedOutputItems.add(key);
 		}
 
 		yield event;

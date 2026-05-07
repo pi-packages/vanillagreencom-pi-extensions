@@ -206,7 +206,7 @@ export default function codexMinimalTools(pi: ExtensionAPI): void {
 		currentCwd = ctx.cwd;
 		const settings = loadSettings(ctx.cwd);
 		if (!settings.enabled || !settings.nativeProviderTools || !hasOpenAiModelsLoaded(ctx) || contextModel(ctx)?.provider !== "openai-codex") return undefined;
-		const result = rewriteNativeOpenAiTools(event.payload);
+		const result = rewriteNativeOpenAiTools(event.payload, { imageModel: settings.imageModel });
 		return result.rewritten.length > 0 ? result.payload : undefined;
 	});
 }
