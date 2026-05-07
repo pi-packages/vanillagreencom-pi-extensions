@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { extname, isAbsolute, resolve } from "node:path";
-import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@mariozechner/pi-coding-agent";
 import type { Api, Model } from "@mariozechner/pi-ai";
 import { type Component, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { loadSettings } from "./settings.js";
@@ -14,6 +14,11 @@ const DEFAULT_CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 const JWT_CLAIM_PATH = "https://api.openai.com/auth";
 const BACKGROUND_IMAGE_INSTRUCTIONS = "Generate or edit images with the hosted image_generation tool. Use the user's prompt and any provided reference images. Return the image_generation_call result.";
 const IMAGE_GEN_STATUS_KEY = "codex-image-gen";
+const IMAGE_GEN_ERROR_MESSAGE_TYPE = "codex-image-generation-error";
+const PANEL_BAR_COLOR = "borderAccent";
+const PANEL_TITLE_COLOR = "customMessageLabel";
+const PANEL_RULE_COLOR = "muted";
+const PANEL_CARD_PADDING_X = 1;
 
 interface ActiveImageJob {
 	id: string;
@@ -44,6 +49,13 @@ interface CodexImageResult {
 	outputFormat?: string;
 	revisedPrompt?: string;
 	imageModel?: string;
+}
+
+interface ImageGenerationErrorDetails {
+	message: string;
+	prompt?: string;
+	imageModel?: string;
+	referenceCount?: number;
 }
 
 function tokenizeArgs(input: string): string[] {
@@ -82,48 +94,61 @@ function tokenizeArgs(input: string): string[] {
 }
 
 function padAnsi(text: string, width: number): string {
-	return text + " ".repeat(Math.max(0, width - visibleWidth(text)));
+	const truncated = truncateToWidth(text, width, "");
+	return `${truncated}${" ".repeat(Math.max(0, width - visibleWidth(truncated)))}`;
 }
 
-function imageGenBranch(theme: any, branch: "├" | "└"): string {
-	return theme.fg("muted", `${branch}─ `);
+function panelFrameContentWidth(width: number): number {
+	return Math.max(1, width - 2 - PANEL_CARD_PADDING_X * 2);
 }
 
-function simpleFrame(lines: string[], width: number, theme: any, title: string): string[] {
-	if (width < 8) return lines.map((line) => truncateToWidth(line, width, ""));
-	const border = (text: string) => theme.fg("borderAccent", text);
-	const titleText = ` ${truncateToWidth(title, Math.max(1, width - 4), "…")} `;
-	const fill = Math.max(1, width - 2 - visibleWidth(titleText));
-	const innerWidth = Math.max(1, width - 4);
+function panelFrame(lines: string[], width: number, theme: Theme): string[] {
+	const safeWidth = Math.max(1, width);
+	if (safeWidth < 8) return lines.map((line) => truncateToWidth(line, safeWidth, ""));
+	const inner = Math.max(1, safeWidth - 2);
+	const contentWidth = panelFrameContentWidth(safeWidth);
+	const border = (text: string) => theme.fg(PANEL_BAR_COLOR, text);
 	return [
-		`${border("┏")}${theme.fg("success", titleText)}${border("━".repeat(fill))}${border("┓")}`,
-		...lines.map((line) => `${border("┃")} ${padAnsi(truncateToWidth(line, innerWidth, ""), innerWidth)} ${border("┃")}`),
-		`${border("┗")}${border("━".repeat(width - 2))}${border("┛")}`,
-	].map((line) => truncateToWidth(line, width, ""));
+		`${border("┏")}${border("━".repeat(inner))}${border("┓")}`,
+		...lines.map((line) => `${border("┃")}${" ".repeat(PANEL_CARD_PADDING_X)}${padAnsi(line, contentWidth)}${" ".repeat(PANEL_CARD_PADDING_X)}${border("┃")}`),
+		`${border("┗")}${border("━".repeat(inner))}${border("┛")}`,
+	].map((line) => truncateToWidth(line, safeWidth, ""));
 }
 
-function renderJobLines(theme: any, width: number): string[] {
+function panelBranch(theme: Theme, branch: "├" | "└" | "│"): string {
+	if (branch === "│") return theme.fg(PANEL_RULE_COLOR, "│  ");
+	return theme.fg(PANEL_RULE_COLOR, `${branch}─ `);
+}
+
+function renderStatusHeader(jobs: ActiveImageJob[], theme: Theme): string {
+	const oldest = jobs[0];
+	const elapsed = oldest ? Math.max(0, Math.round((Date.now() - oldest.startedAt) / 1000)) : 0;
+	const imageModels = [...new Set(jobs.map((job) => job.imageModel))];
+	const modelText = imageModels.length === 1 ? imageModels[0] : `${imageModels.length} models`;
+	const refs = jobs.reduce((total, job) => total + job.referenceCount, 0);
+	const refText = refs > 0 ? ` · ${refs} ref${refs === 1 ? "" : "s"}` : "";
+	return `${theme.fg(PANEL_TITLE_COLOR, theme.bold("Image Generation"))} ${theme.fg("muted", `${jobs.length} running · ${modelText}${refText} · ${elapsed}s`)}`;
+}
+
+function renderJobLines(theme: Theme, width: number): string[] {
 	const jobs = Array.from(activeImageJobs.values()).sort((a, b) => a.startedAt - b.startedAt);
 	if (jobs.length === 0) return [];
-	const running = jobs.length;
 	const dot = theme.fg("dim", " · ");
-	const lines = [
-		`${theme.fg("accent", "● ")}${theme.fg("text", theme.bold("Image Generation"))}${dot}${theme.fg("success", `${running} running`)}${dot}${theme.fg("dim", "/image-gen")}`,
-	];
+	const lines = [renderStatusHeader(jobs, theme)];
 	const shown = jobs.slice(0, 4);
 	for (const [index, job] of shown.entries()) {
 		const ageSeconds = Math.max(0, Math.round((Date.now() - job.startedAt) / 1000));
 		const isLast = index === shown.length - 1 && jobs.length <= shown.length;
-		const refs = job.referenceCount > 0 ? `${dot}${theme.fg("warning", `${job.referenceCount} ref`)}` : "";
+		const refs = job.referenceCount > 0 ? `${dot}${theme.fg("dim", `${job.referenceCount} ref${job.referenceCount === 1 ? "" : "s"}`)}` : "";
 		const promptWidth = Math.max(16, width - 36);
-		lines.push(`${imageGenBranch(theme, isLast ? "└" : "├")}${theme.fg("accent", "◐ ")}${theme.fg("toolOutput", job.imageModel)}${refs}${dot}${theme.fg("success", "running")}${dot}${theme.fg("dim", `${ageSeconds}s`)}${dot}${theme.fg("text", truncateToWidth(job.prompt, promptWidth, "…"))}`);
+		lines.push(`${panelBranch(theme, isLast ? "└" : "├")}${theme.fg("accent", "●")} ${theme.fg("accent", truncateToWidth(job.prompt, promptWidth, "…"))}${dot}${theme.fg("muted", job.imageModel)}${refs}${dot}${theme.fg("dim", `${ageSeconds}s`)}`);
 	}
 	const hidden = jobs.length - shown.length;
-	if (hidden > 0) lines.push(`${imageGenBranch(theme, "└")}${theme.fg("muted", `… ${hidden} more`)}`);
-	return simpleFrame(lines, width, theme, ` image-gen ${running} `);
+	if (hidden > 0) lines.push(`${panelBranch(theme, "└")}${theme.fg("muted", `… ${hidden} more`)}`);
+	return panelFrame(lines, width, theme);
 }
 
-function createImageGenWidgetFactory(): (_tui: unknown, theme: any) => Component {
+function createImageGenWidgetFactory(): (_tui: unknown, theme: Theme) => Component {
 	return (_tui, theme) => ({
 		invalidate() {},
 		render(width: number): string[] {
@@ -296,6 +321,50 @@ function collectImageResult(results: CodexImageResult[], item: unknown, fallback
 	});
 }
 
+function collectResponseText(value: unknown, out: string[]): void {
+	if (!value || typeof value !== "object") return;
+	const item = value as Record<string, unknown>;
+	for (const key of ["text", "refusal", "summary_text", "message"] as const) {
+		const text = item[key];
+		if (typeof text === "string" && text.trim()) out.push(text.trim());
+	}
+	for (const key of ["content", "output", "summary"] as const) {
+		const child = item[key];
+		if (Array.isArray(child)) for (const part of child) collectResponseText(part, out);
+	}
+}
+
+export function summarizeNonImageResponse(response: Record<string, unknown> | undefined): string {
+	if (!response) return "No image was returned by Codex.";
+	const status = typeof response.status === "string" ? response.status : undefined;
+	const error = response.error && typeof response.error === "object" ? response.error as Record<string, unknown> : undefined;
+	const errorMessage = typeof error?.message === "string" ? error.message : undefined;
+	const texts: string[] = [];
+	collectResponseText(response, texts);
+	const text = [...new Set(texts)].join(" ").replace(/\s+/g, " ").trim();
+	const details = [status && status !== "completed" ? `status ${status}` : undefined, errorMessage, text].filter(Boolean).join(" · ");
+	return details ? `No image was returned by Codex: ${details}` : "No image was returned by Codex.";
+}
+
+function renderImageGenError(details: ImageGenerationErrorDetails, theme: Theme): Component {
+	return {
+		invalidate() {},
+		render(width: number): string[] {
+			const safeWidth = Math.max(1, width);
+			const message = details.message || "Image generation failed.";
+			const promptWidth = Math.max(16, safeWidth - 28);
+			const lines = [
+				`${theme.fg("error", "● ")}${theme.fg("text", theme.bold("Image Generation "))}${theme.fg("error", "failed")}`,
+			];
+			if (details.imageModel) lines.push(`${panelBranch(theme, "├")}${theme.fg("text", "Model ")}${theme.fg("muted", details.imageModel)}`);
+			if (details.referenceCount && details.referenceCount > 0) lines.push(`${panelBranch(theme, "├")}${theme.fg("text", "Refs ")}${theme.fg("muted", `${details.referenceCount}`)}`);
+			if (details.prompt) lines.push(`${panelBranch(theme, "├")}${theme.fg("text", "Prompt ")}${theme.fg("muted", truncateToWidth(details.prompt, promptWidth, "…"))}`);
+			lines.push(`${panelBranch(theme, "└")}${theme.fg("error", truncateToWidth(message, Math.max(16, safeWidth - 5), "…"))}`);
+			return lines.map((line) => truncateToWidth(line, safeWidth, ""));
+		},
+	};
+}
+
 async function runBackgroundImageGeneration(pi: ExtensionAPI, ctx: ExtensionCommandContext, parsed: ParsedImageGenCommand): Promise<void> {
 	const settings = loadSettings(ctx.cwd);
 	const model = ctx.modelRegistry.find("openai-codex", "gpt-5.5") ?? (ctx.model?.provider === "openai-codex" ? ctx.model : undefined);
@@ -318,18 +387,21 @@ async function runBackgroundImageGeneration(pi: ExtensionAPI, ctx: ExtensionComm
 	if (!response.ok) throw new Error(`Codex image generation failed: ${response.status} ${await response.text()}`);
 	const results: CodexImageResult[] = [];
 	let responseId: string | undefined;
+	let lastResponse: Record<string, unknown> | undefined;
 	for await (const event of parseSseEvents(response)) {
 		if (event.type === "response.created" && event.response && typeof event.response === "object") {
+			lastResponse = event.response as Record<string, unknown>;
 			const id = (event.response as { id?: unknown }).id;
 			if (typeof id === "string") responseId = id;
 		}
 		if (event.type === "response.output_item.done") collectImageResult(results, event.item, settings.imageModel);
 		if ((event.type === "response.completed" || event.type === "response.done") && event.response && typeof event.response === "object") {
+			lastResponse = event.response as Record<string, unknown>;
 			const responseOutput = (event.response as { output?: unknown }).output;
 			if (Array.isArray(responseOutput)) for (const item of responseOutput) collectImageResult(results, item, settings.imageModel);
 		}
 	}
-	if (results.length === 0) throw new Error("Codex image generation completed without an image_generation_call result.");
+	if (results.length === 0) throw new Error(summarizeNonImageResponse(lastResponse));
 	const savedImages = [];
 	for (const result of results) {
 		savedImages.push(await saveOpenAICodexGeneratedImage(ctx.cwd, {
@@ -350,6 +422,22 @@ async function runBackgroundImageGeneration(pi: ExtensionAPI, ctx: ExtensionComm
 }
 
 export function registerBackgroundImageGenerationCommand(pi: ExtensionAPI): void {
+	pi.registerMessageRenderer<ImageGenerationErrorDetails>(IMAGE_GEN_ERROR_MESSAGE_TYPE, (message, _options, theme) => {
+		const rawContent = typeof message.content === "string"
+			? message.content
+			: message.content
+					.filter((item) => item.type === "text")
+					.map((item) => item.text)
+					.join("\n");
+		const details: ImageGenerationErrorDetails = {
+			message: message.details?.message ?? rawContent.replace(/^Image generation failed:\s*/i, "") ?? "Image generation failed.",
+			prompt: message.details?.prompt,
+			imageModel: message.details?.imageModel,
+			referenceCount: message.details?.referenceCount,
+		};
+		return renderImageGenError(details, theme);
+	});
+
 	pi.registerCommand("image-gen", {
 		description: "Generate or edit an image in the background with Codex OAuth. Usage: /image-gen prompt text [@reference.png]",
 		handler: async (args, ctx) => {
@@ -364,7 +452,12 @@ export function registerBackgroundImageGenerationCommand(pi: ExtensionAPI): void
 			void runBackgroundImageGeneration(pi, ctx, parsed)
 				.catch((error) => {
 					const message = error instanceof Error ? error.message : String(error);
-					pi.sendMessage({ customType: "codex-image-generation-error", content: `Image generation failed: ${message}`, display: true }, { triggerTurn: false });
+					pi.sendMessage({
+						customType: IMAGE_GEN_ERROR_MESSAGE_TYPE,
+						content: `Image generation failed: ${message}`,
+						display: true,
+						details: { message, prompt: parsed.prompt, imageModel: settings.imageModel, referenceCount: parsed.imagePaths.length } satisfies ImageGenerationErrorDetails,
+					}, { triggerTurn: false });
 				})
 				.finally(() => finishImageJob(ctx, job.id));
 		},

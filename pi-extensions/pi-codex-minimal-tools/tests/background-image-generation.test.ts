@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildBackgroundImageRequest, parseImageGenCommandArgs } from "../src/background-image-generation.js";
+import { buildBackgroundImageRequest, parseImageGenCommandArgs, summarizeNonImageResponse } from "../src/background-image-generation.js";
 
 test("parseImageGenCommandArgs separates @reference images from prompt", () => {
 	assert.deepEqual(parseImageGenCommandArgs("make it green @icon.png 'with soft shadows' @refs/logo.webp"), {
@@ -28,4 +28,13 @@ test("buildBackgroundImageRequest requests edit with reference images", () => {
 	assert.equal(input[0].content[0].text, "Edit the provided image(s): change icon to green");
 	assert.equal(input[0].content[1].type, "input_image");
 	assert.equal(input[0].content[1].image_url, "data:image/png;base64,abc");
+});
+
+test("summarizeNonImageResponse includes status, error, and text output", () => {
+	const summary = summarizeNonImageResponse({
+		status: "failed",
+		error: { message: "image tool failed" },
+		output: [{ type: "message", content: [{ type: "output_text", text: "Could not generate that image." }] }],
+	});
+	assert.equal(summary, "No image was returned by Codex: status failed · image tool failed · Could not generate that image.");
 });
