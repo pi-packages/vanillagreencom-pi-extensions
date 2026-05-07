@@ -3353,16 +3353,19 @@ class QolSessionSearchComponent {
 	private maxOverlayRows(): number {
 		const terminalRows = Number(this.tui.terminal?.rows ?? process.stdout.rows ?? 30);
 		const safeRows = Number.isFinite(terminalRows) && terminalRows > 0 ? terminalRows : 30;
-		return Math.max(8, Math.floor(safeRows * SESSION_SEARCH_OVERLAY_HEIGHT_RATIO));
+		return Math.max(9, Math.floor(safeRows * SESSION_SEARCH_OVERLAY_HEIGHT_RATIO));
+	}
+
+	private compactSearchLayout(): boolean {
+		return this.maxOverlayRows() < 18;
 	}
 
 	private searchMaxVisibleRows(): number {
 		const configured = Math.max(1, Math.floor(settingNumber("sessionSearch.maxVisible", 8, this.cwd)));
-		// Search results render as 2 content rows plus a divider between rows.
-		// The remaining chrome is title, search box, help text, scroll status,
-		// tabs, bottom detail rows, footer, and frame. Keep the rendered line count within overlay maxHeight
-		// so Pi does not clip the bottom of the popup on short terminals.
-		const responsive = Math.max(1, Math.floor((this.maxOverlayRows() - 16) / 3));
+		// Each hit is two rows plus a separator between hits. Chrome is aggressively
+		// reduced on short terminals so the popup can shrink to one visible hit.
+		const chromeRows = this.compactSearchLayout() ? 7 : 11;
+		const responsive = Math.max(1, Math.floor((this.maxOverlayRows() - chromeRows) / 3));
 		return Math.max(1, Math.min(configured, responsive));
 	}
 
@@ -3694,6 +3697,7 @@ class QolSessionSearchComponent {
 	private renderSearch(width: number): string[] {
 		const { bottom, divider, empty, filledRow, inner, row, top } = boxParts(width, this.theme);
 		const state = this.searchState;
+		const compact = this.compactSearchLayout();
 		const lines: string[] = [top("Session Search", `${state.results.length} hits`), empty()];
 		const accent = (s: string) => this.theme.fg("accent", s);
 		const dim = (s: string) => this.theme.fg("dim", s);
@@ -3701,22 +3705,24 @@ class QolSessionSearchComponent {
 		const cursorChar = state.query[state.cursor] ?? " ";
 		const queryDisplay = `${state.query.slice(0, state.cursor)}${this.theme.inverse(cursorChar)}${state.query.slice(state.cursor + (state.cursor < state.query.length ? 1 : 0))}`;
 		lines.push(row(this.renderScopeTabs(inner)));
-		lines.push(empty());
+		if (!compact) lines.push(empty());
 		lines.push(filledRow(` > ${queryDisplay}`));
-		lines.push(row(dim(`${state.total} sessions searched · fuzzy tokens · re:<pattern> regex · "phrase" exact`)));
-		lines.push(empty(), divider(), empty());
+		if (!compact) lines.push(row(dim(`fuzzy tokens · re:<pattern> regex · "phrase" exact`)));
+		lines.push(divider());
 
 		if (state.results.length === 0) {
-			lines.push(row(muted(state.query.trim() ? "No prompts match your search" : "No prompts found")), empty());
+			lines.push(row(muted(state.query.trim() ? "No prompts match your search" : "No prompts found")));
 		} else {
 			lines.push(...this.renderSearchHitPane(inner, row, dim, muted, accent));
 		}
 
-		lines.push(divider(), empty());
-		lines.push(...this.renderSearchDetailRows(inner, row, dim, muted));
-		lines.push(empty());
-		lines.push(row(`${ansiYellow("-/=")} ${dim("page")}  ${ansiYellow("enter")} ${dim("all prompts")}  ${ansiYellow("alt+c")} ${dim("copy")}  ${ansiYellow("alt+f")} ${dim("fork")}  ${ansiYellow("alt+r")} ${dim("resume")}`));
-		lines.push(row(`${ansiYellow("alt+i")} ${dim("inject")}  ${ansiYellow("alt+a")} ${dim("actions")}  ${ansiYellow("tab")} ${dim("scope")}  ${ansiYellow("ctrl+u")} ${dim("clear")}  ${ansiYellow("esc")} ${dim("close")}`));
+		lines.push(divider());
+		if (compact) {
+			lines.push(row(`${ansiYellow("enter")} ${dim("prompts")}  ${ansiYellow("alt+c/f/r/i/a")} ${dim("actions")}  ${ansiYellow("tab")} ${dim("scope")}  ${ansiYellow("esc")} ${dim("close")}`));
+		} else {
+			lines.push(row(`${ansiYellow("-/=")} ${dim("page")}  ${ansiYellow("enter")} ${dim("all prompts")}  ${ansiYellow("alt+c")} ${dim("copy")}  ${ansiYellow("alt+f")} ${dim("fork")}  ${ansiYellow("alt+r")} ${dim("resume")}`));
+			lines.push(row(`${ansiYellow("alt+i")} ${dim("inject")}  ${ansiYellow("alt+a")} ${dim("actions")}  ${ansiYellow("tab")} ${dim("scope")}  ${ansiYellow("ctrl+u")} ${dim("clear")}  ${ansiYellow("esc")} ${dim("close")}`));
+		}
 		lines.push(bottom());
 		return lines;
 	}
@@ -3729,6 +3735,7 @@ class QolSessionSearchComponent {
 		accent: (s: string) => string,
 	): string[] {
 		const state = this.searchState;
+		const compact = this.compactSearchLayout();
 		const maxVisible = this.searchMaxVisibleRows();
 		const start = Math.max(0, Math.min(state.selected - Math.floor(maxVisible / 2), state.results.length - maxVisible));
 		const end = Math.min(start + maxVisible, state.results.length);
@@ -3765,7 +3772,7 @@ class QolSessionSearchComponent {
 			output.push(row(dim("─".repeat(Math.max(8, inner)))));
 			for (const line of this.renderPromptPreviewLines(selectedHit, inner, Math.min(5, paneRows), dim, muted, accent)) output.push(row(line));
 		}
-		if (state.results.length > maxVisible) output.push(row(dim(`${state.selected + 1}/${state.results.length} ${state.query.trim() ? "matches" : "recent prompts"}`)));
+		if (!compact && state.results.length > maxVisible) output.push(row(dim(`${state.selected + 1}/${state.results.length} ${state.query.trim() ? "matches" : "recent prompts"}`)));
 		return output;
 	}
 
@@ -3782,7 +3789,7 @@ class QolSessionSearchComponent {
 			return clipped + " ".repeat(Math.max(0, width - visibleWidth(clipped)));
 		};
 		if (!hit) return Array.from({ length: maxLines }, () => fixed(""));
-		const title = `${accent("Full prompt")} ${dim(`#${hit.message.index}`)}`;
+		const title = accent("Prompt preview");
 		const cwd = muted(truncateToWidth(shortPathForUi(hit.result.cwd || hit.result.path), width, "…"));
 		const bodyBudget = Math.max(1, maxLines - 3);
 		const body = wrapVisible(styleSessionSnippet(hit.message.text, this.searchState.query, this.theme), width, bodyBudget);
@@ -3804,27 +3811,6 @@ class QolSessionSearchComponent {
 		return truncateToWidth(parts.join(" "), inner, "");
 	}
 
-	private renderSearchDetailRows(
-		inner: number,
-		row: (content?: string) => string,
-		dim: (s: string) => string,
-		muted: (s: string) => string,
-	): string[] {
-		const state = this.searchState;
-		const selected = state.results[state.selected];
-		const scope = state.scope === "current" ? "current project" : "all sessions";
-		const query = oneLine(state.query);
-		const summary = `${state.results.length} prompt hits · ${state.total} sessions · ${scope}${query ? ` · query “${truncateToWidth(query, 28, "…")}”` : ""}`;
-		if (!selected) return [row(dim(summary))];
-		const locationPrefix = dim("Session CWD: ");
-		const location = shortPathForUi(selected.result.cwd || dirname(selected.result.path));
-		return [
-			row(locationPrefix + muted(truncateToWidth(location, Math.max(10, inner - visibleWidth(locationPrefix)), "…"))),
-			row(dim(`Selected: ${sessionResumeTitle(selected.result)} · prompt #${selected.message.index}`)),
-			row(dim(summary)),
-		];
-	}
-
 	private renderMessages(width: number, state: QolSessionMessagesState): string[] {
 		const { bottom, divider, empty, inner, row, selectedRow, top } = boxParts(width, this.theme);
 		const accent = (s: string) => this.theme.fg("accent", s);
@@ -3838,7 +3824,7 @@ class QolSessionSearchComponent {
 			const gap = Math.max(1, inner - visibleWidth(clippedLeft) - visibleWidth(right));
 			return `${clippedLeft}${" ".repeat(gap)}${right}`;
 		};
-		const right = dim(`${promptCountLabel(state.messages.length)} · ${formatSessionSearchDate(result.modified)}`);
+		const right = dim(formatSessionSearchDate(result.modified));
 		const title = truncateToWidth(sessionResumeTitle(result), Math.max(12, inner - visibleWidth(right) - 1), "…");
 		lines.push(row(pair(this.theme.bold(accent(title)), right)));
 		lines.push(row(muted(truncateToWidth(shortPathForUi(result.cwd || result.path), inner, "…"))));
@@ -3857,7 +3843,6 @@ class QolSessionSearchComponent {
 			const messageRow = `${number} ${selected ? this.theme.bold(accent(text)) : text}`;
 			lines.push(selected ? selectedRow(messageRow) : row(messageRow));
 		}
-		if (state.messages.length > maxVisible) lines.push(empty(), row(dim(`${state.selected + 1}/${state.messages.length} user prompts`)));
 		lines.push(divider(), empty());
 		lines.push(row(`${ansiYellow("-/=")} ${dim("page")}  ${ansiYellow("enter")} ${dim("prompt actions")}  ${ansiYellow("alt+c")} ${dim("copy prompt")}  ${ansiYellow("alt+f")} ${dim("fork from here")}  ${ansiYellow("alt+r")} ${dim("resume")}  ${ansiYellow("esc")} ${dim("sessions")}`));
 		lines.push(bottom());
