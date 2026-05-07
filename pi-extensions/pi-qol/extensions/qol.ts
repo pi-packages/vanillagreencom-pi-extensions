@@ -125,7 +125,7 @@ const DEFAULT_PERMISSION_GATE_PREVIEW_CHARS = 1200;
 const DEFAULT_PERMISSION_GATE_PREVIEW_LINE_WIDTH = 120;
 const DEFAULT_SESSION_SEARCH_LIMIT = 40;
 const DEFAULT_SESSION_SEARCH_PREVIEW_SNIPPETS = 6;
-const DEFAULT_SESSION_SEARCH_SHORTCUT = "f3";
+const DEFAULT_SESSION_SEARCH_SHORTCUT = "f2";
 const DEFAULT_SESSION_SEARCH_SUMMARY_INPUT_CHARS = 180_000;
 const DEFAULT_SESSION_SEARCH_SUMMARY_MAX_TOKENS = 4096;
 const DEFAULT_SESSION_SEARCH_CACHE_TTL_SECONDS = 0;
@@ -2430,6 +2430,7 @@ function sessionSearchShortcut(cwd?: string): string | undefined {
 	if (!settingBoolean("sessionSearch.ctrlFShortcut", true, cwd)) return undefined;
 	const shortcut = settingStringAllowEmpty("sessionSearch.shortcutKey", DEFAULT_SESSION_SEARCH_SHORTCUT, cwd).trim().toLowerCase();
 	if (!shortcut || shortcut === "none" || shortcut === "off" || shortcut === "false") return undefined;
+	if (shortcut === "f3") return DEFAULT_SESSION_SEARCH_SHORTCUT;
 	return shortcut;
 }
 

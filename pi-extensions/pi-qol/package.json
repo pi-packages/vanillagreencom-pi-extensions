@@ -340,9 +340,9 @@
         {
           "key": "sessionSearch.shortcutKey",
           "label": "Session search shortcut",
-          "description": "Keyboard shortcut to open the session search overlay. Default f3 avoids Pi's built-in Ctrl+F and Alt+F editor bindings. Set to none to disable.",
+          "description": "Keyboard shortcut to open the session search overlay. Default f2 avoids Pi's built-in Ctrl+F and Alt+F editor bindings. Set to none to disable.",
           "type": "string",
-          "default": "f3",
+          "default": "f2",
           "category": "Session Search",
           "apply": "reload",
           "requiresReload": true

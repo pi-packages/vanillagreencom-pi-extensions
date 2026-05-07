@@ -11,7 +11,7 @@ const INSTALL_SYMBOL = Symbol.for("vstack.pi-session-manager.installed");
 const VSTACK_MODAL_LOCK_SYMBOL = Symbol.for("vstack.pi.modal-lock");
 const PACKAGE_ID = "@vanillagreen/pi-session-manager";
 const LEGACY_STATUS_KEY = "session-manager";
-const DEFAULT_SHORTCUT = "alt+shift+r";
+const DEFAULT_SHORTCUT = "f1";
 const DEFAULT_WIDTH = 112;
 const DEFAULT_ROWS = 12;
 const POPUP_HEIGHT_RATIO = 0.9;
@@ -146,6 +146,7 @@ function settingSort(cwd?: string): SortMode {
 function configuredShortcut(cwd?: string): string | undefined {
 	const shortcut = settingStringAllowEmpty("shortcutKey", DEFAULT_SHORTCUT, cwd).trim().toLowerCase();
 	if (!shortcut || shortcut === "none" || shortcut === "off" || shortcut === "false") return undefined;
+	if (shortcut === "alt+shift+r" || shortcut === "ctrl+shift+r") return DEFAULT_SHORTCUT;
 	return shortcut;
 }
 
@@ -1253,14 +1254,7 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 	if (shortcut) {
 		pi.registerShortcut(shortcut, {
 			description: "Open session manager",
-			handler: async (ctx) => {
-				if (!ctx.hasUI) return;
-				if (!ctx.isIdle()) {
-					ctx.ui.notify("Session manager can open after the current turn finishes", "warning");
-					return;
-				}
-				ctx.ui.setEditorText("/sessions");
-			},
+			handler: async (ctx) => handleSessionsCommand("", ctx, pi),
 		});
 	}
 }

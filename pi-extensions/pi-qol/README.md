@@ -31,7 +31,7 @@ Restart Pi after installation.
 - Compact image placeholders: existing pasted image paths can collapse to `[Image #N]` aliases and are attached on submit.
 - Session naming: `/rename [name]` sets or shows the friendly session name; automatic first-prompt naming is enabled by default.
 - Context usage: `/context` prints an inline Claude-style context-window visualization with estimated Pi/model category breakdowns.
-- Previous-session search: `/search` and optional `F3` overlay search prior sessions, preview snippets, resume, inject summarized context, or start a new session with summarized context.
+- Previous-session search: `/search` and optional `F2` overlay search prior sessions, preview snippets, resume, inject summarized context, or start a new session with summarized context.
 - Handoff: `/handoff <goal>` drafts a focused prompt for a new session, preserving the latest compaction summary plus retained branch entries.
 - Optional permission gate: when enabled, prompts before configured `bash` tool command fragments run; default match is `rm -Rf`.
 - Notifications: terminal/tmux/native notifications for ready-for-input, questions, direction needed, task completion, and critical/blocked states.
@@ -85,7 +85,7 @@ Settings are exposed through `pi-extension-manager` under **QOL**.
 ### Session search
 
 - `sessionSearch.enabled`: register `/search` and the overlay.
-- `sessionSearch.shortcutKey`: shortcut to open search; default `f3`, set `none` to disable.
+- `sessionSearch.shortcutKey`: shortcut to open search; default `f2`, set `none` to disable.
 - `sessionSearch.sortMode`: `relevance` or `recent`.
 - Result/layout knobs: `resultLimit`, `maxVisible`, `messageMaxVisible`, `previewSnippets`, `overlayWidth`, `cacheTtlSeconds`.
 - Summary knobs: `summaryModel`, `summaryMaxTokens`, `summaryInputMaxChars`.
