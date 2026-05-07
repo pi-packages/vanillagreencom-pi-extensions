@@ -60,7 +60,7 @@ The global shortcut defaults to `Alt+Shift+R` — it pre-fills `/sessions` into 
 
 ## Settings
 
-Settings are exposed through `pi-extension-manager` under `vstack.extensionManager.config.pi-session-manager`.
+Settings are exposed through `pi-extension-manager` under `vstack.extensionManager.config.@vanillagreen/pi-session-manager`.
 
 | Key | Default | Notes |
 | --- | --- | --- |

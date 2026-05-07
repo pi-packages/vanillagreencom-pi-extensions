@@ -26,8 +26,8 @@ Restart Pi after installation.
 
 ## What it provides
 
-- Compact statusline and `π` prompt editor: shows repo/project, branch/dirty state, model, colorized thinking level, optional Caveman badge, context window size, and remaining context percent while replacing Pi's default footer/editor chrome.
-- Reliable multiline input: `Shift+Enter` / `Shift+Return` inserts a newline when the terminal reports it distinctly; `ctrl+j` is the default fallback newline key. `Alt+Enter` is reserved for Pi follow-up messages. When `pi-caveman` is loaded, `Alt+C` cycles Caveman modes.
+- Compact statusline and `π` prompt editor: shows repo/project, branch/dirty state, model, colorized thinking level, optional Caveman badge, context window size, remaining context percent, and (inside `pi-agents-tmux` child panes) an ANSI-background subagent-name badge while replacing Pi's default footer/editor chrome.
+- Reliable multiline input: `Shift+Enter` / `Shift+Return` inserts a newline when the terminal reports it distinctly; `ctrl+j` is the default fallback newline key. `Alt+Enter` is reserved for Pi follow-up messages. QOL can also style Pi's built-in steering/follow-up pending queue preview with an ANSI green left bar while leaving the restore hint muted. When `pi-caveman` is loaded, `Alt+C` cycles Caveman modes.
 - Compact image placeholders: existing pasted image paths can collapse to `[Image #N]` aliases and are attached on submit.
 - Session naming: `/rename [name]` sets or shows the friendly session name; automatic first-prompt naming is enabled by default.
 - Context usage: `/context` prints an inline Claude-style context-window visualization with estimated Pi/model category breakdowns.
@@ -66,6 +66,13 @@ Settings are exposed through `pi-extension-manager` under **QOL**.
 - `inputBottomPaddingLines`: blank lines below the compact prompt; default `0`.
 - Git display knobs: `gitRefreshTimeoutMs`, `showDirtyMarker`.
 - If `pi-caveman` is loaded, QOL reads its bridge to show a Caveman icon in the statusline and to make `Alt+C` cycle Caveman modes. The Caveman package's `showStatusBadge` setting also controls this QOL badge.
+- If `pi-agents-tmux` is loaded inside a child pane, QOL reads its bridge/env metadata to show a trailing subagent-name badge after the context percent. The badge uses the agent `color:` frontmatter (`red`, `green`, `yellow`, `blue`, `magenta`, `cyan`; aliases `orange`, `purple`/`violet`, `teal`) or falls back to automatic color cycling.
+
+### Input
+
+- `newlineOnShiftEnter`: intercept distinguishable `Shift+Enter` / `Shift+Return` and insert a newline; default on.
+- `newlineFallbackKey`: alternate newline key for terminals that cannot distinguish shifted enter; default `ctrl+j`, or `none` to disable.
+- `pendingQueue.asciiGreen`: style Pi's built-in steering/follow-up pending queue preview with an ANSI green heavy left bar while keeping the Alt+Up restore hint in the theme hint color with a two-space indent; default on.
 
 ### Session auto-rename
 
