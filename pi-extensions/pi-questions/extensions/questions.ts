@@ -39,11 +39,9 @@ const ICONS = {
 	circleFilled: "",   // nf-fa-circle
 	circleOpen: "",     // nf-fa-circle_o
 } as const;
-const ANSI_YELLOW_FG = "\x1b[33m";
 const ANSI_FG_RESET = "\x1b[39m";
 
 function ansiGreen(text: string): string { return `${ANSI_GREEN_FG}${text}${ANSI_FG_RESET}`; }
-function ansiYellow(text: string): string { return `${ANSI_YELLOW_FG}${text}${ANSI_FG_RESET}`; }
 
 type VstackConfig = Record<string, unknown>;
 type QuestionRenderMode = "editor" | "overlay";
@@ -761,10 +759,10 @@ async function openQuestionUi(ctx: ExtensionContext, pending: PendingQuestion): 
 				return truncateToWidth(parts.join(" "), width, "");
 			};
 
-			const renderOption = (question: QuestionTab, index: number, width: number): string => {
+			const renderOption = (question: QuestionTab, index: number, width: number): string[] => {
 				const custom = isCustomRow(question, index);
 				const option = custom ? undefined : question.options[index];
-				if (!custom && !option) return panelLine("", width);
+				if (!custom && !option) return [panelLine("", width)];
 				const isCursor = index === selectedRows[activeTab];
 				const customValue = customAnswers[activeTab].trim();
 				const isChecked = custom ? customValue.length > 0 : selections[activeTab].has(option!.label);
@@ -776,12 +774,33 @@ async function openQuestionUi(ctx: ExtensionContext, pending: PendingQuestion): 
 				const rawDesc = custom
 					? customValue ? "edit custom response" : question.customPlaceholder
 					: option!.description;
-				const descWidth = rawDesc ? Math.min(Math.max(10, Math.floor(width * 0.38)), visibleWidth(rawDesc)) : 0;
-				const desc = rawDesc ? ` ${theme.fg(isCursor ? "text" : "dim", truncateToWidth(rawDesc, descWidth, ""))}` : "";
-				const labelWidth = Math.max(1, width - prefixWidth - visibleWidth(desc));
-				const label = truncateToWidth(rawLabel, labelWidth, "");
-				const row = `${prefix}${isCursor ? theme.bold(label) : label}${desc}`;
-				return isCursor ? selectedLine(theme, row, width) : panelLine(row, width);
+				const styleLabel = (text: string) => (isCursor ? theme.bold(text) : text);
+				const styleDesc = (text: string) => theme.fg(isCursor ? "text" : "dim", text);
+				const wrapRow = (content: string) => (isCursor ? selectedLine(theme, content, width) : panelLine(content, width));
+				const inlineSpace = Math.max(0, width - prefixWidth - visibleWidth(rawLabel) - 1);
+				if (rawDesc && inlineSpace >= visibleWidth(rawDesc) && inlineSpace > 0) {
+					const row = `${prefix}${styleLabel(rawLabel)} ${styleDesc(rawDesc)}`;
+					return [wrapRow(row)];
+				}
+				if (!rawDesc) {
+					const labelWidth = Math.max(1, width - prefixWidth);
+					const row = `${prefix}${styleLabel(truncateToWidth(rawLabel, labelWidth, ""))}`;
+					return [wrapRow(row)];
+				}
+				const labelWidth = Math.max(1, width - prefixWidth);
+				const labelLines = wrapPlain(rawLabel, labelWidth, 4);
+				const descIndent = " ".repeat(prefixWidth);
+				const descWidth = Math.max(1, width - prefixWidth);
+				const descLines = wrapPlain(rawDesc, descWidth, 8);
+				const out: string[] = [];
+				labelLines.forEach((line, i) => {
+					const content = i === 0 ? `${prefix}${styleLabel(line)}` : `${descIndent}${styleLabel(line)}`;
+					out.push(wrapRow(content));
+				});
+				for (const line of descLines) {
+					out.push(wrapRow(`${descIndent}${styleDesc(line)}`));
+				}
+				return out;
 			};
 
 			const render = (width: number): string[] => {
@@ -790,28 +809,28 @@ async function openQuestionUi(ctx: ExtensionContext, pending: PendingQuestion): 
 				const question = request.questions[activeTab];
 				const lines: string[] = [];
 
+				if (request.questions.length > 1) {
+					lines.push(panelLine("", innerWidth));
+				}
 				lines.push(panelLine(renderTabs(innerWidth), innerWidth));
 				lines.push(panelLine("", innerWidth));
 				for (const line of wrapPlain(question.question, innerWidth, 3)) {
 					lines.push(panelLine(theme.fg("text", line), innerWidth));
 				}
-				const mode = inputMode
-					? "free-text · enter submits · esc returns to options"
-					: question.multiple
-						? `multi-select · space toggles · enter continues${question.allowCustom ? " · custom row types" : ""}`
-						: `single-select · enter picks and continues${question.allowCustom ? " · custom row types" : ""}`;
-				lines.push(panelLine(theme.fg("dim", mode), innerWidth));
 				lines.push(panelLine("", innerWidth));
 
 				const start = scrollOffsets[activeTab];
 				const visibleRows = visibleRowsFor(activeTab);
 				const totalRows = rowCount(question);
 				const end = Math.min(totalRows, start + visibleRows);
+				let renderedRowLines = 0;
 				for (let index = start; index < end; index += 1) {
-					lines.push(renderOption(question, index, innerWidth));
+					const rowLines = renderOption(question, index, innerWidth);
+					for (const line of rowLines) lines.push(line);
+					renderedRowLines += rowLines.length;
 				}
 				if (useOverlay) {
-					for (let i = end - start; i < visibleRows; i += 1) lines.push(panelLine("", innerWidth));
+					for (let i = renderedRowLines; i < visibleRows; i += 1) lines.push(panelLine("", innerWidth));
 				}
 
 				if (inputMode) {
@@ -822,12 +841,7 @@ async function openQuestionUi(ctx: ExtensionContext, pending: PendingQuestion): 
 					}
 				}
 
-				lines.push(panelLine("", innerWidth));
-				const footer = inputMode
-					? `${ansiYellow("enter")} ${theme.fg("dim", "submit text")}  ${ansiYellow("esc")} ${theme.fg("dim", "back")}`
-					: `${ansiYellow("-/=")} ${theme.fg("dim", "page")}  ${ansiYellow("enter")} ${theme.fg("dim", question.multiple ? "next/submit" : "choose")}  ${ansiYellow("space")} ${theme.fg("dim", question.multiple ? "toggle/type" : question.allowCustom ? "type custom" : "-")}  ${ansiYellow("tab/←/→")} ${theme.fg("dim", "tabs")}`;
-				lines.push(panelLine(footer, innerWidth));
-				return framePopup(lines, width, theme, request.header, inputMode ? "esc back" : "esc");
+				return framePopup(lines, width, theme, request.header, "");
 			};
 
 			return {
