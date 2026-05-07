@@ -28,6 +28,7 @@ interface CavemanBridge {
 	isActive(): boolean;
 	getMode(): string;
 	getLastActiveMode(): string;
+	isStatusBadgeEnabled?(cwd?: string): boolean;
 	subscribe(listener: () => void): () => void;
 }
 
@@ -1210,7 +1211,9 @@ function setTmuxWindowOption(target: string, option: string, value: string): voi
 function renderStatusLine(width: number, ctx: ExtensionContext, git: GitState, pi: ExtensionAPI, theme: Pick<Theme, "fg">): string {
 	const { label: contextLabel, percent } = statuslineContextInfo(ctx);
 	const leftHead = `${git.projectName}${gitBadge(git, settingBoolean("showDirtyMarker", true, ctx.cwd))} ${formatModel(ctx, pi)} (${contextLabel})`;
-	const caveman = readCavemanBridge();
+	const cavemanBridge = readCavemanBridge();
+	const cavemanVisible = !!cavemanBridge && (cavemanBridge.isStatusBadgeEnabled?.(ctx.cwd) ?? true);
+	const caveman = cavemanVisible ? cavemanBridge : undefined;
 	const cavemanGlyph = caveman ? (caveman.isActive() ? CAVEMAN_ICON_ACTIVE : CAVEMAN_ICON_INACTIVE) : "";
 	const cavemanTone: "success" | "muted" = caveman?.isActive() ? "success" : "muted";
 	const cavemanSegment = caveman ? ` / ${cavemanGlyph}` : "";

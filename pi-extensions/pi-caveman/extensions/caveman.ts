@@ -13,6 +13,7 @@ interface CavemanBridge {
 	isActive(): boolean;
 	getMode(): Mode;
 	getLastActiveMode(): ActiveMode;
+	isStatusBadgeEnabled(cwd?: string): boolean;
 	subscribe(listener: () => void): () => void;
 }
 
@@ -203,6 +204,7 @@ export default function caveman(pi: ExtensionAPI): void {
 		isActive: () => state.mode !== "off",
 		getMode: () => state.mode,
 		getLastActiveMode: () => state.lastActiveMode,
+		isStatusBadgeEnabled: (cwd) => settingBoolean("showStatusBadge", true, cwd),
 		subscribe: (listener) => {
 			listeners.add(listener);
 			return () => { listeners.delete(listener); };
