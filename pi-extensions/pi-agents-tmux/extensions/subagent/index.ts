@@ -1544,6 +1544,7 @@ function renderActiveTabBody(items: SubagentDashboardItem[], runtimeRoot: string
 		lines.push(`${agentPad(left[i] ?? "", leftWidth)} ${theme.fg("dim", "\u2502")} ${truncateToWidth(right[i] ?? "", rightWidth, "")}`);
 	}
 	const legend = `${theme.fg("muted", "Active")}: ${theme.fg("warning", "running/waiting")} \u00b7 ${theme.fg("success", "completed")} \u00b7 ${theme.fg("error", "failed")}`;
+	lines.push("");
 	lines.push(...wrapTextWithAnsi(legend, width));
 	return lines;
 }
@@ -1570,6 +1571,7 @@ function renderHistoryTabBody(
 		lines.push(`${agentPad(left[i] ?? "", leftWidth)} ${theme.fg("dim", "│")} ${truncateToWidth(right[i] ?? "", rightWidth, "")}`);
 	}
 	const legend = `${theme.fg("muted", "Status")}: ${theme.fg("success", "completed")} · ${theme.fg("warning", "running/queued/blocked")} · ${theme.fg("error", "failed")}`;
+	lines.push("");
 	lines.push(...wrapTextWithAnsi(legend, width));
 	return lines;
 }
