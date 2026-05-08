@@ -52,6 +52,7 @@ const DEFAULT_RESULT_MAX_BYTES = 100 * 1024;
 const DEFAULT_RESULT_MAX_LINES = 4_000;
 const TRACE_VIEWER_WIDTH = "92%";
 const TRACE_VIEWER_MAX_HEIGHT = "88%";
+const AGENT_EDIT_CONFIRM_WIDTH = 96;
 const MALFORMED_COMPLETION_GRACE_MS = 1_500;
 
 type AgentAsciiColor = "red" | "green" | "yellow" | "blue" | "magenta" | "cyan";
@@ -4812,29 +4813,38 @@ async function openTraceViewer(ctx: ExtensionContext, title: string, items: Trac
 	}), { overlay: true, overlayOptions: { anchor: "center", width: TRACE_VIEWER_WIDTH, maxHeight: TRACE_VIEWER_MAX_HEIGHT } });
 }
 
+function highlightAgentEditConfirmationPaths(message: string): string {
+	return message.replace(/(~\/[^\s,]+|\/[^\s,]*\/[^\s,]+)/g, (match) => {
+		const trailing = match.match(/[.;:!?]+$/)?.[0] ?? "";
+		const filePath = trailing ? match.slice(0, -trailing.length) : match;
+		return `${ansiGreen(filePath)}${trailing}`;
+	});
+}
+
 async function showAgentEditConfirmation(ctx: ExtensionContext, message: string): Promise<void> {
 	if (!ctx.hasUI) {
 		ctx.ui.notify(message, "info");
 		return;
 	}
+	const styledMessage = highlightAgentEditConfirmationPaths(message);
 	await ctx.ui.custom<void>((tui: TUI, theme: Theme, _kb, done) => ({
 		invalidate() {},
 		handleInput(data: string) {
 			if (matchesKey(data, "return") || matchesKey(data, "enter") || matchesKey(data, "escape") || matchesKey(data, "backspace") || matchesKey(data, "ctrl+c")) done();
 		},
 		render(width: number): string[] {
-			const frameWidth = Math.max(44, Math.min(width, 96));
+			const frameWidth = Math.max(8, Math.min(width, AGENT_EDIT_CONFIRM_WIDTH));
 			const innerWidth = Math.max(1, frameWidth - 4);
 			const lines = [
 				theme.fg("success", "Agent metadata updated"),
 				"",
-				...wrapTextWithAnsi(message, innerWidth),
+				...wrapTextWithAnsi(styledMessage, innerWidth),
 				"",
-				`${ansiYellow("enter")} ${theme.fg("dim", "return to agents · ")}${ansiYellow("esc")} ${theme.fg("dim", "return")}`,
+				`${ansiYellow("enter")} ${theme.fg("dim", "return to agents")}`,
 			];
 			return simpleFrame(lines, frameWidth, theme, "Agents").slice(0, Math.max(8, Math.floor(tui.terminal.rows * 0.45)));
 		},
-	}), { overlay: true, overlayOptions: { anchor: "center", width: "72%", maxHeight: "40%" } });
+	}), { overlay: true, overlayOptions: { anchor: "center", width: AGENT_EDIT_CONFIRM_WIDTH, maxHeight: "40%" } });
 }
 
 async function traceViewerItems(record: PaneTaskRecord): Promise<TraceViewerItem[]> {
