@@ -65,3 +65,10 @@ pane-respond <pane> --harness pi --question que_... --reject
 - Use `--answer-text` only when that tab has `allowCustom=true`; this is the bridge equivalent of tabbing to the custom/free-type row and typing in the inline editor.
 - Use `--answers-json` for multi-tab requests. The JSON must contain one inner answer array per tab, e.g. `[["Label A"],["custom text"]]`.
 - If bridge metadata is missing and fallback tmux driving is unavoidable, use `--keys-allow-tmux` deliberately and mirror the UI mechanics: `Tab`/`Left`/`Right` switch tabs, `Up`/`Down` or `j`/`k` move rows, `Space` toggles multi-select/custom, `Enter` advances/submits, `Escape` cancels or leaves text input.
+
+## Pi slash-command grammar
+
+- Pi only expands `/skill:<name>` (via `_expandSkillCommand`) and explicitly `pi.registerCommand`-registered names. Bare `/<skill-name>` is **not** auto-aliased and falls through to the LLM as raw text.
+- `pi.sendUserMessage()` deliberately sets `expandPromptTemplates: false`, bypassing slash-command and skill expansion.
+- `pi-bridge send` (and therefore `pane-respond --harness pi --payload "/..."`) routes through `sendUserMessage`, so mid-session bridge messages do **not** expand slash commands.
+- The only paths that expand slash commands: the interactive editor (user typing + Enter) and the `pi` CLI's initial-prompt argument. Spawn commands must therefore use `pi '/skill:<name> ...'` (see `open-terminal`); flightdeck doesn't send slash commands mid-session by design.

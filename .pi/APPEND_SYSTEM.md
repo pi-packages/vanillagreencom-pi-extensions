@@ -20,6 +20,13 @@ For any `pi-extensions/**` or Pi package behavior change:
 
 Worktree/feature branch dev: test via local project Pi settings for that checkout; do not add vstack repo sources pointing at temp/worktree paths.
 
+## Pi slash-command expansion (gotcha)
+
+- `pi.sendUserMessage()` and `pi-bridge send` both bypass slash-command and skill expansion (`expandPromptTemplates: false` in `agent-session.js`). Sending `/skill:foo` via either path delivers raw text to the LLM, not a Skill tool call.
+- The only paths that expand slash commands are the interactive editor (user types + Enter) and the `pi` CLI's initial-prompt argument (`pi '/skill:foo'`).
+- For programmatic UX from an extension, `ctx.ui.pasteToEditor("/skill:foo\n")` fills the editor and the user submits — established pattern across pi-skills-manager / pi-qol / pi-session-manager / pi-prompt-stash.
+- No public API submits the editor programmatically. If you find yourself wanting one, the slash command probably wasn't the right shape — open a popup / register a tool / register the command directly via `pi.registerCommand` instead.
+
 General `vstack add` scope rules apply (see [AGENTS.md](../AGENTS.md#rules)).
 
 # Publishing Pi extension packages to npm
