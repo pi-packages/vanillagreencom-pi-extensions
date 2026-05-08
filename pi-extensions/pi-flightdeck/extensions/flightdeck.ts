@@ -283,6 +283,7 @@ function renderIssueLine(issue: IssueRecord, theme: Theme, _snapshot: Flightdeck
 function renderIssueDetailLines(issue: IssueRecord, theme: Theme): string[] {
 	const out: string[] = [];
 	if (issue.pane_target) out.push(theme.fg("dim", `pane ${issue.pane_target}`));
+	if (issue.launch?.model || issue.launch?.effort) out.push(theme.fg("dim", `run  ${formatLaunchProfile(issue)}`));
 	if (issue.worktree) out.push(theme.fg("dim", `wt   ${compactPath(issue.worktree)}`));
 	const decisions = issue.decisions_log ?? [];
 	const last = decisions[decisions.length - 1];
@@ -299,6 +300,12 @@ function renderIssueDetailLines(issue: IssueRecord, theme: Theme): string[] {
 		out.push(ratio > 2 ? theme.fg("error", `${txt} (>2× — possible creep)`) : theme.fg("dim", txt));
 	}
 	return out;
+}
+
+function formatLaunchProfile(issue: IssueRecord): string {
+	const model = typeof issue.launch?.model === "string" && issue.launch.model.trim() ? issue.launch.model.trim() : "default-model";
+	const effort = typeof issue.launch?.effort === "string" && issue.launch.effort.trim() ? issue.launch.effort.trim() : "default-effort";
+	return `${model} · ${effort}`;
 }
 
 // ============================================================================
@@ -415,6 +422,7 @@ function renderIssueDetailBlock(issue: IssueRecord, theme: Theme, width: number)
 	const lines: string[] = [];
 	lines.push(`${theme.fg("customMessageLabel", theme.bold(issue.issue))} ${theme.fg("dim", "·")} ${stateBadge(theme, issue.state)} ${theme.fg("dim", "·")} ${harnessChip(theme, issue.harness)}`);
 	if (issue.pane_target) lines.push(`${label(theme, "pane:")} ${theme.fg("text", issue.pane_target)}`);
+	if (issue.launch?.model || issue.launch?.effort) lines.push(`${label(theme, "run:")}  ${theme.fg("text", formatLaunchProfile(issue))}`);
 	if (issue.worktree) lines.push(`${label(theme, "wt:")}   ${theme.fg("text", compactPath(issue.worktree))}`);
 	if (issue.pr_number) lines.push(`${label(theme, "PR:")}   ${theme.fg("accent", `#${issue.pr_number}`)}`);
 	if (issue.substate) lines.push(`${label(theme, "tag:")}  ${tagBadge(theme, issue.substate)}`);

@@ -267,15 +267,15 @@ Use this whenever § 4.3 or § 4.4 launches a pane through `open-terminal`.
    | Normal/complex implementation | Claude Code, strongest reasoning | `--harness claude --model 'opus[1m]' --effort max` |
    | OpenAI/Codex-preferred implementation | Codex, strongest reasoning | `--harness codex --model gpt-5.5 --effort xhigh` |
    | Pi-native orchestration / Pi extension work | Pi, strongest OpenAI reasoning | `--harness pi --model openai/gpt-5.5 --effort xhigh` |
-   | OpenCode-preferred implementation | OpenCode, strong model | `--harness opencode --model openai/gpt-5.5` |
+   | OpenCode-preferred implementation | OpenCode, strong model + variant | `--harness opencode --model openai/gpt-5.5 --effort xhigh` |
    | User wants their configured defaults | Harness default | `--harness [HARNESS]` only |
 
    Notes:
-   - `open-terminal` maps effort per harness: Claude → `--effort`, Codex → `-c model_reasoning_effort=...`, Pi → `--thinking`. `max` maps to `xhigh` for Codex/Pi. OpenCode effort is not wired by this launcher; do not invent a flag.
+   - `open-terminal` maps effort per harness: Claude → `--effort`, Codex → `-c model_reasoning_effort=...`, Pi → `--thinking`, OpenCode → `--variant`. `max` maps to `xhigh` for Codex/Pi and OpenCode OpenAI/Codex models; OpenCode `off` maps to `none`.
    - If the user chooses a model/effort different from the recommendation, pass exactly their values.
    - If the user chooses harness defaults, omit `--model` and `--effort`.
 
-2. **Ask user** for launch profile. Include the recommendation first, then: `Claude max` | `Codex xhigh` | `Pi xhigh` | `OpenCode model only` | `Harness defaults` | `I'll launch it myself` | custom model/effort.
+2. **Ask user** for launch profile. Include the recommendation first, then: `Claude max` | `Codex xhigh` | `Pi xhigh` | `OpenCode xhigh` | `Harness defaults` | `I'll launch it myself` | custom model/effort.
 
 3. **Capture** `[HARNESS]`, optional `[MODEL]`, optional `[EFFORT]`. Build `[LAUNCH_FLAGS]` as:
    ```bash

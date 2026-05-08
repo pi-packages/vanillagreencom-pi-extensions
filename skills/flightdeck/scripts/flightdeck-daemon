@@ -37,7 +37,7 @@
 #     if the PID is reused before the next startup GC runs.
 #
 # Usage:
-#   flightdeck-daemon start  --session <S> --master <pane> --inner <p1>[,<p2>...]
+#   flightdeck-daemon start  --session <S> --master <pane> --inner <p1>[,<p2>...] [--inner-harnesses <h1>[,<h2>...]]
 #   flightdeck-daemon stop   --session <S>
 #   flightdeck-daemon status --session <S>
 #   flightdeck-daemon events --session <S>     # turn-start drain (no clear)
@@ -151,7 +151,7 @@ start spawn modes:
                        change the default.
   --in-tmux-window   — spawn a dedicated tmux window in the same session
                        running 'start --foreground'. Lifetime ties to the
-                       tmux session. Recommended for codex/opencode/omp
+                       tmux session. Recommended for codex/opencode/pi/omp
                        harnesses where backgrounding is unreliable.
   --foreground       — keep the process attached. Used internally by both
                        spawn modes; pass directly for ops debugging.
@@ -1709,7 +1709,7 @@ case "$ACTION" in
     #                        run_in_background reparenting).
     #   tmux-window       → spawn a dedicated tmux window inside the same
     #                        session running 'start --foreground'.
-    #                        Recommended for codex/opencode/omp where
+    #                        Recommended for codex/opencode/pi/omp where
     #                        backgrounding semantics vary; the tmux session
     #                        is the natural lifetime boundary for a
     #                        flightdeck session anyway.

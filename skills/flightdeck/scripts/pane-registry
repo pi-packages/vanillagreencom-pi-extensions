@@ -4,7 +4,7 @@
 # Usage:
 #   pane-registry init <ISSUE> --window <name> --harness <h> --worktree <path> [--pane-index <N>] [--pr <N>]
 #                                  [--oc-url <URL> --oc-session-id <ID> [--oc-port <N>]]
-#   pane-registry list [--format json|inner-panes]
+#   pane-registry list [--format json|inner-panes|inner-harnesses]
 #   pane-registry get <ISSUE>
 #   pane-registry set-state <ISSUE> <state>             # waiting|prompting|submitting|merge-ready|merged|aborted|dead
 #   pane-registry set-substate <ISSUE> <substate>      # tag string from prompt-classify
@@ -62,6 +62,7 @@ case "$ACTION" in
     CC_URL=""; CC_SESSION_UUID=""; CC_PORT=""; CC_TRANSCRIPT=""
     PI_BRIDGE_PID=""; PI_BRIDGE_SOCKET=""; PI_SESSION_ID=""
     CX_WS=""; CX_THREAD_ID=""
+    LAUNCH_MODEL=""; LAUNCH_EFFORT=""
     while [[ $# -gt 0 ]]; do
       case "$1" in
         --window) WINDOW="$2"; shift 2 ;;
@@ -95,6 +96,8 @@ case "$ACTION" in
         OC_URL=$(jq -r '.url // ""' "$_spawn_file" 2>/dev/null || echo "")
         OC_SESSION_ID=$(jq -r '.session_id // ""' "$_spawn_file" 2>/dev/null || echo "")
         OC_PORT=$(jq -r '.port // ""' "$_spawn_file" 2>/dev/null || echo "")
+        LAUNCH_MODEL=$(jq -r '.launch.model // ""' "$_spawn_file" 2>/dev/null || echo "")
+        LAUNCH_EFFORT=$(jq -r '.launch.effort // ""' "$_spawn_file" 2>/dev/null || echo "")
       fi
     fi
     # Auto-hydrate claude channel metadata.
@@ -105,6 +108,8 @@ case "$ACTION" in
         CC_SESSION_UUID=$(jq -r '.session_uuid // ""' "$_cc_spawn_file" 2>/dev/null || echo "")
         CC_PORT=$(jq -r '.port // ""' "$_cc_spawn_file" 2>/dev/null || echo "")
         CC_TRANSCRIPT=$(jq -r '.transcript // ""' "$_cc_spawn_file" 2>/dev/null || echo "")
+        LAUNCH_MODEL=$(jq -r '.launch.model // ""' "$_cc_spawn_file" 2>/dev/null || echo "")
+        LAUNCH_EFFORT=$(jq -r '.launch.effort // ""' "$_cc_spawn_file" 2>/dev/null || echo "")
       fi
     fi
     # Auto-hydrate pi bridge metadata.
@@ -114,6 +119,8 @@ case "$ACTION" in
         PI_BRIDGE_PID=$(jq -r '.pid // ""' "$_pi_spawn_file" 2>/dev/null || echo "")
         PI_BRIDGE_SOCKET=$(jq -r '.socket // ""' "$_pi_spawn_file" 2>/dev/null || echo "")
         PI_SESSION_ID=$(jq -r '.session_id // ""' "$_pi_spawn_file" 2>/dev/null || echo "")
+        LAUNCH_MODEL=$(jq -r '.launch.model // ""' "$_pi_spawn_file" 2>/dev/null || echo "")
+        LAUNCH_EFFORT=$(jq -r '.launch.effort // ""' "$_pi_spawn_file" 2>/dev/null || echo "")
       fi
     fi
     # Auto-hydrate codex bridge metadata.
@@ -122,6 +129,8 @@ case "$ACTION" in
       if [[ -f "$_cx_spawn_file" ]]; then
         CX_WS=$(jq -r '.url // ""' "$_cx_spawn_file" 2>/dev/null || echo "")
         CX_THREAD_ID=$(jq -r '.thread_id // ""' "$_cx_spawn_file" 2>/dev/null || echo "")
+        LAUNCH_MODEL=$(jq -r '.launch.model // ""' "$_cx_spawn_file" 2>/dev/null || echo "")
+        LAUNCH_EFFORT=$(jq -r '.launch.effort // ""' "$_cx_spawn_file" 2>/dev/null || echo "")
       fi
     fi
 
@@ -147,6 +156,8 @@ case "$ACTION" in
       --arg pi_session_id "$PI_SESSION_ID" \
       --arg cx_ws "$CX_WS" \
       --arg cx_thread_id "$CX_THREAD_ID" \
+      --arg launch_model "$LAUNCH_MODEL" \
+      --arg launch_effort "$LAUNCH_EFFORT" \
       --arg now "$(now)" \
       '{
         window: $window,
@@ -166,6 +177,10 @@ case "$ACTION" in
         pi_session_id: ($pi_session_id | if . == "" then null else . end),
         cx_ws: ($cx_ws | if . == "" then null else . end),
         cx_thread_id: ($cx_thread_id | if . == "" then null else . end),
+        launch: (if $launch_model == "" and $launch_effort == "" then null else {
+          model: ($launch_model | if . == "" then null else . end),
+          effort: ($launch_effort | if . == "" then null else . end)
+        } end),
         state: "waiting",
         substate: null,
         unknown_since: null,
@@ -199,8 +214,13 @@ case "$ACTION" in
         # `flightdeck-daemon start --inner`. Each issue's orchestrator pane.
         "$FD_STATE" get '.issues // {} | to_entries | map(.value.pane_target) | join(",")'
         ;;
+      inner-harnesses)
+        # Comma-separated harness list in the same issue order as
+        # `inner-panes`, suitable for `flightdeck-daemon --inner-harnesses`.
+        "$FD_STATE" get '.issues // {} | to_entries | map(.value.harness // "") | join(",")'
+        ;;
       *)
-        echo "Unknown format: $FORMAT (supported: json, inner-panes)" >&2
+        echo "Unknown format: $FORMAT (supported: json, inner-panes, inner-harnesses)" >&2
         exit 2
         ;;
     esac

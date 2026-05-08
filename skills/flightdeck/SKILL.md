@@ -140,6 +140,7 @@ Lessons distilled from real multi-issue session experience are grouped by domain
       "window": "<window-name>",
       "pane_target": "<TMUX_SESSION>:<window>.0",
       "harness": "claude|opencode|codex|...",
+      "launch": { "model": "<model-or-null>", "effort": "<effort-or-null>" },
       "worktree": "<absolute path>",
       "pr_number": 0,
       "state": "prompting",

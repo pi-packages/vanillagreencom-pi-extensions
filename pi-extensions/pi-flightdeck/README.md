@@ -7,7 +7,7 @@ When Pi is running as the flightdeck **master agent** in a tmux session, this ex
 ## What it shows
 
 - **Pause banner** — when flightdeck master sets `paused_for_user`, a high-contrast yellow-framed banner appears above the editor with the issue id, reason, and prompt excerpt. Clears automatically when master resumes.
-- **Persistent dashboard widget** — compact tree of tracked issues with state badges, harness chip, PR number, last decision, and age.
+- **Persistent dashboard widget** — compact tree of tracked issues with state badges, harness chip, launch model/effort when available, PR number, last decision, and age.
 - **`/flightdeck` popup** (F6) — full mission-control view with six tabs:
   - **Overview** — one row per tracked issue, with detail block for the selected one.
   - **Live feed** — daemon log, pending events queue, adapter wake events, and decisions interleaved.

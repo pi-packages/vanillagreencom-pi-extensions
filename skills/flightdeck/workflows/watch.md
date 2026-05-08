@@ -41,10 +41,12 @@ Master mode entry point. Polls every spawned issue pane, classifies their prompt
    ```
    MASTER_PANE="$SESSION:1.<base-pane-index>"  # the pane this watch.md runs in
    INNER_PANES="$(.agents/skills/flightdeck/scripts/pane-registry list --format inner-panes)"
+   INNER_HARNESSES="$(.agents/skills/flightdeck/scripts/pane-registry list --format inner-harnesses)"
    .agents/skills/flightdeck/scripts/flightdeck-daemon start \
      --session "$SESSION" \
      --master "$MASTER_PANE" \
-     --inner "$INNER_PANES"
+     --inner "$INNER_PANES" \
+     --inner-harnesses "$INNER_HARNESSES"
    ```
    `start` self-daemonizes via `setsid + nohup`: the call blocks until the child writes its PID file, then returns. Do NOT add `&` or harness-specific backgrounding — the daemon survives the calling shell's lifecycle on its own. The daemon refuses via flock if already running for this session, so the call is idempotent and safe on every `watch` re-entry.
 

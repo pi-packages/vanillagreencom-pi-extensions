@@ -20,6 +20,7 @@ export interface IssueRecord {
 	harness?: string;
 	worktree?: string;
 	pr_number?: number | null;
+	launch?: { model?: string | null; effort?: string | null } | null;
 	state?: IssueState;
 	substate?: string | null;
 	unknown_since?: string | null;
