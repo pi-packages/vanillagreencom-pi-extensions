@@ -1029,8 +1029,9 @@ function renderAgentList(agents: AgentConfig[], statuses: Map<string, AgentPaneS
 		const status = agentStatus(agent, statuses.get(agent.name));
 		const marker = " ";
 		const name = ansiMagenta(selected ? theme.bold(agent.name) : agent.name);
-		const meta = theme.fg("dim", ` ${status === "one-shot" ? "bg" : "pane"} · ${agent.source}`);
-		const model = agent.model ? theme.fg("dim", ` · ${agent.model}`) : "";
+		const metaTone = selected ? "text" : "dim";
+		const meta = theme.fg(metaTone, ` ${status === "one-shot" ? "bg" : "pane"} · ${agent.source}`);
+		const model = agent.model ? theme.fg(metaTone, ` · ${agent.model}`) : "";
 		const row = truncateToWidth(`${marker}${agentStatusIcon(status, theme)} ${name}${meta}${model}`, width, "…");
 		lines.push(selected ? theme.bg("selectedBg", agentPad(row, width)) : row);
 	}
@@ -1150,8 +1151,8 @@ function renderActiveAgentList(items: SubagentDashboardItem[], ui: AgentBrowserU
 		const selected = ui.activeSelected === 0;
 		const icon = theme.fg("accent", "\uf075"); // nf-fa-comment
 		const label = theme.fg(selected ? "accent" : "text", theme.bold("Chat"));
-		const hint = theme.fg("dim", "all agents");
-		const row = `${icon} ${label} ${theme.fg("dim", "\u00b7")} ${hint}`;
+		const hint = theme.fg(selected ? "text" : "dim", "all agents");
+		const row = `${icon} ${label} ${theme.fg(selected ? "text" : "dim", "\u00b7")} ${hint}`;
 		const prefix = selected ? theme.fg("accent", "> ") : "  ";
 		lines.push(truncateToWidth(`${prefix}${row}`, width, ""));
 	}
@@ -1169,8 +1170,9 @@ function renderActiveAgentList(items: SubagentDashboardItem[], ui: AgentBrowserU
 		const selected = absoluteIndex === ui.activeSelected;
 		const icon = dashboardStatusIcon(item.status, theme);
 		const name = selected ? ansiMagenta(theme.bold(item.agent)) : ansiMagenta(item.agent);
-		const kind = theme.fg("dim", dashboardKindLabel(item.kind));
-		const row = `${icon} ${name} ${theme.fg("dim", "\u00b7")} ${kind}`;
+		const metaTone = selected ? "text" : "dim";
+		const kind = theme.fg(metaTone, dashboardKindLabel(item.kind));
+		const row = `${icon} ${name} ${theme.fg(metaTone, "\u00b7")} ${kind}`;
 		const prefix = selected ? theme.fg("accent", "> ") : "  ";
 		lines.push(truncateToWidth(`${prefix}${row}`, width, ""));
 	}
@@ -1195,7 +1197,7 @@ function renderActiveAgentDetail(item: SubagentDashboardItem | undefined, ui: Ag
 	const body: string[] = [];
 	body.push(...wrap(`${theme.fg("muted", "Task ID")}: ${theme.fg("dim", item.taskId)}`));
 	if (item.task) body.push(...wrap(`${theme.fg("muted", "Task")}: ${item.task}`));
-	if (item.transcriptPath) body.push(...wrap(`${theme.fg("muted", "Transcript")}: ${theme.fg("dim", compactPath(item.transcriptPath, { maxChars: Number.POSITIVE_INFINITY }))}`));
+	if (item.transcriptPath) body.push(...wrapPlainNoEllipsis(`Transcript: ${compactPath(item.transcriptPath, { maxChars: Number.POSITIVE_INFINITY })}`, safeWidth).map((line) => theme.fg("dim", line)));
 	if (item.usage) {
 		const usageLine = formatUsageStatsForDashboard(item.usage).join(" \u00b7 ");
 		if (usageLine) body.push(...wrap(`${theme.fg("muted", "Usage")}: ${theme.fg("dim", usageLine)}`));
@@ -1284,15 +1286,40 @@ function renderHistoryList(records: PaneTaskRecord[], ui: AgentBrowserUiState, w
 		const selected = index === ui.historySelected;
 		const icon = historyStatusIcon(record.status, theme);
 		const name = ansiMagenta(selected ? theme.bold(record.agent) : record.agent);
-		const when = theme.fg("dim", formatRelativeTime(record.completedAt ?? record.createdAt));
+		const metaTone = selected ? "text" : "dim";
+		const when = theme.fg(metaTone, formatRelativeTime(record.completedAt ?? record.createdAt));
 		const summary = oneLinePreview(record.summary || record.task || "", 60);
-		const detail = summary ? theme.fg("dim", `  ${summary}`) : "";
-		const row = truncateToWidth(`${icon} ${name} ${theme.fg("dim", "·")} ${when}${detail}`, width, "…");
+		const detail = summary ? theme.fg(metaTone, `  ${summary}`) : "";
+		const row = truncateToWidth(`${icon} ${name} ${theme.fg(metaTone, "·")} ${when}${detail}`, width, "…");
 		lines.push(selected ? theme.bg("selectedBg", agentPad(row, width)) : row);
 	}
 	const hidden = Math.max(0, records.length - (ui.historyScroll + listRows));
 	if (hidden > 0) lines.push(theme.fg("dim", `↓ ${hidden} more`));
 	return lines;
+}
+
+function wrapPlainNoEllipsis(text: string, width: number): string[] {
+	const targetWidth = Math.max(1, width);
+	const out: string[] = [];
+	for (const raw of text.split(/\r?\n/)) {
+		const soft = wrapTextWithAnsi(raw, targetWidth);
+		const chunks = soft.length > 0 ? soft : [""];
+		for (const chunk of chunks) {
+			let rest = chunk;
+			if (!rest) {
+				out.push("");
+				continue;
+			}
+			while (visibleWidth(rest) > targetWidth) {
+				const part = truncateToWidth(rest, targetWidth, "");
+				if (!part) break;
+				out.push(part);
+				rest = rest.slice(part.length);
+			}
+			if (rest) out.push(rest);
+		}
+	}
+	return out;
 }
 
 function renderHistoryDetail(
@@ -1317,16 +1344,19 @@ function renderHistoryDetail(
 	const titleLine = `${agentPaneTitle(theme, "Detail", ui.pane === "inspector")} ${ansiMagenta(theme.bold(record.agent))} ${historyStatusText(record.status, theme)} ${theme.fg("dim", `· ${when}`)}`;
 	const subtabLine = renderTraceTabBar(subtabs, subtabIndex, safeWidth, theme);
 	const item = subtabs[subtabIndex];
-	const fileLine = item?.path
-		? theme.fg("dim", `file ${compactPath(item.path, { maxChars: Math.max(24, safeWidth - 6) })}`)
-		: theme.fg("dim", item?.type === "summary" ? "metadata view" : "");
+	const fileLines = item?.path
+		? wrapPlainNoEllipsis(`file ${compactPath(item.path, { maxChars: Number.POSITIVE_INFINITY })}`, safeWidth).map((line) => theme.fg("dim", line))
+		: item?.type === "summary"
+			? [theme.fg("dim", "metadata view")]
+			: [];
 	const rawLines = (item?.text || "(empty)").split(/\r?\n/);
 	const wrapped: string[] = [];
 	for (const raw of rawLines) {
-		const chunk = wrapTextWithAnsi(raw, safeWidth);
+		const chunk = wrapPlainNoEllipsis(raw, safeWidth);
 		wrapped.push(...(chunk.length > 0 ? chunk : [""]));
 	}
-	const headerRows = fileLine ? 4 : 3;
+	const header: string[] = [titleLine, "", subtabLine, "", ...fileLines];
+	const headerRows = header.length;
 	const footerRows = 1;
 	const visibleRows = Math.max(1, rows - headerRows - footerRows);
 	const maxScroll = Math.max(0, wrapped.length - visibleRows);
@@ -1336,8 +1366,7 @@ function renderHistoryDetail(
 	const afterCount = Math.max(0, wrapped.length - ui.inspectorScroll - visibleRows);
 	const after = afterCount > 0 ? `↓ ${afterCount}` : "";
 	const scrollHint = [before, after].filter(Boolean).join(" · ");
-	const out: string[] = [titleLine, "", subtabLine];
-	if (fileLine) out.push(fileLine);
+	const out: string[] = [...header];
 	out.push(...slice);
 	if (scrollHint) out.push(theme.fg("dim", scrollHint));
 	else out.push("");
