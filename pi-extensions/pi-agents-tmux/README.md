@@ -81,7 +81,7 @@ Bg (non-pane) agents resume by default per parent session: omitting `sessionKey`
 
 The extension routes pi at `runtime/sessions/bg-<agent>-<key>.jsonl`. Same `agent + sessionKey` across delegations resumes the same pi session and retains memory; different keys keep separate histories.
 
-Pane agents persist via their own pane session file, so `sessionKey` is ignored when the agent has `pane: true`. Default start/send resumes or reuses that session. To start fresh after stopping a pane, pass `forceSpawn: true` or run `/agents:new <name>`; if a live pane exists, stop it first.
+Pane agents persist via their own pane session file, so `sessionKey` is ignored when the agent has `pane: true`. `stop_subagent` and `/agents:stop <name>` kill the live tmux process but preserve that session file. Default `subagent`, `/agents:start <name>`, and `/agents:send <name> ...` resume/reuse it; to start fresh, pass `forceSpawn: true` or run `/agents:new <name>`.
 
 ## Commands
 
@@ -91,7 +91,7 @@ Pane agents persist via their own pane session file, so `sessionKey` is ignored 
 | `/agents project\|user\|both` | Open the browser with an explicit scope. |
 | `/agents show <name> [scope]` | Inspect an agent. |
 | `/agents:start <name>` | Start/reuse a live pane or resume the saved pane session. |
-| `/agents:new <name>` | Stop any live pane and start with a fresh session file. |
+| `/agents:new <name>` | Stop any live pane, archive the saved pane session, and start fresh. |
 | `/agents:send <name> <task>` | Queue a task for a persistent pane. |
 | `/agents:attach <name>` | Focus an existing pane. |
 | `/agents:stop <name>` | Stop a persistent pane. |
@@ -175,7 +175,7 @@ Use `get_subagent_result` with either `taskId` or `agent` (latest task for that 
 
 Use `steer_subagent` for mid-run correction. It targets `pi-session-bridge` (`steer`, `send --auto`, or `follow-up`) only when `pi-bridge list --json` contains an exact match for the child pane's registered `sessionFile` under this parent session runtime. It never falls back to matching by cwd. If the exact bridge target is unavailable, it queues a clear steering note in the pane inbox; that fallback is read only when the pane is idle.
 
-Use `stop_subagent` to kill a persistent pane from the parent agent. It removes the pane registry/dashboard row and marks any non-terminal active task as blocked.
+Use `stop_subagent` to kill a persistent pane from the parent agent. It removes the pane registry/dashboard row and marks any non-terminal active task as blocked, but preserves the session file so the next default start/delegation resumes memory.
 
 ## Artifacts and events
 
