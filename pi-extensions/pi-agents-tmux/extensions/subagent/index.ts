@@ -3912,7 +3912,7 @@ function formatCompletionGroup(completions: PaneCompletionDetails[]): string {
 	return [`# Agent completions (${completions.length})`, "", ...completions.map(formatCompletionDetails)].join("\n\n---\n\n");
 }
 
-async function pollPaneCompletions(runtimeRoot: string, pi: ExtensionAPI, triggerTurn = true): Promise<number> {
+async function pollPaneCompletions(runtimeRoot: string, pi: ExtensionAPI, triggerTurn = false): Promise<number> {
 	const root = outboxRoot(runtimeRoot);
 	let agentDirs: fs.Dirent[];
 	try {
@@ -4594,9 +4594,9 @@ function renderPaneCompletionMessage(message: { content: string; details?: unkno
 		container.addChild(
 			wrappedText(
 				[
-					`Source: ${compactPath(detail.sourcePath)}`,
-					detail.archivePath ? `Archive: ${compactPath(detail.archivePath)}` : "",
-					detail.transcriptPath ? `Transcript: ${compactPath(detail.transcriptPath)}` : "",
+					`Source: ${compactPath(detail.sourcePath, { maxChars: Number.POSITIVE_INFINITY })}`,
+					detail.archivePath ? `Archive: ${compactPath(detail.archivePath, { maxChars: Number.POSITIVE_INFINITY })}` : "",
+					detail.transcriptPath ? `Transcript: ${compactPath(detail.transcriptPath, { maxChars: Number.POSITIVE_INFINITY })}` : "",
 				]
 					.filter(Boolean)
 					.map((line) => theme.fg("dim", line))
@@ -6530,6 +6530,12 @@ export default function (pi: ExtensionAPI) {
 				return new Container();
 			}
 			const agentName = args.agent || "...";
+			try {
+				const agent = discoverAgents(_context?.cwd ?? process.cwd(), scope).agents.find((candidate) => candidate.name === agentName);
+				if (agent?.pane) return new Container();
+			} catch {
+				// Keep the generic call preview if discovery fails.
+			}
 			const preview = args.task ? oneLinePreview(args.task, 56) : "...";
 			let text = `${agentsCommandBullet(theme)}${agentWord(theme)} ${ansiMagenta(theme.bold(agentName))}`;
 			if (scope !== "project") text += theme.fg("dim", ` · ${scope}`);
@@ -6555,10 +6561,46 @@ export default function (pi: ExtensionAPI) {
 						? theme.fg("warning", `Full output unavailable: ${r.fullOutputError}`)
 						: "";
 			const transcriptLine = (r: SingleResult) => (r.transcriptPath ? theme.fg("dim", `Transcript: ${compactPath(r.transcriptPath)}`) : "");
-			const queuedPaneLine = (r: SingleResult) => {
+			const queuedPaneLine = (r: SingleResult, dashboard = false) => {
 				if (!r.taskId || !r.paneId) return "";
-				const hint = theme.fg("dim", " · ctrl+o");
-				return agentStatusLine(theme, r.agent, "Queued task", "warning", `${theme.fg("dim", " · pane")}${hint}`);
+				const suffix = `${theme.fg("dim", ` · pane${dashboard ? " · dashboard" : ""}`)}${theme.fg("dim", " · ctrl+p expand")}`;
+				return agentStatusLine(theme, r.agent, "Queued task", "warning", suffix);
+			};
+			const queuedTaskPreviewComponent = (r: SingleResult, dashboard = false): Component => ({
+				invalidate() {},
+				render(width: number): string[] {
+					const header = queuedPaneLine(r, dashboard);
+					const task = r.task.replace(/\s+/g, " ").trim() || "queued task";
+					const firstPrefix = subagentBranch(theme, "└", cwd);
+					const nextPrefix = subagentBranch(theme, "│", cwd);
+					const textWidth = Math.max(20, width - Math.max(visibleWidth(firstPrefix), visibleWidth(nextPrefix)));
+					const wrapped = wrapTextWithAnsi(task, textWidth);
+					const shown = wrapped.slice(0, 2);
+					if (wrapped.length > shown.length && shown.length > 0) shown[shown.length - 1] = truncateToWidth(`${shown[shown.length - 1]}…`, textWidth, "…");
+					return [
+						header,
+						`${firstPrefix}${theme.fg("dim", shown[0] ?? "queued task")}`,
+						...(shown[1] ? [`${nextPrefix}${theme.fg("dim", shown[1])}`] : []),
+					];
+				},
+			});
+			const expandedQueuedTaskComponent = (r: SingleResult): Component => {
+				const container = new Container();
+				container.addChild(wrappedText(queuedPaneLine(r)));
+				container.addChild(new Spacer(1));
+				container.addChild(wrappedText(theme.fg("muted", "─── Queued task ───")));
+				container.addChild(new Markdown(r.task.trim() || "(empty task)", 0, 0, mdTheme));
+				const artifacts = [
+					r.taskId ? `Task ID: ${r.taskId}` : "",
+					r.queuedTaskFile ? `Inbox: ${compactPath(r.queuedTaskFile)}` : "",
+					r.queuedOutboxFile ? `Completion: ${compactPath(r.queuedOutboxFile)}` : "",
+					r.transcriptPath ? `Transcript: ${compactPath(r.transcriptPath)}` : "",
+				].filter(Boolean);
+				if (artifacts.length > 0) {
+					container.addChild(new Spacer(1));
+					for (const line of artifacts) container.addChild(wrappedText(theme.fg("dim", line)));
+				}
+				return container;
 			};
 			const addFinalResponseMarkdown = (container: Container, finalOutput: string, toolCalls: DisplayItem[]) => {
 				if (!finalOutput.trim()) {
@@ -6601,6 +6643,7 @@ export default function (pi: ExtensionAPI) {
 				const quietDashboard = !expanded && dashboardEnabled(cwd) && quietInline(cwd);
 
 				if (expanded) {
+					if (isQueued) return expandedQueuedTaskComponent(r);
 					const container = new Container();
 					let header = agentStatusLine(theme, r.agent, isQueued ? "Queued task" : isError ? "failed" : "completed", isQueued ? "warning" : isError ? "error" : "success", theme.fg("dim", ` · ${isQueued ? "pane" : "bg"}`));
 					if (isError && r.stopReason) header += ` ${theme.fg("error", `[${r.stopReason}]`)}`;
@@ -6637,9 +6680,8 @@ export default function (pi: ExtensionAPI) {
 					return container;
 				}
 
-				if (quietDashboard && queued) {
-					return wrappedText(agentStatusLine(theme, r.agent, "Queued task", "warning", `${theme.fg("dim", " · pane · dashboard")}${theme.fg("dim", " · ctrl+o")}`));
-				}
+
+				if (queued) return queuedTaskPreviewComponent(r, quietDashboard);
 
 				if (quietDashboard && !queued && !isError) {
 					const toolCalls = displayItems.filter((item) => item.type === "toolCall");
