@@ -940,15 +940,15 @@ class SessionManagerOverlay implements Focusable {
 			return;
 		}
 
-		if (matchesKey(data, "delete") || matchesKey(data, "alt+d") || this.keybindings.matches(data, "app.session.delete")) {
-			const selected = this.selected();
-			if (selected) this.startDelete(selected);
+		if (matchesKey(data, "alt+d")) {
+			this.startDeleteAll();
 			this.requestRender();
 			return;
 		}
 
-		if (matchesKey(data, "alt+x") || matchesKey(data, "ctrl+x")) {
-			this.startDeleteAll();
+		if (matchesKey(data, "delete") || this.keybindings.matches(data, "app.session.delete")) {
+			const selected = this.selected();
+			if (selected) this.startDelete(selected);
 			this.requestRender();
 			return;
 		}
@@ -1107,7 +1107,8 @@ class SessionManagerOverlay implements Focusable {
 		const optionRow = (index: 0 | 1, label: string) => {
 			const selected = this.deleteConfirmSelection === index;
 			const prefix = selected ? "› " : "  ";
-			const content = `${ui.warning(prefix)}${index === 0 ? ui.error(label) : ui.dim(label)}`;
+			const labelText = selected ? this.theme.fg("text", label) : index === 0 ? ui.error(label) : ui.dim(label);
+			const content = `${ui.warning(prefix)}${labelText}`;
 			const padded = padAnsi(content, boxInner);
 			return selected ? this.theme.bg(index === 0 ? "toolErrorBg" : "selectedBg", padded) : padded;
 		};
@@ -1306,7 +1307,7 @@ class SessionManagerOverlay implements Focusable {
 		if (this.mode === "rename") return [warning("empty name clears title")];
 		return [
 			`${ansiYellow("-/=")} ${dim("page · ")}${ansiYellow("enter")} ${dim("resume · ")}${ansiYellow("alt+m")} ${dim("resume+model · ")}${ansiYellow("alt+r")} ${dim("rename")}`,
-			`${ansiYellow("tab")} ${dim("scope · ")}${ansiYellow("alt+s")} ${dim("sort · ")}${ansiYellow("alt+n")} ${dim("names · ")}${ansiYellow("del")} ${dim("delete · ")}${ansiYellow("alt+x")} ${dim("delete all")}`,
+			`${ansiYellow("tab")} ${dim("scope · ")}${ansiYellow("alt+s")} ${dim("sort · ")}${ansiYellow("alt+n")} ${dim("names · ")}${ansiYellow("del")} ${dim("delete · ")}${ansiYellow("alt+d")} ${dim("delete all")}`,
 		];
 	}
 
