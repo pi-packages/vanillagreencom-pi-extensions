@@ -18,7 +18,9 @@ Analyze proposed issues for cross-project conflicts, architecture coverage, and 
 
 ### 1.1 Parse Input
 
-Read input file with Read tool. Extract `FEATURE`, `RESEARCH_PATH`, `ORIGIN_ISSUE` (may be null), `PROPOSED_ISSUES[]`.
+Read input file with Read tool. Extract `FEATURE`, `RESEARCH_PATH`, `ORIGIN_ISSUE` (may be null), `PLANNER_HANDOFF` (may be null), `PROPOSED_ISSUES[]`.
+
+If `PLANNER_HANDOFF` is present, treat it as high-signal technical context from the scout → planner chain, not as a project-management decision. Preserve its plan path, proposed phases/issues, and explicit TPM questions through analysis. Use it to inform project placement, issue grouping, dependency ordering, and roadmap-vs-child-issue recommendations, but still verify against current issue/project state.
 
 ### 1.2 Analyze Origin Issue
 

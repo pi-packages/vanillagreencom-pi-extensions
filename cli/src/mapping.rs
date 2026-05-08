@@ -5,6 +5,8 @@ use std::path::Path;
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct MappingConfig {
+    #[serde(rename = "skip-role-skills")]
+    pub skip_role_skills: Vec<String>,
     #[serde(rename = "agent-skills")]
     pub agent_skills: HashMap<String, Vec<String>>,
     #[serde(rename = "agent-skills-optional")]
@@ -86,16 +88,30 @@ impl MappingConfig {
             }
         }
 
-        // 3. Role-skills from config
-        let role_key = agent_role.as_str();
-        if let Some(role_skills) = self.role_skills.get(role_key) {
-            for s in role_skills {
-                push_unique(s);
+        // 3. Role-skills from config, unless this agent opts out to keep a
+        // narrow context (for example scout/planner handoff agents).
+        if !self.skips_role_skills(&name) {
+            let role_key = agent_role.as_str();
+            if let Some(role_skills) = self.role_skills.get(role_key) {
+                for s in role_skills {
+                    push_unique(s);
+                }
             }
         }
 
         matched.sort();
         matched
+    }
+
+    fn skips_role_skills(&self, agent_name: &str) -> bool {
+        let normalized = agent_name.to_lowercase();
+        self.skip_role_skills.iter().any(|name| {
+            let name = name.to_lowercase();
+            name == normalized
+                || normalized
+                    .strip_prefix("reviewer-")
+                    .is_some_and(|suffix| suffix == name)
+        })
     }
 
     /// Return optional skills for an agent (from `[agent-skills-optional]`).
@@ -208,6 +224,37 @@ mod tests {
         assert!(matched.contains(&"github".to_string()));
         assert!(matched.contains(&"worktree".to_string()));
         assert!(!matched.contains(&"linear".to_string()));
+    }
+
+    #[test]
+    fn skip_role_skills_keeps_agent_context_narrow() {
+        let mut config = MappingConfig::default();
+        config.skip_role_skills = vec!["planner".into(), "scout".into()];
+        config
+            .agent_skills
+            .insert("planner".into(), vec!["linear".into()]);
+        config
+            .agent_skills
+            .insert("scout".into(), vec!["linear".into()]);
+        config.role_skills.insert(
+            "engineer".into(),
+            vec!["github".into(), "worktree".into(), "issue-lifecycle".into()],
+        );
+        config
+            .role_skills
+            .insert("reviewer".into(), vec!["issue-lifecycle".into()]);
+        let available = vec![
+            "linear".into(),
+            "github".into(),
+            "worktree".into(),
+            "issue-lifecycle".into(),
+        ];
+
+        let planner = config.skills_for_agent("planner", &AgentRole::Engineer, &available);
+        assert_eq!(planner, vec!["linear".to_string()]);
+
+        let scout = config.skills_for_agent("scout", &AgentRole::Reviewer, &available);
+        assert_eq!(scout, vec!["linear".to_string()]);
     }
 
     #[test]

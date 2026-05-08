@@ -9,6 +9,7 @@ Plan a new roadmap with research gate, specialist consultation, cross-project an
 | `roadmap plan [feature]` | Plan roadmap for feature |
 | `roadmap plan [feature] @[research-path]` | Plan with existing research |
 | `roadmap plan [feature] @[research-path] --origin-issue [ISSUE_ID]` | Plan with origin issue context for hierarchy |
+| `roadmap plan [feature] --planner-handoff @[plan-file]` | Plan with an existing planner output from scout → planner chain |
 
 ---
 
@@ -16,13 +17,22 @@ Plan a new roadmap with research gate, specialist consultation, cross-project an
 
 ### 1.1 Parse Arguments
 
-Extract `FEATURE`, optional `RESEARCH_PATH`, and optional `--origin-issue [ISSUE_ID]` from arguments.
+Extract `FEATURE`, optional `RESEARCH_PATH`, optional `--origin-issue [ISSUE_ID]`, and optional `--planner-handoff @[PLAN_FILE]` from arguments.
 
 If `--origin-issue` provided, fetch issue details and store as `ORIGIN_ISSUE`:
 ```bash
 .agents/skills/linear/scripts/linear.sh cache issues get [ORIGIN_ISSUE_ID]
 ```
 Store `id`, `title`, `project`, `description`, `children`. If not provided, set `ORIGIN_ISSUE` = null.
+
+If `--planner-handoff` is provided, read the planner file and extract `PLANNER_HANDOFF`:
+- plan path
+- plan summary / recommended approach
+- proposed phases or issue candidates
+- TPM Handoff Recommendation / TPM Handoff Prompt if present
+- Linear issue IDs or project names mentioned
+
+If no planner handoff is provided, set `PLANNER_HANDOFF` = null. Do not run `planner` inside this workflow; the normal orchestration chain is main → scout → planner → tpm → main, and this workflow consumes a planner handoff only when the main agent already has one.
 
 ### 1.2 Check for Research Context
 
@@ -111,7 +121,7 @@ Reply with structured table. Include ONLY issues for your domain.
 
 ### 4.1 Write Input File
 
-Write input per [roadmap-plan-input.md](../schemas/roadmap-plan-input.md) to `tmp/roadmap-input-YYYYMMDD-HHMMSS.json`. Include `origin_issue` field (null if not provided).
+Write input per [roadmap-plan-input.md](../schemas/roadmap-plan-input.md) to `tmp/roadmap-input-YYYYMMDD-HHMMSS.json`. Include `origin_issue` and `planner_handoff` fields (null if not provided).
 
 ### 4.2 Delegate to TPM
 

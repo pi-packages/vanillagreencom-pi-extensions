@@ -114,7 +114,7 @@ Windows: CLI runs natively; symlink mode falls back to copy.
 |---|---|---|
 | `generalist` | engineer | General maintenance, cleanup, docs, stale references, and project hygiene. |
 | `iced` | engineer | Iced UI implementation and architecture specialist. |
-| `planner` | engineer | Turns requirements and scout findings into ordered implementation plans and plan files. |
+| `planner` | engineer | Turns requirements and scout findings into ordered implementation plans, plan files, and TPM handoff prompts when roadmap/issue planning is needed. |
 | `researcher` | engineer | Exa-powered research specialist for evidence-backed findings reports. |
 | `rust` | engineer | Rust engineer for systems work, performance, zero-allocation, and low-level design. |
 | `scout` | reviewer | Fast reconnaissance for unfamiliar code before planning or implementation; may write requested report artifacts. |
