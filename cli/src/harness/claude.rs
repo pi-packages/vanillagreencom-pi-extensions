@@ -98,7 +98,15 @@ fn claude_tools_override(override_tools: Option<&[String]>) -> Option<Vec<String
 }
 
 fn claude_disallowed_tools_for(agent: &Agent, deny_tools: Option<&[String]>) -> Vec<String> {
-    let mut tools: Vec<String> = match agent.role {
+    if let Some(deny_tools) = deny_tools {
+        return dedupe_tools(
+            deny_tools
+                .iter()
+                .map(|tool| claude_tool_name(tool))
+                .collect(),
+        );
+    }
+    let tools: Vec<String> = match agent.role {
         // Claude Code subagents should not recursively spawn other subagents.
         AgentRole::Engineer => vec!["Task".into()],
         // Reviewer/manager agents are read-only by default. Bash remains allowed
@@ -111,9 +119,6 @@ fn claude_disallowed_tools_for(agent: &Agent, deny_tools: Option<&[String]>) -> 
             "Task".into(),
         ],
     };
-    if let Some(deny_tools) = deny_tools {
-        tools.extend(deny_tools.iter().map(|tool| claude_tool_name(tool)));
-    }
     dedupe_tools(tools)
 }
 
@@ -285,7 +290,7 @@ mod tests {
         let path = generate_agent(&agent, &dir, &[], &[], &[], &extras).expect("generate ok");
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(!content.contains("\ntools:"));
-        assert!(content.contains("disallowedTools: Task, Bash, Write"));
+        assert!(content.contains("disallowedTools: Bash, Task, Write"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

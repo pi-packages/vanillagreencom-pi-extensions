@@ -306,7 +306,11 @@ fn merge_optional_tool_lists(
             out.push(trimmed.to_string());
         }
     }
-    if out.is_empty() { None } else { Some(out) }
+    if base.is_some() || harness.is_some() {
+        Some(out)
+    } else {
+        None
+    }
 }
 
 impl AgentExtras {

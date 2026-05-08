@@ -159,15 +159,28 @@ fn pi_tools_with_overrides(
 }
 
 fn pi_deny_tools_for(agent: &Agent, frontmatter: &agent::AgentFrontmatterOverrides) -> Vec<String> {
-    let mut tools: Vec<String> = match agent.role {
-        AgentRole::Engineer => Vec::new(),
-        AgentRole::Reviewer | AgentRole::Manager => {
-            vec!["edit".into(), "write".into(), "apply_patch".into()]
-        }
-    };
-    if let Some(deny_tools) = frontmatter.deny_tools.as_ref() {
-        tools.extend(deny_tools.iter().map(|tool| tool.trim().to_string()));
+    let tools = frontmatter
+        .deny_tools
+        .clone()
+        .unwrap_or_else(|| pi_default_deny_tools_for(agent));
+    dedupe_pi_tool_names(tools)
+}
+
+fn pi_default_deny_tools_for(agent: &Agent) -> Vec<String> {
+    let mut tools = vec![
+        "subagent".into(),
+        "get_subagent_result".into(),
+        "steer_subagent".into(),
+        "stop_subagent".into(),
+        "question".into(),
+    ];
+    if matches!(agent.role, AgentRole::Reviewer | AgentRole::Manager) {
+        tools.extend(["edit".into(), "write".into(), "apply_patch".into()]);
     }
+    tools
+}
+
+fn dedupe_pi_tool_names(tools: Vec<String>) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
     tools
         .into_iter()
@@ -303,7 +316,9 @@ mod tests {
         assert!(content.contains("model: openai-codex/gpt-5.5:xhigh"));
         assert!(content.contains("color: magenta"));
         assert!(content.contains("tools: read, grep, find, ls, bash, edit, write"));
-        assert!(!content.contains("deny-tools:"));
+        assert!(content.contains(
+            "deny-tools: subagent, get_subagent_result, steer_subagent, stop_subagent, question"
+        ));
         assert!(content.contains("web_search"));
         assert!(content.contains("web_research"));
         assert!(content.contains("pane: true"));
@@ -361,7 +376,7 @@ mod tests {
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("model: openai-codex/gpt-5.5:high"));
         assert!(content.contains("tools: read, grep, find, ls, bash"));
-        assert!(content.contains("deny-tools: edit, write, apply_patch"));
+        assert!(content.contains("deny-tools: subagent, get_subagent_result, steer_subagent, stop_subagent, question, edit, write, apply_patch"));
         assert!(content.contains("web_search"));
         assert!(content.contains("web_research"));
         assert!(!content.contains("pane: true"));

@@ -147,8 +147,8 @@ Supported agent frontmatter fields:
 | --- | --- | --- |
 | `name` | yes | Unique agent name used in `subagent`, `/agents`, pane title, and task ids. |
 | `description` | yes | Short description shown in `/agents` and completions. |
-| `tools` | no | Comma-separated Pi tool allowlist, for example `read, grep, find, ls, bash, edit, write, web_research`. This is used only when `subagentToolAccess=frontmatter`; default `all` inherits active parent tools instead. Recursive/prompt tools (`subagent`, `get_subagent_result`, `steer_subagent`, `stop_subagent`, `question`) are stripped even if listed. |
-| `deny-tools` | no | Comma-separated Pi tools to subtract from inherited active tools or the strict `tools` allowlist. Prefer this for maintainable restrictions; future parent tools are inherited unless explicitly denied. |
+| `tools` | no | Comma-separated Pi tool allowlist, for example `read, grep, find, ls, bash, edit, write, web_research`. This is used only when `subagentToolAccess=frontmatter`; default `all` inherits active parent tools instead. |
+| `deny-tools` | no | Comma-separated Pi tools to subtract from inherited active tools or the strict `tools` allowlist. Prefer this for maintainable restrictions; future parent tools are inherited unless explicitly denied. Vstack-generated agents deny recursive/prompt tools by default, but hand-authored agents can choose differently. |
 | `model` | no | Pi model id. Shorthands are accepted: `sonnet` → `claude-sonnet-4-5`, `opus*` → `claude-opus-4-5`, `haiku` → `claude-haiku-4-5`. Other values pass through unchanged, including provider ids like `openai-codex/gpt-5.5:xhigh`. |
 | `pane` | no | `true`, `yes`, `1`, or `pane` starts/reuses a persistent tmux pane. Omit or use `false` for background one-shot mode. |
 | `persistentPane` | no | Legacy alias for `pane`. |
@@ -199,5 +199,5 @@ A future backend could use Pi SDK `createAgentSession()` for non-pane one-shot a
 - `truncateResults`, `resultMaxBytes` (default 102400), `resultMaxLines` (default 4000), and `preserveFullOutput` for result truncation. Oversized one-shot outputs are saved under `~/.pi/agent/vstack/pi-agents-tmux/sessions/<session-id>/outputs/` when preservation is enabled.
 - `completionPollMs` and `childInboxPollMs` for persistent pane polling intervals.
 - `forceSessionBridgeForPanes` (default `true`) explicitly loads `pi-session-bridge` in new pane launchers so steering continues to work if settings drift.
-- `subagentToolAccess` (default `all`) controls whether child Pi sessions inherit all active Pi tools or receive only the agent `tools:` allowlist. `deny-tools:` and recursive/prompt tool stripping are always applied.
+- `subagentToolAccess` (default `all`) controls whether child Pi sessions inherit all active Pi tools or receive only the agent `tools:` allowlist. In both modes the agent's `deny-tools:` is subtracted.
 - `subagentModelSource` (default `frontmatter`) controls whether child Pi sessions use the agent `model:` value or inherit the parent session model.

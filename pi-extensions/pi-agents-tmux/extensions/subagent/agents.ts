@@ -124,7 +124,7 @@ function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig
 			description,
 			color: asString(frontmatter.color),
 			tools: parseTools(frontmatter.tools, name),
-			denyTools: parseToolList(frontmatter["deny-tools"] ?? frontmatter.denyTools),
+			denyTools: parseToolList(frontmatter["deny-tools"] ?? frontmatter.denyTools ?? frontmatter.disallowedTools),
 			model: normalizeModel(frontmatter.model),
 			pane: asBoolean(frontmatter.pane ?? frontmatter.persistentPane),
 			systemPrompt: body,

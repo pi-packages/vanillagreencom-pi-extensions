@@ -217,18 +217,13 @@ function selectedModelForAgent(agent: AgentConfig, parentModel: string | undefin
 	return subagentModelSource(cwd) === "parent" ? (parentModel ?? agent.model) : (agent.model ?? parentModel);
 }
 
-const CHILD_TOOL_DENYLIST = new Set(["subagent", "get_subagent_result", "steer_subagent", "stop_subagent", "question"]);
-
 function normalizedPiToolName(tool: string): string {
 	return tool.trim().toLowerCase().replace(/-/g, "_");
 }
 
 function selectedToolsForAgent(agent: AgentConfig, cwd: string | undefined, extraTools: string[] = [], activeTools?: string[]): string[] | undefined {
 	const baseTools = subagentToolAccess(cwd) === "all" ? (activeTools ?? agent.tools ?? []) : (agent.tools ?? []);
-	const denied = new Set([
-		...Array.from(CHILD_TOOL_DENYLIST),
-		...(agent.denyTools ?? []).map(normalizedPiToolName),
-	]);
+	const denied = new Set((agent.denyTools ?? []).map(normalizedPiToolName));
 	const tools = [...baseTools, ...extraTools]
 		.map((tool) => tool.trim())
 		.filter((tool) => tool && !denied.has(normalizedPiToolName(tool)));
