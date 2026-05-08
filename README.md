@@ -87,10 +87,10 @@ reviewer-perf = { tools = ["read", "grep", "find", "ls", "bash"] }
 
 # Harness-specific frontmatter values win over top-level values.
 [agent-frontmatter.pi]
-researcher = { color = "purple", model = "openai-codex/gpt-5.5:xhigh", tools = ["read", "grep", "find", "ls", "bash", "edit", "write", "web_research"] }
+researcher = { color = "purple", model = "openai-codex/gpt-5.5:xhigh", deny-tools = ["bash"] }
 ```
 
-Claude Code and Pi emit `tools` into agent frontmatter; OpenCode uses permissions instead, and Cursor/Codex do not have the same per-agent tools frontmatter. For Pi agents installed through vstack, frontmatter edits belong in `[agent-frontmatter.pi]`, not in `.pi/agents/<name>.md`; generated agent files are overwritten by `vstack refresh`. The Pi `/agents` popup writes model/tools/color changes to this table for vstack-managed project agents and refreshes the project agent immediately.
+Claude Code and Pi emit native `tools` allowlists into agent frontmatter. Vstack also supports `deny-tools` in `[agent-frontmatter]` / harness-specific tables; generators subtract those tools from the default or explicit allowlist before writing the native agent file. OpenCode uses permissions instead, and Cursor/Codex do not have the same per-agent tools frontmatter. For Pi agents installed through vstack, frontmatter edits belong in `[agent-frontmatter.pi]`, not in `.pi/agents/<name>.md`; generated agent files are overwritten by `vstack refresh`. The Pi `/agents` popup writes model/tools/deny-tools/color changes to this table for vstack-managed project agents and refreshes the project agent immediately.
 
 Custom safety hooks (`[[custom-hooks]]`) follow the same pattern. Direct edits to generated agent or skill files are also picked up automatically where possible, but `vstack.toml` is the stable home for generated frontmatter overrides and reusable project guidance.
 

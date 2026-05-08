@@ -71,6 +71,7 @@ fn is_agent_frontmatter_override(value: &toml::Value) -> bool {
         "color",
         "model",
         "tools",
+        "deny-tools",
         "pane",
         "mode",
         "sandbox-mode",
@@ -503,6 +504,7 @@ fn render_inline_table_fields(fields: &[(String, String)]) -> String {
         "color",
         "model",
         "tools",
+        "deny-tools",
         "pane",
         "mode",
         "sandbox-mode",
@@ -948,7 +950,7 @@ fn project_config_header() -> String {
     out.push_str("# every install and refresh.\n");
     out.push_str("#\n");
     out.push_str("# Skills live in [agent-skills]. Generated frontmatter\n");
-    out.push_str("# overrides like model, tools, color, and pane live in\n");
+    out.push_str("# overrides like model, tools, deny-tools, color, and pane live in\n");
     out.push_str("# [agent-frontmatter] or [agent-frontmatter.pi].\n");
     out.push_str("#\n");
     out.push_str("# After editing, run:  vstack refresh\n");
@@ -1382,7 +1384,7 @@ fn agent_frontmatter_heading() -> String {
     out.push_str("# Optional generated-frontmatter overrides. Top-level entries\n");
     out.push_str("# apply to every harness; harness-specific tables win. Prefer\n");
     out.push_str("# harness-specific model/tool values when formats differ.\n");
-    out.push_str("# Supported fields: color, model, tools, pane, mode,\n");
+    out.push_str("# Supported fields: color, model, tools, deny-tools, pane, mode,\n");
     out.push_str("# sandbox-mode, model-reasoning-effort. Unknown fields ignored.\n");
     out.push_str("# Examples:\n");
     out.push_str("# rust = { color = \"green\" }\n");
@@ -1390,6 +1392,7 @@ fn agent_frontmatter_heading() -> String {
     out.push_str(
         "# reviewer-perf = { tools = [\"read\", \"grep\", \"find\", \"ls\", \"bash\"] }\n",
     );
+    out.push_str("# scout = { deny-tools = [\"bash\"] }\n");
     out.push_str("#\n");
     out
 }
@@ -1432,12 +1435,14 @@ fn sync_agent_frontmatter_heading(content: &str) -> String {
 
 fn agent_frontmatter_pi_heading() -> String {
     let mut out = String::new();
-    out.push_str("# Pi-specific model/tool/color overrides. This is where the\n");
-    out.push_str("# Pi /agents popup writes model, tools, and color changes for\n");
+    out.push_str("# Pi-specific frontmatter overrides. This is where the\n");
+    out.push_str("# Pi /agents popup writes model, tools, deny-tools, and color changes for\n");
     out.push_str("# vstack-managed project agents.\n");
     out.push_str("# Examples:\n");
     out.push_str("# rust = { color = \"orange\" }\n");
-    out.push_str("# planner = { model = \"openai-codex/gpt-5.5:high\", tools = [\"read\", \"grep\", \"find\", \"ls\", \"bash\", \"edit\", \"write\", \"web_search\", \"web_research\"] }\n");
+    out.push_str(
+        "# planner = { model = \"openai-codex/gpt-5.5:high\", deny-tools = [\"bash\"] }\n",
+    );
     out
 }
 
@@ -1445,7 +1450,9 @@ fn ensure_agent_frontmatter_pi_heading(content: &str) -> String {
     let Some(insert_at) = section_start(content, "[agent-frontmatter.pi]") else {
         return content.to_string();
     };
-    if content.contains("# Pi-specific model/tool/color overrides") {
+    if content.contains("# Pi-specific frontmatter overrides")
+        || content.contains("# Pi-specific model/tool/color overrides")
+    {
         return content.to_string();
     }
     let mut out = String::new();
@@ -1463,7 +1470,9 @@ fn sync_agent_frontmatter_pi_heading(content: &str) -> String {
     let Some(section_at) = section_start(content, "[agent-frontmatter.pi]") else {
         return content.to_string();
     };
-    let Some(heading_at) = content[..section_at].rfind("# Pi-specific model/tool/color overrides")
+    let Some(heading_at) = content[..section_at]
+        .rfind("# Pi-specific frontmatter overrides")
+        .or_else(|| content[..section_at].rfind("# Pi-specific model/tool/color overrides"))
     else {
         return content.to_string();
     };
@@ -2159,7 +2168,7 @@ rust = "Always use thiserror for errors."
         assert!(updated.contains("iced = \"\"\"\nalpha\nbeta\"\"\""));
         assert!(!updated.contains("beta\n\"\"\""));
         assert!(updated.contains("Agent Frontmatter"));
-        assert!(updated.contains("Pi-specific model/tool/color overrides"));
+        assert!(updated.contains("Pi-specific frontmatter overrides"));
         assert!(updated.contains("# planner = { model = \"openai/gpt-5.5\", color = \"blue\" }"));
         assert!(updated.contains(
             "# reviewer-perf = { tools = [\"read\", \"grep\", \"find\", \"ls\", \"bash\"] }"

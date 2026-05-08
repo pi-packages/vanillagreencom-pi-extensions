@@ -222,6 +222,11 @@ pub struct AgentFrontmatterOverrides {
     /// Tool allowlist for harnesses that support scoped agent tools (Pi and Claude Code).
     #[serde(default, deserialize_with = "deserialize_optional_tools")]
     pub tools: Option<Vec<String>>,
+    /// Tool denylist applied after defaults or an explicit `tools` allowlist.
+    /// Vstack generators subtract these names for harnesses whose native
+    /// frontmatter only supports allowlists.
+    #[serde(default, deserialize_with = "deserialize_optional_tools")]
+    pub deny_tools: Option<Vec<String>>,
     /// Pi persistent pane flag.
     pub pane: Option<bool>,
     /// OpenCode mode override.
@@ -266,6 +271,7 @@ impl AgentFrontmatterOverrides {
             color: harness.color.clone().or_else(|| self.color.clone()),
             model: harness.model.clone().or_else(|| self.model.clone()),
             tools: harness.tools.clone().or_else(|| self.tools.clone()),
+            deny_tools: merge_optional_tool_lists(&self.deny_tools, &harness.deny_tools),
             pane: harness.pane.or(self.pane),
             mode: harness.mode.clone().or_else(|| self.mode.clone()),
             sandbox_mode: harness
@@ -282,6 +288,25 @@ impl AgentFrontmatterOverrides {
     pub fn is_empty(&self) -> bool {
         self == &Self::default()
     }
+}
+
+fn merge_optional_tool_lists(
+    base: &Option<Vec<String>>,
+    harness: &Option<Vec<String>>,
+) -> Option<Vec<String>> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for tool in base
+        .iter()
+        .chain(harness.iter())
+        .flat_map(|tools| tools.iter())
+    {
+        let trimmed = tool.trim();
+        if !trimmed.is_empty() && seen.insert(trimmed.to_string()) {
+            out.push(trimmed.to_string());
+        }
+    }
+    if out.is_empty() { None } else { Some(out) }
 }
 
 impl AgentExtras {

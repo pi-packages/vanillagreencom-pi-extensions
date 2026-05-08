@@ -39,10 +39,7 @@ pub fn generate_agent(
         .model
         .clone()
         .unwrap_or_else(|| pi_model_for(&agent.model));
-    let tools = frontmatter
-        .tools
-        .clone()
-        .unwrap_or_else(|| pi_tools_for(agent, skills));
+    let tools = pi_tools_with_overrides(agent, skills, &frontmatter);
 
     let mut output = String::new();
     output.push_str("---\n");
@@ -142,6 +139,37 @@ pub fn pi_tools_for(agent: &Agent, skills: &[(String, String)]) -> Vec<String> {
     }
 
     dedupe_tools(tools)
+}
+
+fn pi_tools_with_overrides(
+    agent: &Agent,
+    skills: &[(String, String)],
+    frontmatter: &agent::AgentFrontmatterOverrides,
+) -> Vec<String> {
+    let tools = frontmatter
+        .tools
+        .clone()
+        .unwrap_or_else(|| pi_tools_for(agent, skills));
+    subtract_denied_pi_tools(tools, frontmatter.deny_tools.as_deref())
+}
+
+fn subtract_denied_pi_tools(tools: Vec<String>, deny_tools: Option<&[String]>) -> Vec<String> {
+    let Some(deny_tools) = deny_tools else {
+        return tools;
+    };
+    let denied: std::collections::HashSet<String> = deny_tools
+        .iter()
+        .map(|tool| normalize_pi_tool_name(tool))
+        .filter(|tool| !tool.is_empty())
+        .collect();
+    tools
+        .into_iter()
+        .filter(|tool| !denied.contains(&normalize_pi_tool_name(tool)))
+        .collect()
+}
+
+fn normalize_pi_tool_name(tool: &str) -> String {
+    tool.trim().to_ascii_lowercase().replace('-', "_")
 }
 
 fn dedupe_tools(tools: Vec<&str>) -> Vec<String> {
@@ -261,6 +289,35 @@ mod tests {
         assert!(content.contains("rust-arch"));
         assert!(content.contains("## Additional Instructions"));
         assert!(content.contains("Never edit this file directly"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn generate_agent_applies_deny_tools_after_defaults() {
+        let dir =
+            std::env::temp_dir().join(format!("vstack_pi_agent_deny_tools_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let agent = agent_fixture("rust", AgentRole::Engineer, "opus");
+        let extras = AgentExtras {
+            frontmatter: agent::AgentFrontmatterOverrides {
+                deny_tools: Some(vec!["bash".into(), "apply-patch".into()]),
+                ..Default::default()
+            },
+            ..AgentExtras::default()
+        };
+        let path = generate_agent(&agent, &dir, &[], &[], &[], &extras).expect("generate ok");
+        let content = std::fs::read_to_string(&path).unwrap();
+        let tools_line = content
+            .lines()
+            .find(|line| line.starts_with("tools:"))
+            .unwrap();
+        assert!(!tools_line.contains("bash"));
+        assert!(!tools_line.contains("apply_patch"));
+        assert!(tools_line.contains("read"));
+        assert!(tools_line.contains("write"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

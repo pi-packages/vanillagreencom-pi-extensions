@@ -219,11 +219,19 @@ function selectedModelForAgent(agent: AgentConfig, parentModel: string | undefin
 
 const CHILD_TOOL_DENYLIST = new Set(["subagent", "get_subagent_result", "steer_subagent", "stop_subagent", "question"]);
 
+function normalizedPiToolName(tool: string): string {
+	return tool.trim().toLowerCase().replace(/-/g, "_");
+}
+
 function selectedToolsForAgent(agent: AgentConfig, cwd: string | undefined, extraTools: string[] = [], activeTools?: string[]): string[] | undefined {
 	const baseTools = subagentToolAccess(cwd) === "all" ? (activeTools ?? agent.tools ?? []) : (agent.tools ?? []);
+	const denied = new Set([
+		...Array.from(CHILD_TOOL_DENYLIST),
+		...(agent.denyTools ?? []).map(normalizedPiToolName),
+	]);
 	const tools = [...baseTools, ...extraTools]
 		.map((tool) => tool.trim())
-		.filter((tool) => tool && !CHILD_TOOL_DENYLIST.has(tool));
+		.filter((tool) => tool && !denied.has(normalizedPiToolName(tool)));
 	return tools.length > 0 ? [...new Set(tools)] : undefined;
 }
 
@@ -565,6 +573,7 @@ function compactAgentPath(filePath: string): string {
 interface AgentFrontmatterEdit {
 	model: string;
 	tools: string[];
+	denyTools: string[];
 	color: string;
 }
 
@@ -604,10 +613,21 @@ function agentCurrentFrontmatterEdit(agent: AgentConfig): AgentFrontmatterEdit {
 	} catch {
 		frontmatter = "";
 	}
-	return {
+	const current = {
 		model: flatYamlField(frontmatter, "model") ?? agent.model ?? "",
 		tools: parseToolsList(flatYamlField(frontmatter, "tools") ?? agent.tools?.join(", ")),
+		denyTools: parseToolsList(flatYamlField(frontmatter, "deny-tools") ?? agent.denyTools?.join(", ")),
 		color: flatYamlField(frontmatter, "color") ?? agent.color ?? "",
+	};
+	if (!isVstackManagedAgentFile(agent)) return current;
+	const tomlPath = vstackTomlPathForAgent(agent, process.cwd());
+	if (!tomlPath) return current;
+	const tomlCurrent = readAgentFrontmatterToml(tomlPath, agent.name);
+	return {
+		model: tomlCurrent.model ?? current.model,
+		tools: tomlCurrent.tools ?? current.tools,
+		denyTools: tomlCurrent.denyTools ?? current.denyTools,
+		color: tomlCurrent.color ?? current.color,
 	};
 }
 
@@ -618,6 +638,7 @@ function editableAgentFrontmatterText(agent: AgentConfig): string {
 		"# For vstack-managed project agents, this writes [agent-frontmatter.pi] in vstack.toml.",
 		`model: ${current.model}`,
 		`tools: ${current.tools.join(", ")}`,
+		`deny-tools: ${current.denyTools.join(", ")}`,
 		`color: ${current.color}`,
 		"",
 	].join("\n");
@@ -631,11 +652,12 @@ function parseEditableAgentFrontmatterText(raw: string): AgentFrontmatterEdit {
 		const match = trimmed.match(/^([A-Za-z][\w-]*)\s*:\s*(.*)$/);
 		if (!match) throw new Error(`Expected 'key: value' line, got: ${trimmed}`);
 		const key = match[1].toLowerCase();
-		if (key === "model" || key === "tools" || key === "color") fields.set(key, match[2] ?? "");
+		if (key === "model" || key === "tools" || key === "deny-tools" || key === "color") fields.set(key, match[2] ?? "");
 	}
 	return {
 		model: stripYamlQuotes(fields.get("model") ?? ""),
 		tools: parseToolsList(fields.get("tools")),
+		denyTools: parseToolsList(fields.get("deny-tools")),
 		color: stripYamlQuotes(fields.get("color") ?? ""),
 	};
 }
@@ -719,12 +741,36 @@ function parseInlineTomlTable(value: string): Map<string, string> {
 	return map;
 }
 
+function readAgentFrontmatterToml(tomlPath: string, agentName: string): Partial<AgentFrontmatterEdit> {
+	let content = "";
+	try { content = fs.readFileSync(tomlPath, "utf-8"); } catch { return {}; }
+	const lines = content.split(/\r?\n/);
+	const sectionStart = lines.findIndex((line) => line.trim() === "[agent-frontmatter.pi]");
+	if (sectionStart < 0) return {};
+	let sectionEnd = lines.length;
+	for (let i = sectionStart + 1; i < lines.length; i += 1) {
+		if (/^\s*\[[^\]]+\]\s*$/.test(lines[i])) { sectionEnd = i; break; }
+		if (lines[i].trim().startsWith("# ──")) { sectionEnd = i; break; }
+	}
+	const keyRe = new RegExp(`^\\s*(?:${agentName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}|${tomlString(agentName).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})\\s*=`);
+	const line = lines.slice(sectionStart + 1, sectionEnd).find((candidate) => keyRe.test(candidate));
+	if (!line) return {};
+	const existingValue = line.split(/=(.*)/s)[1] ?? "";
+	const fields = parseInlineTomlTable(existingValue.trim());
+	return {
+		model: fields.has("model") ? stripYamlQuotes(fields.get("model") ?? "") : undefined,
+		tools: fields.has("tools") ? parseToolsList(fields.get("tools")) : undefined,
+		denyTools: fields.has("deny-tools") ? parseToolsList(fields.get("deny-tools")) : undefined,
+		color: fields.has("color") ? stripYamlQuotes(fields.get("color") ?? "") : undefined,
+	};
+}
+
 function tomlAgentKey(agentName: string): string {
 	return /^[A-Za-z0-9_-]+$/.test(agentName) ? agentName : tomlString(agentName);
 }
 
 function renderTomlInlineTable(fields: Map<string, string>): string {
-	const preferred = ["color", "model", "tools", "pane", "mode", "sandbox-mode", "model-reasoning-effort"];
+	const preferred = ["color", "model", "tools", "deny-tools", "pane", "mode", "sandbox-mode", "model-reasoning-effort"];
 	const keys = [...preferred.filter((key) => fields.has(key)), ...[...fields.keys()].filter((key) => !preferred.includes(key)).sort()];
 	return `{ ${keys.map((key) => `${key} = ${fields.get(key)}`).join(", ")} }`;
 }
@@ -735,7 +781,7 @@ function upsertAgentFrontmatterToml(content: string, agentName: string, edit: Ag
 	let sectionStart = lines.findIndex((line) => line.trim() === section);
 	if (sectionStart < 0) {
 		const insertAt = lines.findIndex((line) => line.trim().startsWith("# ── Installed skills"));
-		const block = ["", "# Pi-specific model/tool/color overrides. This is where the", "# Pi /agents popup writes model, tools, and color changes for", "# vstack-managed project agents.", section, ""];
+		const block = ["", "# Pi-specific frontmatter overrides. This is where the", "# Pi /agents popup writes model, tools, deny-tools, and color changes for", "# vstack-managed project agents.", section, ""];
 		if (insertAt >= 0) lines.splice(insertAt, 0, ...block);
 		else lines.push(...block);
 		sectionStart = lines.findIndex((line) => line.trim() === section);
@@ -755,6 +801,7 @@ function upsertAgentFrontmatterToml(content: string, agentName: string, edit: Ag
 	if (edit.color.trim()) fields.set("color", tomlString(edit.color.trim())); else fields.delete("color");
 	if (edit.model.trim()) fields.set("model", tomlString(edit.model.trim())); else fields.delete("model");
 	if (edit.tools.length > 0) fields.set("tools", tomlArray(edit.tools)); else fields.delete("tools");
+	if (edit.denyTools.length > 0) fields.set("deny-tools", tomlArray(edit.denyTools)); else fields.delete("deny-tools");
 	if (fields.size === 0) {
 		if (absoluteIndex >= 0) lines.splice(absoluteIndex, 1);
 	} else {
@@ -806,6 +853,7 @@ function updateAgentFileFrontmatter(raw: string, edit: AgentFrontmatterEdit): st
 	let fm = split.frontmatter;
 	fm = upsertYamlField(fm, "model", edit.model.trim() ? yamlScalar(edit.model.trim()) : undefined);
 	fm = upsertYamlField(fm, "tools", edit.tools.length > 0 ? edit.tools.join(", ") : undefined);
+	fm = upsertYamlField(fm, "deny-tools", edit.denyTools.length > 0 ? edit.denyTools.join(", ") : undefined);
 	fm = upsertYamlField(fm, "color", edit.color.trim() ? yamlScalar(edit.color.trim()) : undefined);
 	return `---\n${fm.replace(/\n*$/, "")}\n---\n\n${split.body.replace(/^\n+/, "")}`;
 }
@@ -818,6 +866,7 @@ function agentSearchText(agent: AgentConfig, status?: AgentPaneStatus): string {
 		agent.filePath,
 		agent.model ?? "",
 		agent.tools?.join(" ") ?? "",
+		agent.denyTools?.join(" ") ?? "",
 		agent.pane ? "pane persistent tmux" : "bg background one-shot oneshot",
 		status?.live ? "live running" : status?.entry ? "dead stopped" : "",
 	].join(" ").toLowerCase();
@@ -1030,6 +1079,7 @@ function renderAgentInspector(agent: AgentConfig | undefined, statuses: Map<stri
 	);
 	pushWrapped(lines, `${theme.fg("muted", "Model")}: ${agent.model ?? "default"}`);
 	pushWrapped(lines, `${theme.fg("muted", "Tools")}: ${agent.tools?.join(", ") ?? "default"}`);
+	if (agent.denyTools && agent.denyTools.length > 0) pushWrapped(lines, `${theme.fg("muted", "Deny tools")}: ${agent.denyTools.join(", ")}`);
 	pushWrapped(lines, `${theme.fg("muted", "Path")}: ${compactAgentPath(agent.filePath)}`);
 	pushWrapped(lines, `${theme.fg("muted", "State")}: ${agentStatusLabel(agent, status, theme)}`);
 	if (status?.entry) {
@@ -4744,7 +4794,7 @@ function renderTraceTabBar(items: TraceViewerItem[], selected: number, width: nu
 }
 
 async function editAgentFrontmatterOverrides(ctx: ExtensionContext, agent: AgentConfig): Promise<string | undefined> {
-	const edited = await ctx.ui.editor(`Edit ${agent.name} frontmatter — model/tools/color`, editableAgentFrontmatterText(agent));
+	const edited = await ctx.ui.editor(`Edit ${agent.name} frontmatter — model/tools/deny-tools/color`, editableAgentFrontmatterText(agent));
 	if (edited === undefined) return undefined;
 	const parsed = parseEditableAgentFrontmatterText(edited);
 	if (isVstackManagedAgentFile(agent)) {
@@ -5658,6 +5708,7 @@ export default function (pi: ExtensionAPI) {
 									`Path: ${agent.filePath}`,
 									`Model: ${agent.model ?? "default"}`,
 									`Tools: ${agent.tools?.join(", ") ?? "default"}`,
+									...(agent.denyTools && agent.denyTools.length > 0 ? [`Deny tools: ${agent.denyTools.join(", ")}`] : []),
 									`Persistent pane: ${agent.pane ? "yes" : "no"}`,
 									"",
 									agent.description,
@@ -6035,8 +6086,9 @@ export default function (pi: ExtensionAPI) {
 			.map((agent) => {
 				const model = agent.model ? ` model=${agent.model}` : "";
 				const tools = agent.tools ? ` tools=${agent.tools.join(",")}` : "";
+				const denyTools = agent.denyTools && agent.denyTools.length > 0 ? ` deny-tools=${agent.denyTools.join(",")}` : "";
 				const pane = agent.pane ? " pane=true" : "";
-				return `- ${agent.name}: ${agent.description} (${agent.source}${model}${tools}${pane})`;
+				return `- ${agent.name}: ${agent.description} (${agent.source}${model}${tools}${denyTools}${pane})`;
 			})
 			.join("\n");
 

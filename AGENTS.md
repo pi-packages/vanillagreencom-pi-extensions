@@ -158,7 +158,7 @@ reviewer-perf = { tools = ["read", "grep", "find", "ls", "bash"] }
 # Harness-specific generated-frontmatter overrides win over top-level entries.
 # Use exact model/tool ids for the target harness when formats differ.
 [agent-frontmatter.pi]
-researcher = { model = "openai-codex/gpt-5.5:xhigh", tools = ["read", "grep", "find", "ls", "bash", "edit", "write", "web_research"] }
+researcher = { model = "openai-codex/gpt-5.5:xhigh", deny-tools = ["bash"] }
 
 # Project instructions prepended to a skill's SKILL.md.
 [skill-instructions]
@@ -175,7 +175,7 @@ trading-design = "Dark theme, green/red accents."
 
 ## Per-Harness Tool Overrides
 
-- Claude Code and Pi write `tools` from `[agent-frontmatter]` / harness-specific frontmatter into generated agent files.
+- Claude Code and Pi write native `tools` allowlists into generated agent files. Vstack also accepts `deny-tools` in `[agent-frontmatter]` / harness-specific frontmatter and subtracts those tools before writing native files.
 - OpenCode uses `permission` for tool access; vstack currently maps role to `mode` and does not emit per-agent permissions.
 - Cursor and Codex do not use the same agent `tools` frontmatter.
 

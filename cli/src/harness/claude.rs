@@ -35,7 +35,11 @@ pub fn generate_agent(
         .unwrap_or_else(|| agent.model_id("claude-code"));
     output.push_str(&format!("model: {}\n", model));
 
-    let tools = claude_tools_for(agent, frontmatter.tools.as_deref());
+    let tools = claude_tools_for(
+        agent,
+        frontmatter.tools.as_deref(),
+        frontmatter.deny_tools.as_deref(),
+    );
     if !tools.is_empty() {
         output.push_str(&format!("tools: {}\n", tools.join(", ")));
     }
@@ -84,37 +88,57 @@ pub fn generate_agent(
     Ok(path)
 }
 
-fn claude_tools_for(agent: &Agent, override_tools: Option<&[String]>) -> Vec<String> {
-    if let Some(tools) = override_tools {
-        return dedupe_tools(tools.iter().map(|tool| claude_tool_name(tool)).collect());
-    }
-
-    let defaults = match agent.role {
-        AgentRole::Engineer => vec![
-            "Read",
-            "Grep",
-            "Glob",
-            "LS",
-            "Bash",
-            "Edit",
-            "MultiEdit",
-            "Write",
-            "WebFetch",
-            "WebSearch",
-            "TodoWrite",
-            "Task",
-        ],
-        AgentRole::Reviewer | AgentRole::Manager => vec![
-            "Read",
-            "Grep",
-            "Glob",
-            "LS",
-            "Bash",
-            "WebFetch",
-            "WebSearch",
-        ],
+fn claude_tools_for(
+    agent: &Agent,
+    override_tools: Option<&[String]>,
+    deny_tools: Option<&[String]>,
+) -> Vec<String> {
+    let tools = if let Some(tools) = override_tools {
+        dedupe_tools(tools.iter().map(|tool| claude_tool_name(tool)).collect())
+    } else {
+        let defaults = match agent.role {
+            AgentRole::Engineer => vec![
+                "Read",
+                "Grep",
+                "Glob",
+                "LS",
+                "Bash",
+                "Edit",
+                "MultiEdit",
+                "Write",
+                "WebFetch",
+                "WebSearch",
+                "TodoWrite",
+                "Task",
+            ],
+            AgentRole::Reviewer | AgentRole::Manager => vec![
+                "Read",
+                "Grep",
+                "Glob",
+                "LS",
+                "Bash",
+                "WebFetch",
+                "WebSearch",
+            ],
+        };
+        defaults.into_iter().map(String::from).collect()
     };
-    defaults.into_iter().map(String::from).collect()
+    subtract_denied_claude_tools(tools, deny_tools)
+}
+
+fn subtract_denied_claude_tools(tools: Vec<String>, deny_tools: Option<&[String]>) -> Vec<String> {
+    let Some(deny_tools) = deny_tools else {
+        return tools;
+    };
+    let denied: std::collections::HashSet<String> = deny_tools
+        .iter()
+        .map(|tool| claude_tool_name(tool))
+        .filter(|tool| !tool.is_empty())
+        .collect();
+    tools
+        .into_iter()
+        .filter(|tool| !denied.contains(tool))
+        .collect()
 }
 
 fn claude_tool_name(tool: &str) -> String {
@@ -261,6 +285,43 @@ mod tests {
         let path = generate_agent(&agent, &dir, &[], &[], &[], &extras).expect("generate ok");
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("tools: Read, Grep, Glob, Bash, WebSearch, mcp__custom"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn generate_agent_applies_deny_tools_after_defaults() {
+        let dir = std::env::temp_dir().join(format!(
+            "vstack_claude_agent_deny_tools_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let agent = agent_fixture("rust", AgentRole::Engineer);
+        let extras = AgentExtras {
+            frontmatter: AgentFrontmatterOverrides {
+                deny_tools: Some(vec!["bash".into(), "task".into(), "write".into()]),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let path = generate_agent(&agent, &dir, &[], &[], &[], &extras).expect("generate ok");
+        let content = std::fs::read_to_string(&path).unwrap();
+        let tools_line = content
+            .lines()
+            .find(|line| line.starts_with("tools:"))
+            .unwrap();
+        let tools: Vec<&str> = tools_line
+            .trim_start_matches("tools:")
+            .split(',')
+            .map(|tool| tool.trim())
+            .collect();
+        assert!(!tools.contains(&"Bash"));
+        assert!(!tools.contains(&"Task"));
+        assert!(!tools.contains(&"Write"));
+        assert!(tools.contains(&"Read"));
+        assert!(tools.contains(&"Edit"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -20,6 +20,7 @@ export interface AgentConfig {
 	description: string;
 	color?: string;
 	tools?: string[];
+	denyTools?: string[];
 	model?: string;
 	pane: boolean;
 	systemPrompt: string;
@@ -44,13 +45,25 @@ function normalizeModel(model: unknown): string | undefined {
 	return trimmed;
 }
 
-function parseTools(value: unknown, name: string): string[] | undefined {
+function parseToolList(value: unknown): string[] | undefined {
 	if (typeof value === "string" && value.trim().length > 0) {
 		return value
 			.split(",")
 			.map((tool) => tool.trim())
 			.filter(Boolean);
 	}
+	if (Array.isArray(value)) {
+		const tools = value
+			.map((tool) => (typeof tool === "string" ? tool.trim() : ""))
+			.filter(Boolean);
+		return tools.length > 0 ? tools : undefined;
+	}
+	return undefined;
+}
+
+function parseTools(value: unknown, name: string): string[] | undefined {
+	const explicit = parseToolList(value);
+	if (explicit) return explicit;
 	return defaultToolsForName(name);
 }
 
@@ -111,6 +124,7 @@ function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig
 			description,
 			color: asString(frontmatter.color),
 			tools: parseTools(frontmatter.tools, name),
+			denyTools: parseToolList(frontmatter["deny-tools"] ?? frontmatter.denyTools),
 			model: normalizeModel(frontmatter.model),
 			pane: asBoolean(frontmatter.pane ?? frontmatter.persistentPane),
 			systemPrompt: body,
