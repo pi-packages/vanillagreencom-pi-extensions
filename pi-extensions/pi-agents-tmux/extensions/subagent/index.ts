@@ -731,13 +731,18 @@ function upsertAgentFrontmatterToml(content: string, agentName: string, edit: Ag
 	const lines = content.split(/\r?\n/);
 	let sectionStart = lines.findIndex((line) => line.trim() === section);
 	if (sectionStart < 0) {
-		const prefix = content.endsWith("\n") ? content : `${content}\n`;
-		return upsertAgentFrontmatterToml(`${prefix}\n${section}\n`, agentName, edit);
+		const insertAt = lines.findIndex((line) => line.trim().startsWith("# ── Installed skills"));
+		const block = ["", "# Pi-specific model/tool/color overrides. This is where the", "# Pi /agents popup writes model, tools, and color changes for", "# vstack-managed project agents.", section, ""];
+		if (insertAt >= 0) lines.splice(insertAt, 0, ...block);
+		else lines.push(...block);
+		sectionStart = lines.findIndex((line) => line.trim() === section);
 	}
 	let sectionEnd = lines.length;
 	for (let i = sectionStart + 1; i < lines.length; i += 1) {
 		if (/^\s*\[[^\]]+\]\s*$/.test(lines[i])) { sectionEnd = i; break; }
+		if (lines[i].trim().startsWith("# ──")) { sectionEnd = i; break; }
 	}
+	while (sectionEnd > sectionStart + 1 && lines[sectionEnd - 1]?.trim() === "") sectionEnd -= 1;
 	const key = tomlAgentKey(agentName);
 	const keyRe = new RegExp(`^\\s*(?:${agentName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}|${tomlString(agentName).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})\\s*=`);
 	const existingIndex = lines.slice(sectionStart + 1, sectionEnd).findIndex((line) => keyRe.test(line));
@@ -752,9 +757,25 @@ function upsertAgentFrontmatterToml(content: string, agentName: string, edit: Ag
 	} else {
 		const nextLine = `${key} = ${renderTomlInlineTable(fields)}`;
 		if (absoluteIndex >= 0) lines[absoluteIndex] = nextLine;
-		else lines.splice(sectionEnd, 0, nextLine);
+		else lines.splice(sectionEnd, 0, nextLine, "");
 	}
 	return `${lines.join("\n").replace(/\n*$/, "")}\n`;
+}
+
+function refreshVstackManagedAgent(agent: AgentConfig, tomlPath: string): { ok: boolean; message?: string } {
+	const projectRoot = path.dirname(tomlPath);
+	const result = spawnSync("vstack", ["refresh", "--scope", "project"], {
+		cwd: projectRoot,
+		encoding: "utf-8",
+		timeout: 120_000,
+	});
+	if (result.error) return { ok: false, message: result.error.message };
+	if ((result.status ?? 0) !== 0) {
+		const detail = (result.stderr || result.stdout || `exit ${result.status}`).trim();
+		return { ok: false, message: detail.split(/\r?\n/).slice(-4).join(" ") };
+	}
+	if (!fs.existsSync(agent.filePath)) return { ok: false, message: `${compactAgentPath(agent.filePath)} was not regenerated.` };
+	return { ok: true };
 }
 
 function yamlScalar(value: string): string {
@@ -4738,7 +4759,9 @@ async function editAgentFrontmatterOverrides(ctx: ExtensionContext, agent: Agent
 			await fs.promises.mkdir(path.dirname(tomlPath), { recursive: true });
 			await fs.promises.writeFile(tomlPath, next, "utf-8");
 		});
-		return `Updated ${agent.name} overrides in ${compactAgentPath(tomlPath)}. Run vstack refresh to regenerate the agent file.`;
+		const refresh = refreshVstackManagedAgent(agent, tomlPath);
+		if (!refresh.ok) return `Updated ${agent.name} overrides in ${compactAgentPath(tomlPath)}. Refresh failed: ${refresh.message || "unknown error"}. Run vstack refresh --scope project to regenerate ${compactAgentPath(agent.filePath)}.`;
+		return `Updated ${compactAgentPath(tomlPath)} and regenerated ${compactAgentPath(agent.filePath)}. Run /reload if Pi does not pick up the changed agent immediately.`;
 	}
 	await withFileMutationQueue(agent.filePath, async () => {
 		const current = await fs.promises.readFile(agent.filePath, "utf-8");
