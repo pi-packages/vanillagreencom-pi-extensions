@@ -460,7 +460,7 @@ class SessionManagerOverlay implements Focusable {
 			return;
 		}
 
-		if (matchesKey(data, "delete") || this.keybindings.matches(data, "app.session.delete")) {
+		if (matchesKey(data, "delete")) {
 			const selected = this.selected();
 			if (selected) this.startDelete(selected);
 			this.requestRender();
