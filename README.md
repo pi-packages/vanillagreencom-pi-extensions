@@ -1,225 +1,90 @@
 # vstack
 
-Cross-harness package manager for AI coding systems.
+Cross-harness package manager for AI coding tools.
 
-Author skills, agents, and hooks once. Install into Claude Code, Cursor, OpenCode, Codex, and Pi from one Rust CLI.
+Author skills, agents, and hooks once. Install them into Claude Code, Cursor, OpenCode, Codex, or Pi from one CLI.
 
 [![Rust](https://img.shields.io/badge/Rust-%20-000000?style=flat-square&logo=rust)](./cli/Cargo.toml)
 [![Ratatui](https://img.shields.io/badge/TUI-ratatui-5D3FD3?style=flat-square)](https://ratatui.rs)
-[![Claude Code](https://img.shields.io/badge/Claude%20Code-supported-0EA5E9?style=flat-square)](#supported-harnesses)
-[![Cursor](https://img.shields.io/badge/Cursor-supported-0EA5E9?style=flat-square)](#supported-harnesses)
-[![OpenCode](https://img.shields.io/badge/OpenCode-supported-0EA5E9?style=flat-square)](#supported-harnesses)
-[![Codex](https://img.shields.io/badge/Codex-supported-0EA5E9?style=flat-square)](#supported-harnesses)
-[![Pi](https://img.shields.io/badge/Pi-supported-0EA5E9?style=flat-square)](#supported-harnesses)
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-supported-0EA5E9?style=flat-square)](#supported-tools)
+[![Cursor](https://img.shields.io/badge/Cursor-supported-0EA5E9?style=flat-square)](#supported-tools)
+[![OpenCode](https://img.shields.io/badge/OpenCode-supported-0EA5E9?style=flat-square)](#supported-tools)
+[![Codex](https://img.shields.io/badge/Codex-supported-0EA5E9?style=flat-square)](#supported-tools)
+[![Pi](https://img.shields.io/badge/Pi-supported-0EA5E9?style=flat-square)](#supported-tools)
 
 ![vstack TUI](docs/assets/vstack-tui.png)
 
 ---
 
-## What Is vstack?
+## What It Is
 
-- Rust CLI/TUI for discovering, installing, updating, and removing AI coding packages.
-- Maintained catalog in this repo (agents, skills, hooks, Pi extensions).
-- Packages authored harness-agnostic; vstack translates per harness at install.
-- Source repo is swappable — this catalog is the default, not the only one.
+A package manager for AI coding workflows. Skills, agents, and hooks live in a source repo; vstack translates them for whichever tool you use. Install per project or for the whole machine, customize freely, and updates won't overwrite your edits.
 
-## Features
+## Highlights
 
-- **Cross-harness install** — Claude Code, Cursor, OpenCode, Codex, Pi from one CLI.
-- **Global or project scope** — install per user or per project.
-- **Skill dependencies** — required deps install transitively; optional deps stay documentation-only.
-- **Config-driven attribution** — `vstack.toml` maps skills/hooks to agents and roles.
-- **Project customization** — per-agent guidance, colors, custom skills, per-skill instructions, custom hooks. Survives upstream updates.
-- **Reconciliation** — agents/skills regenerate on changes, preserving user edits.
-- **Lockfile refresh** — `vstack refresh` reinstalls all locked items; `--scope project|global|all` narrows.
-- **Source switching** — multiple package repos persisted in a global registry, swappable from the TUI.
-- **Fast TUI** — native Rust + mouse, built on `ratatui`/`crossterm`.
+- **One source, many tools.** Claude Code, Cursor, OpenCode, Codex, Pi.
+- **Per project or global.** One workspace or every project on the machine.
+- **Customizable.** Tweak agents and skills per project — edits survive updates.
+- **Skill dependencies.** Skills declare what they need; everything installs together.
+- **Swappable catalogs.** Use this catalog or any compatible repo.
+- **Fast TUI.** Native Rust interface for browsing, installing, and managing packages.
 
 ## Quick Start
 
 ```bash
 cargo install --git https://github.com/vanillagreencom/vstack.git vstack
-vstack add vanillagreencom/vstack   # interactive installer
+vstack add vanillagreencom/vstack
 ```
 
-### Commands
-
-| Command | Default scope | What it does |
-|---|---|---|
-| `vstack add <source>` | project | Install items (TUI by default; non-interactive with `-y` and item filters) |
-| `vstack remove <names>` | project | Uninstall items |
-| `vstack list` (alias `ls`) | all | Show installed items grouped by scope |
-| `vstack check` | all | Validate install state (outdated, orphaned, missing) |
-| `vstack refresh` | all | Reinstall locked items from current source. `--verbose`/`-v` prints per-item hash old→new with changed/unchanged status |
-| `vstack verify` | all | Confirm the live install matches its source on disk: lock hash vs current source, plus byte-level source-vs-install comparison for Pi packages. Exits non-zero on drift |
-| `vstack update-pi` | all | Update Pi packages by version (npm sources or vstack repos) |
-| `vstack update` | n/a | Self-update the CLI binary |
-| `vstack init <name> --kind <agent\|skill\|hook>` | n/a | Scaffold a new template in a vstack source repo |
-
-All scope-aware commands accept `--scope project|global|all`. `-g`/`--global` is shorthand for `--scope global`. When both are passed, `--scope` wins.
-
-Non-interactive `add` examples (item filters `--agent`, `--skill`, `--hook`, `--pi-extension` restrict the install; `--all` includes everything; `-y` skips the TUI):
-
-```bash
-vstack add vanillagreencom/vstack --pi-extension pi-web-tools --harness pi -y
-vstack add vanillagreencom/vstack --global --skill decider -y
-vstack add vanillagreencom/vstack --global --all -y
-```
-
-## Project-Local Config
-
-Two files at the project root:
-
-- **`vstack.toml`** — agent customization. Auto-created by `vstack add`. Edit, then `vstack refresh`. See [Project Customization](#project-customization).
-- **`.env.local`** — skill config (tokens, paths, auth). Copy from [.env.local.example](./.env.local.example). Symlinked into worktrees by the `worktree` skill.
+That opens an interactive installer where you pick which agents, skills, hooks, and Pi extensions to bring in, and which tools to install them into.
 
 ## How It Works
 
-### Mental Model
-
-A source repo is a package registry:
-
-- `agents/*.md` — agent definitions
-- `skills/*/SKILL.md` — skill packages (rules, scripts, workflows alongside)
-- `hooks/*.sh` — safety hooks
-- `pi-extensions/*/package.json` — npm-shaped Pi extension packages
-- `vstack.toml` — mapping and attribution rules
-
-### Dependencies And Mapping
-
-**Skill dependencies.** A skill lists the other skills it needs in its `SKILL.md` frontmatter:
-
-```yaml
-dependencies:
-  required: [linear, orchestration, decider]
-  optional: []
-```
-
-`required` deps install transitively whenever the skill installs. `optional` deps are documentation only — they're not auto-installed.
-
-**Agent attribution.** The source repo's `vstack.toml` decides which skills and hooks attach to which agents:
-
-- `[agent-skills]` — explicit skills per agent.
-- `[role-skills]` — skills added to every agent of a role (`engineer`, `reviewer`, `manager`).
-- `[hook-events]` — hooks attached by event/matcher, scoped to roles or `"all"`.
-
-```toml
-[agent-skills]
-rust = ["rust-arch", "rust-async", "rust-cargo"]
-iced = ["iced-rs", "iced-shadcn"]
-
-[role-skills]
-engineer = ["issue-lifecycle", "github", "worktree", "decider", "linear"]
-reviewer = ["issue-lifecycle", "linear"]
-
-[hook-events]
-"PreToolUse:Bash" = "all"
-"PostToolUse:Edit|Write" = ["engineer"]
-```
-
-### Project Customization
-
-`vstack add` auto-creates `vstack.toml` with placeholders for each installed agent and skill. Edit, then `vstack refresh`. All sections survive upstream updates — re-applied on every install/refresh.
-
-```toml
-# Launch instruction per agent.
-[agent-launch-instructions]
-rust = "Read open issues, pick up the highest-priority backend task."
-generalist = ""    # empty = no section
-
-# Extra rules appended to the agent file.
-[agent-additional-instructions]
-rust = "Always run clippy before committing."
-
-# Skills per agent. Auto-populated; edit freely.
-[agent-skills]
-rust = ["rust-arch", "rust-cargo", "decider", "github", "worktree"]
-iced = ["iced-rs", "trading-design", "decider", "github", "worktree"]
-
-# Agent display color written to supported agent frontmatter.
-# Pi subagent panes use this for the statusline badge background.
-[agent-colors]
-rust = "green"
-iced = "magenta"
-
-# Project instructions appended to a skill's SKILL.md.
-[skill-instructions]
-trading-design = "Dark theme, green/red accents."
-
-# Custom hooks. Claude Code runs the command; others use description as inline rules.
-[[custom-hooks]]
-event = "PreToolUse"
-matcher = "Bash"
-command = "./scripts/no-force-push.sh"
-description = "Never `git push --force` on main or master."
-agents = "all"     # "all" | role | [agent names]
-```
-
-Direct edits to generated agent/skill files are extracted into `vstack.toml` before the next regeneration — both approaches work.
-
-### Architecture
+A source repo is a package registry. vstack discovers what's there, asks which pieces you want, then writes the right files for each tool.
 
 ```text
 source repo
-├─ agents/*.md
-├─ skills/*/SKILL.md
-├─ hooks/*.sh
-└─ vstack.toml
-        │
+├─ agents
+├─ skills
+├─ hooks
+└─ Pi extensions
         ▼
    vstack CLI / TUI
-   - discovers packages
-   - resolves dependencies
-   - selects repo / scope / harnesses / method
-   - applies mapping rules
-        │
-        ├─ Claude Code → .claude/agents, .claude/skills, .claude/hooks, settings.json
-        ├─ Cursor      → .cursor/rules
-        ├─ OpenCode    → .opencode/agents, .opencode/skills, opencode.json
-        ├─ Codex       → .codex/agents, .agents/skills
-        └─ Pi          → .pi/agents, .agents/skills, .pi/packages, .pi/settings.json
+        ▼
+Claude Code · Cursor · OpenCode · Codex · Pi
 ```
 
-### Repo Sources
+### Customizing With `vstack.toml`
 
-Default: `vanillagreencom/vstack`. The TUI switches between remembered repos or adds new ones (GitHub shorthand or URL).
+`vstack add` writes a `vstack.toml` at your project root. Edit it to customize per-agent behavior; run `vstack refresh` to apply.
 
-Compatible repos:
+```toml
+# Skills assigned to each agent.
+[agent-skills]
+rust = ["rust-arch", "rust-cargo", "github", "worktree"]
 
-```text
-agents/
-skills/
-hooks/
-pi-extensions/   # optional
-vstack.toml
+# Extra instructions appended to an agent.
+[agent-additional-instructions]
+rust = "Always run clippy before committing."
+
+# Agent display color.
+[agent-colors]
+rust = "green"
 ```
 
-## Supported Harnesses
+Custom safety hooks (`[[custom-hooks]]`) and per-skill instructions (`[skill-instructions]`) follow the same pattern. Direct edits to generated agent or skill files are also picked up automatically — everything survives upstream updates.
 
-| Harness | Agents | Skills | Hooks | Notes |
-|---|---|---|---|---|
-| Claude Code | `.claude/agents/*.md` | `.claude/skills/<name>/` | native `.claude/hooks/*.sh` + `settings.json` | richest native hook support |
-| Cursor | `.cursor/rules/*.mdc` | `.cursor/rules/<name>/` | safety rules only | project scope only |
-| OpenCode | `.opencode/agents/*.md` | `.opencode/skills/<name>/` | instructions + `opencode.json` permissions | config-dir aware |
-| Codex | `.codex/agents/*.toml` | `.agents/skills/<name>/` | safety prose in `developer_instructions` | uses `CODEX_HOME` when set |
-| Pi | `.pi/agents/*.md` | `.agents/skills/<name>/` | safety prose in agent body | extensions install to `.pi/packages/<name>` and register in `.pi/settings.json` |
+## Supported Tools
 
-Global install behavior:
+| Tool | Notes |
+|---|---|
+| Claude Code | Richest native hook support. Works per project or globally. |
+| Cursor | Project scope only; safety rules surface as `.cursor/rules`. |
+| OpenCode | Config-dir aware. |
+| Codex | Safety guidance lives inside agent instructions. |
+| Pi | Adds Pi extension installation alongside agents and skills. |
 
-- Claude Code: user home `~/.claude`
-- OpenCode: config-dir based, respecting `OPENCODE_CONFIG` / `OPENCODE_CONFIG_DIR`
-- Codex: `CODEX_HOME` or `~/.codex`
-- Pi: `~/.pi/agent`, respecting `PI_CODING_AGENT_DIR`
-- Cursor: intentionally project-only
-
-### Pi notes
-
-- **Agents.** `.pi/agents/*.md` are inert without a loader extension (`pi-agents-tmux`). `pi-session-bridge` is a separate TUI side-channel for external controllers.
-- **Hooks.** No native runtime; safety prose is appended to the agent body.
-- **Extensions.** `vstack add` copies to `<scope>/packages/<name>`, registers in `settings.json`, symlinks each `bin` entry to `<scope>/bin/<cli>`. Add `<scope>/bin` to `PATH`. `vstack remove` cleans all three.
-- **Scope is exclusive.** Pi loads global + project together — duplicate registration crashes startup. vstack skips duplicates with a notice; use `vstack remove [-g]` to switch.
-
-Windows: CLI runs natively; symlink mode falls back to copy on non-Unix targets.
+Windows: CLI runs natively; symlink mode falls back to copy.
 
 ## Package Catalog In This Repo
 
@@ -283,18 +148,18 @@ Windows: CLI runs natively; symlink mode falls back to copy on non-Unix targets.
 
 #### Workflow / Platform
 
-| Skill | Brief | Commands |
-|---|---|---|
-| [`decider`](skills/decider/)* | Architectural decision document management and indexing. | — |
-| [`deep-research`](skills/deep-research/) | Exa-powered deep research and portable findings report generation. | `scripts/deep-research report "question" --output findings.md`, `scripts/deep-research doctor` |
-| [`github`](skills/github/)* | GitHub PR, thread, review, CI, and merge workflows. | — |
-| [`issue-lifecycle`](skills/issue-lifecycle/)* | Delegated implementation/review/QA issue workflows. | — |
-| [`linear`](skills/linear/)* | Linear issue, cycle, milestone, and project workflows. | — |
-| [`flightdeck`](skills/flightdeck/)* | Master session lifecycle for multi-issue parallel dev work; tmux-only. | `/flightdeck start [ISSUE_ID]`, `/flightdeck parallel-check`, `/flightdeck watch`, `/flightdeck status` |
-| [`orchestration`](skills/orchestration/)* | Per-issue inside-worktree lifecycle: dev → review → submit → merge. | `/orchestration start`, `/orchestration dev-start`, `/orchestration ci-fix`, `/orchestration review-pr`, `/orchestration submit-pr`, `/orchestration merge-pr` |
-| [`project-management`](skills/project-management/)* | TPM-orchestrated planning, audit, roadmap, research-driven decomposition. | `/project-management cycle-plan`, `/project-management audit-issues`, `/project-management roadmap plan`, `/project-management roadmap create`, `/project-management research-spike`, `/project-management research-complete` |
-| [`second-opinion`](skills/second-opinion/) | Cross-model review via external AI CLI; auto-detects harness and calls the opposite (Claude ↔ Codex). | `/second-opinion review`, `/second-opinion challenge`, `/second-opinion audit`, `/second-opinion quick` |
-| [`worktree`](skills/worktree/)* | Git worktree creation, env/config linkage, and isolated workflows. | `/worktree create`, `/worktree list`, `/worktree remove`, `/worktree push`, `/worktree check` |
+| Skill | Brief |
+|---|---|
+| [`decider`](skills/decider/)* | Architectural decision document management and indexing. |
+| [`deep-research`](skills/deep-research/) | Exa-powered deep research and portable findings report generation. |
+| [`github`](skills/github/)* | GitHub PR, thread, review, CI, and merge workflows. |
+| [`issue-lifecycle`](skills/issue-lifecycle/)* | Delegated implementation, review, and QA issue workflows. |
+| [`linear`](skills/linear/)* | Linear issue, cycle, milestone, and project workflows. |
+| [`flightdeck`](skills/flightdeck/)* | Master session lifecycle for multi-issue parallel dev work; tmux-only. |
+| [`orchestration`](skills/orchestration/)* | Per-issue lifecycle inside a worktree: dev → review → submit → merge. |
+| [`project-management`](skills/project-management/)* | TPM-driven planning, audits, roadmaps, and research-backed decomposition. |
+| [`second-opinion`](skills/second-opinion/) | Cross-model review via the opposite AI CLI (Claude ↔ Codex). |
+| [`worktree`](skills/worktree/)* | Git worktree creation, env/config linkage, and isolated workflows. |
 
 ### Hooks
 
@@ -307,59 +172,27 @@ Windows: CLI runs natively; symlink mode falls back to copy on non-Unix targets.
 
 ### Pi Extensions
 
-All Pi packages declare `vstack.extensionManager.settings` (including an `enabled` toggle). Install `pi-extension-manager` to browse/edit from Pi.
+Install [`pi-extension-manager`](pi-extensions/pi-extension-manager/README.md) to browse and configure these from inside Pi.
 
 | Extension | Purpose |
 |---|---|
-| [`pi-agents-tmux`](pi-extensions/pi-agents-tmux/README.md) | Delegate work to `.pi/agents` / `.claude/agents` with isolated context and persistent tmux panes (`subagent`, `get_subagent_result`, `steer_subagent`, `/agents`). |
-| [`pi-background-tasks`](pi-extensions/pi-background-tasks/README.md) | Non-blocking shell tasks via `bg_task`/`bg_status` plus a `/bg` dashboard so long-running commands do not block the turn. |
-| [`pi-caveman`](pi-extensions/pi-caveman/README.md) | Native Pi caveman communication mode via `before_agent_start` prompt injection (`/caveman`). |
-| [`pi-claude-bridge`](pi-extensions/pi-claude-bridge/README.md) | Claude Code provider bridge (`claude-bridge/*`) with vstack-controlled Pi prompt-context forwarding. |
-| [`pi-codex-minimal-tools`](pi-extensions/pi-codex-minimal-tools/README.md) | Adds Codex-style `view_image`, `apply_patch`, native OpenAI `image_generation`, and background `/image-gen` with Codex OAuth without replacing Pi's native file/shell/edit tools. |
-| [`pi-extension-manager`](pi-extensions/pi-extension-manager/README.md) | Pi-styled package manager (`/extensions`) plus separate inline settings editor (`/extensions:settings`). |
-| [`pi-flightdeck`](pi-extensions/pi-flightdeck/README.md) | Read-only mission-control dashboard for the [`flightdeck`](skills/flightdeck) skill: pause banner, persistent issue widget, and `/flightdeck` popup with Overview / Live feed / Conversations / Conflicts & merges / Decisions / Daemon tabs. |
-| [`pi-output-policy`](pi-extensions/pi-output-policy/README.md) | OMP-style large-output policy: shell minimization, head/tail truncation, spill-file preservation, UI-safe caps. |
-| [`pi-prompt-stash`](pi-extensions/pi-prompt-stash/README.md) | Per-session prompt stash history with stash/pop editor (`Alt+S`). |
-| [`pi-qol`](pi-extensions/pi-qol/README.md) | Compact statusline/`π` prompt, multiline input, image chips, session naming/search/handoff, custom compaction, thinking timer. |
-| [`pi-questions`](pi-extensions/pi-questions/README.md) | Structured multi-tab popup questions for the model with bridge-driven replies. |
-| [`pi-session-bridge`](pi-extensions/session-bridge/README.md) | Unix-socket JSONL side channel + `pi-bridge` CLI for external control, event streaming, prompt sending, and answering `pi-questions`. |
-| [`pi-session-manager`](pi-extensions/pi-session-manager/README.md) | Polished session browser (`/sessions`) for searching, resuming, renaming, and deleting Pi sessions. |
-| [`pi-skills-manager`](pi-extensions/pi-skills-manager/README.md) | Dedicated `/skill` shell for browsing, creating, editing, and toggling Pi skills; expands `[skill] <name>` markers before sending prompts. |
-| [`pi-task-panel`](pi-extensions/pi-task-panel/README.md) | Persistent structured task panel above the status line plus `/tasks` commands and `tasks_write` tool. |
-| [`pi-tool-renderer`](pi-extensions/pi-tool-renderer/README.md) | Compact Claude/opencode-style renderers for built-in `read`/`bash`/search/mutation tools while preserving original execution. |
-| [`pi-web-tools`](pi-extensions/pi-web-tools/README.md) | First-party web stack: provider-toggled `web_search` (Exa, Perplexity, Gemini, no-key Exa MCP/DuckDuckGo, OpenAI native), Exa deep research, and `web_fetch` extraction with HTML chrome strip + Jina fallback, GitHub clone cache, scanned-PDF vision OCR, YouTube/local video understanding, and Exa Code `/context` for `code_search`. See also [`EXA.md`](pi-extensions/pi-web-tools/EXA.md). |
-
-Source layout:
-
-```text
-pi-extensions/
-└─ <name>/
-   ├─ package.json        npm-shaped, with `pi.extensions` and optional `bin`
-   ├─ extensions/*.ts     loaded by Pi via the `pi.extensions` manifest
-   ├─ bin/*               optional CLI scripts
-   ├─ README.md
-   └─ THIRD_PARTY_NOTICES.md  optional attribution for vendored/base code
-```
-
-#### Settings layout
-
-vstack writes Pi's `packages` as relative paths (resolved against the settings file dir):
-
-```json
-{
-  "packages": [
-    "./packages/pi-session-bridge",
-    "./packages/pi-qol"
-  ]
-}
-```
-
-| Scope | Settings file | Packages directory |
-|---|---|---|
-| Global | `~/.pi/agent/settings.json` | `~/.pi/agent/packages/<name>/` |
-| Project | `.pi/settings.json` | `.pi/packages/<name>/` |
-
-Other keys are preserved. Legacy absolute paths auto-rewrite on next `add`/`refresh`. `pi-extension-manager` writes its disabled list + setting values under `vstack.extensionManager`.
+| [`pi-agents-tmux`](pi-extensions/pi-agents-tmux/README.md) | Delegate work to subagents in isolated, persistent tmux panes. |
+| [`pi-background-tasks`](pi-extensions/pi-background-tasks/README.md) | Non-blocking shell tasks with a live status dashboard. |
+| [`pi-caveman`](pi-extensions/pi-caveman/README.md) | Caveman communication mode. |
+| [`pi-claude-bridge`](pi-extensions/pi-claude-bridge/README.md) | Claude Code provider bridge with prompt-context forwarding. |
+| [`pi-codex-minimal-tools`](pi-extensions/pi-codex-minimal-tools/README.md) | Codex-style image, patch, and image-generation tools alongside Pi natives. |
+| [`pi-extension-manager`](pi-extensions/pi-extension-manager/README.md) | Pi-styled package manager and inline settings editor. |
+| [`pi-flightdeck`](pi-extensions/pi-flightdeck/README.md) | Mission-control dashboard for the `flightdeck` skill. |
+| [`pi-output-policy`](pi-extensions/pi-output-policy/README.md) | Large-output policy with truncation and spill-file preservation. |
+| [`pi-prompt-stash`](pi-extensions/pi-prompt-stash/README.md) | Per-session prompt stash history with stash/pop editor. |
+| [`pi-qol`](pi-extensions/pi-qol/README.md) | Compact statusline, multiline input, image chips, session naming and search. |
+| [`pi-questions`](pi-extensions/pi-questions/README.md) | Structured multi-tab popup questions with bridge-driven replies. |
+| [`pi-session-bridge`](pi-extensions/session-bridge/README.md) | Side-channel for external control, event streaming, and prompt sending. |
+| [`pi-session-manager`](pi-extensions/pi-session-manager/README.md) | Polished session browser for searching, resuming, and managing Pi sessions. |
+| [`pi-skills-manager`](pi-extensions/pi-skills-manager/README.md) | Browse, create, edit, and toggle Pi skills from a dedicated shell. |
+| [`pi-task-panel`](pi-extensions/pi-task-panel/README.md) | Persistent structured task panel above the status line. |
+| [`pi-tool-renderer`](pi-extensions/pi-tool-renderer/README.md) | Compact Claude/opencode-style renderers for built-in tools. |
+| [`pi-web-tools`](pi-extensions/pi-web-tools/README.md) | First-party web stack: search, deep research, fetch, video, and more. |
 
 ## License
 
