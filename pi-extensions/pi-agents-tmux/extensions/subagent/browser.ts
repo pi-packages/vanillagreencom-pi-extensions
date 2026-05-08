@@ -1,0 +1,1805 @@
+import { spawnSync } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import {
+	getMarkdownTheme,
+	type ExtensionContext,
+	type Theme,
+	withFileMutationQueue,
+} from "@earendil-works/pi-coding-agent";
+import {
+	Markdown,
+	matchesKey,
+	truncateToWidth,
+	visibleWidth,
+	wrapTextWithAnsi,
+	type TUI,
+} from "@earendil-works/pi-tui";
+import {
+	discoverAgents,
+	type AgentConfig,
+	type AgentScope,
+} from "./agents.js";
+import {
+	dashboardKindLabel,
+	dashboardStatusIcon,
+	dashboardStatusText,
+} from "./dashboard.js";
+import {
+	activePill,
+	ansiGreen,
+	ansiMagenta,
+	ansiYellow,
+	compactPath,
+	divider,
+	formatUsageStatsForDashboard,
+	inactivePill,
+	oneLinePreview,
+	simpleFrame,
+} from "./format.js";
+import {
+	ensurePersistentPane,
+	paneExists,
+	stopPersistentPane,
+	tmux,
+} from "./pane.js";
+import { readPaneRegistry, readTaskRegistry } from "./tasks.js";
+import { paneCompletionTone, readTextFileIfExists } from "./renderers.js";
+import { recordTraceRef } from "./renderers.js";
+import {
+	ACTIVE_BROWSER_TAB,
+	AGENT_SCOPE_TABS,
+	AGENTS_BROWSER_HEIGHT_RATIO,
+	AGENTS_BROWSER_MAX_HEIGHT,
+	AGENTS_BROWSER_WIDTH,
+	AGENTS_LEFT_MAX_WIDTH,
+	AGENTS_LEFT_MIN_WIDTH,
+	AGENTS_POPUP_FRAME_ROWS,
+	AGENTS_POPUP_PADDING_X,
+	AGENTS_POPUP_PADDING_Y,
+	AGENT_EDIT_CONFIRM_WIDTH,
+	HISTORY_BROWSER_TAB,
+	HISTORY_SUBTAB_LABELS,
+	ICONS,
+	TRACE_VIEWER_MAX_HEIGHT,
+	TRACE_VIEWER_WIDTH,
+	VSTACK_MODAL_LOCK_SYMBOL,
+	type AgentBrowserAction,
+	type AgentBrowserLayout,
+	type AgentBrowserTabDef,
+	type AgentBrowserTabId,
+	type AgentBrowserUiState,
+	type AgentFrontmatterEdit,
+	type AgentPaneStatus,
+	type ChatMessage,
+	type HistoryDetailEntry,
+	type PaneTaskRecord,
+	type PaneTaskRegistry,
+	type PaneTaskStatus,
+	type SubagentDashboardItem,
+	type TraceViewerItem,
+	type TraceViewerState,
+	type VstackModalLock,
+} from "./types.js";
+import { safeFileName } from "./names.js";
+
+export function acquireVstackModalLock(): () => void {
+	const host = globalThis as unknown as Record<PropertyKey, unknown>;
+	const existing = host[VSTACK_MODAL_LOCK_SYMBOL] as VstackModalLock | undefined;
+	const lock = existing && typeof existing.depth === "number" ? existing : { depth: 0 };
+	host[VSTACK_MODAL_LOCK_SYMBOL] = lock;
+	lock.depth += 1;
+	let released = false;
+	return () => {
+		if (released) return;
+		released = true;
+		lock.depth = Math.max(0, lock.depth - 1);
+	};
+}
+
+function agentInlineLine(text: string): string {
+	return text.replace(/[\r\n]+/g, " ").replace(/\t/g, " ");
+}
+
+function agentPad(text: string, width: number): string {
+	const safeWidth = Math.max(0, width);
+	const truncated = truncateToWidth(agentInlineLine(text), safeWidth, "");
+	return `${truncated}${" ".repeat(Math.max(0, safeWidth - visibleWidth(truncated)))}`;
+}
+
+function isAgentBrowserTextInput(data: string): boolean {
+	return data.length === 1 && data >= " " && data !== "\x7f";
+}
+
+function compactAgentPath(filePath: string): string {
+	const home = os.homedir();
+	return filePath.startsWith(home) ? `~${filePath.slice(home.length)}` : filePath;
+}
+
+function stripYamlQuotes(value: string): string {
+	const trimmed = value.trim();
+	if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+		return trimmed.slice(1, -1).replace(/\\"/g, '"').replace(/\\'/g, "'");
+	}
+	return trimmed;
+}
+
+function splitMarkdownFrontmatter(raw: string): { frontmatter: string; body: string; hasFrontmatter: boolean } {
+	if (!raw.startsWith("---\n") && raw.trim() !== "---") return { frontmatter: "", body: raw, hasFrontmatter: false };
+	const close = raw.indexOf("\n---", 4);
+	if (close < 0) return { frontmatter: "", body: raw, hasFrontmatter: false };
+	const afterClose = raw.slice(close + 4).replace(/^\r?\n/, "");
+	return { frontmatter: raw.slice(4, close), body: afterClose, hasFrontmatter: true };
+}
+
+function flatYamlField(frontmatter: string, key: string): string | undefined {
+	const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const match = frontmatter.match(new RegExp(`^\\s*${escaped}\\s*:\\s*(.*?)\\s*$`, "m"));
+	return match?.[1] === undefined ? undefined : stripYamlQuotes(match[1]);
+}
+
+function parseToolsList(value: string | undefined): string[] {
+	if (!value) return [];
+	const trimmed = value.trim();
+	const listText = trimmed.startsWith("[") && trimmed.endsWith("]") ? trimmed.slice(1, -1) : trimmed;
+	return listText.split(",").map((tool) => stripYamlQuotes(tool).trim()).filter(Boolean);
+}
+
+function agentCurrentFrontmatterEdit(agent: AgentConfig): AgentFrontmatterEdit {
+	let frontmatter = "";
+	try {
+		frontmatter = splitMarkdownFrontmatter(fs.readFileSync(agent.filePath, "utf-8")).frontmatter;
+	} catch {
+		frontmatter = "";
+	}
+	const current = {
+		model: flatYamlField(frontmatter, "model") ?? agent.model ?? "",
+		tools: parseToolsList(flatYamlField(frontmatter, "tools") ?? agent.tools?.join(", ")),
+		denyTools: parseToolsList(flatYamlField(frontmatter, "deny-tools") ?? agent.denyTools?.join(", ")),
+		color: flatYamlField(frontmatter, "color") ?? agent.color ?? "",
+	};
+	if (!isVstackManagedAgentFile(agent)) return current;
+	const tomlPath = vstackTomlPathForAgent(agent, process.cwd());
+	if (!tomlPath) return current;
+	const tomlCurrent = readAgentFrontmatterToml(tomlPath, agent.name);
+	return {
+		model: tomlCurrent.model ?? current.model,
+		tools: tomlCurrent.tools ?? current.tools,
+		denyTools: tomlCurrent.denyTools ?? current.denyTools,
+		color: tomlCurrent.color ?? current.color,
+	};
+}
+
+function agentHasExplicitToolsFrontmatter(agent: AgentConfig): boolean {
+	let frontmatter = "";
+	try {
+		frontmatter = splitMarkdownFrontmatter(fs.readFileSync(agent.filePath, "utf-8")).frontmatter;
+	} catch {
+		frontmatter = "";
+	}
+	if (!isVstackManagedAgentFile(agent)) return flatYamlField(frontmatter, "tools") !== undefined;
+	const tomlPath = vstackTomlPathForAgent(agent, process.cwd());
+	if (!tomlPath) return false;
+	return readAgentFrontmatterToml(tomlPath, agent.name).tools !== undefined;
+}
+
+function editableAgentFrontmatterText(agent: AgentConfig): string {
+	const current = agentCurrentFrontmatterEdit(agent);
+	const lines = [
+		"# Edit Pi agent frontmatter overrides. Blank values remove the override.",
+		"# Deny-tools is preferred; tools is omitted unless you uncomment/add it.",
+		"# To set a strict tools allowlist, add: tools: read, grep, find, ls",
+		"# For vstack-managed project agents, this writes [agent-frontmatter.pi] in vstack.toml.",
+		`model: ${current.model}`,
+		`deny-tools: ${current.denyTools.join(", ")}`,
+	];
+	if (agentHasExplicitToolsFrontmatter(agent)) lines.push(`# existing tools override (uncomment to keep): tools: ${current.tools.join(", ")}`);
+	lines.push(`color: ${current.color}`, "");
+	return lines.join("\n");
+}
+
+function parseEditableAgentFrontmatterText(raw: string): AgentFrontmatterEdit {
+	const fields = new Map<string, string>();
+	for (const line of raw.split(/\r?\n/)) {
+		const trimmed = line.trim();
+		if (!trimmed || trimmed.startsWith("#")) continue;
+		const match = trimmed.match(/^([A-Za-z][\w-]*)\s*:\s*(.*)$/);
+		if (!match) throw new Error(`Expected 'key: value' line, got: ${trimmed}`);
+		const key = match[1].toLowerCase();
+		if (key === "model" || key === "tools" || key === "deny-tools" || key === "color") fields.set(key, match[2] ?? "");
+	}
+	return {
+		model: stripYamlQuotes(fields.get("model") ?? ""),
+		tools: parseToolsList(fields.get("tools")),
+		denyTools: parseToolsList(fields.get("deny-tools")),
+		color: stripYamlQuotes(fields.get("color") ?? ""),
+	};
+}
+
+function isVstackManagedAgentFile(agent: AgentConfig): boolean {
+	try {
+		const raw = fs.readFileSync(agent.filePath, "utf-8");
+		return raw.includes("Never edit this file directly") && raw.includes("vstack refresh");
+	} catch {
+		return false;
+	}
+}
+
+function projectRootForAgentFile(agent: AgentConfig, cwd: string): string {
+	const normalized = path.resolve(agent.filePath);
+	for (const marker of [`${path.sep}.pi${path.sep}agents${path.sep}`, `${path.sep}.claude${path.sep}agents${path.sep}`]) {
+		const idx = normalized.indexOf(marker);
+		if (idx >= 0) return normalized.slice(0, idx);
+	}
+	let current = path.resolve(cwd);
+	while (true) {
+		if (fs.existsSync(path.join(current, "vstack.toml")) || fs.existsSync(path.join(current, ".vstack-lock.json")) || fs.existsSync(path.join(current, ".git"))) return current;
+		const parent = path.dirname(current);
+		if (parent === current) return path.resolve(cwd);
+		current = parent;
+	}
+}
+
+function vstackTomlPathForAgent(agent: AgentConfig, cwd: string): string | undefined {
+	let current = projectRootForAgentFile(agent, cwd);
+	while (true) {
+		const candidate = path.join(current, "vstack.toml");
+		if (fs.existsSync(candidate)) return candidate;
+		if (fs.existsSync(path.join(current, ".vstack-lock.json")) || fs.existsSync(path.join(current, ".git"))) return candidate;
+		const parent = path.dirname(current);
+		if (parent === current) return undefined;
+		current = parent;
+	}
+}
+
+function tomlString(value: string): string {
+	return `"${value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`;
+}
+
+function tomlArray(values: string[]): string {
+	return `[${values.map(tomlString).join(", ")}]`;
+}
+
+function splitTopLevelCommas(input: string): string[] {
+	const out: string[] = [];
+	let current = "";
+	let quote: string | undefined;
+	let bracketDepth = 0;
+	let escaped = false;
+	for (const char of input) {
+		if (escaped) { current += char; escaped = false; continue; }
+		if (char === "\\") { current += char; escaped = true; continue; }
+		if (quote) {
+			current += char;
+			if (char === quote) quote = undefined;
+			continue;
+		}
+		if (char === '"' || char === "'") { quote = char; current += char; continue; }
+		if (char === "[") bracketDepth += 1;
+		if (char === "]") bracketDepth = Math.max(0, bracketDepth - 1);
+		if (char === "," && bracketDepth === 0) { out.push(current.trim()); current = ""; continue; }
+		current += char;
+	}
+	if (current.trim()) out.push(current.trim());
+	return out;
+}
+
+function parseInlineTomlTable(value: string): Map<string, string> {
+	const map = new Map<string, string>();
+	const trimmed = value.trim().replace(/^\{/, "").replace(/\}$/, "");
+	for (const part of splitTopLevelCommas(trimmed)) {
+		const idx = part.indexOf("=");
+		if (idx <= 0) continue;
+		map.set(part.slice(0, idx).trim(), part.slice(idx + 1).trim());
+	}
+	return map;
+}
+
+function readAgentFrontmatterToml(tomlPath: string, agentName: string): Partial<AgentFrontmatterEdit> {
+	let content = "";
+	try { content = fs.readFileSync(tomlPath, "utf-8"); } catch { return {}; }
+	const lines = content.split(/\r?\n/);
+	const sectionStart = lines.findIndex((line) => line.trim() === "[agent-frontmatter.pi]");
+	if (sectionStart < 0) return {};
+	let sectionEnd = lines.length;
+	for (let i = sectionStart + 1; i < lines.length; i += 1) {
+		if (/^\s*\[[^\]]+\]\s*$/.test(lines[i])) { sectionEnd = i; break; }
+		if (lines[i].trim().startsWith("# ──")) { sectionEnd = i; break; }
+	}
+	const keyRe = new RegExp(`^\\s*(?:${agentName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}|${tomlString(agentName).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})\\s*=`);
+	const line = lines.slice(sectionStart + 1, sectionEnd).find((candidate) => keyRe.test(candidate));
+	if (!line) return {};
+	const existingValue = line.split(/=(.*)/s)[1] ?? "";
+	const fields = parseInlineTomlTable(existingValue.trim());
+	return {
+		model: fields.has("model") ? stripYamlQuotes(fields.get("model") ?? "") : undefined,
+		tools: fields.has("tools") ? parseToolsList(fields.get("tools")) : undefined,
+		denyTools: fields.has("deny-tools") ? parseToolsList(fields.get("deny-tools")) : undefined,
+		color: fields.has("color") ? stripYamlQuotes(fields.get("color") ?? "") : undefined,
+	};
+}
+
+function tomlAgentKey(agentName: string): string {
+	return /^[A-Za-z0-9_-]+$/.test(agentName) ? agentName : tomlString(agentName);
+}
+
+function renderTomlInlineTable(fields: Map<string, string>): string {
+	const preferred = ["color", "model", "deny-tools", "tools", "pane", "mode", "sandbox-mode", "model-reasoning-effort"];
+	const keys = [...preferred.filter((key) => fields.has(key)), ...[...fields.keys()].filter((key) => !preferred.includes(key)).sort()];
+	return `{ ${keys.map((key) => `${key} = ${fields.get(key)}`).join(", ")} }`;
+}
+
+function upsertAgentFrontmatterToml(content: string, agentName: string, edit: AgentFrontmatterEdit): string {
+	const section = "[agent-frontmatter.pi]";
+	const lines = content.split(/\r?\n/);
+	let sectionStart = lines.findIndex((line) => line.trim() === section);
+	if (sectionStart < 0) {
+		const insertAt = lines.findIndex((line) => line.trim().startsWith("# ── Installed skills"));
+		const block = ["", "# Pi-specific frontmatter overrides. This is where the", "# Pi /agents popup writes model, deny-tools, optional tools, and color changes for", "# vstack-managed project agents.", section, ""];
+		if (insertAt >= 0) lines.splice(insertAt, 0, ...block);
+		else lines.push(...block);
+		sectionStart = lines.findIndex((line) => line.trim() === section);
+	}
+	let sectionEnd = lines.length;
+	for (let i = sectionStart + 1; i < lines.length; i += 1) {
+		if (/^\s*\[[^\]]+\]\s*$/.test(lines[i])) { sectionEnd = i; break; }
+		if (lines[i].trim().startsWith("# ──")) { sectionEnd = i; break; }
+	}
+	while (sectionEnd > sectionStart + 1 && lines[sectionEnd - 1]?.trim() === "") sectionEnd -= 1;
+	const key = tomlAgentKey(agentName);
+	const keyRe = new RegExp(`^\\s*(?:${agentName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}|${tomlString(agentName).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})\\s*=`);
+	const existingIndex = lines.slice(sectionStart + 1, sectionEnd).findIndex((line) => keyRe.test(line));
+	const absoluteIndex = existingIndex >= 0 ? sectionStart + 1 + existingIndex : -1;
+	const existingValue = absoluteIndex >= 0 ? (lines[absoluteIndex].split(/=(.*)/s)[1] ?? "") : "";
+	const fields = parseInlineTomlTable(existingValue.trim());
+	if (edit.color.trim()) fields.set("color", tomlString(edit.color.trim())); else fields.delete("color");
+	if (edit.model.trim()) fields.set("model", tomlString(edit.model.trim())); else fields.delete("model");
+	if (edit.tools.length > 0) fields.set("tools", tomlArray(edit.tools)); else fields.delete("tools");
+	if (edit.denyTools.length > 0) fields.set("deny-tools", tomlArray(edit.denyTools)); else fields.delete("deny-tools");
+	if (fields.size === 0) {
+		if (absoluteIndex >= 0) lines.splice(absoluteIndex, 1);
+	} else {
+		const nextLine = `${key} = ${renderTomlInlineTable(fields)}`;
+		if (absoluteIndex >= 0) lines[absoluteIndex] = nextLine;
+		else lines.splice(sectionEnd, 0, nextLine, "");
+	}
+	return `${lines.join("\n").replace(/\n*$/, "")}\n`;
+}
+
+function refreshVstackManagedAgent(agent: AgentConfig, tomlPath: string): { ok: boolean; message?: string } {
+	const projectRoot = path.dirname(tomlPath);
+	const result = spawnSync("vstack", ["refresh", "--scope", "project"], {
+		cwd: projectRoot,
+		encoding: "utf-8",
+		timeout: 120_000,
+	});
+	if (result.error) return { ok: false, message: result.error.message };
+	if ((result.status ?? 0) !== 0) {
+		const detail = (result.stderr || result.stdout || `exit ${result.status}`).trim();
+		return { ok: false, message: detail.split(/\r?\n/).slice(-4).join(" ") };
+	}
+	if (!fs.existsSync(agent.filePath)) return { ok: false, message: `${compactAgentPath(agent.filePath)} was not regenerated.` };
+	return { ok: true };
+}
+
+function yamlScalar(value: string): string {
+	if (!value) return "";
+	return /^[A-Za-z0-9_./:+-]+$/.test(value) ? value : `"${value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`;
+}
+
+function upsertYamlField(frontmatter: string, key: string, value: string | undefined): string {
+	const lines = frontmatter.split(/\r?\n/);
+	const keyRe = new RegExp(`^\\s*${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*:`);
+	const idx = lines.findIndex((line) => keyRe.test(line));
+	if (!value) {
+		if (idx >= 0) lines.splice(idx, 1);
+		return lines.join("\n");
+	}
+	const line = `${key}: ${value}`;
+	if (idx >= 0) lines[idx] = line;
+	else lines.push(line);
+	return lines.join("\n");
+}
+
+function updateAgentFileFrontmatter(raw: string, edit: AgentFrontmatterEdit): string {
+	const split = splitMarkdownFrontmatter(raw);
+	if (!split.hasFrontmatter) throw new Error("Agent file does not have YAML frontmatter.");
+	let fm = split.frontmatter;
+	fm = upsertYamlField(fm, "model", edit.model.trim() ? yamlScalar(edit.model.trim()) : undefined);
+	fm = upsertYamlField(fm, "tools", edit.tools.length > 0 ? edit.tools.join(", ") : undefined);
+	fm = upsertYamlField(fm, "deny-tools", edit.denyTools.length > 0 ? edit.denyTools.join(", ") : undefined);
+	fm = upsertYamlField(fm, "color", edit.color.trim() ? yamlScalar(edit.color.trim()) : undefined);
+	return `---\n${fm.replace(/\n*$/, "")}\n---\n\n${split.body.replace(/^\n+/, "")}`;
+}
+
+function agentSearchText(agent: AgentConfig, status?: AgentPaneStatus): string {
+	return [
+		agent.name,
+		agent.description,
+		agent.source,
+		agent.filePath,
+		agent.model ?? "",
+		agent.tools?.join(" ") ?? "",
+		agent.denyTools?.join(" ") ?? "",
+		agent.pane ? "pane persistent tmux" : "bg background one-shot oneshot",
+		status?.live ? "live running" : status?.entry ? "dead stopped" : "",
+	].join(" ").toLowerCase();
+}
+
+function filterAgentsForBrowser(agents: AgentConfig[], query: string, statuses: Map<string, AgentPaneStatus>): AgentConfig[] {
+	const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+	if (tokens.length === 0) return agents;
+	return agents.filter((agent) => tokens.every((token) => agentSearchText(agent, statuses.get(agent.name)).includes(token)));
+}
+
+function tabNext(current: AgentBrowserTabId, hasActive: boolean, delta: number): AgentBrowserTabId {
+	const tabs: AgentBrowserTabId[] = hasActive
+		? ["active", "project", "user", "both", "history"]
+		: ["project", "user", "both", "history"];
+	const index = Math.max(0, tabs.indexOf(current));
+	return tabs[(index + delta + tabs.length) % tabs.length]!;
+}
+
+async function loadAgentPaneStatuses(runtimeRoot: string): Promise<Map<string, AgentPaneStatus>> {
+	const registry = await readPaneRegistry(runtimeRoot);
+	const entries = await Promise.all(
+		Object.entries(registry).map(async ([agentName, entry]) => [agentName, { entry, live: await paneExists(entry.paneId) }] as const),
+	);
+	return new Map(entries);
+}
+
+function agentFrameContentWidth(width: number): number {
+	return Math.max(1, width - 2 - AGENTS_POPUP_PADDING_X * 2);
+}
+
+function agentBrowserLayout(terminalRows: number): AgentBrowserLayout {
+	const innerRows = Math.max(1, Math.floor(Math.max(1, terminalRows) * AGENTS_BROWSER_HEIGHT_RATIO) - AGENTS_POPUP_FRAME_ROWS);
+	const bodyRows = Math.max(0, innerRows - 9);
+	return {
+		bodyRows,
+		innerRows,
+		listRows: Math.max(1, bodyRows - 3),
+	};
+}
+
+function agentDivider(width: number, theme: Theme): string {
+	return theme.fg("dim", "─".repeat(Math.max(1, width)));
+}
+
+function agentFrame(lines: string[], width: number, theme: Theme, fixedInnerRows = 30, title = ""): string[] {
+	const safeWidth = Math.max(1, width);
+	const inner = Math.max(1, safeWidth - 2);
+	const contentWidth = agentFrameContentWidth(safeWidth);
+	const border = (s: string) => theme.fg("borderAccent", s);
+	let body = lines;
+	if (body.length > fixedInnerRows) {
+		const hidden = body.length - fixedInnerRows + 1;
+		body = [...body.slice(0, Math.max(0, fixedInnerRows - 1)), theme.fg("dim", `↓ ${hidden} more line(s)`)].slice(0, fixedInnerRows);
+	} else if (body.length < fixedInnerRows) {
+		body = [...body, ...Array.from({ length: fixedInnerRows - body.length }, () => "")];
+	}
+	const blank = `${border("┃")}${" ".repeat(inner)}${border("┃")}`;
+	const top = () => {
+		if (!title) return `${border("┏")}${border("━".repeat(inner))}${border("┓")}`;
+		const titlePlain = ` ${truncateToWidth(title, Math.max(1, inner - 2), "…")} `;
+		const fill = Math.max(1, inner - visibleWidth(titlePlain));
+		return `${border("┏")}${ansiGreen(titlePlain)}${border("━".repeat(fill))}${border("┓")}`;
+	};
+	const out = [top()];
+	for (let i = 0; i < AGENTS_POPUP_PADDING_Y; i += 1) out.push(blank);
+	for (const line of body) out.push(`${border("┃")}${" ".repeat(AGENTS_POPUP_PADDING_X)}${agentPad(line, contentWidth)}${" ".repeat(AGENTS_POPUP_PADDING_X)}${border("┃")}`);
+	for (let i = 0; i < AGENTS_POPUP_PADDING_Y; i += 1) out.push(blank);
+	out.push(`${border("┗")}${border("━".repeat(inner))}${border("┛")}`);
+	return out.map((line) => truncateToWidth(agentInlineLine(line), safeWidth, ""));
+}
+
+function agentActivePill(theme: Theme, label: string): string {
+	return theme.fg("accent", theme.inverse(theme.bold(label)));
+}
+
+function agentInactivePill(theme: Theme, label: string): string {
+	return theme.bg("selectedBg", theme.fg("accent", label));
+}
+
+function agentPaneTitle(theme: Theme, label: string, active: boolean): string {
+	const padded = ` ${label} `;
+	return active ? agentActivePill(theme, padded) : agentInactivePill(theme, padded);
+}
+
+function agentEntityTitle(theme: Theme, label: string): string {
+	return ansiMagenta(theme.bold(label));
+}
+
+function renderAgentBrowserTabs(active: AgentBrowserTabId, hasActive: boolean, width: number, theme: Theme): string {
+	const tabs: AgentBrowserTabDef[] = hasActive
+		? [ACTIVE_BROWSER_TAB, ...AGENT_SCOPE_TABS, HISTORY_BROWSER_TAB]
+		: [...AGENT_SCOPE_TABS, HISTORY_BROWSER_TAB];
+	const partFor = (tab: AgentBrowserTabDef): string => {
+		const label = ` ${truncateToWidth(tab.label, 18, "…")} `;
+		if (tab.id === active) return agentActivePill(theme, label);
+		return agentInactivePill(theme, label);
+	};
+	return truncateToWidth(tabs.map(partFor).join(" "), width, "");
+}
+
+function agentStatus(agent: AgentConfig, status: AgentPaneStatus | undefined): "live" | "dead" | "pane" | "one-shot" {
+	if (!agent.pane) return "one-shot";
+	if (status?.live) return "live";
+	if (status?.entry) return "dead";
+	return "pane";
+}
+
+function agentStatusColor(status: ReturnType<typeof agentStatus>): "success" | "warning" | "muted" | "dim" {
+	if (status === "live") return "success";
+	if (status === "dead") return "warning";
+	if (status === "pane") return "muted";
+	return "dim";
+}
+
+function agentStatusIcon(status: ReturnType<typeof agentStatus>, theme: Theme): string {
+	if (status === "live") return theme.fg("success", ICONS.circleFilled);
+	if (status === "dead") return theme.fg("warning", ICONS.times);
+	if (status === "pane") return theme.fg("warning", ICONS.circleOpen);
+	return theme.fg("dim", "·");
+}
+
+function agentStatusLabel(agent: AgentConfig, status: AgentPaneStatus | undefined, theme: Theme): string {
+	const state = agentStatus(agent, status);
+	if (state === "live") return theme.fg("success", "live");
+	if (state === "dead") return theme.fg("warning", "dead");
+	if (state === "pane") return theme.fg("muted", "pane-ready/startable");
+	return theme.fg("dim", "bg");
+}
+
+function agentLegend(theme: Theme): string {
+	return `${theme.fg("muted", "Legend")}: ${theme.fg("success", ICONS.circleFilled)} live pane · ${theme.fg("warning", ICONS.circleOpen)} pane-ready/startable · ${theme.fg("warning", ICONS.times)} stale pane · ${theme.fg("dim", "·")} bg`;
+}
+
+function renderAgentList(agents: AgentConfig[], statuses: Map<string, AgentPaneStatus>, ui: AgentBrowserUiState, width: number, theme: Theme, listRows: number): string[] {
+	const lines = [`${agentPaneTitle(theme, "Agents", ui.pane === "list")} ${theme.fg("dim", `(${agents.length})`)}`, ""];
+	if (agents.length === 0) {
+		lines.push(theme.fg("dim", "No matching agents."));
+		return lines;
+	}
+	if (ui.scroll > 0) lines.push(theme.fg("dim", `↑ ${ui.scroll} earlier`));
+	for (const [visibleIndex, agent] of agents.slice(ui.scroll, ui.scroll + listRows).entries()) {
+		const index = ui.scroll + visibleIndex;
+		const selected = index === ui.selected;
+		const status = agentStatus(agent, statuses.get(agent.name));
+		const marker = " ";
+		const name = ansiMagenta(selected ? theme.bold(agent.name) : agent.name);
+		const metaTone = selected ? "text" : "dim";
+		const meta = theme.fg(metaTone, ` ${status === "one-shot" ? "bg" : "pane"} · ${agent.source}`);
+		const model = agent.model ? theme.fg(metaTone, ` · ${agent.model}`) : "";
+		const row = truncateToWidth(`${marker}${agentStatusIcon(status, theme)} ${name}${meta}${model}`, width, "…");
+		lines.push(selected ? theme.bg("selectedBg", agentPad(row, width)) : row);
+	}
+	const hidden = Math.max(0, agents.length - (ui.scroll + listRows));
+	if (hidden > 0) lines.push(theme.fg("dim", `↓ ${hidden} more`));
+	return lines;
+}
+
+function renderAgentPromptViewport(agent: AgentConfig, ui: AgentBrowserUiState, width: number, rows: number, theme: Theme): string[] {
+	const prompt = agent.systemPrompt.trim() || theme.fg("dim", "(empty prompt)");
+	const promptLines = new Markdown(prompt, 0, 0, getMarkdownTheme()).render(width);
+	const visibleRows = Math.max(1, rows - 1);
+	const maxScroll = Math.max(0, promptLines.length - visibleRows);
+	ui.inspectorScroll = Math.max(0, Math.min(ui.inspectorScroll, maxScroll));
+	const visible = promptLines.slice(ui.inspectorScroll, ui.inspectorScroll + visibleRows);
+	const before = ui.inspectorScroll > 0 ? `↑ ${ui.inspectorScroll}` : "";
+	const afterCount = Math.max(0, promptLines.length - ui.inspectorScroll - visibleRows);
+	const after = afterCount > 0 ? `↓ ${afterCount}` : "";
+	const scroll = [before, after].filter(Boolean).join(" · ");
+	return scroll ? [...visible, theme.fg("dim", scroll)] : visible;
+}
+
+function renderAgentInspector(agent: AgentConfig | undefined, statuses: Map<string, AgentPaneStatus>, ui: AgentBrowserUiState, width: number, rows: number, theme: Theme): string[] {
+	if (!agent) return [`${agentPaneTitle(theme, "Inspector", ui.pane === "inspector")} ${theme.fg("dim", "Select an agent to inspect it.")}`];
+	const status = statuses.get(agent.name);
+	const safeWidth = Math.max(8, width);
+	const pushWrapped = (target: string[], text: string) => {
+		const wrapped = wrapTextWithAnsi(text, safeWidth);
+		target.push(...(wrapped.length > 0 ? wrapped : [""]));
+	};
+	const lines: string[] = [];
+	pushWrapped(
+		lines,
+		`${agentPaneTitle(theme, "Inspector", ui.pane === "inspector")} ${agentEntityTitle(theme, agent.name)} ${theme.fg(agentStatusColor(agentStatus(agent, status)), agentStatus(agent, status))}`,
+	);
+	lines.push("");
+	lines.push(...wrapTextWithAnsi(agent.description || "No description.", safeWidth).slice(0, 3));
+	lines.push("");
+	pushWrapped(
+		lines,
+		`${theme.fg("muted", "Kind")}: ${agent.pane ? "persistent pane" : "bg"}    ${theme.fg("muted", "Scope")}: ${agent.source}`,
+	);
+	pushWrapped(lines, `${theme.fg("muted", "Model")}: ${agent.model ?? "default"}`);
+	pushWrapped(lines, `${theme.fg("muted", "Deny tools")}: ${agent.denyTools && agent.denyTools.length > 0 ? agent.denyTools.join(", ") : "none"}`);
+	pushWrapped(lines, `${theme.fg("muted", "Path")}: ${compactAgentPath(agent.filePath)}`);
+	pushWrapped(lines, `${theme.fg("muted", "State")}: ${agentStatusLabel(agent, status, theme)}`);
+	if (status?.entry) {
+		pushWrapped(lines, `${theme.fg("muted", "Pane")}: ${status.entry.windowName}`);
+		pushWrapped(lines, `${theme.fg("muted", "Last task")}: ${status.entry.lastTaskAt ?? "never"}`);
+	}
+	lines.push("", theme.fg("muted", theme.bold("System Prompt")));
+	const promptRows = Math.max(1, rows - lines.length);
+	lines.push(...renderAgentPromptViewport(agent, ui, safeWidth, promptRows, theme));
+	return lines.slice(0, rows);
+}
+
+export function activeDashboardItems(items: SubagentDashboardItem[]): SubagentDashboardItem[] {
+	return items
+		.sort((a, b) => {
+			const aKey = a.startedAt ?? a.taskId;
+			const bKey = b.startedAt ?? b.taskId;
+			if (aKey === bKey) return 0;
+			return aKey < bKey ? -1 : 1;
+		});
+}
+
+function readTranscriptTail(transcriptPath: string | undefined, maxLines: number): string[] {
+	if (!transcriptPath) return [];
+	try {
+		const raw = fs.readFileSync(transcriptPath, "utf-8");
+		const lines = raw.split(/\r?\n/);
+		const rendered: string[] = [];
+		for (const line of lines) {
+			if (!line.trim()) continue;
+			let event: any;
+			try { event = JSON.parse(line); } catch { rendered.push(line); continue; }
+			const inner = event?.event && typeof event.event === "object" ? event.event : event;
+			const msg = inner?.message;
+			if (msg && typeof msg === "object") {
+				const role = msg.role || inner.type || "?";
+				const content = Array.isArray(msg.content) ? msg.content : [];
+				const textPart = content.find((c: any) => c?.type === "text");
+				const tool = content.find((c: any) => c?.type === "toolCall");
+				if (tool) rendered.push(`${role}: [tool] ${tool.name ?? "?"} ${JSON.stringify(tool.arguments ?? {}).slice(0, 80)}`);
+				else if (textPart?.text) rendered.push(`${role}: ${oneLinePreview(String(textPart.text), 200)}`);
+				else if (typeof msg.content === "string") rendered.push(`${role}: ${oneLinePreview(msg.content, 200)}`);
+				else rendered.push(`${role}: (${inner.type ?? "message"})`);
+				continue;
+			}
+			if (typeof inner?.type === "string") {
+				rendered.push(inner.type);
+				continue;
+			}
+			rendered.push(line);
+		}
+		return rendered.slice(-maxLines);
+	} catch {
+		return [];
+	}
+}
+
+function renderActiveAgentList(items: SubagentDashboardItem[], ui: AgentBrowserUiState, width: number, theme: Theme, listRows: number): string[] {
+	const totalRows = items.length + 1;
+	const lines = [`${agentPaneTitle(theme, "Active", ui.pane === "list")} ${theme.fg("dim", `(${items.length})`)}`, ""];
+	if (ui.activeScroll > 0) lines.push(theme.fg("dim", `\u2191 ${ui.activeScroll} earlier`));
+	const chatVisible = ui.activeScroll === 0 && listRows > 0;
+	if (chatVisible) {
+		const selected = ui.activeSelected === 0;
+		const icon = theme.fg("accent", "\uf075");
+		const label = theme.fg(selected ? "accent" : "text", theme.bold("Chat"));
+		const hint = theme.fg(selected ? "text" : "dim", "all agents");
+		const row = `${icon} ${label} ${theme.fg(selected ? "text" : "dim", "\u00b7")} ${hint}`;
+		const prefix = selected ? theme.fg("accent", "> ") : "  ";
+		lines.push(truncateToWidth(`${prefix}${row}`, width, ""));
+	}
+	const agentsHeader = ui.activeScroll === 0 && items.length > 0 && listRows > 1;
+	if (agentsHeader) lines.push(theme.fg("muted", "Agents"));
+	const usedRows = (chatVisible ? 1 : 0) + (agentsHeader ? 1 : 0);
+	const remainingRows = Math.max(0, listRows - usedRows);
+	const itemStart = Math.max(0, ui.activeScroll);
+	const startItemIndex = Math.max(0, itemStart - 1);
+	const visible = items.slice(startItemIndex, startItemIndex + remainingRows);
+	for (const [index, item] of visible.entries()) {
+		const absoluteIndex = startItemIndex + index + 1;
+		const selected = absoluteIndex === ui.activeSelected;
+		const icon = dashboardStatusIcon(item.status, theme);
+		const name = selected ? ansiMagenta(theme.bold(item.agent)) : ansiMagenta(item.agent);
+		const metaTone = selected ? "text" : "dim";
+		const kind = theme.fg(metaTone, dashboardKindLabel(item.kind));
+		const row = `${icon} ${name} ${theme.fg(metaTone, "\u00b7")} ${kind}`;
+		const prefix = selected ? theme.fg("accent", "> ") : "  ";
+		lines.push(truncateToWidth(`${prefix}${row}`, width, ""));
+	}
+	const after = items.length - (startItemIndex + visible.length);
+	if (after > 0) lines.push(theme.fg("dim", `\u2193 ${after} more`));
+	void totalRows;
+	return lines;
+}
+
+function renderActiveAgentDetail(item: SubagentDashboardItem | undefined, ui: AgentBrowserUiState, width: number, rows: number, theme: Theme): string[] {
+	if (!item) return [`${agentPaneTitle(theme, "Detail", ui.pane === "inspector")} ${theme.fg("dim", "Select an agent to inspect.")}`];
+	const safeWidth = Math.max(8, width);
+	const wrap = (text: string): string[] => {
+		const wrapped = wrapTextWithAnsi(text, safeWidth);
+		return wrapped.length > 0 ? wrapped : [""];
+	};
+	const titleLine = `${agentPaneTitle(theme, "Detail", ui.pane === "inspector")} ${ansiMagenta(theme.bold(item.agent))} ${dashboardStatusText(item, theme)} ${theme.fg("dim", dashboardKindLabel(item.kind))}`;
+	const body: string[] = [];
+	body.push(...wrap(`${theme.fg("muted", "Task ID")}: ${theme.fg("dim", item.taskId)}`));
+	if (item.task) body.push(...wrap(`${theme.fg("muted", "Task")}: ${item.task}`));
+	if (item.transcriptPath) body.push(...wrapPlainNoEllipsis(`Transcript: ${compactPath(item.transcriptPath, { maxChars: Number.POSITIVE_INFINITY })}`, safeWidth).map((line) => theme.fg("dim", line)));
+	if (item.usage) {
+		const usageLine = formatUsageStatsForDashboard(item.usage).join(" \u00b7 ");
+		if (usageLine) body.push(...wrap(`${theme.fg("muted", "Usage")}: ${theme.fg("dim", usageLine)}`));
+	}
+	if (item.message) {
+		body.push("");
+		body.push(...wrap(theme.fg("muted", theme.bold("Latest Message"))));
+		const wrapped = wrapTextWithAnsi(item.message, safeWidth);
+		body.push(...wrapped.slice(0, 8));
+	}
+	body.push("");
+	body.push(...wrap(theme.fg("muted", theme.bold("Transcript Tail"))));
+	const tail = readTranscriptTail(item.transcriptPath, 400);
+	if (tail.length === 0) {
+		body.push(...wrap(theme.fg("dim", "(transcript empty or unavailable)")));
+	} else {
+		for (const line of tail) body.push(...wrap(theme.fg("toolOutput", line)));
+	}
+	const allLines: string[] = [titleLine, ""];
+	const visibleBodyRows = Math.max(1, rows - 2);
+	const maxOffset = Math.max(0, body.length - visibleBodyRows);
+	const offset = Math.max(0, Math.min(ui.inspectorScroll, maxOffset));
+	ui.inspectorScroll = offset;
+	const slice = body.slice(offset, offset + visibleBodyRows);
+	allLines.push(...slice);
+	if (offset > 0 || maxOffset > 0) {
+		const hint = `${offset > 0 ? `\u2191 ${offset} earlier` : ""}${offset > 0 && offset < maxOffset ? "  " : ""}${offset < maxOffset ? `\u2193 ${maxOffset - offset} more` : ""}`.trim();
+		if (hint && allLines.length < rows) {
+			const lastIndex = allLines.length - 1;
+			allLines[lastIndex] = `${allLines[lastIndex]} ${theme.fg("dim", hint)}`;
+		}
+	}
+	return allLines.slice(0, rows);
+}
+
+export function formatRelativeTime(iso: string | undefined): string {
+	if (!iso) return "—";
+	const ts = Date.parse(iso);
+	if (!Number.isFinite(ts)) return "—";
+	const delta = Date.now() - ts;
+	if (delta < 0) return "just now";
+	const sec = Math.floor(delta / 1000);
+	if (sec < 60) return `${sec}s ago`;
+	const min = Math.floor(sec / 60);
+	if (min < 60) return `${min}m ago`;
+	const hr = Math.floor(min / 60);
+	if (hr < 24) return `${hr}h ago`;
+	const day = Math.floor(hr / 24);
+	if (day < 30) return `${day}d ago`;
+	const mo = Math.floor(day / 30);
+	if (mo < 12) return `${mo}mo ago`;
+	return new Date(ts).toISOString().slice(0, 10);
+}
+
+function historyStatusIcon(status: PaneTaskStatus, theme: Theme): string {
+	if (status === "completed") return theme.fg("success", ICONS.check);
+	if (status === "failed") return theme.fg("error", ICONS.times);
+	if (status === "blocked") return theme.fg("warning", ICONS.times);
+	if (status === "running") return theme.fg("warning", ICONS.cog);
+	if (status === "queued") return theme.fg("warning", ICONS.clock);
+	return theme.fg("muted", "·");
+}
+
+function historyStatusText(status: PaneTaskStatus, theme: Theme): string {
+	return theme.fg(paneCompletionTone(status), status);
+}
+
+function sortedHistoryRecords(registry: PaneTaskRegistry): PaneTaskRecord[] {
+	return Object.values(registry)
+		.filter((record) => record.taskId && record.agent)
+		.sort((a, b) => recordTimestampLocal(b) - recordTimestampLocal(a));
+}
+
+function recordTimestampLocal(record: PaneTaskRecord): number {
+	const value = Date.parse(record.completedAt ?? record.createdAt ?? "");
+	return Number.isFinite(value) ? value : 0;
+}
+
+function renderHistoryList(records: PaneTaskRecord[], ui: AgentBrowserUiState, width: number, theme: Theme, listRows: number): string[] {
+	const lines = [`${agentPaneTitle(theme, "Tasks", ui.pane === "list")} ${theme.fg("dim", `(${records.length})`)}`, ""];
+	if (records.length === 0) {
+		lines.push(theme.fg("dim", "No agent task history yet."));
+		return lines;
+	}
+	if (ui.historyScroll > 0) lines.push(theme.fg("dim", `↑ ${ui.historyScroll} earlier`));
+	for (const [visibleIndex, record] of records.slice(ui.historyScroll, ui.historyScroll + listRows).entries()) {
+		const index = ui.historyScroll + visibleIndex;
+		const selected = index === ui.historySelected;
+		const icon = historyStatusIcon(record.status, theme);
+		const name = ansiMagenta(selected ? theme.bold(record.agent) : record.agent);
+		const metaTone = selected ? "text" : "dim";
+		const when = theme.fg(metaTone, formatRelativeTime(record.completedAt ?? record.createdAt));
+		const summary = oneLinePreview(record.summary || record.task || "", 60);
+		const detail = summary ? theme.fg(metaTone, `  ${summary}`) : "";
+		const row = truncateToWidth(`${icon} ${name} ${theme.fg(metaTone, "·")} ${when}${detail}`, width, "…");
+		lines.push(selected ? theme.bg("selectedBg", agentPad(row, width)) : row);
+	}
+	const hidden = Math.max(0, records.length - (ui.historyScroll + listRows));
+	if (hidden > 0) lines.push(theme.fg("dim", `↓ ${hidden} more`));
+	return lines;
+}
+
+function wrapPlainNoEllipsis(text: string, width: number): string[] {
+	const targetWidth = Math.max(1, width);
+	const out: string[] = [];
+	for (const raw of text.split(/\r?\n/)) {
+		const soft = wrapTextWithAnsi(raw, targetWidth);
+		const chunks = soft.length > 0 ? soft : [""];
+		for (const chunk of chunks) {
+			let rest = chunk;
+			if (!rest) {
+				out.push("");
+				continue;
+			}
+			while (visibleWidth(rest) > targetWidth) {
+				const part = truncateToWidth(rest, targetWidth, "");
+				if (!part) break;
+				out.push(part);
+				rest = rest.slice(part.length);
+			}
+			if (rest) out.push(rest);
+		}
+	}
+	return out;
+}
+
+function renderHistoryDetail(
+	record: PaneTaskRecord | undefined,
+	cache: Map<string, HistoryDetailEntry>,
+	ui: AgentBrowserUiState,
+	width: number,
+	rows: number,
+	theme: Theme,
+): string[] {
+	if (!record) {
+		return [`${agentPaneTitle(theme, "Detail", ui.pane === "inspector")} ${theme.fg("dim", "Select a task to view its trace.")}`];
+	}
+	const safeWidth = Math.max(8, width);
+	const entry = cache.get(record.taskId);
+	const items = entry?.items;
+	const placeholderText = entry?.error ? `Error: ${entry.error}` : entry?.loading || !items ? "Loading…" : "(empty)";
+	const subtabs: TraceViewerItem[] = items ?? HISTORY_SUBTAB_LABELS.map((label) => ({ label, text: placeholderText, type: label.toLowerCase() as TraceViewerItem["type"] }));
+	const subtabIndex = Math.max(0, Math.min(ui.historySubtab, subtabs.length - 1));
+	ui.historySubtab = subtabIndex;
+	const when = formatRelativeTime(record.completedAt ?? record.createdAt);
+	const titleLine = `${agentPaneTitle(theme, "Detail", ui.pane === "inspector")} ${ansiMagenta(theme.bold(record.agent))} ${historyStatusText(record.status, theme)} ${theme.fg("dim", `· ${when}`)}`;
+	const subtabLine = renderTraceTabBar(subtabs, subtabIndex, safeWidth, theme);
+	const item = subtabs[subtabIndex];
+	const fileLines = item?.path
+		? wrapPlainNoEllipsis(`file ${compactPath(item.path, { maxChars: Number.POSITIVE_INFINITY })}`, safeWidth).map((line) => theme.fg("dim", line))
+		: item?.type === "summary"
+			? [theme.fg("dim", "metadata view")]
+			: [];
+	const rawLines = (item?.text || "(empty)").split(/\r?\n/);
+	const wrapped: string[] = [];
+	for (const raw of rawLines) {
+		const chunk = wrapPlainNoEllipsis(raw, safeWidth);
+		wrapped.push(...(chunk.length > 0 ? chunk : [""]));
+	}
+	const header: string[] = [titleLine, "", subtabLine, "", ...fileLines];
+	const headerRows = header.length;
+	const footerRows = 1;
+	const visibleRows = Math.max(1, rows - headerRows - footerRows);
+	const maxScroll = Math.max(0, wrapped.length - visibleRows);
+	ui.inspectorScroll = Math.max(0, Math.min(ui.inspectorScroll, maxScroll));
+	const slice = wrapped.slice(ui.inspectorScroll, ui.inspectorScroll + visibleRows);
+	const before = ui.inspectorScroll > 0 ? `↑ ${ui.inspectorScroll}` : "";
+	const afterCount = Math.max(0, wrapped.length - ui.inspectorScroll - visibleRows);
+	const after = afterCount > 0 ? `↓ ${afterCount}` : "";
+	const scrollHint = [before, after].filter(Boolean).join(" · ");
+	const out: string[] = [...header];
+	out.push(...slice);
+	if (scrollHint) out.push(theme.fg("dim", scrollHint));
+	else out.push("");
+	return out.slice(0, rows);
+}
+
+function deriveTaskIdFromFile(file: string): string | undefined {
+	const base = path.basename(file, path.extname(file));
+	const stripped = base.replace(/^\d{10,}-/, "");
+	return stripped || base || undefined;
+}
+
+function trimChatBody(text: string, max = 4_000): string {
+	const compact = text.trim();
+	if (compact.length <= max) return compact;
+	return `${compact.slice(0, max)}\n\u2026(truncated)`;
+}
+
+function extractDelegationBody(raw: string): string {
+	const lines = raw.split(/\r?\n/);
+	const out: string[] = [];
+	let started = false;
+	for (const line of lines) {
+		if (!started) {
+			if (/^Task for /.test(line) || /^Task ID:/.test(line)) continue;
+			if (line.trim() === "") continue;
+			started = true;
+		}
+		if (/^When done, /.test(line)) break;
+		if (/^If complete_subagent is unavailable/.test(line)) break;
+		if (/^Do not complete before the work is actually done/.test(line)) break;
+		out.push(line);
+	}
+	while (out.length > 0 && out[out.length - 1].trim() === "") out.pop();
+	return out.join("\n").trim();
+}
+
+function extractSteeringBody(raw: string): string {
+	const lines = raw.split(/\r?\n/);
+	const out: string[] = [];
+	let started = false;
+	for (const line of lines) {
+		if (!started) {
+			if (/^Steering update for /.test(line)) continue;
+			if (line.trim() === "") continue;
+			started = true;
+		}
+		out.push(line);
+	}
+	return out.join("\n").trim();
+}
+
+function loadChatMessages(runtimeRoot: string, agentNames: string[]): ChatMessage[] {
+	const messages: ChatMessage[] = [];
+	const seen = new Set<string>();
+	const pushMd = (filePath: string, agent: string): void => {
+		const key = `md:${filePath}`;
+		if (seen.has(key)) return;
+		seen.add(key);
+		let stat: fs.Stats;
+		try { stat = fs.statSync(filePath); } catch { return; }
+		let raw: string;
+		try { raw = fs.readFileSync(filePath, "utf-8"); } catch { return; }
+		const isSteer = /^Steering update for /m.test(raw) || /^STEER:/im.test(raw);
+		const body = trimChatBody(isSteer ? extractSteeringBody(raw) : extractDelegationBody(raw));
+		if (!body) return;
+		messages.push({
+			timestamp: stat.mtimeMs,
+			agent,
+			taskId: deriveTaskIdFromFile(filePath),
+			kind: isSteer ? "steering" : "delegation",
+			from: "@orch",
+			to: `@${agent}`,
+			body,
+		});
+	};
+	const pushJson = (filePath: string, agent: string): void => {
+		const key = `json:${filePath}`;
+		if (seen.has(key)) return;
+		seen.add(key);
+		let stat: fs.Stats;
+		try { stat = fs.statSync(filePath); } catch { return; }
+		let parsed: Record<string, unknown> | undefined;
+		try { parsed = JSON.parse(fs.readFileSync(filePath, "utf-8")) as Record<string, unknown>; } catch { return; }
+		const summary = typeof parsed?.summary === "string" ? parsed.summary : "(no summary)";
+		const status = typeof parsed?.status === "string" ? parsed.status : undefined;
+		const notes = typeof parsed?.notes === "string" ? parsed.notes : undefined;
+		const filesChanged = Array.isArray(parsed?.filesChanged)
+			? (parsed.filesChanged as unknown[]).filter((entry): entry is string => typeof entry === "string")
+			: undefined;
+		messages.push({
+			timestamp: stat.mtimeMs,
+			agent,
+			taskId: deriveTaskIdFromFile(filePath),
+			kind: "completion",
+			from: `@${agent}`,
+			to: "@orch",
+			body: summary,
+			status,
+			filesChanged,
+			notes,
+		});
+	};
+	const mdDirs = ["inbox", "processing", "done"];
+	const jsonDirs = ["outbox", "processed"];
+	for (const agent of agentNames) {
+		for (const rel of mdDirs) {
+			const dir = path.join(runtimeRoot, rel, safeFileName(agent));
+			let entries: string[];
+			try { entries = fs.readdirSync(dir); } catch { continue; }
+			for (const name of entries) if (name.endsWith(".md")) pushMd(path.join(dir, name), agent);
+		}
+		for (const rel of jsonDirs) {
+			const dir = path.join(runtimeRoot, rel, safeFileName(agent));
+			let entries: string[];
+			try { entries = fs.readdirSync(dir); } catch { continue; }
+			for (const name of entries) if (name.endsWith(".json")) pushJson(path.join(dir, name), agent);
+		}
+	}
+	messages.sort((a, b) => a.timestamp - b.timestamp);
+	return messages;
+}
+
+function chatTimestamp(ms: number): string {
+	const d = new Date(ms);
+	const hh = String(d.getHours()).padStart(2, "0");
+	const mm = String(d.getMinutes()).padStart(2, "0");
+	const ss = String(d.getSeconds()).padStart(2, "0");
+	return `${hh}:${mm}:${ss}`;
+}
+
+function chatRoleColor(name: string, theme: Theme): string {
+	if (name === "@orch") return theme.fg("accent", theme.bold(name));
+	return ansiMagenta(theme.bold(name));
+}
+
+function chatKindBadge(kind: ChatMessage["kind"], theme: Theme): string {
+	if (kind === "completion") return theme.fg("success", "completion");
+	if (kind === "steering") return theme.fg("warning", "steer");
+	return theme.fg("muted", "delegation");
+}
+
+function chatStatusIcon(status: string | undefined, theme: Theme): string | undefined {
+	if (!status) return undefined;
+	if (status === "completed") return theme.fg("success", ICONS.check);
+	if (status === "failed") return theme.fg("error", ICONS.times);
+	if (status === "blocked") return theme.fg("error", ICONS.times);
+	return theme.fg("warning", ICONS.warning);
+}
+
+function wrapWithHangingIndent(text: string, indent: string, width: number): string[] {
+	const innerWidth = Math.max(1, width - visibleWidth(indent));
+	const out: string[] = [];
+	for (const line of text.split(/\r?\n/)) {
+		const wrapped = wrapTextWithAnsi(line, innerWidth);
+		if (wrapped.length === 0) {
+			out.push(indent);
+			continue;
+		}
+		for (const sub of wrapped) out.push(`${indent}${sub}`);
+	}
+	return out;
+}
+
+function renderChatRoomDetail(runtimeRoot: string, agentNames: string[], ui: AgentBrowserUiState, width: number, rows: number, theme: Theme): string[] {
+	const safeWidth = Math.max(8, width);
+	const titleLine = `${agentPaneTitle(theme, "Chat", ui.pane === "inspector")} ${theme.fg("dim", `(${agentNames.length} agent${agentNames.length === 1 ? "" : "s"})`)}`;
+	const messages = loadChatMessages(runtimeRoot, agentNames);
+	const body: string[] = [];
+	if (messages.length === 0) {
+		body.push(...wrapTextWithAnsi(theme.fg("dim", "No messages yet. Delegations and completions will appear here as agents work."), safeWidth));
+	} else {
+		for (let i = 0; i < messages.length; i += 1) {
+			const msg = messages[i];
+			const time = theme.fg("dim", chatTimestamp(msg.timestamp));
+			const arrow = theme.fg("dim", "\u2192");
+			const fromLabel = chatRoleColor(msg.from, theme);
+			const toLabel = chatRoleColor(msg.to, theme);
+			const sep = theme.fg("dim", "\u00b7");
+			const kindBadge = chatKindBadge(msg.kind, theme);
+			const statusIcon = chatStatusIcon(msg.status, theme);
+			const headerParts = [time, fromLabel, arrow, toLabel, sep, kindBadge];
+			if (statusIcon) headerParts.push(sep, statusIcon);
+			body.push(...wrapTextWithAnsi(headerParts.join(" "), safeWidth));
+			const indent = theme.fg("dim", "\u2502 ");
+			const bodyText = msg.body || theme.fg("dim", "(empty)");
+			body.push(...wrapWithHangingIndent(theme.fg("toolOutput", bodyText), indent, safeWidth));
+			if (msg.filesChanged && msg.filesChanged.length > 0) {
+				body.push(...wrapWithHangingIndent(theme.fg("muted", `files: ${msg.filesChanged.join(", ")}`), indent, safeWidth));
+			}
+			if (msg.notes) {
+				body.push(...wrapWithHangingIndent(theme.fg("muted", `notes: ${msg.notes}`), indent, safeWidth));
+			}
+			if (i < messages.length - 1) body.push("");
+		}
+	}
+	const allLines: string[] = [titleLine, ""];
+	const visibleBodyRows = Math.max(1, rows - 2);
+	const maxOffset = Math.max(0, body.length - visibleBodyRows);
+	const offset = Math.max(0, Math.min(ui.inspectorScroll, maxOffset));
+	ui.inspectorScroll = offset;
+	allLines.push(...body.slice(offset, offset + visibleBodyRows));
+	if (offset > 0 || maxOffset > 0) {
+		const hint = `${offset > 0 ? `\u2191 ${offset} earlier` : ""}${offset > 0 && offset < maxOffset ? "  " : ""}${offset < maxOffset ? `\u2193 ${maxOffset - offset} more` : ""}`.trim();
+		if (hint && allLines.length < rows) {
+			const lastIndex = allLines.length - 1;
+			allLines[lastIndex] = `${allLines[lastIndex]} ${theme.fg("dim", hint)}`;
+		}
+	}
+	return allLines.slice(0, rows);
+}
+
+function renderActiveTabBody(items: SubagentDashboardItem[], runtimeRoot: string, ui: AgentBrowserUiState, width: number, theme: Theme, layout: AgentBrowserLayout): string[] {
+	const maxLeftWidth = Math.max(10, width - 13);
+	const desiredLeftWidth = Math.min(AGENTS_LEFT_MAX_WIDTH, Math.floor(width * 0.32), maxLeftWidth);
+	const leftWidth = Math.max(10, Math.min(maxLeftWidth, Math.max(Math.min(AGENTS_LEFT_MIN_WIDTH, maxLeftWidth), desiredLeftWidth)));
+	const rightWidth = Math.max(1, width - leftWidth - 3);
+	const bodyRows = layout.bodyRows;
+	const left = renderActiveAgentList(items, ui, leftWidth, theme, layout.listRows);
+	const chatSelected = ui.activeSelected === 0;
+	const agentNames = items.map((i) => i.agent);
+	const right = chatSelected
+		? renderChatRoomDetail(runtimeRoot, agentNames, ui, rightWidth, bodyRows, theme)
+		: renderActiveAgentDetail(items[ui.activeSelected - 1], ui, rightWidth, bodyRows, theme);
+	const lines: string[] = [];
+	const headerLine = `${theme.fg("muted", "View")}: ${theme.fg("text", "active")}  ${theme.fg("muted", "Items")}: ${items.length}`;
+	lines.push(...wrapTextWithAnsi(headerLine, width));
+	lines.push(agentDivider(width, theme));
+	for (let i = 0; i < bodyRows; i += 1) {
+		lines.push(`${agentPad(left[i] ?? "", leftWidth)} ${theme.fg("dim", "\u2502")} ${truncateToWidth(right[i] ?? "", rightWidth, "")}`);
+	}
+	const legend = `${theme.fg("muted", "Active")}: ${theme.fg("warning", "running/waiting")} \u00b7 ${theme.fg("success", "completed")} \u00b7 ${theme.fg("error", "failed")}`;
+	lines.push("");
+	lines.push(...wrapTextWithAnsi(legend, width));
+	return lines;
+}
+
+function renderHistoryTabBody(
+	records: PaneTaskRecord[],
+	cache: Map<string, HistoryDetailEntry>,
+	ui: AgentBrowserUiState,
+	width: number,
+	theme: Theme,
+	layout: AgentBrowserLayout,
+): string[] {
+	const maxLeftWidth = Math.max(10, width - 13);
+	const desiredLeftWidth = Math.min(AGENTS_LEFT_MAX_WIDTH, Math.floor(width * 0.36), maxLeftWidth);
+	const leftWidth = Math.max(10, Math.min(maxLeftWidth, Math.max(Math.min(AGENTS_LEFT_MIN_WIDTH, maxLeftWidth), desiredLeftWidth)));
+	const rightWidth = Math.max(1, width - leftWidth - 3);
+	const bodyRows = layout.bodyRows;
+	const left = renderHistoryList(records, ui, leftWidth, theme, layout.listRows);
+	const record = records[ui.historySelected];
+	const right = renderHistoryDetail(record, cache, ui, rightWidth, bodyRows, theme);
+	const headerLine = `${theme.fg("muted", "View")}: ${theme.fg("text", "history")}  ${theme.fg("muted", "Tasks")}: ${records.length}`;
+	const lines: string[] = [...wrapTextWithAnsi(headerLine, width), agentDivider(width, theme)];
+	for (let i = 0; i < bodyRows; i += 1) {
+		lines.push(`${agentPad(left[i] ?? "", leftWidth)} ${theme.fg("dim", "│")} ${truncateToWidth(right[i] ?? "", rightWidth, "")}`);
+	}
+	const legend = `${theme.fg("muted", "Status")}: ${theme.fg("success", "completed")} · ${theme.fg("warning", "running/queued/blocked")} · ${theme.fg("error", "failed")}`;
+	lines.push("");
+	lines.push(...wrapTextWithAnsi(legend, width));
+	return lines;
+}
+
+function renderAgentsBody(
+	discovery: ReturnType<typeof discoverAgents>,
+	agents: AgentConfig[],
+	statuses: Map<string, AgentPaneStatus>,
+	ui: AgentBrowserUiState,
+	width: number,
+	theme: Theme,
+	layout: AgentBrowserLayout,
+): string[] {
+	const selected = agents[ui.selected];
+	const maxLeftWidth = Math.max(10, width - 13);
+	const desiredLeftWidth = Math.min(AGENTS_LEFT_MAX_WIDTH, Math.floor(width * 0.38), maxLeftWidth);
+	const leftWidth = Math.max(10, Math.min(maxLeftWidth, Math.max(Math.min(AGENTS_LEFT_MIN_WIDTH, maxLeftWidth), desiredLeftWidth)));
+	const rightWidth = Math.max(1, width - leftWidth - 3);
+	const bodyRows = layout.bodyRows;
+	const liveCount = [...statuses.values()].filter((status) => status.live).length;
+	const paneCount = discovery.agents.filter((agent) => agent.pane).length;
+	const left = renderAgentList(agents, statuses, ui, leftWidth, theme, layout.listRows);
+	const right = renderAgentInspector(selected, statuses, ui, rightWidth, bodyRows, theme);
+	const rows = bodyRows;
+	const searchLine = theme.bg("toolPendingBg", agentPad(` > ${ui.search}${theme.inverse(" ")}`, width));
+	const filterLine = `${theme.fg("muted", "View")}: ${theme.fg("text", "agents")}  ${theme.fg("muted", "Filters")}: scope ${ui.scope} · ${agents.length}/${discovery.agents.length} shown · ${paneCount} pane · ${liveCount} live`;
+	const filterLines = wrapTextWithAnsi(filterLine, width);
+	const lines = [searchLine, ...filterLines, agentDivider(width, theme)];
+	for (let i = 0; i < rows; i += 1) {
+		lines.push(`${agentPad(left[i] ?? "", leftWidth)} ${theme.fg("dim", "│")} ${truncateToWidth(right[i] ?? "", rightWidth, "")}`);
+	}
+	lines.push("");
+	lines.push(...wrapTextWithAnsi(agentLegend(theme), width));
+	return lines;
+}
+
+function createAgentsBrowserComponent(
+	discovery: ReturnType<typeof discoverAgents>,
+	statuses: Map<string, AgentPaneStatus>,
+	taskRegistry: PaneTaskRegistry,
+	ui: AgentBrowserUiState,
+	theme: Theme,
+	requestRender: () => void,
+	getLayout: () => AgentBrowserLayout,
+	done: (action: AgentBrowserAction) => void,
+	getActiveItems: () => SubagentDashboardItem[],
+	runtimeRoot: string,
+) {
+	const filtered = () => filterAgentsForBrowser(discovery.agents, ui.search, statuses);
+	const selectedAgent = () => filtered()[ui.selected];
+	const clamp = () => {
+		const layout = getLayout();
+		const list = filtered();
+		ui.selected = Math.max(0, Math.min(ui.selected, Math.max(0, list.length - 1)));
+		if (ui.selected < ui.scroll) ui.scroll = ui.selected;
+		if (ui.selected >= ui.scroll + layout.listRows) ui.scroll = ui.selected - layout.listRows + 1;
+		ui.scroll = Math.max(0, Math.min(ui.scroll, Math.max(0, list.length - layout.listRows)));
+	};
+	const historyRecords = sortedHistoryRecords(taskRegistry);
+	const historyCache = new Map<string, HistoryDetailEntry>();
+	const loadHistoryRecord = (record: PaneTaskRecord | undefined) => {
+		if (!record) return;
+		const entry = historyCache.get(record.taskId);
+		if (entry?.items || entry?.loading) return;
+		historyCache.set(record.taskId, { loading: true });
+		void traceViewerItems(record).then((items) => {
+			historyCache.set(record.taskId, { items });
+			requestRender();
+		}).catch((error) => {
+			historyCache.set(record.taskId, { error: error instanceof Error ? error.message : String(error) });
+			requestRender();
+		});
+	};
+	const clampHistory = () => {
+		const layout = getLayout();
+		const total = historyRecords.length;
+		ui.historySelected = Math.max(0, Math.min(ui.historySelected, Math.max(0, total - 1)));
+		if (ui.historySelected < ui.historyScroll) ui.historyScroll = ui.historySelected;
+		if (ui.historySelected >= ui.historyScroll + layout.listRows) ui.historyScroll = ui.historySelected - layout.listRows + 1;
+		ui.historyScroll = Math.max(0, Math.min(ui.historyScroll, Math.max(0, total - layout.listRows)));
+	};
+
+	const hasActiveTab = () => getActiveItems().length > 0;
+	const switchTab = (delta: number) => {
+		const next = tabNext(ui.tab, hasActiveTab(), delta);
+		if (next === "active") {
+			ui.tab = "active";
+			ui.activeSelected = 0;
+			ui.activeScroll = 0;
+			ui.inspectorScroll = 0;
+			ui.pane = "list";
+			requestRender();
+			return;
+		}
+		if (next === "history") {
+			ui.tab = "history";
+			ui.historySelected = 0;
+			ui.historyScroll = 0;
+			ui.historySubtab = 0;
+			ui.inspectorScroll = 0;
+			ui.pane = "list";
+			loadHistoryRecord(historyRecords[0]);
+			requestRender();
+			return;
+		}
+		ui.tab = next;
+		ui.scope = next;
+		ui.selected = 0;
+		ui.scroll = 0;
+		ui.inspectorScroll = 0;
+		done({ type: "reload" });
+	};
+	const insertSelected = () => {
+		const agent = selectedAgent();
+		if (agent) done({ type: "insert", agentName: agent.name });
+	};
+	const startSelected = () => {
+		const agent = selectedAgent();
+		if (agent) done({ type: "start", agentName: agent.name });
+	};
+	const attachSelected = () => {
+		const agent = selectedAgent();
+		if (agent) done({ type: "attach", agentName: agent.name });
+	};
+	const stopSelected = () => {
+		const agent = selectedAgent();
+		if (agent) done({ type: "stop", agentName: agent.name });
+	};
+	const editFrontmatterSelected = () => {
+		const agent = selectedAgent();
+		if (agent) done({ type: "editFrontmatter", agentName: agent.name });
+	};
+	function handleInput(data: string): void {
+		if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
+			if (ui.tab !== "active" && ui.search) { ui.search = ""; ui.selected = 0; ui.scroll = 0; requestRender(); return; }
+			done({ type: "close" });
+			return;
+		}
+		if (matchesKey(data, "tab")) return switchTab(1);
+		if (matchesKey(data, "shift+tab")) return switchTab(-1);
+		if (matchesKey(data, "left")) {
+			if (ui.tab === "history" && ui.pane === "inspector") {
+				if (ui.historySubtab === 0) {
+					ui.pane = "list";
+				} else {
+					ui.historySubtab -= 1;
+					ui.inspectorScroll = 0;
+				}
+				requestRender();
+				return;
+			}
+			ui.pane = "list";
+			requestRender();
+			return;
+		}
+		if (matchesKey(data, "right")) {
+			if (ui.tab === "history" && ui.pane === "inspector") {
+				const total = HISTORY_SUBTAB_LABELS.length;
+				if (ui.historySubtab < total - 1) {
+					ui.historySubtab += 1;
+					ui.inspectorScroll = 0;
+					requestRender();
+				}
+				return;
+			}
+			ui.pane = "inspector";
+			requestRender();
+			return;
+		}
+		if (matchesKey(data, "-") || matchesKey(data, "=")) {
+			const layout = getLayout();
+			const page = Math.max(1, layout.bodyRows);
+			const delta = matchesKey(data, "-") ? -page : page;
+			if (ui.tab === "active") {
+				const items = getActiveItems();
+				const totalRows = items.length + 1;
+				if (ui.pane === "inspector") {
+					ui.inspectorScroll = Math.max(0, ui.inspectorScroll + delta);
+				} else {
+					ui.activeSelected = Math.max(0, Math.min(totalRows - 1, ui.activeSelected + delta));
+					if (ui.activeSelected < ui.activeScroll) ui.activeScroll = ui.activeSelected;
+					if (ui.activeSelected >= ui.activeScroll + layout.listRows) ui.activeScroll = ui.activeSelected - layout.listRows + 1;
+					ui.activeScroll = Math.max(0, Math.min(ui.activeScroll, Math.max(0, totalRows - layout.listRows)));
+					ui.inspectorScroll = 0;
+				}
+			} else if (ui.tab === "history") {
+				if (ui.pane === "inspector") {
+					ui.inspectorScroll = Math.max(0, ui.inspectorScroll + delta);
+				} else {
+					ui.historySelected = Math.max(0, ui.historySelected + delta);
+					ui.historySubtab = 0;
+					ui.inspectorScroll = 0;
+					clampHistory();
+					loadHistoryRecord(historyRecords[ui.historySelected]);
+				}
+			} else if (ui.pane === "inspector") {
+				ui.inspectorScroll = Math.max(0, ui.inspectorScroll + delta);
+			} else {
+				ui.selected = Math.max(0, ui.selected + delta);
+				ui.inspectorScroll = 0;
+				clamp();
+			}
+			requestRender();
+			return;
+		}
+		if (ui.tab === "active") {
+			const items = getActiveItems();
+			const layout = getLayout();
+			const totalRows = items.length + 1;
+			const clampActive = () => {
+				ui.activeSelected = Math.max(0, Math.min(ui.activeSelected, Math.max(0, totalRows - 1)));
+				if (ui.activeSelected < ui.activeScroll) ui.activeScroll = ui.activeSelected;
+				if (ui.activeSelected >= ui.activeScroll + layout.listRows) ui.activeScroll = ui.activeSelected - layout.listRows + 1;
+				ui.activeScroll = Math.max(0, Math.min(ui.activeScroll, Math.max(0, totalRows - layout.listRows)));
+			};
+			if (matchesKey(data, "up")) {
+				if (ui.pane === "inspector") ui.inspectorScroll = Math.max(0, ui.inspectorScroll - 1);
+				else { ui.activeSelected -= 1; ui.inspectorScroll = 0; clampActive(); }
+				requestRender();
+				return;
+			}
+			if (matchesKey(data, "down")) {
+				if (ui.pane === "inspector") ui.inspectorScroll += 1;
+				else { ui.activeSelected += 1; ui.inspectorScroll = 0; clampActive(); }
+				requestRender();
+				return;
+			}
+			if (matchesKey(data, "pageup" as any)) {
+				if (ui.pane === "inspector") ui.inspectorScroll = Math.max(0, ui.inspectorScroll - Math.max(1, layout.bodyRows));
+				else { ui.activeSelected -= layout.listRows; ui.inspectorScroll = 0; clampActive(); }
+				requestRender();
+				return;
+			}
+			if (matchesKey(data, "pagedown" as any)) {
+				if (ui.pane === "inspector") ui.inspectorScroll += Math.max(1, layout.bodyRows);
+				else { ui.activeSelected += layout.listRows; ui.inspectorScroll = 0; clampActive(); }
+				requestRender();
+				return;
+			}
+			if (matchesKey(data, "home")) { if (ui.pane === "inspector") ui.inspectorScroll = 0; else { ui.activeSelected = 0; ui.activeScroll = 0; } requestRender(); return; }
+			if (matchesKey(data, "end")) { if (ui.pane === "inspector") ui.inspectorScroll = Number.MAX_SAFE_INTEGER; else { ui.activeSelected = Math.max(0, totalRows - 1); clampActive(); } requestRender(); return; }
+			return;
+		}
+		if (ui.tab === "history") {
+			const layout = getLayout();
+			if (matchesKey(data, "up")) {
+				if (ui.pane === "inspector") ui.inspectorScroll = Math.max(0, ui.inspectorScroll - 1);
+				else { ui.historySelected = Math.max(0, ui.historySelected - 1); ui.historySubtab = 0; ui.inspectorScroll = 0; clampHistory(); loadHistoryRecord(historyRecords[ui.historySelected]); }
+				requestRender();
+				return;
+			}
+			if (matchesKey(data, "down")) {
+				if (ui.pane === "inspector") ui.inspectorScroll += 1;
+				else { ui.historySelected += 1; ui.historySubtab = 0; ui.inspectorScroll = 0; clampHistory(); loadHistoryRecord(historyRecords[ui.historySelected]); }
+				requestRender();
+				return;
+			}
+			if (matchesKey(data, "pageup" as any)) {
+				if (ui.pane === "inspector") ui.inspectorScroll = Math.max(0, ui.inspectorScroll - Math.max(1, layout.bodyRows));
+				else { ui.historySelected = Math.max(0, ui.historySelected - layout.listRows); ui.historySubtab = 0; ui.inspectorScroll = 0; clampHistory(); loadHistoryRecord(historyRecords[ui.historySelected]); }
+				requestRender();
+				return;
+			}
+			if (matchesKey(data, "pagedown" as any)) {
+				if (ui.pane === "inspector") ui.inspectorScroll += Math.max(1, layout.bodyRows);
+				else { ui.historySelected += layout.listRows; ui.historySubtab = 0; ui.inspectorScroll = 0; clampHistory(); loadHistoryRecord(historyRecords[ui.historySelected]); }
+				requestRender();
+				return;
+			}
+			if (matchesKey(data, "home")) { if (ui.pane === "inspector") ui.inspectorScroll = 0; else { ui.historySelected = 0; ui.historyScroll = 0; ui.historySubtab = 0; loadHistoryRecord(historyRecords[0]); } requestRender(); return; }
+			if (matchesKey(data, "end")) { if (ui.pane === "inspector") ui.inspectorScroll = Number.MAX_SAFE_INTEGER; else { ui.historySelected = Math.max(0, historyRecords.length - 1); ui.historySubtab = 0; clampHistory(); loadHistoryRecord(historyRecords[ui.historySelected]); } requestRender(); return; }
+			if (matchesKey(data, "enter") || matchesKey(data, "return")) {
+				if (ui.pane === "list") { ui.pane = "inspector"; loadHistoryRecord(historyRecords[ui.historySelected]); requestRender(); return; }
+				return;
+			}
+			return;
+		}
+		if (matchesKey(data, "up")) {
+			if (ui.pane === "inspector") ui.inspectorScroll -= 1;
+			else { ui.selected -= 1; ui.inspectorScroll = 0; clamp(); }
+			requestRender();
+			return;
+		}
+		if (matchesKey(data, "down")) {
+			if (ui.pane === "inspector") ui.inspectorScroll += 1;
+			else { ui.selected += 1; ui.inspectorScroll = 0; clamp(); }
+			requestRender();
+			return;
+		}
+		if (matchesKey(data, "pageup" as any)) {
+			const layout = getLayout();
+			if (ui.pane === "inspector") ui.inspectorScroll -= Math.max(1, layout.bodyRows);
+			else { ui.selected -= layout.listRows; ui.inspectorScroll = 0; clamp(); }
+			requestRender();
+			return;
+		}
+		if (matchesKey(data, "pagedown" as any)) {
+			const layout = getLayout();
+			if (ui.pane === "inspector") ui.inspectorScroll += Math.max(1, layout.bodyRows);
+			else { ui.selected += layout.listRows; ui.inspectorScroll = 0; clamp(); }
+			requestRender();
+			return;
+		}
+		if (matchesKey(data, "home")) { if (ui.pane === "inspector") ui.inspectorScroll = 0; else { ui.selected = 0; ui.scroll = 0; } requestRender(); return; }
+		if (matchesKey(data, "end")) { if (ui.pane === "inspector") ui.inspectorScroll = Number.MAX_SAFE_INTEGER; else { ui.selected = Math.max(0, filtered().length - 1); clamp(); } requestRender(); return; }
+		if (matchesKey(data, "enter") || matchesKey(data, "return")) return insertSelected();
+		if (matchesKey(data, "alt+m") || matchesKey(data, "ctrl+m")) return editFrontmatterSelected();
+		if (matchesKey(data, "alt+p") || matchesKey(data, "ctrl+p")) return startSelected();
+		if (matchesKey(data, "alt+o") || matchesKey(data, "ctrl+o")) return attachSelected();
+		if (matchesKey(data, "alt+x") || matchesKey(data, "ctrl+x")) return stopSelected();
+		if (matchesKey(data, "backspace")) { ui.search = ui.search.slice(0, -1); ui.selected = 0; ui.scroll = 0; ui.inspectorScroll = 0; clamp(); requestRender(); return; }
+		if (matchesKey(data, "ctrl+u")) { ui.search = ""; ui.selected = 0; ui.scroll = 0; ui.inspectorScroll = 0; requestRender(); return; }
+		if (isAgentBrowserTextInput(data)) { ui.search += data; ui.pane = "list"; ui.selected = 0; ui.scroll = 0; ui.inspectorScroll = 0; clamp(); requestRender(); }
+	}
+
+	function render(width: number): string[] {
+		const layout = getLayout();
+		const safeWidth = Math.max(1, width);
+		const bodyWidth = agentFrameContentWidth(safeWidth);
+		const activeItems = getActiveItems();
+		const hasActive = activeItems.length > 0;
+		if (ui.tab === "active" && !hasActive) ui.tab = ui.scope;
+		const tabLine = renderAgentBrowserTabs(ui.tab, hasActive, bodyWidth, theme);
+		if (ui.tab === "active") {
+			const footer = `${ansiYellow("tab")} ${theme.fg("dim", "view · ")}${ansiYellow("-/=")} ${theme.fg("dim", "page · ")}${ansiYellow("←/→")} ${theme.fg("dim", "pane")}`;
+			const lines = [tabLine, "", ...renderActiveTabBody(activeItems, runtimeRoot, ui, bodyWidth, theme, layout), agentDivider(bodyWidth, theme), ...wrapTextWithAnsi(footer, bodyWidth)];
+			return agentFrame(lines, safeWidth, theme, layout.innerRows, "Agents");
+		}
+		if (ui.tab === "history") {
+			clampHistory();
+			loadHistoryRecord(historyRecords[ui.historySelected]);
+			const arrowsLabel = ui.pane === "inspector" ? "sections · " : "pane · ";
+			const footer = `${ansiYellow("tab")} ${theme.fg("dim", "view · ")}${ansiYellow("-/=")} ${theme.fg("dim", "page · ")}${ansiYellow("←/→")} ${theme.fg("dim", arrowsLabel.replace(/ +$/, ""))}`;
+			const lines = [tabLine, "", ...renderHistoryTabBody(historyRecords, historyCache, ui, bodyWidth, theme, layout), agentDivider(bodyWidth, theme), ...wrapTextWithAnsi(footer, bodyWidth)];
+			return agentFrame(lines, safeWidth, theme, layout.innerRows, "Agents");
+		}
+		clamp();
+		const footer = `${ansiYellow("tab")} ${theme.fg("dim", "view · ")}${ansiYellow("-/=")} ${theme.fg("dim", "page · ")}${ansiYellow("←/→")} ${theme.fg("dim", "pane · ")}${ansiYellow("alt+m")} ${theme.fg("dim", "edit frontmatter · ")}${ansiYellow("alt+p/o/x")} ${theme.fg("dim", "pane ops")}`;
+		const lines = [
+			tabLine,
+			"",
+			...renderAgentsBody(discovery, filtered(), statuses, ui, bodyWidth, theme, layout),
+			agentDivider(bodyWidth, theme),
+			...wrapTextWithAnsi(footer, bodyWidth),
+		];
+		return agentFrame(lines, safeWidth, theme, layout.innerRows, "Agents");
+	}
+
+	return { handleInput, invalidate() {}, render };
+}
+
+export async function openAgentsBrowser(
+	ctx: ExtensionContext,
+	initialScope: AgentScope,
+	initialAgentName: string | undefined,
+	runtimeRoot: string,
+	parentSessionId: string,
+	parentModel: string | undefined,
+	parentThinkingLevel: string | undefined,
+	activeTools: string[] | undefined,
+	getActiveItems: () => SubagentDashboardItem[],
+	onAgentStopped?: (agentName: string) => void,
+): Promise<void> {
+	const releaseModalLock = acquireVstackModalLock();
+	try {
+	const initialActive = getActiveItems().length > 0 && !initialAgentName;
+	const ui: AgentBrowserUiState = {
+		inspectorScroll: 0,
+		pane: initialAgentName ? "inspector" : "list",
+		tab: initialActive ? "active" : initialScope,
+		scope: initialScope,
+		search: "",
+		selected: 0,
+		scroll: 0,
+		activeSelected: 0,
+		activeScroll: 0,
+		historySelected: 0,
+		historyScroll: 0,
+		historySubtab: 0,
+	};
+	while (true) {
+		const discovery = discoverAgents(ctx.cwd, ui.scope);
+		if (initialAgentName) {
+			const selected = discovery.agents.findIndex((agent) => agent.name === initialAgentName);
+			if (selected >= 0) ui.selected = selected;
+			else {
+				ctx.ui.notify(`Unknown agent "${initialAgentName}" for scope "${ui.scope}"`, "warning");
+				ui.pane = "list";
+			}
+		}
+		const statuses = await loadAgentPaneStatuses(runtimeRoot);
+		const taskRegistry = await readTaskRegistry(runtimeRoot).catch(() => ({} as PaneTaskRegistry));
+		const action = await ctx.ui.custom<AgentBrowserAction>(
+			(tui: TUI, theme: Theme, _keybindings, done) => createAgentsBrowserComponent(
+				discovery,
+				statuses,
+				taskRegistry,
+				ui,
+				theme,
+				() => tui.requestRender(),
+				() => agentBrowserLayout(tui.terminal.rows),
+				done,
+				getActiveItems,
+				runtimeRoot,
+			),
+			{ overlay: true, overlayOptions: { anchor: "center", maxHeight: AGENTS_BROWSER_MAX_HEIGHT, width: AGENTS_BROWSER_WIDTH } },
+		);
+		initialAgentName = undefined;
+		if (!action || action.type === "close") return;
+		if (action.type === "reload") continue;
+		const agent = discovery.agents.find((candidate) => candidate.name === action.agentName);
+		if (!agent) {
+			ctx.ui.notify(`Unknown agent: ${action.agentName}`, "error");
+			continue;
+		}
+		try {
+			if (action.type === "editFrontmatter") {
+				const message = await editAgentFrontmatterOverrides(ctx, agent);
+				if (message) await showAgentEditConfirmation(ctx, message);
+				continue;
+			}
+			if (action.type === "insert") {
+				ctx.ui.pasteToEditor(`Use agent ${agent.name} to: `);
+				return;
+			}
+			if (action.type === "start") {
+				if (!agent.pane) throw new Error(`${agent.name} is not configured with pane: true.`);
+				await ensurePersistentPane(runtimeRoot, parentSessionId, ctx.cwd, agent, parentModel, parentThinkingLevel, activeTools);
+				ctx.ui.notify(`Started/reused ${agent.name}`, "info");
+				continue;
+			}
+			if (action.type === "attach") {
+				const registry = await readPaneRegistry(runtimeRoot);
+				const entry = registry[agent.name];
+				if (!entry || !(await paneExists(entry.paneId))) throw new Error(`No live pane for ${agent.name}.`);
+				const result = await tmux(["select-pane", "-t", entry.paneId]);
+				if (result.code !== 0) throw new Error(result.stderr || result.stdout || "tmux select-pane failed");
+				ctx.ui.notify(`Attached to ${agent.name}`, "info");
+				return;
+			}
+			if (action.type === "stop") {
+				await stopPersistentPane(runtimeRoot, agent.name);
+				onAgentStopped?.(agent.name);
+				ctx.ui.notify(`Stopped ${agent.name}`, "info");
+				continue;
+			}
+		} catch (error) {
+			ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+		}
+	}
+	} finally {
+		releaseModalLock();
+	}
+}
+
+function traceViewerLines(state: TraceViewerState, width: number, rows: number, theme: Theme): string[] {
+	const innerWidth = Math.max(1, width - 4);
+	const frameRows = Math.max(8, rows);
+	const item = state.items[state.selected] ?? state.items[0];
+	const help = `${ansiYellow("tab/←→")} ${theme.fg("dim", "sections · ")}${ansiYellow("-/=")} ${theme.fg("dim", "page")}`;
+	const tabs = renderTraceTabBar(state.items, state.selected, innerWidth, theme);
+	const meta = [
+		item?.ref ? theme.fg("accent", item.ref) : "",
+		item?.agent ? theme.fg("muted", item.agent) : "",
+		item?.status ? theme.fg(item.status === "completed" ? "success" : item.status === "failed" ? "error" : "warning", item.status) : "",
+		item?.createdAt ? theme.fg("dim", item.createdAt) : "",
+	].filter(Boolean).join(theme.fg("dim", " · "));
+	const file = item?.path ? theme.fg("dim", `file ${compactPath(item.path, { maxChars: Math.max(24, innerWidth - 8) })}`) : theme.fg("dim", "metadata view");
+	const rawContent = (item?.text || "(empty)").split(/\r?\n/);
+	const content = rawContent.map((line) => truncateToWidth(line, innerWidth, ""));
+	const fixedRowsInsideFrame = 8;
+	const bodyRows = Math.max(1, frameRows - 2 - fixedRowsInsideFrame);
+	const maxScroll = Math.max(0, content.length - bodyRows);
+	state.scroll = Math.max(0, Math.min(state.scroll, maxScroll));
+	const visible = content.slice(state.scroll, state.scroll + bodyRows);
+	const footer = item?.path
+		? theme.fg("dim", `${state.scroll + 1}-${Math.min(content.length, state.scroll + bodyRows)}/${content.length} · file`)
+		: theme.fg("dim", `${state.scroll + 1}-${Math.min(content.length, state.scroll + bodyRows)}/${content.length} · metadata`);
+	const innerLines = [
+		tabs,
+		"",
+		meta || file,
+		meta ? file : "",
+		divider(innerWidth, theme),
+		...visible,
+		divider(innerWidth, theme),
+		footer,
+		help,
+	];
+	while (innerLines.length < frameRows - 2) innerLines.splice(Math.max(0, innerLines.length - 2), 0, "");
+	return simpleFrame(innerLines.slice(0, frameRows - 2), width, theme, state.title);
+}
+
+function renderTraceTabBar(items: TraceViewerItem[], selected: number, width: number, theme: Theme): string {
+	const partFor = (item: TraceViewerItem, index: number): string => {
+		const label = ` ${truncateToWidth(item.label, 18, "…")} `;
+		return index === selected ? activePill(theme, label) : inactivePill(theme, label);
+	};
+	const renderWindow = (start: number, end: number): string => {
+		const parts = items.slice(start, end).map((item, offset) => partFor(item, start + offset));
+		if (start > 0) parts.unshift(theme.fg("dim", "‹"));
+		if (end < items.length) parts.push(theme.fg("dim", "›"));
+		return parts.join(" ");
+	};
+	let start = Math.max(0, selected);
+	let end = Math.min(items.length, selected + 1);
+	let current = renderWindow(start, end);
+	let preferRight = true;
+	while (start > 0 || end < items.length) {
+		const addRight = end < items.length && (preferRight || start === 0);
+		const addLeft = !addRight && start > 0;
+		const nextStart = addLeft ? start - 1 : start;
+		const nextEnd = addRight ? end + 1 : end;
+		const candidate = renderWindow(nextStart, nextEnd);
+		if (visibleWidth(candidate) > width) {
+			if (addRight && start > 0) {
+				preferRight = false;
+				continue;
+			}
+			break;
+		}
+		start = nextStart;
+		end = nextEnd;
+		current = candidate;
+		preferRight = !preferRight;
+	}
+	return truncateToWidth(current, width, "");
+}
+
+export async function editAgentFrontmatterOverrides(ctx: ExtensionContext, agent: AgentConfig): Promise<string | undefined> {
+	const edited = await ctx.ui.editor(`Edit ${agent.name} frontmatter — model/deny-tools/optional tools/color`, editableAgentFrontmatterText(agent));
+	if (edited === undefined) return undefined;
+	const parsed = parseEditableAgentFrontmatterText(edited);
+	if (isVstackManagedAgentFile(agent)) {
+		const tomlPath = vstackTomlPathForAgent(agent, ctx.cwd);
+		if (!tomlPath) throw new Error(`Could not locate vstack.toml for vstack-managed agent ${agent.name}.`);
+		await withFileMutationQueue(tomlPath, async () => {
+			let current = "";
+			try { current = await fs.promises.readFile(tomlPath, "utf-8"); } catch {}
+			const next = upsertAgentFrontmatterToml(current, agent.name, parsed);
+			await fs.promises.mkdir(path.dirname(tomlPath), { recursive: true });
+			await fs.promises.writeFile(tomlPath, next, "utf-8");
+		});
+		const refresh = refreshVstackManagedAgent(agent, tomlPath);
+		if (!refresh.ok) return `Updated ${agent.name} overrides in ${compactAgentPath(tomlPath)}. Refresh failed: ${refresh.message || "unknown error"}. Run vstack refresh --scope project to regenerate ${compactAgentPath(agent.filePath)}.`;
+		return `Updated ${compactAgentPath(tomlPath)} and regenerated ${compactAgentPath(agent.filePath)}. Run /reload if Pi does not pick up the changed agent immediately.`;
+	}
+	await withFileMutationQueue(agent.filePath, async () => {
+		const current = await fs.promises.readFile(agent.filePath, "utf-8");
+		await fs.promises.writeFile(agent.filePath, updateAgentFileFrontmatter(current, parsed), "utf-8");
+	});
+	return `Updated ${agent.name} frontmatter in ${compactAgentPath(agent.filePath)}.`;
+}
+
+export async function openTraceViewer(ctx: ExtensionContext, title: string, items: TraceViewerItem[]): Promise<void> {
+	if (!ctx.hasUI) {
+		ctx.ui.notify(title, "info");
+		return;
+	}
+	const state: TraceViewerState = { items: items.length ? items : [{ label: "Empty", text: "No traces found." }], selected: 0, scroll: 0, title };
+	await ctx.ui.custom<void>((tui, theme, _kb, done) => ({
+		invalidate() {},
+		handleInput(data: string) {
+			const tracePageRows = Math.max(1, Math.min(30, Math.max(12, Math.floor(tui.terminal.rows * 0.72))) - 10);
+			if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) return done();
+			if (matchesKey(data, "up")) { state.scroll = Math.max(0, state.scroll - 1); tui.requestRender(); return; }
+			if (matchesKey(data, "down")) { state.scroll += 1; tui.requestRender(); return; }
+			if (matchesKey(data, "-") || matchesKey(data, "pageup" as any) || matchesKey(data, "page_up" as any)) { state.scroll = Math.max(0, state.scroll - tracePageRows); tui.requestRender(); return; }
+			if (matchesKey(data, "=") || matchesKey(data, "pagedown" as any) || matchesKey(data, "page_down" as any)) { state.scroll += tracePageRows; tui.requestRender(); return; }
+			if (matchesKey(data, "left")) { state.selected = (state.selected + state.items.length - 1) % state.items.length; state.scroll = 0; tui.requestRender(); return; }
+			if (matchesKey(data, "right") || matchesKey(data, "tab")) { state.selected = (state.selected + 1) % state.items.length; state.scroll = 0; tui.requestRender(); return; }
+		},
+		render(width: number): string[] {
+			const rows = Math.min(30, Math.max(12, Math.floor(tui.terminal.rows * 0.72)));
+			const lines = traceViewerLines(state, width, rows, theme);
+			return lines.slice(0, rows);
+		},
+	}), { overlay: true, overlayOptions: { anchor: "center", width: TRACE_VIEWER_WIDTH, maxHeight: TRACE_VIEWER_MAX_HEIGHT } });
+}
+
+function highlightAgentEditConfirmationPaths(message: string): string {
+	return message.replace(/(~\/[^\s,]+|\/[^\s,]*\/[^\s,]+)/g, (match) => {
+		const trailing = match.match(/[.;:!?]+$/)?.[0] ?? "";
+		const filePath = trailing ? match.slice(0, -trailing.length) : match;
+		return `${ansiGreen(filePath)}${trailing}`;
+	});
+}
+
+export async function showAgentEditConfirmation(ctx: ExtensionContext, message: string): Promise<void> {
+	if (!ctx.hasUI) {
+		ctx.ui.notify(message, "info");
+		return;
+	}
+	const styledMessage = highlightAgentEditConfirmationPaths(message);
+	await ctx.ui.custom<void>((tui: TUI, theme: Theme, _kb, done) => ({
+		invalidate() {},
+		handleInput(data: string) {
+			if (matchesKey(data, "return") || matchesKey(data, "enter") || matchesKey(data, "escape") || matchesKey(data, "backspace") || matchesKey(data, "ctrl+c")) done();
+		},
+		render(width: number): string[] {
+			const frameWidth = Math.max(8, Math.min(width, AGENT_EDIT_CONFIRM_WIDTH));
+			const innerWidth = Math.max(1, frameWidth - 4);
+			const lines = [
+				theme.fg("success", "Agent metadata updated"),
+				"",
+				...wrapTextWithAnsi(styledMessage, innerWidth),
+				"",
+				`${ansiYellow("enter")} ${theme.fg("dim", "return to agents")}`,
+			];
+			return simpleFrame(lines, frameWidth, theme, "Agents").slice(0, Math.max(8, Math.floor(tui.terminal.rows * 0.45)));
+		},
+	}), { overlay: true, overlayOptions: { anchor: "center", width: AGENT_EDIT_CONFIRM_WIDTH, maxHeight: "40%" } });
+}
+
+export async function traceViewerItems(record: PaneTaskRecord): Promise<TraceViewerItem[]> {
+	const ref = recordTraceRef(record);
+	const metadata = [
+		"Overview",
+		"",
+		`Ref      ${ref}`,
+		`Agent    ${record.agent}`,
+		`Status   ${record.status}`,
+		`Task ID  ${record.taskId}`,
+		`Created  ${record.createdAt}`,
+		record.completedAt ? `Done     ${record.completedAt}` : "",
+		"",
+		"Summary",
+		"-------",
+		record.summary || "No summary yet.",
+		"",
+		"Files changed",
+		"-------------",
+		record.filesChanged?.length ? record.filesChanged.map((file) => `- ${file}`).join("\n") : "None reported",
+		"",
+		"Validation",
+		"----------",
+		record.validation?.length ? record.validation.map((item) => `- ${item}`).join("\n") : "None reported",
+		record.notes ? `\nNotes\n-----\n${record.notes}` : "",
+	].filter(Boolean).join("\n");
+	const transcript = await readTextFileIfExists(record.transcriptPath, 80_000);
+	const completion = await readTextFileIfExists(record.completionArchivePath ?? record.completionSourcePath, 24_000);
+	const common = { agent: record.agent, createdAt: record.completedAt ?? record.createdAt, ref, status: record.status, summary: record.summary || record.task };
+	return [
+		{ ...common, label: "Summary", text: metadata, type: "summary" },
+		{ ...common, label: "Transcript", path: record.transcriptPath, text: transcript || "Transcript unavailable.", type: "transcript" },
+		{ ...common, label: "Completion", path: record.completionArchivePath ?? record.completionSourcePath, text: completion || "Completion JSON unavailable.", type: "completion" },
+		{ ...common, label: "Task", path: record.inboxFile, text: record.task || "Task unavailable.", type: "task" },
+	];
+}

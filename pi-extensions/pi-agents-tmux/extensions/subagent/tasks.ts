@@ -1,0 +1,532 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { withFileMutationQueue, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { stringifyError } from "./format.js";
+import { safeFileName } from "./names.js";
+import {
+	completionArchiveDir,
+	completionPath,
+	outboxRoot,
+	registryPath,
+	taskArtifactPaths,
+	taskRegistryPath,
+} from "./paths.js";
+import {
+	MALFORMED_COMPLETION_GRACE_MS,
+	PACKAGE_ID,
+	type PaneCompletion,
+	type PaneCompletionDetails,
+	type PaneCompletionMessageDetails,
+	type PaneRegistry,
+	type PaneRegistryEntry,
+	type PaneTaskRecord,
+	type PaneTaskRegistry,
+	type PaneTaskStatus,
+} from "./types.js";
+
+export function normalizedPath(value: string): string {
+	return path.normalize(path.resolve(value));
+}
+
+export function samePath(left: string | undefined, right: string | undefined): boolean {
+	return Boolean(left && right && normalizedPath(left) === normalizedPath(right));
+}
+
+export function pathWithin(parentDir: string, childPath: string): boolean {
+	const parent = normalizedPath(parentDir);
+	const child = normalizedPath(childPath);
+	const relative = path.relative(parent, child);
+	return relative === "" || Boolean(relative && !relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+export function paneSessionBelongsToRuntime(runtimeRoot: string, entry: PaneRegistryEntry): boolean {
+	return pathWithin(path.join(runtimeRoot, "sessions"), entry.sessionFile);
+}
+
+export async function readPaneRegistry(runtimeRoot: string): Promise<PaneRegistry> {
+	try {
+		const content = await fs.promises.readFile(registryPath(runtimeRoot), "utf-8");
+		return JSON.parse(content) as PaneRegistry;
+	} catch {
+		return {};
+	}
+}
+
+export async function writePaneRegistry(runtimeRoot: string, registry: PaneRegistry): Promise<void> {
+	const filePath = registryPath(runtimeRoot);
+	await withFileMutationQueue(filePath, async () => {
+		await fs.promises.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
+		await fs.promises.writeFile(filePath, `${JSON.stringify(registry, null, "\t")}\n`, { encoding: "utf-8", mode: 0o600 });
+	});
+}
+
+export async function updatePaneRegistry(
+	runtimeRoot: string,
+	mutator: (registry: PaneRegistry) => Promise<void> | void,
+): Promise<PaneRegistry> {
+	const filePath = registryPath(runtimeRoot);
+	let registry: PaneRegistry = {};
+	await withFileMutationQueue(filePath, async () => {
+		try {
+			const content = await fs.promises.readFile(filePath, "utf-8");
+			const parsed = JSON.parse(content);
+			registry = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as PaneRegistry) : {};
+		} catch {
+			registry = {};
+		}
+		await mutator(registry);
+		await fs.promises.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
+		await fs.promises.writeFile(filePath, `${JSON.stringify(registry, null, "\t")}\n`, { encoding: "utf-8", mode: 0o600 });
+	});
+	return registry;
+}
+
+export async function readTaskRegistry(runtimeRoot: string): Promise<PaneTaskRegistry> {
+	try {
+		const content = await fs.promises.readFile(taskRegistryPath(runtimeRoot), "utf-8");
+		const parsed = JSON.parse(content);
+		if (Array.isArray(parsed)) {
+			return Object.fromEntries(parsed.filter((record) => record?.taskId).map((record) => [record.taskId, record])) as PaneTaskRegistry;
+		}
+		return parsed && typeof parsed === "object" ? (parsed as PaneTaskRegistry) : {};
+	} catch {
+		return {};
+	}
+}
+
+export async function writeTaskRegistry(runtimeRoot: string, records: PaneTaskRegistry): Promise<void> {
+	const filePath = taskRegistryPath(runtimeRoot);
+	await withFileMutationQueue(filePath, async () => {
+		await fs.promises.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
+		await fs.promises.writeFile(filePath, `${JSON.stringify(records, null, "\t")}\n`, { encoding: "utf-8", mode: 0o600 });
+	});
+}
+
+export async function updateTaskRegistry(runtimeRoot: string, mutator: (records: PaneTaskRegistry) => void): Promise<PaneTaskRegistry> {
+	const filePath = taskRegistryPath(runtimeRoot);
+	let records: PaneTaskRegistry = {};
+	await withFileMutationQueue(filePath, async () => {
+		try {
+			const content = await fs.promises.readFile(filePath, "utf-8");
+			const parsed = JSON.parse(content);
+			records = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as PaneTaskRegistry) : {};
+		} catch {
+			records = {};
+		}
+		mutator(records);
+		await fs.promises.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
+		await fs.promises.writeFile(filePath, `${JSON.stringify(records, null, "\t")}\n`, { encoding: "utf-8", mode: 0o600 });
+	});
+	return records;
+}
+
+export async function upsertTaskRecord(runtimeRoot: string, record: PaneTaskRecord): Promise<void> {
+	await updateTaskRegistry(runtimeRoot, (records) => {
+		records[record.taskId] = { ...records[record.taskId], ...record };
+	});
+}
+
+export function normalizePaneTaskStatus(status: unknown): PaneTaskStatus {
+	return status === "queued" || status === "running" || status === "completed" || status === "blocked" || status === "failed" || status === "needs_completion"
+		? status
+		: "unknown";
+}
+
+export function isTerminalTaskStatus(status: PaneTaskStatus | undefined): boolean {
+	return status === "completed" || status === "blocked" || status === "failed";
+}
+
+export function appendUniqueDiagnostic(existing: string[] | undefined, diagnostic: string): string[] {
+	const compact = diagnostic.replace(/\s+/g, " ").trim();
+	if (!compact) return existing ?? [];
+	const diagnostics = [...(existing ?? [])];
+	if (!diagnostics.includes(compact)) diagnostics.push(compact);
+	return diagnostics.slice(-8);
+}
+
+export function completionParseErrorMessage(filePath: string, error: unknown): string {
+	return `Malformed completion JSON at ${filePath}: ${stringifyError(error)}. Replace it with one valid completion object or call complete_subagent again.`;
+}
+
+export async function fileExists(filePath: string | undefined): Promise<boolean> {
+	if (!filePath) return false;
+	try {
+		await fs.promises.access(filePath, fs.constants.F_OK);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+export async function readPaneCompletionFile(filePath: string): Promise<{ completion?: PaneCompletion; error?: unknown; exists: boolean }> {
+	let raw: string;
+	try {
+		raw = await fs.promises.readFile(filePath, "utf-8");
+	} catch (error) {
+		const code = typeof error === "object" && error && "code" in error ? (error as { code?: unknown }).code : undefined;
+		if (code === "ENOENT") return { exists: false };
+		return { error, exists: true };
+	}
+	try {
+		const parsed = JSON.parse(raw);
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("completion must be a JSON object");
+		return { completion: parsed as PaneCompletion, exists: true };
+	} catch (error) {
+		return { error, exists: true };
+	}
+}
+
+export async function markTaskNeedsCompletion(
+	runtimeRoot: string,
+	agentName: string,
+	taskId: string,
+	options: {
+		diagnostic: string;
+		doneFile?: string;
+		outboxFile?: string;
+		processingFile?: string;
+		transcriptPath?: string;
+	},
+): Promise<PaneTaskRecord | undefined> {
+	let updated: PaneTaskRecord | undefined;
+	const now = new Date().toISOString();
+	await updateTaskRegistry(runtimeRoot, (records) => {
+		const existing = records[taskId];
+		if (isTerminalTaskStatus(existing?.status)) {
+			updated = existing;
+			return;
+		}
+		const outboxFile = options.outboxFile ?? existing?.outboxFile ?? completionPath(runtimeRoot, agentName, taskId);
+		updated = {
+			...existing,
+			taskId,
+			agent: existing?.agent ?? agentName,
+			task: existing?.task ?? "",
+			status: "needs_completion",
+			inboxFile: existing?.inboxFile,
+			processingFile: options.processingFile ?? existing?.processingFile,
+			doneFile: options.doneFile ?? existing?.doneFile,
+			outboxFile,
+			transcriptPath: options.transcriptPath ?? existing?.transcriptPath,
+			createdAt: existing?.createdAt ?? now,
+			updatedAt: now,
+			diagnostics: appendUniqueDiagnostic(existing?.diagnostics, options.diagnostic),
+		};
+		records[taskId] = updated;
+	});
+	return updated;
+}
+
+export async function refreshTaskDiagnostics(runtimeRoot: string, record: PaneTaskRecord): Promise<{ record: PaneTaskRecord; diagnostics: string[] }> {
+	const paths = taskArtifactPaths(runtimeRoot, record);
+	const [inboxExists, processingExists, doneExists, outboxExists, archiveExists, transcriptExists] = await Promise.all([
+		fileExists(paths.inboxFile),
+		fileExists(paths.processingFile),
+		fileExists(paths.doneFile),
+		fileExists(paths.outboxFile),
+		fileExists(paths.completionArchivePath),
+		fileExists(paths.transcriptPath),
+	]);
+
+	let nextStatus = record.status;
+	let diagnostics = [...(record.diagnostics ?? [])];
+	const add = (message: string) => {
+		diagnostics = appendUniqueDiagnostic(diagnostics, message);
+	};
+
+	if (!isTerminalTaskStatus(record.status)) {
+		if (processingExists && record.status === "queued") {
+			nextStatus = "running";
+			add(`Task file was claimed by the child pane: ${paths.processingFile}`);
+		}
+		if (doneExists && !outboxExists && !archiveExists) {
+			nextStatus = "needs_completion";
+			add(`Task turn ended but no completion record was found. Expected outbox: ${paths.outboxFile}`);
+		}
+		if (outboxExists) {
+			const parsed = await readPaneCompletionFile(paths.outboxFile);
+			if (parsed.error) {
+				nextStatus = "needs_completion";
+				add(completionParseErrorMessage(paths.outboxFile, parsed.error));
+			}
+		}
+		if (!inboxExists && !processingExists && !doneExists && !outboxExists && !archiveExists) {
+			if (record.status === "queued" || record.status === "running") nextStatus = "unknown";
+			add(`No task handoff or completion artifacts are present for ${record.taskId}; the pane may have been reset or the runtime was cleaned.`);
+		}
+	}
+
+	const artifactDiagnostics = [
+		`Expected outbox: ${paths.outboxFile} (${outboxExists ? "present" : "missing"})`,
+		`Inbox file: ${paths.inboxFile} (${inboxExists ? "present" : "missing"})`,
+		`Processing file: ${paths.processingFile} (${processingExists ? "present" : "missing"})`,
+		`Done file: ${paths.doneFile} (${doneExists ? "present" : "missing"})`,
+		paths.completionArchivePath ? `Archived completion: ${paths.completionArchivePath} (${archiveExists ? "present" : "missing"})` : "Archived completion: (none recorded)",
+		paths.transcriptPath ? `Transcript: ${paths.transcriptPath} (${transcriptExists ? "present" : "missing"})` : "Transcript: (none recorded)",
+	];
+
+	const pathPatch = {
+		inboxFile: record.inboxFile ?? paths.inboxFile,
+		processingFile: record.processingFile ?? (processingExists ? paths.processingFile : undefined),
+		doneFile: record.doneFile ?? (doneExists ? paths.doneFile : undefined),
+		outboxFile: record.outboxFile ?? paths.outboxFile,
+	};
+	const changed =
+		nextStatus !== record.status ||
+		diagnostics.join("\n") !== (record.diagnostics ?? []).join("\n") ||
+		pathPatch.inboxFile !== record.inboxFile ||
+		pathPatch.processingFile !== record.processingFile ||
+		pathPatch.doneFile !== record.doneFile ||
+		pathPatch.outboxFile !== record.outboxFile;
+
+	if (!changed) return { record, diagnostics: [...diagnostics, ...artifactDiagnostics] };
+
+	let updated = record;
+	await updateTaskRegistry(runtimeRoot, (records) => {
+		const existing = records[record.taskId] ?? record;
+		updated = {
+			...existing,
+			...pathPatch,
+			status: nextStatus,
+			diagnostics,
+			updatedAt: new Date().toISOString(),
+		};
+		records[record.taskId] = updated;
+	});
+	return { record: updated, diagnostics: [...diagnostics, ...artifactDiagnostics] };
+}
+
+export function latestTaskRecord(records: PaneTaskRegistry, agent?: string): PaneTaskRecord | undefined {
+	return Object.values(records)
+		.filter((record) => !agent || record.agent === agent)
+		.sort((a, b) => (b.updatedAt ?? b.completedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.completedAt ?? a.createdAt))[0];
+}
+
+export function emitSubagentEvent(pi: ExtensionAPI, event: string, payload: Record<string, unknown>): void {
+	try {
+		const bus = (pi as unknown as { events?: { emit?: (name: string, payload: unknown) => void } }).events;
+		bus?.emit?.(event, {
+			package: PACKAGE_ID,
+			...payload,
+			timestamp: new Date().toISOString(),
+		});
+	} catch {
+		// Lifecycle events are best-effort extension integration signals.
+	}
+}
+
+export async function archiveCompletion(runtimeRoot: string, agentName: string, filePath: string): Promise<string> {
+	const archiveDir = completionArchiveDir(runtimeRoot, agentName);
+	await fs.promises.mkdir(archiveDir, { recursive: true, mode: 0o700 });
+	const archivedPath = path.join(archiveDir, `${Date.now()}-${path.basename(filePath)}`);
+	await fs.promises.rename(filePath, archivedPath);
+	return archivedPath;
+}
+
+export function paneCompletionDetailsFromCompletion(
+	completion: PaneCompletion,
+	agentDirName: string,
+	filePath: string,
+	archivePath: string | undefined,
+	registry: PaneRegistry,
+	tasks: PaneTaskRegistry,
+): PaneCompletionDetails {
+	const agent = completion.agent || agentDirName;
+	const taskId = completion.taskId || path.basename(filePath, path.extname(filePath));
+	const record = tasks[taskId];
+	return {
+		agent,
+		taskId,
+		status: normalizePaneTaskStatus(completion.status),
+		summary: completion.summary || "No summary provided.",
+		filesChanged: Array.isArray(completion.filesChanged) ? completion.filesChanged : [],
+		validation: Array.isArray(completion.validation) ? completion.validation : [],
+		notes: completion.notes,
+		sourcePath: filePath,
+		archivePath,
+		transcriptPath: record?.transcriptPath ?? registry[agent]?.sessionFile,
+		completedAt: new Date().toISOString(),
+		paneId: record?.paneId ?? registry[agent]?.paneId,
+	};
+}
+
+export function formatCompletionDetails(detail: PaneCompletionDetails): string {
+	const files = detail.filesChanged.length ? detail.filesChanged.map((file) => `- ${file}`).join("\n") : "None reported";
+	const validation = detail.validation.length ? detail.validation.map((item) => `- ${item}`).join("\n") : "None reported";
+	return [
+		`# Agent completion: ${detail.agent}`,
+		`Task ID: ${detail.taskId}`,
+		`Status: ${detail.status}`,
+		`Source: ${detail.sourcePath}`,
+		detail.archivePath ? `Archive: ${detail.archivePath}` : "",
+		detail.transcriptPath ? `Transcript: ${detail.transcriptPath}` : "",
+		"",
+		"## Summary",
+		detail.summary,
+		"",
+		"## Files Changed",
+		files,
+		"",
+		"## Validation",
+		validation,
+		detail.notes ? `\n## Notes\n${detail.notes}` : "",
+	]
+		.filter(Boolean)
+		.join("\n");
+}
+
+export function formatCompletionGroup(completions: PaneCompletionDetails[]): string {
+	if (completions.length === 1) return formatCompletionDetails(completions[0]);
+	return [`# Agent completions (${completions.length})`, "", ...completions.map(formatCompletionDetails)].join("\n\n---\n\n");
+}
+
+const paneCompletionPollLocks = new Set<string>();
+const emittedPaneCompletionKeys = new Set<string>();
+
+export function paneCompletionDedupKey(runtimeRoot: string, agent: string, taskId: string): string {
+	return `${normalizedPath(runtimeRoot)}\0${agent}\0${taskId}`;
+}
+
+export async function pollPaneCompletions(runtimeRoot: string, pi: ExtensionAPI, triggerTurn = false): Promise<number> {
+	const lockKey = normalizedPath(runtimeRoot);
+	if (paneCompletionPollLocks.has(lockKey)) return 0;
+	paneCompletionPollLocks.add(lockKey);
+	try {
+		return await pollPaneCompletionsUnlocked(runtimeRoot, pi, triggerTurn);
+	} finally {
+		paneCompletionPollLocks.delete(lockKey);
+	}
+}
+
+async function pollPaneCompletionsUnlocked(runtimeRoot: string, pi: ExtensionAPI, triggerTurn = false): Promise<number> {
+	const root = outboxRoot(runtimeRoot);
+	let agentDirs: fs.Dirent[];
+	try {
+		agentDirs = await fs.promises.readdir(root, { withFileTypes: true });
+	} catch {
+		return 0;
+	}
+
+	const registry = await readPaneRegistry(runtimeRoot);
+	let tasks = await readTaskRegistry(runtimeRoot);
+	const completions: PaneCompletionDetails[] = [];
+
+	for (const agentDir of agentDirs) {
+		if (!agentDir.isDirectory()) continue;
+		const dir = path.join(root, agentDir.name);
+		let files: string[];
+		try {
+			files = (await fs.promises.readdir(dir)).filter((file) => file.endsWith(".json")).sort();
+		} catch {
+			continue;
+		}
+
+		for (const file of files) {
+			const filePath = path.join(dir, file);
+			let parseFailure = false;
+			try {
+				const parsed = await readPaneCompletionFile(filePath);
+				if (parsed.error) {
+					parseFailure = true;
+					throw parsed.error;
+				}
+				if (!parsed.completion) continue;
+				const completion = parsed.completion;
+				const agentName = completion.agent || agentDir.name;
+				const taskId = completion.taskId || path.basename(filePath, path.extname(filePath));
+				const dedupKey = paneCompletionDedupKey(runtimeRoot, agentName, taskId);
+				const existing = tasks[taskId];
+				const alreadyEmitted = emittedPaneCompletionKeys.has(dedupKey)
+					|| Boolean(existing && existing.agent === agentName && isTerminalTaskStatus(existing.status) && (existing.completedAt || existing.completionArchivePath));
+				const archivePath = await archiveCompletion(runtimeRoot, agentName, filePath);
+				if (alreadyEmitted) continue;
+				const detail = paneCompletionDetailsFromCompletion(completion, agentDir.name, filePath, archivePath, registry, tasks);
+				completions.push(detail);
+				emittedPaneCompletionKeys.add(dedupKey);
+				tasks = await updateTaskRegistry(runtimeRoot, (records) => {
+					const existing = records[detail.taskId];
+					records[detail.taskId] = {
+						...existing,
+						taskId: detail.taskId,
+						agent: detail.agent,
+						task: existing?.task ?? "",
+						createdAt: existing?.createdAt ?? detail.completedAt,
+						status: detail.status,
+						paneId: detail.paneId,
+						completionSourcePath: detail.sourcePath,
+						completionArchivePath: detail.archivePath,
+						transcriptPath: detail.transcriptPath,
+						summary: detail.summary,
+						filesChanged: detail.filesChanged,
+						validation: detail.validation,
+						notes: detail.notes,
+						updatedAt: detail.completedAt,
+						completedAt: detail.completedAt,
+					};
+				});
+				emitSubagentEvent(pi, detail.status === "completed" ? "subagents:completed" : "subagents:failed", {
+					mode: "pane",
+					agent: detail.agent,
+					paneId: detail.paneId,
+					taskId: detail.taskId,
+					status: detail.status,
+					summary: detail.summary,
+					runtimeRoot,
+					transcriptPath: detail.transcriptPath,
+					completionPath: detail.archivePath ?? detail.sourcePath,
+				});
+			} catch (error) {
+				const code = typeof error === "object" && error && "code" in error ? (error as { code?: unknown }).code : undefined;
+				if (!parseFailure && code === "ENOENT") continue;
+				let oldEnough = true;
+				try {
+					const stat = await fs.promises.stat(filePath);
+					oldEnough = Date.now() - stat.mtimeMs >= MALFORMED_COMPLETION_GRACE_MS;
+				} catch {
+					oldEnough = true;
+				}
+				if (!oldEnough) continue;
+				const taskId = path.basename(filePath, path.extname(filePath));
+				const diagnostic = parseFailure
+					? completionParseErrorMessage(filePath, error)
+					: `Unable to collect completion JSON at ${filePath}: ${stringifyError(error)}. The file was left in place for retry.`;
+				const updated = await markTaskNeedsCompletion(runtimeRoot, agentDir.name, taskId, {
+					diagnostic,
+					outboxFile: filePath,
+					transcriptPath: registry[agentDir.name]?.sessionFile,
+				});
+				if (updated) {
+					tasks = { ...tasks, [taskId]: updated };
+					emitSubagentEvent(pi, "subagents:needs_completion", {
+						mode: "pane",
+						agent: updated.agent,
+						paneId: updated.paneId ?? registry[updated.agent]?.paneId,
+						taskId,
+						status: "needs_completion",
+						summary: diagnostic,
+						runtimeRoot,
+						transcriptPath: updated.transcriptPath,
+						completionPath: filePath,
+					});
+				}
+			}
+		}
+	}
+
+	if (completions.length > 0) {
+		const content = formatCompletionGroup(completions);
+		pi.sendMessage(
+			{ customType: "subagent-completion", content, details: { completions } as PaneCompletionMessageDetails, display: true },
+			triggerTurn ? { triggerTurn: true, deliverAs: "followUp" } : undefined,
+		);
+	}
+	return completions.length;
+}
+
+export function createTaskId(agentName: string): string {
+	return `${safeFileName(agentName)}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+export function normalizedTaskForDedup(task: string): string {
+	return task.replace(/\s+/g, " ").trim();
+}
