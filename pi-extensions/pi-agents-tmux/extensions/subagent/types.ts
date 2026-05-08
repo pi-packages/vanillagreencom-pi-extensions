@@ -352,6 +352,7 @@ export interface SteerSubagentDetails {
 	bridgeSocket?: string;
 	deliverAs: string;
 	fallbackFile?: string;
+	outboxFile?: string;
 	paneId: string;
 	runtimeRoot: string;
 	sessionFile: string;

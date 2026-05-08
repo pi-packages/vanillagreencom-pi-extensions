@@ -105,6 +105,7 @@ import {
 import {
 	appendUniqueDiagnostic,
 	completionParseErrorMessage,
+	createTaskId,
 	emitSubagentEvent,
 	isTerminalTaskStatus,
 	latestTaskRecord,
@@ -116,6 +117,7 @@ import {
 	readTaskRegistry,
 	refreshTaskDiagnostics,
 	updateTaskRegistry,
+	upsertTaskRecord,
 } from "./tasks.js";
 import {
 	CompleteSubagentParams,
@@ -155,6 +157,12 @@ function bridgeTargetArgs(metadata: { socket?: string; pid?: string }): string[]
 	return [];
 }
 
+type FollowUpTask = { taskId: string; outboxFile: string; taskFile?: string };
+
+function isFollowUpDelivery(deliverAs: string): boolean {
+	return deliverAs === "follow-up" || deliverAs === "send";
+}
+
 function steerDiagnostics(details: SteerSubagentDetails): string[] {
 	return [
 		`Target agent: ${details.agent}`,
@@ -166,20 +174,53 @@ function steerDiagnostics(details: SteerSubagentDetails): string[] {
 		`Child session file: ${details.sessionFile}`,
 		`Runtime root: ${details.runtimeRoot}`,
 		details.fallbackFile ? `Inbox fallback: ${details.fallbackFile}` : "",
+		details.outboxFile ? `Expected outbox: ${details.outboxFile}` : "",
 	].filter(Boolean);
 }
 
-async function queueSteeringFallback(runtimeRoot: string, agentName: string, message: string): Promise<string> {
-	const steeringId = `${safeFileName(`${agentName}-steer`)}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+async function createFollowUpTask(runtimeRoot: string, agentName: string, entry: { paneId: string; sessionFile: string }, message: string): Promise<FollowUpTask> {
+	const taskId = createTaskId(agentName);
+	const outboxFile = completionPath(runtimeRoot, agentName, taskId);
+	await upsertTaskRecord(runtimeRoot, {
+		taskId,
+		agent: agentName,
+		task: message,
+		status: "running",
+		paneId: entry.paneId,
+		outboxFile,
+		transcriptPath: entry.sessionFile,
+		createdAt: new Date().toISOString(),
+		updatedAt: new Date().toISOString(),
+	});
+	return { taskId, outboxFile };
+}
+
+async function queueSteeringFallback(runtimeRoot: string, agentName: string, message: string, deliverAs: string = "steer", followUpTask?: FollowUpTask): Promise<string> {
+	const steeringId = followUpTask?.taskId ?? `${safeFileName(`${agentName}-steer`)}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 	const filePath = path.join(inboxDir(runtimeRoot, agentName), `${safeFileName(steeringId)}.md`);
-	const content = formatSteeringForChild(agentName, message, false);
+	const content = formatSteeringForChild(agentName, message, false, deliverAs, followUpTask);
 	await fs.promises.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
 	await fs.promises.writeFile(filePath, content, { encoding: "utf-8", mode: 0o600 });
+	if (followUpTask) {
+		await updateTaskRegistry(runtimeRoot, (records) => {
+			const existing = records[followUpTask.taskId];
+			if (existing) records[followUpTask.taskId] = { ...existing, status: "queued", inboxFile: filePath, updatedAt: new Date().toISOString() };
+		});
+		followUpTask.taskFile = filePath;
+	}
 	return filePath;
 }
 
-function formatSteeringForChild(agentName: string, message: string, liveBridge: boolean): string {
-	return [`Steering update for ${agentName}${liveBridge ? " (live bridge)" : " (queued fallback)"}:`, "", message.trim()].join("\n");
+function formatSteeringForChild(agentName: string, message: string, liveBridge: boolean, deliverAs: string = "steer", followUpTask?: FollowUpTask): string {
+	const followUp = isFollowUpDelivery(deliverAs);
+	const schema = followUpTask ? JSON.stringify({ agent: agentName, taskId: followUpTask.taskId, status: "completed|blocked|failed", summary: "1-3 sentence result", filesChanged: ["path/or empty"], validation: ["command/result or empty"], notes: "optional" }) : "";
+	return [
+		`${followUp ? "Follow-up task" : "Steering update"} for ${agentName}${liveBridge ? " (live bridge)" : " (queued fallback)"}:`,
+		...(followUpTask ? [`Task ID: ${followUpTask.taskId}`, `Completion outbox: ${followUpTask.outboxFile}`] : []),
+		"",
+		message.trim(),
+		...(followUp ? ["", "When done, call complete_subagent with status, summary, filesChanged, validation, and optional notes.", ...(followUpTask ? [`If complete_subagent is unavailable, write exactly one JSON object to ${followUpTask.outboxFile} using this schema: ${schema}`] : [])] : []),
+	].join("\n");
 }
 
 export default function (pi: ExtensionAPI) {
@@ -498,10 +539,18 @@ export default function (pi: ExtensionAPI) {
 		parameters: CompleteSubagentParams,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			if (!childAgentName) return { content: [{ type: "text", text: "complete_subagent is only available inside a persistent agent pane." }], details: {}, isError: true };
-			if (!childCurrentTaskFile) return { content: [{ type: "text", text: "No active agent task file is being processed." }], details: {}, isError: true };
-			const taskId = path.basename(childCurrentTaskFile, path.extname(childCurrentTaskFile));
 			const runtimeRoot = runtimeDirForContext(ctx);
-			const outboxFile = completionPath(runtimeRoot, childAgentName, taskId);
+			let taskId = childCurrentTaskFile ? path.basename(childCurrentTaskFile, path.extname(childCurrentTaskFile)) : "";
+			let outboxFile = taskId ? completionPath(runtimeRoot, childAgentName, taskId) : "";
+			if (!taskId) {
+				const records = Object.values(await readTaskRegistry(runtimeRoot))
+					.filter((record) => record.agent === childAgentName && (record.status === "queued" || record.status === "running"))
+					.sort((a, b) => (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt));
+				const record = records[0];
+				if (!record) return { content: [{ type: "text", text: "No active agent task file or bridge follow-up task is being processed." }], details: {}, isError: true };
+				taskId = record.taskId;
+				outboxFile = record.outboxFile ?? completionPath(runtimeRoot, childAgentName, taskId);
+			}
 			const completion = {
 				agent: childAgentName,
 				taskId,
@@ -522,9 +571,12 @@ export default function (pi: ExtensionAPI) {
 		renderCall(_args, _theme, _context) {
 			return new Container();
 		},
-		renderResult(_result, _options, _theme, _context) {
-			// Silent: completion line is emitted post-turn from the agent_end hook.
-			return new Container();
+		renderResult(result, _options, theme, _context) {
+			const details = result.details as { agent?: string; status?: string; outboxFile?: string } | undefined;
+			const agent = details?.agent ?? childAgentName ?? "agent";
+			const statusWord = details?.status === "failed" ? "failed" : details?.status === "blocked" ? "blocked" : "completed";
+			const tone = details?.status === "failed" || details?.status === "blocked" ? "error" : "success";
+			return framedMessage(agentStatusLine(theme, agent, statusWord, tone, theme.fg("muted", " · reported")), theme);
 		},
 	});
 
@@ -1142,6 +1194,7 @@ export default function (pi: ExtensionAPI) {
 			if (!(await paneExists(entry.paneId))) return { content: [{ type: "text", text: `Agent ${agentName} is not live.` }], details: {}, isError: true };
 
 			const deliverAs = params.deliverAs ?? "steer";
+			const followUpTask = isFollowUpDelivery(deliverAs) ? await createFollowUpTask(runtimeRoot, agentName, entry, params.message) : undefined;
 			const metadata = await ensurePaneBridgeMetadata(runtimeRoot, entry);
 			const bridgeBin = metadata ? await resolvePiBridgeBin() : undefined;
 			const targetArgs = metadata ? bridgeTargetArgs(metadata) : [];
@@ -1154,21 +1207,22 @@ export default function (pi: ExtensionAPI) {
 				paneId: entry.paneId,
 				runtimeRoot,
 				sessionFile: entry.sessionFile,
-				taskId: params.taskId ?? record?.taskId,
+				taskId: followUpTask?.taskId ?? params.taskId ?? record?.taskId,
+				outboxFile: followUpTask?.outboxFile,
 			} satisfies SteerSubagentDetails;
 
 			if (bridgeBin && targetArgs.length > 0) {
 				const command = deliverAs === "follow-up" ? "follow-up" : deliverAs === "send" ? "send" : "steer";
 				const args = [command, ...targetArgs];
 				if (command === "send") args.push("--auto");
-				args.push(formatSteeringForChild(agentName, params.message, true));
+				args.push(formatSteeringForChild(agentName, params.message, true, deliverAs, followUpTask));
 				const result = await execCapture(bridgeBin, args, { cwd: entry.cwd });
 				if (result.code === 0) {
-					patchDashboard(params.taskId ?? record?.taskId, { bridge: true, paneId: entry.paneId });
+					patchDashboard(followUpTask?.taskId ?? params.taskId ?? record?.taskId, { bridge: true, paneId: entry.paneId });
 					emitSubagentEvent(pi, "subagents:steered", {
 						mode: "pane",
 						agent: agentName,
-						taskId: params.taskId ?? record?.taskId,
+						taskId: followUpTask?.taskId ?? params.taskId ?? record?.taskId,
 						paneId: entry.paneId,
 						bridge: true,
 						bridgePid: metadata?.pid,
@@ -1182,13 +1236,13 @@ export default function (pi: ExtensionAPI) {
 						details: baseDetails,
 					};
 				}
-				const fallbackFile = await queueSteeringFallback(runtimeRoot, agentName, params.message);
+				const fallbackFile = await queueSteeringFallback(runtimeRoot, agentName, params.message, deliverAs, followUpTask);
 				const details = { ...baseDetails, bridge: false, fallbackFile } satisfies SteerSubagentDetails;
-				patchDashboard(params.taskId ?? record?.taskId, { bridge: false, paneId: entry.paneId });
+				patchDashboard(followUpTask?.taskId ?? params.taskId ?? record?.taskId, { bridge: false, paneId: entry.paneId });
 				emitSubagentEvent(pi, "subagents:steered", {
 					mode: "pane",
 					agent: agentName,
-					taskId: params.taskId ?? record?.taskId,
+					taskId: followUpTask?.taskId ?? params.taskId ?? record?.taskId,
 					paneId: entry.paneId,
 					bridge: false,
 					deliverAs,
@@ -1201,13 +1255,13 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 
-			const fallbackFile = await queueSteeringFallback(runtimeRoot, agentName, params.message);
+			const fallbackFile = await queueSteeringFallback(runtimeRoot, agentName, params.message, deliverAs, followUpTask);
 			const details = { ...baseDetails, bridge: false, fallbackFile } satisfies SteerSubagentDetails;
-			patchDashboard(params.taskId ?? record?.taskId, { bridge: false, paneId: entry.paneId });
+			patchDashboard(followUpTask?.taskId ?? params.taskId ?? record?.taskId, { bridge: false, paneId: entry.paneId });
 			emitSubagentEvent(pi, "subagents:steered", {
 				mode: "pane",
 				agent: agentName,
-				taskId: params.taskId ?? record?.taskId,
+				taskId: followUpTask?.taskId ?? params.taskId ?? record?.taskId,
 				paneId: entry.paneId,
 				bridge: false,
 				deliverAs,
