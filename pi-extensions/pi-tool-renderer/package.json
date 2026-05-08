@@ -436,7 +436,7 @@
         {
           "key": "toolChrome",
           "label": "Global tool chrome",
-          "description": "Global chrome for tool rows. outlines adds muted full-width horizontal rules above and below tool output; transparent removes default tool backgrounds without rules; off preserves Pi defaults.",
+          "description": "Global chrome for tool rows. outlines adds muted horizontal rules above and below tool output; transparent removes default tool backgrounds without rules; off preserves Pi defaults.",
           "type": "enum",
           "enumValues": [
             "off",
@@ -444,6 +444,24 @@
             "outlines"
           ],
           "default": "outlines",
+          "category": "Chrome",
+          "apply": "live"
+        },
+        {
+          "key": "rightMarginGuard",
+          "label": "Guard terminal right margin",
+          "description": "Render compact tool chrome, wrapped lines, diffs, and compact user-message borders one column short to avoid right-margin auto-wrap flashes in tmux and some terminals.",
+          "type": "boolean",
+          "default": true,
+          "category": "Chrome",
+          "apply": "live"
+        },
+        {
+          "key": "pendingStatusAnimation",
+          "label": "Animate pending tool status",
+          "description": "Blink pending compact tool bullets. Disabled by default for more stable streaming output at the bottom of terminal panes.",
+          "type": "boolean",
+          "default": false,
           "category": "Chrome",
           "apply": "live"
         },

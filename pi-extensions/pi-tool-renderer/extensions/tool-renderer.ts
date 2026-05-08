@@ -137,7 +137,20 @@ function renderUserMessageBorder(lines: string[], width: number, theme: any): st
 
 function appendUserMessageBreak(lines: string[], width: number, cwd?: string): string[] {
 	if (lines.length === 0 || !settingBoolean("userMessageTrailingBlankLine", true, cwd)) return lines;
-	return [...lines, " ".repeat(Math.max(0, width))];
+	// A visual blank row does not need to fill the terminal width. Keeping it empty
+	// avoids writing a printable character into the last column, which can trigger
+	// auto-wrap/scroll flashes in tmux and some terminal emulators when streaming
+	// output is already sitting on the bottom row.
+	return [...lines, ""];
+}
+
+function rightMarginGuardEnabled(cwd?: string): boolean {
+	return settingBoolean("rightMarginGuard", true, cwd);
+}
+
+function stableRenderWidth(width: number, cwd?: string): number {
+	const safe = Math.max(1, Math.floor(width || 1));
+	return rightMarginGuardEnabled(cwd) && safe > 1 ? safe - 1 : safe;
 }
 
 function lineCount(text: string): number {
@@ -278,8 +291,9 @@ function installUserMessageRenderer(pi: ExtensionAPI, UserMessageComponent: any)
 
 				if (compact && width >= 4) {
 					const theme = ctx.ui?.theme ?? FALLBACK_THEME;
-					const lines = state!.originalRender.call(this, Math.max(1, width - 2));
-					return appendUserMessageBreak(renderUserMessageBorder(lines, width, theme), width, cwd);
+					const frameWidth = stableRenderWidth(width, cwd);
+					const lines = state!.originalRender.call(this, Math.max(1, frameWidth - 2));
+					return appendUserMessageBreak(renderUserMessageBorder(lines, frameWidth, theme), width, cwd);
 				}
 			}
 
@@ -334,7 +348,7 @@ function installAssistantMessageRenderer(pi: ExtensionAPI, AssistantMessageCompo
 			if (this?.hasToolCalls) return rendered;
 			const end = trimTrailingBlankLines(rendered);
 			if (end.length === 0) return rendered;
-			return [...end, " ".repeat(Math.max(0, width))];
+			return [...end, ""];
 		};
 		prototype.updateContent = function alignedAssistantUpdateContent(this: any, message: any): void {
 			state!.originalUpdateContent.call(this, message);
@@ -535,7 +549,7 @@ function padAnsiLine(line: string, width: number): string {
 }
 
 function renderStyledCodeBlock(token: any, width: number, markdownTheme: any, ctx?: ExtensionContext): string[] {
-	const contentWidth = Math.max(1, width);
+	const contentWidth = stableRenderWidth(width, ctx?.cwd);
 	const rawLang = typeof token?.lang === "string" ? token.lang.trim() : "";
 	const lang = rawLang.split(/\s+/)[0] || undefined;
 	const code = typeof token?.text === "string" ? token.text : "";
@@ -621,7 +635,7 @@ class TruncatedLines {
 
 	render(width: number): string[] {
 		if (this.cachedLines && this.cachedWidth === width) return this.cachedLines;
-		const targetWidth = Math.max(1, width);
+		const targetWidth = stableRenderWidth(width);
 		const lines = this.lines.flatMap((line) => {
 			const wrapped = wrapTextWithAnsi(line, targetWidth);
 			return wrapped.length > 0 ? wrapped : [""];
@@ -908,9 +922,10 @@ function padVisible(text: string, width: number): string {
 	return missing > 0 ? `${text}${" ".repeat(missing)}` : text;
 }
 
-function terminalWidth(): number {
+function terminalWidth(cwd?: string): number {
 	const raw = Number(process.stdout.columns || (process.stderr as any).columns || process.env.COLUMNS || 120);
-	return Math.max(60, raw);
+	const guarded = stableRenderWidth(raw, cwd);
+	return Math.max(40, guarded);
 }
 
 function truncateAnsi(text: string, width: number): string {
@@ -1252,9 +1267,19 @@ function blinkingPrefix(theme: any, context: any): string {
 	return theme.fg(on ? "success" : "muted", on ? "● " : "○ ");
 }
 
+function pendingStatusAnimation(cwd?: string): boolean {
+	return settingBoolean("pendingStatusAnimation", false, cwd);
+}
+
+function pendingStatusPrefix(theme: any, context: any, cwd?: string): string {
+	if (pendingStatusAnimation(context?.cwd ?? cwd)) return blinkingPrefix(theme, context);
+	clearBlink(context);
+	return theme.fg("warning", "● ");
+}
+
 function renderPendingCall(call: string, theme: any, context: any, cwd?: string): TruncatedLines | ReturnType<typeof makeEmpty> {
 	if (!context?.executionStarted || !context?.isPartial || stackToolCalls(context?.cwd ?? cwd)) return makeEmpty();
-	return makeTruncatedLines(`${blinkingPrefix(theme, context)}${call}`);
+	return makeTruncatedLines(`${pendingStatusPrefix(theme, context, cwd)}${call}`);
 }
 
 function renderPendingDetail(text: string, theme: any): TruncatedLines {
@@ -1723,7 +1748,7 @@ function collapsedDiffHint(remainingLines: number, hiddenHunks: number, expanded
 
 function renderStructuredDiff(diff: StructuredDiff, theme: any, expanded: boolean, cwd?: string, rowLimit?: number | null, path?: string, widthOffset = 0): string {
 	if (diff.additions === 0 && diff.removals === 0) return theme.fg("muted", "no changes");
-	const width = Math.max(40, terminalWidth() - Math.max(0, widthOffset));
+	const width = Math.max(40, terminalWidth(cwd) - Math.max(0, widthOffset));
 	const configuredLimit = rowLimit === undefined ? configuredDiffRowLimit(expanded, cwd) : rowLimit;
 	const maxRows = configuredLimit === null ? diff.lines.length : Math.max(1, configuredLimit);
 	const rows = diff.lines.slice(0, maxRows);
@@ -2005,7 +2030,7 @@ function renderMutationCallPreview(kind: "Edit" | "Write" | "Create", targetPath
 	if (context?.executionStarted && !context?.isPartial) return makeEmpty();
 	if (!settingBoolean("mutationCallPreview", true, cwd) || diffs.length === 0) return makeEmpty();
 	const total = summarizeDiffs(diffs);
-	const prefix = context?.executionStarted && context?.isPartial ? blinkingPrefix(theme, context) : stackPrefix(theme);
+	const prefix = context?.executionStarted && context?.isPartial ? pendingStatusPrefix(theme, context, cwd) : stackPrefix(theme);
 	let text = `${prefix}${toolLabel(theme, `${kind} `)}${theme.fg("accent", targetPath)}${theme.fg("dim", " · preview · ")}${diffSummary(total, theme, cwd)}`;
 	const maxShown = context?.expanded ? diffs.length : Math.min(1, diffs.length);
 	const perDiffLimit = Math.max(4, Math.floor(settingNumber("mutationCallPreviewLines", 16, cwd) / Math.max(1, maxShown)));
@@ -2649,7 +2674,7 @@ function stringArrayArg(args: any, ...keys: string[]): string[] {
 }
 
 function genericStatusPrefix(context: any, theme: any): string {
-	if (!context?.executionStarted || context?.isPartial) return blinkingPrefix(theme, context);
+	if (!context?.executionStarted || context?.isPartial) return pendingStatusPrefix(theme, context);
 	clearBlink(context);
 	return theme.fg(context?.isError ? "error" : "success", "● ");
 }
@@ -3081,8 +3106,8 @@ function prepareToolChromeTheme(theme: any, cwd?: string): void {
 
 let activeToolChromeCtx: ExtensionContext | undefined;
 
-function mutedHorizontalRule(theme: any, width: number): string {
-	return subtleRule(theme, "─".repeat(Math.max(1, width)));
+function mutedHorizontalRule(theme: any, width: number, cwd?: string): string {
+	return subtleRule(theme, "─".repeat(stableRenderWidth(width, cwd)));
 }
 
 function shouldOmitBottomToolChromeRule(core: string[]): boolean {
@@ -3105,13 +3130,15 @@ function installToolChromePatch(): void {
 		let end = rendered.length - 1;
 		while (end >= start && stripAnsi(rendered[end] ?? "").trim().length === 0) end--;
 		if (start > end) return rendered;
+		const effectiveCwd = this?.cwd ?? process.cwd();
+		const renderWidth = stableRenderWidth(width, effectiveCwd);
 		const core = rendered.slice(start, end + 1).flatMap((line) => {
-			const wrapped = wrapTextWithAnsi(stripLeadingBackgroundLayer(line), Math.max(1, width));
+			const wrapped = wrapTextWithAnsi(stripLeadingBackgroundLayer(line), renderWidth);
 			return wrapped.length > 0 ? wrapped : [""];
 		});
 		if (mode === "transparent") return core;
 		const activeTheme = this?.[TOOL_CHROME_THEME_SYMBOL] ?? this?.ui?.theme ?? (activeToolChromeCtx?.hasUI ? activeToolChromeCtx.ui.theme : undefined);
-		const rule = mutedHorizontalRule(activeTheme, width);
+		const rule = mutedHorizontalRule(activeTheme, width, effectiveCwd);
 		return shouldOmitBottomToolChromeRule(core) ? [rule, ...core] : [rule, ...core, rule];
 	};
 	proto[TOOL_CHROME_PATCH_SYMBOL] = true;
