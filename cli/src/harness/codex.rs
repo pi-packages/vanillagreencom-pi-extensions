@@ -39,7 +39,8 @@ pub fn generate_agent(
         "haiku" => ("gpt-5.5", "medium"),
         other => (other, "high"),
     };
-    let model = frontmatter.model.as_deref().unwrap_or(model);
+    let model_override = frontmatter.model.as_deref().map(codex_model_for_override);
+    let model = model_override.as_deref().unwrap_or(model);
     let reasoning_effort = agent::openai_effort_name(
         frontmatter
             .model_reasoning_effort
@@ -86,6 +87,13 @@ pub fn generate_agent(
 
 fn escape_toml(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn codex_model_for_override(model: &str) -> String {
+    match model.to_lowercase().as_str() {
+        "opus" | "sonnet" | "haiku" => "gpt-5.5".into(),
+        other => other.into(),
+    }
 }
 
 #[cfg(test)]

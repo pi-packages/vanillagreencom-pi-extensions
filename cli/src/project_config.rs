@@ -438,6 +438,17 @@ fn toml_inline_string(value: &str) -> String {
     )
 }
 
+fn toml_inline_array(values: &[String]) -> String {
+    format!(
+        "[{}]",
+        values
+            .iter()
+            .map(|value| toml_inline_string(value))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
 fn split_top_level_commas(input: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut current = String::new();
@@ -507,11 +518,10 @@ fn render_inline_table_fields(fields: &[(String, String)]) -> String {
     let preferred = [
         "color",
         "model",
+        "effort",
         "deny-tools",
-        "tools",
         "pane",
         "background",
-        "effort",
         "isolation",
         "memory",
         "mode",
@@ -868,6 +878,264 @@ pub fn write_agent_colors(project_root: &Path, agent_color_map: &HashMap<String,
     }
 }
 
+/// Write the generated frontmatter defaults into `vstack.toml` as real,
+/// editable entries. Existing user-set fields are preserved; missing fields are
+/// filled so users can inspect and modify the values that drive regeneration.
+pub fn write_agent_frontmatter_defaults(
+    project_root: &Path,
+    agents: &[crate::agent::Agent],
+    harnesses_by_agent: &HashMap<String, Vec<crate::harness::Harness>>,
+) {
+    if agents.is_empty() || harnesses_by_agent.is_empty() {
+        return;
+    }
+
+    let path = project_root.join("vstack.toml");
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let mut content = ensure_agent_frontmatter_scaffold(&existing);
+
+    let mut agents_sorted: Vec<&crate::agent::Agent> = agents
+        .iter()
+        .filter(|agent| harnesses_by_agent.contains_key(&agent.name))
+        .collect();
+    agents_sorted.sort_by(|a, b| a.name.cmp(&b.name));
+
+    let base_entries: Vec<(String, Vec<(String, String)>)> = agents_sorted
+        .iter()
+        .map(|agent| (agent.name.clone(), base_frontmatter_defaults(agent)))
+        .filter(|(_, fields)| !fields.is_empty())
+        .collect();
+    content =
+        merge_frontmatter_defaults_into_section(&content, "[agent-frontmatter]", &base_entries);
+
+    for (harness, section) in [
+        (
+            crate::harness::Harness::ClaudeCode,
+            "[agent-frontmatter.claude]",
+        ),
+        (
+            crate::harness::Harness::OpenCode,
+            "[agent-frontmatter.opencode]",
+        ),
+        (crate::harness::Harness::Codex, "[agent-frontmatter.codex]"),
+        (crate::harness::Harness::Pi, "[agent-frontmatter.pi]"),
+    ] {
+        let entries: Vec<(String, Vec<(String, String)>)> = agents_sorted
+            .iter()
+            .filter(|agent| {
+                harnesses_by_agent
+                    .get(&agent.name)
+                    .is_some_and(|harnesses| harnesses.contains(&harness))
+            })
+            .map(|agent| {
+                (
+                    agent.name.clone(),
+                    harness_frontmatter_defaults(agent, harness),
+                )
+            })
+            .filter(|(_, fields)| !fields.is_empty())
+            .collect();
+        content = merge_frontmatter_defaults_into_section(&content, section, &entries);
+    }
+
+    content = ensure_value_section_entry_spacing(&dedupe_agent_frontmatter_sections(&content));
+    if content != existing {
+        let _ = std::fs::write(path, content);
+    }
+}
+
+fn base_frontmatter_defaults(agent: &crate::agent::Agent) -> Vec<(String, String)> {
+    let mut fields = Vec::new();
+    if let Some(color) = agent
+        .color
+        .as_deref()
+        .filter(|color| !color.trim().is_empty())
+    {
+        fields.push(("color".into(), toml_inline_string(color)));
+    }
+    fields.push(("model".into(), toml_inline_string(&agent.model)));
+    if let Some(effort) = crate::agent::effort_for_model(&agent.model) {
+        fields.push(("effort".into(), toml_inline_string(effort)));
+    }
+    fields.push((
+        "deny-tools".into(),
+        toml_inline_array(&common_default_deny_tools(agent)),
+    ));
+    fields
+}
+
+fn common_default_deny_tools(agent: &crate::agent::Agent) -> Vec<String> {
+    let mut tools = vec!["subagent".to_string()];
+    if !agent.name.eq_ignore_ascii_case("planner") {
+        tools.push("question".to_string());
+    }
+    tools
+}
+
+fn harness_frontmatter_defaults(
+    agent: &crate::agent::Agent,
+    harness: crate::harness::Harness,
+) -> Vec<(String, String)> {
+    match harness {
+        crate::harness::Harness::ClaudeCode => vec![("background".into(), "false".into())],
+        crate::harness::Harness::OpenCode => vec![(
+            "mode".into(),
+            toml_inline_string(match agent.role {
+                crate::agent::AgentRole::Engineer => "all",
+                crate::agent::AgentRole::Analyst
+                | crate::agent::AgentRole::Reviewer
+                | crate::agent::AgentRole::Manager => "subagent",
+            }),
+        )],
+        crate::harness::Harness::Codex => vec![(
+            "sandbox-mode".into(),
+            toml_inline_string(match agent.role {
+                crate::agent::AgentRole::Engineer => "danger-full-access",
+                crate::agent::AgentRole::Analyst
+                | crate::agent::AgentRole::Reviewer
+                | crate::agent::AgentRole::Manager => "workspace-write",
+            }),
+        )],
+        crate::harness::Harness::Pi => {
+            vec![
+                (
+                    "deny-tools".into(),
+                    toml_inline_array(&pi_extra_default_deny_tools()),
+                ),
+                ("pane".into(), default_pi_pane(agent).to_string()),
+            ]
+        }
+        crate::harness::Harness::Cursor => Vec::new(),
+    }
+}
+
+fn pi_extra_default_deny_tools() -> Vec<String> {
+    vec![
+        "get_subagent_result".into(),
+        "steer_subagent".into(),
+        "stop_subagent".into(),
+    ]
+}
+
+fn default_pi_pane(agent: &crate::agent::Agent) -> bool {
+    matches!(agent.role, crate::agent::AgentRole::Engineer)
+        || agent.name.eq_ignore_ascii_case("planner")
+}
+
+fn merge_frontmatter_defaults_into_section(
+    content: &str,
+    section: &str,
+    entries: &[(String, Vec<(String, String)>)],
+) -> String {
+    if entries.is_empty() {
+        return content.to_string();
+    }
+    let content = ensure_frontmatter_section(content, section);
+    let mut out = content.clone();
+    for (agent, fields) in entries {
+        out = upsert_missing_inline_table_fields(&out, section, agent, fields);
+    }
+    out
+}
+
+fn ensure_frontmatter_section(content: &str, section: &str) -> String {
+    if section_start(content, section).is_some() {
+        return content.to_string();
+    }
+    let mut out = content.trim_end().to_string();
+    out.push_str("\n\n");
+    if section != "[agent-frontmatter]" && section != "[agent-frontmatter.pi]" {
+        out.push_str(&format!(
+            "# {} frontmatter values generated by vstack. Edit fields, then run `vstack refresh`.\n",
+            section
+                .trim_start_matches("[agent-frontmatter.")
+                .trim_end_matches(']')
+        ));
+    }
+    out.push_str(section);
+    out.push('\n');
+    out
+}
+
+fn upsert_missing_inline_table_fields(
+    content: &str,
+    section: &str,
+    agent_name: &str,
+    defaults: &[(String, String)],
+) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut result = Vec::with_capacity(lines.len() + 2);
+    let mut active_section = "";
+    let mut inserted = false;
+    let mut section_found = false;
+    let key_prefix = format!("{} =", agent_name);
+    let key_prefix_tight = format!("{}=", agent_name);
+
+    for line in lines {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') && !trimmed.starts_with("# [") {
+            if active_section == section && !inserted {
+                result.push(format!(
+                    "{} = {}",
+                    agent_name,
+                    render_inline_table_fields(defaults)
+                ));
+                inserted = true;
+            }
+            active_section = trimmed;
+            section_found |= active_section == section;
+            result.push(line.to_string());
+            continue;
+        }
+
+        if active_section == section
+            && (trimmed.starts_with(&key_prefix) || trimmed.starts_with(&key_prefix_tight))
+        {
+            let existing_value = line.split_once('=').map(|(_, value)| value).unwrap_or("{}");
+            let mut fields = parse_inline_table_fields(existing_value);
+            let existing_keys: HashSet<String> =
+                fields.iter().map(|(key, _)| key.clone()).collect();
+            for (key, value) in defaults {
+                if !existing_keys.contains(key) {
+                    fields.push((key.clone(), value.clone()));
+                }
+            }
+            result.push(format!(
+                "{} = {}",
+                agent_name,
+                render_inline_table_fields(&fields)
+            ));
+            inserted = true;
+            continue;
+        }
+
+        if active_section == section && !inserted && trimmed.starts_with('#') {
+            result.push(format!(
+                "{} = {}",
+                agent_name,
+                render_inline_table_fields(defaults)
+            ));
+            inserted = true;
+        }
+
+        result.push(line.to_string());
+    }
+
+    if section_found && !inserted {
+        result.push(format!(
+            "{} = {}",
+            agent_name,
+            render_inline_table_fields(defaults)
+        ));
+    }
+
+    let mut rendered = result.join("\n");
+    if content.ends_with('\n') {
+        rendered.push('\n');
+    }
+    rendered
+}
+
 /// Write `[agent-skills-optional]` entries to the project's vstack.toml.
 /// Only adds agents that don't already have an entry — never overwrites user edits.
 pub fn write_agent_skills_optional(
@@ -1046,6 +1314,9 @@ fn normalize_attached_section_headers(content: &str) -> String {
         "[skill-instructions]",
         "[agent-skills]",
         "[agent-frontmatter]",
+        "[agent-frontmatter.claude]",
+        "[agent-frontmatter.opencode]",
+        "[agent-frontmatter.codex]",
         "[agent-frontmatter.pi]",
         "[agent-skills-optional]",
         "[agent-colors]",
@@ -1193,7 +1464,10 @@ fn ensure_value_section_entry_spacing(content: &str) -> String {
             continue;
         }
 
-        if SPACED_SECTIONS.contains(&active_section) && looks_like_toml_key_line(trimmed) {
+        if (SPACED_SECTIONS.contains(&active_section)
+            || is_agent_frontmatter_section(active_section))
+            && looks_like_toml_key_line(trimmed)
+        {
             out.push(lines[i].to_string());
             let multiline = starts_toml_multiline_value(trimmed);
             let array = starts_multiline_array_value(trimmed);
@@ -1231,6 +1505,28 @@ fn ensure_value_section_entry_spacing(content: &str) -> String {
     if content.ends_with('\n') {
         rendered.push('\n');
     }
+    ensure_blank_line_before_section_headers(&rendered)
+}
+
+fn ensure_blank_line_before_section_headers(content: &str) -> String {
+    let mut out: Vec<String> = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[')
+            && !trimmed.starts_with("# [")
+            && out.last().is_some_and(|previous| {
+                !previous.trim().is_empty() && !previous.trim_start().starts_with('#')
+            })
+        {
+            out.push(String::new());
+        }
+        out.push(line.to_string());
+    }
+
+    let mut rendered = out.join("\n");
+    if content.ends_with('\n') {
+        rendered.push('\n');
+    }
     rendered
 }
 
@@ -1244,6 +1540,10 @@ fn starts_multiline_array_value(trimmed_line: &str) -> bool {
 
 fn closes_multiline_array_value(trimmed_line: &str) -> bool {
     trimmed_line.ends_with(']')
+}
+
+fn is_agent_frontmatter_section(section: &str) -> bool {
+    section == "[agent-frontmatter]" || section.starts_with("[agent-frontmatter.")
 }
 
 fn dedupe_agent_frontmatter_sections(content: &str) -> String {
@@ -1260,9 +1560,7 @@ fn dedupe_agent_frontmatter_sections(content: &str) -> String {
             continue;
         }
 
-        if (active_section == "[agent-frontmatter]" || active_section == "[agent-frontmatter.pi]")
-            && looks_like_toml_key_line(trimmed)
-        {
+        if is_agent_frontmatter_section(active_section) && looks_like_toml_key_line(trimmed) {
             if let Some((key, _)) = trimmed.split_once('=') {
                 let key = key.trim().to_string();
                 if !seen_keys.insert(key) {
@@ -1390,23 +1688,15 @@ fn agent_frontmatter_scaffold() -> String {
 fn agent_frontmatter_heading() -> String {
     let mut out = String::new();
     out.push_str("# ── Agent Frontmatter ────────────────────────────────\n");
-    out.push_str("# Optional generated-frontmatter overrides. Top-level entries\n");
-    out.push_str("# apply to every harness; harness-specific tables win. Prefer\n");
-    out.push_str("# harness-specific model values when formats differ. Prefer\n");
-    out.push_str("# deny-tools for maintainable restrictions.\n");
-    out.push_str("# Supported fields: color, model, effort, deny-tools, pane,\n");
-    out.push_str("# background, isolation, memory, mode, sandbox-mode, model-reasoning-effort.\n");
-    out.push_str("# Unknown fields ignored. Claude: effort/background/isolation/memory.\n");
+    out.push_str("# vstack writes active defaults here for every installed agent.\n");
+    out.push_str("# Edit fields, then run `vstack refresh` to regenerate harness files.\n");
+    out.push_str("# Top-level entries apply to every harness; harness-specific tables win.\n");
+    out.push_str("# Fields: color, model, effort, deny-tools, pane, background,\n");
+    out.push_str("# isolation, memory, mode, sandbox-mode, model-reasoning-effort.\n");
     out.push_str("# Claude maps effort = \"xhigh\" to effort = \"max\".\n");
     out.push_str(
         "# OpenCode maps colors to hex. OpenAI/Pi/Codex map effort = \"max\" to \"xhigh\".\n",
     );
-    out.push_str("# Pi: pane/model suffix. Codex: model-reasoning-effort.\n");
-    out.push_str("# Examples:\n");
-    out.push_str("# rust = { color = \"green\" }\n");
-    out.push_str("# planner = { model = \"opus\", effort = \"xhigh\", background = true, isolation = \"worktree\", memory = \"local\", color = \"blue\" }\n");
-    out.push_str("# reviewer-perf = { deny-tools = [\"bash\", \"edit\"] }\n");
-    out.push_str("# scout = { deny-tools = [\"bash\"], isolation = \"none\" }\n");
     out.push_str("#\n");
     out
 }
@@ -1449,14 +1739,8 @@ fn sync_agent_frontmatter_heading(content: &str) -> String {
 
 fn agent_frontmatter_pi_heading() -> String {
     let mut out = String::new();
-    out.push_str("# Pi-specific frontmatter overrides. This is where the\n");
-    out.push_str("# Pi /agents popup writes model, deny-tools, and color changes for\n");
-    out.push_str("# vstack-managed project agents.\n");
-    out.push_str("# Examples:\n");
-    out.push_str("# rust = { color = \"orange\" }\n");
-    out.push_str(
-        "# planner = { model = \"openai-codex/gpt-5.5:xhigh\", deny-tools = [\"bash\"] }\n",
-    );
+    out.push_str("# Pi-specific frontmatter values. The Pi /agents popup edits\n");
+    out.push_str("# vstack-managed entries in this file, then `vstack refresh` applies them.\n");
     out
 }
 
@@ -1464,7 +1748,8 @@ fn ensure_agent_frontmatter_pi_heading(content: &str) -> String {
     let Some(insert_at) = section_start(content, "[agent-frontmatter.pi]") else {
         return content.to_string();
     };
-    if content.contains("# Pi-specific frontmatter overrides")
+    if content.contains("# Pi-specific frontmatter values")
+        || content.contains("# Pi-specific frontmatter overrides")
         || content.contains("# Pi-specific model/tool/color overrides")
     {
         return content.to_string();
@@ -1485,7 +1770,8 @@ fn sync_agent_frontmatter_pi_heading(content: &str) -> String {
         return content.to_string();
     };
     let Some(heading_at) = content[..section_at]
-        .rfind("# Pi-specific frontmatter overrides")
+        .rfind("# Pi-specific frontmatter values")
+        .or_else(|| content[..section_at].rfind("# Pi-specific frontmatter overrides"))
         .or_else(|| content[..section_at].rfind("# Pi-specific model/tool/color overrides"))
     else {
         return content.to_string();
@@ -1538,6 +1824,7 @@ fn ensure_agent_frontmatter_scaffold(content: &str) -> String {
     let normalized = sync_agent_frontmatter_heading(&normalized);
     let normalized = ensure_agent_frontmatter_pi_heading(&normalized);
     let normalized = sync_agent_frontmatter_pi_heading(&normalized);
+    let normalized = collapse_duplicate_agent_frontmatter_pi_headings(&normalized);
     let content = normalized.as_str();
     let has_base = section_start(content, "[agent-frontmatter]").is_some();
     let has_pi = section_start(content, "[agent-frontmatter.pi]").is_some();
@@ -1579,6 +1866,26 @@ fn ensure_agent_frontmatter_scaffold(content: &str) -> String {
     out.push_str(&block);
     out.push_str("\n");
     out.push_str(content[insert_at..].trim_start_matches('\n'));
+    if content.ends_with('\n') && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}
+
+fn collapse_duplicate_agent_frontmatter_pi_headings(content: &str) -> String {
+    let Some(section_at) = section_start(content, "[agent-frontmatter.pi]") else {
+        return content.to_string();
+    };
+    let heading = agent_frontmatter_pi_heading();
+    let prefix = &content[..section_at];
+    if prefix.matches(&heading).count() <= 1 {
+        return content.to_string();
+    }
+    let mut out = String::new();
+    out.push_str(prefix.replace(&heading, "").trim_end());
+    out.push_str("\n\n");
+    out.push_str(&heading);
+    out.push_str(content[section_at..].trim_start_matches('\n'));
     if content.ends_with('\n') && !out.ends_with('\n') {
         out.push('\n');
     }
@@ -2183,10 +2490,7 @@ rust = "Always use thiserror for errors."
         assert!(updated.contains("iced = \"\"\"\nalpha\nbeta\"\"\""));
         assert!(!updated.contains("beta\n\"\"\""));
         assert!(updated.contains("Agent Frontmatter"));
-        assert!(updated.contains("Pi-specific frontmatter overrides"));
-        assert!(updated.contains("# planner = { model = \"opus\", effort = \"xhigh\", background = true, isolation = \"worktree\", memory = \"local\", color = \"blue\" }"));
-        assert!(updated.contains("# reviewer-perf = { deny-tools = [\"bash\", \"edit\"] }"));
-        assert!(updated.contains("# rust = { color = \"orange\" }"));
+        assert!(updated.contains("Pi-specific frontmatter values"));
         assert!(updated.contains("Generated frontmatter"));
         assert!(
             updated.find("Agent Frontmatter").unwrap()

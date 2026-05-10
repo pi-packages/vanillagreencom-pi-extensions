@@ -81,28 +81,38 @@ impl Agent {
 
     /// Map model name to provider-specific model ID
     pub fn model_id(&self, provider: &str) -> String {
-        let base = self.model.to_lowercase();
-        match provider {
-            "anthropic" => match base.as_str() {
-                "opus" => "anthropic/claude-opus-4-20250514".into(),
-                "sonnet" => "anthropic/claude-sonnet-4-20250514".into(),
-                "haiku" => "anthropic/claude-haiku-4-5-20251001".into(),
-                other => other.into(),
-            },
-            "openai" => match base.as_str() {
-                "opus" => "openai/gpt-5.5".into(),
-                "sonnet" => "openai/gpt-5.5".into(),
-                "haiku" => "openai/gpt-5.5".into(),
-                other => format!("openai/{other}"),
-            },
-            "claude-code" => match base.as_str() {
-                "opus" => "opus[1m]".into(),
-                "sonnet" => "sonnet".into(),
-                "haiku" => "haiku".into(),
-                other => other.into(),
-            },
-            _ => base,
-        }
+        model_id_for(provider, &self.model)
+    }
+}
+
+/// Map a canonical or exact model name to a provider-specific model ID.
+/// Canonical vstack tiers (`opus`, `sonnet`, `haiku`) translate per harness;
+/// all other values pass through as exact provider ids.
+pub fn model_id_for(provider: &str, model: &str) -> String {
+    let base = model.to_lowercase();
+    if base.contains('/') {
+        return model.into();
+    }
+    match provider {
+        "anthropic" => match base.as_str() {
+            "opus" => "anthropic/claude-opus-4-20250514".into(),
+            "sonnet" => "anthropic/claude-sonnet-4-20250514".into(),
+            "haiku" => "anthropic/claude-haiku-4-5-20251001".into(),
+            other => other.into(),
+        },
+        "openai" => match base.as_str() {
+            "opus" => "openai/gpt-5.5".into(),
+            "sonnet" => "openai/gpt-5.5".into(),
+            "haiku" => "openai/gpt-5.5".into(),
+            other => format!("openai/{other}"),
+        },
+        "claude-code" => match base.as_str() {
+            "opus" => "opus[1m]".into(),
+            "sonnet" => "sonnet".into(),
+            "haiku" => "haiku".into(),
+            other => other.into(),
+        },
+        _ => base,
     }
 }
 

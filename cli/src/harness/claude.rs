@@ -31,7 +31,8 @@ pub fn generate_agent(
     // Map model to Claude Code format unless project config supplies an exact id.
     let model = frontmatter
         .model
-        .clone()
+        .as_deref()
+        .map(|model| agent::model_id_for("claude-code", model))
         .unwrap_or_else(|| agent.model_id("claude-code"));
     output.push_str(&format!("model: {}\n", model));
 
@@ -158,7 +159,7 @@ fn claude_default_deny_tools_for(agent: &Agent) -> Vec<String> {
     // Keep planner able to ask the user; all other vstack agents should return to parent instead.
     let mut tools = vec!["Agent".into()];
     if !agent.name.eq_ignore_ascii_case("planner") {
-        tools.push("Question".into());
+        tools.push("AskUserQuestion".into());
     }
     tools
 }
@@ -183,7 +184,7 @@ fn claude_tool_name(tool: &str) -> String {
         "todowrite" => "TodoWrite".into(),
         "todoread" => "TodoRead".into(),
         "task" | "agent" | "subagent" | "spawnagent" | "spawnagentsoncsv" => "Agent".into(),
-        "question" => "Question".into(),
+        "question" | "askuserquestion" => "AskUserQuestion".into(),
         "notebookread" => "NotebookRead".into(),
         "notebookedit" => "NotebookEdit".into(),
         _ => tool.trim().to_string(),
@@ -279,7 +280,7 @@ mod tests {
         assert!(content.contains("background: false"));
         assert!(!content.contains("isolation:"));
         assert!(!content.contains("memory:"));
-        assert!(content.contains("disallowedTools: Agent, Question"));
+        assert!(content.contains("disallowedTools: Agent, AskUserQuestion"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -311,7 +312,7 @@ mod tests {
         let path = generate_agent(&agent, &dir, &[], &[], &[], &extras).expect("generate ok");
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(!content.contains("\ntools:"));
-        assert!(content.contains("disallowedTools: Agent, Question"));
+        assert!(content.contains("disallowedTools: Agent, AskUserQuestion"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -341,7 +342,7 @@ mod tests {
         let path = generate_agent(&agent, &dir, &[], &[], &[], &extras).expect("generate ok");
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(!content.contains("\ntools:"));
-        assert!(content.contains("disallowedTools: Agent, Question, Bash, Write"));
+        assert!(content.contains("disallowedTools: Agent, AskUserQuestion, Bash, Write"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -430,7 +431,7 @@ mod tests {
         assert!(content.contains("isolation: worktree"));
         assert!(content.contains("memory: local"));
         assert!(content.contains("disallowedTools: Agent"));
-        assert!(!content.contains("Question"));
+        assert!(!content.contains("AskUserQuestion"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

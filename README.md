@@ -79,18 +79,22 @@ rust = "Always run clippy before committing."
 [skill-instructions]
 trading-design = "Dark theme, green/red accents."
 
-# Generated-frontmatter overrides. Top-level entries apply to every harness.
+# Generated frontmatter. vstack populates active defaults; edit and refresh.
 [agent-frontmatter]
-rust = { color = "green" }
-planner = { model = "opus", effort = "xhigh", color = "blue" }
-reviewer-perf = { deny-tools = ["bash", "edit"] }
+rust = { color = "orange", model = "opus", effort = "xhigh", deny-tools = ["subagent", "question"] }
 
 # Harness-specific frontmatter values win over top-level values.
 [agent-frontmatter.claude]
-planner = { background = true, isolation = "worktree", memory = "local" }
+rust = { background = false }
+
+[agent-frontmatter.opencode]
+rust = { mode = "all" }
+
+[agent-frontmatter.codex]
+rust = { sandbox-mode = "danger-full-access" }
 
 [agent-frontmatter.pi]
-researcher = { color = "purple", model = "openai-codex/gpt-5.5:xhigh", deny-tools = ["bash"] }
+rust = { deny-tools = ["get_subagent_result", "steer_subagent", "stop_subagent"], pane = true }
 ```
 
 Prefer `deny-tools` for maintenance: Claude Code writes it as native `disallowedTools`, OpenCode writes it as `permission: <tool>: deny`, and Pi agents use it through the `pi-agents-tmux` extension while inheriting active tools by default. Claude Code also supports `effort`, `background`, `isolation`, and `memory` in generated subagent frontmatter; vstack emits `background: false` by default, omits `isolation` and `memory` unless configured, and maps Claude `effort = "xhigh"` to `effort: max`. OpenAI-style harnesses map `effort = "max"` back to `xhigh`. OpenCode writes `color` as hex and maps reasoning effort to `options.reasoningEffort` plus `reasoningSummary: auto` and `textVerbosity: medium`. Cursor/Codex do not have the same per-agent tool-deny frontmatter. For Pi agents installed through vstack, frontmatter edits belong in `[agent-frontmatter]` or a harness-specific table in `vstack.toml`, not in `.pi/agents/<name>.md`; generated agent files are overwritten by `vstack refresh`. The Pi `/agents` popup writes model/deny-tools/color changes to shared `[agent-frontmatter]` so all generated harness files update where those fields apply.

@@ -31,7 +31,8 @@ pub fn generate_agent(
 
     let model = frontmatter
         .model
-        .clone()
+        .as_deref()
+        .map(|model| agent::model_id_for("openai", model))
         .unwrap_or_else(|| agent.model_id("openai"));
     let reasoning_effort = opencode_reasoning_effort_for(agent, &frontmatter);
     let color = opencode_color_for(agent, extras, &frontmatter);

@@ -352,12 +352,31 @@ fn run_one(global: bool, verbose: bool) -> Result<()> {
     }
 
     if !global {
-        let agent_color_map: HashMap<String, Option<String>> = all_source_agents
+        let harnesses_by_agent: HashMap<String, Vec<Harness>> = lock
+            .entries
+            .iter()
+            .filter(|(_, entry)| entry.kind == ItemKind::Agent)
+            .map(|(name, entry)| {
+                (
+                    name.clone(),
+                    entry
+                        .harnesses
+                        .iter()
+                        .filter_map(|harness_id| Harness::from_id(harness_id))
+                        .collect(),
+                )
+            })
+            .collect();
+        let installed_agents: Vec<Agent> = all_source_agents
             .iter()
             .filter(|agent| lock.entries.contains_key(&agent.name))
-            .map(|agent| (agent.name.clone(), agent.color.clone()))
+            .cloned()
             .collect();
-        crate::project_config::write_agent_colors(&project_root, &agent_color_map);
+        crate::project_config::write_agent_frontmatter_defaults(
+            &project_root,
+            &installed_agents,
+            &harnesses_by_agent,
+        );
         project_config = crate::project_config::ProjectConfig::load(&project_root);
     }
 
@@ -438,17 +457,34 @@ fn run_one(global: bool, verbose: bool) -> Result<()> {
     lock.save(&lock_path)?;
 
     if verbose {
-        let kind_w = changes.iter().map(|(_, k, _, _, _)| k.len()).max().unwrap_or(0);
-        let name_w = changes.iter().map(|(_, _, n, _, _)| n.len()).max().unwrap_or(0);
+        let kind_w = changes
+            .iter()
+            .map(|(_, k, _, _, _)| k.len())
+            .max()
+            .unwrap_or(0);
+        let name_w = changes
+            .iter()
+            .map(|(_, _, n, _, _)| n.len())
+            .max()
+            .unwrap_or(0);
         for (_, kind, name, old, new) in &changes {
             let mark = if old == new { "✓" } else { "!" };
             let label = if old == new { "unchanged" } else { "changed" };
-            let old_short = if old.is_empty() { "—".to_string() } else { old.chars().take(8).collect() };
+            let old_short = if old.is_empty() {
+                "—".to_string()
+            } else {
+                old.chars().take(8).collect()
+            };
             let new_short: String = new.chars().take(8).collect();
             eprintln!(
                 "  {mark} {:kw$}  {:nw$}  {} → {}  ({})",
-                kind, name, old_short, new_short, label,
-                kw = kind_w, nw = name_w,
+                kind,
+                name,
+                old_short,
+                new_short,
+                label,
+                kw = kind_w,
+                nw = name_w,
             );
         }
     } else {
@@ -458,14 +494,15 @@ fn run_one(global: bool, verbose: bool) -> Result<()> {
                 updated_by_kind.entry(*kind).or_default().push(name.clone());
             }
         }
-        for kind in [ItemKind::Agent, ItemKind::Skill, ItemKind::Hook, ItemKind::PiExtension] {
+        for kind in [
+            ItemKind::Agent,
+            ItemKind::Skill,
+            ItemKind::Hook,
+            ItemKind::PiExtension,
+        ] {
             if let Some(names) = updated_by_kind.get_mut(&kind) {
                 names.sort();
-                eprintln!(
-                    "  ! {} updated: {}",
-                    kind.label_short(),
-                    names.join(", ")
-                );
+                eprintln!("  ! {} updated: {}", kind.label_short(), names.join(", "));
             }
         }
     }

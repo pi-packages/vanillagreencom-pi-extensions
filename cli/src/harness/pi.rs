@@ -35,9 +35,13 @@ pub fn generate_agent(
     let path = dir.join(format!("{}.md", agent.name));
 
     let frontmatter = extras.frontmatter_for("pi");
-    let model = frontmatter.model.clone().unwrap_or_else(|| {
-        pi_model_for_with_effort(&agent.model, pi_effort_for(agent, &frontmatter))
-    });
+    let model = frontmatter
+        .model
+        .as_deref()
+        .map(|model| pi_model_for_with_effort(model, pi_effort_for(agent, &frontmatter)))
+        .unwrap_or_else(|| {
+            pi_model_for_with_effort(&agent.model, pi_effort_for(agent, &frontmatter))
+        });
     let deny_tools = pi_deny_tools_for(agent, &frontmatter);
 
     let mut output = String::new();

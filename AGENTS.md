@@ -132,18 +132,22 @@ rust = "Read docs/architecture.md before coding."
 [agent-additional-instructions]
 rust = "Always run clippy before committing."
 
-# Generated-frontmatter overrides. Top-level entries apply where supported.
+# Generated frontmatter. vstack populates active defaults; edit and refresh.
 [agent-frontmatter]
-rust = { color = "green" }
-planner = { model = "opus", effort = "xhigh", color = "blue" }
-reviewer-perf = { deny-tools = ["bash", "edit"] }
+rust = { color = "orange", model = "opus", effort = "xhigh", deny-tools = ["subagent", "question"] }
 
 # Harness-specific overrides win over top-level entries.
 [agent-frontmatter.claude]
-planner = { background = true, isolation = "worktree", memory = "local" }
+rust = { background = false }
+
+[agent-frontmatter.opencode]
+rust = { mode = "all" }
+
+[agent-frontmatter.codex]
+rust = { sandbox-mode = "danger-full-access" }
 
 [agent-frontmatter.pi]
-researcher = { model = "openai-codex/gpt-5.5:xhigh", deny-tools = ["bash"] }
+rust = { deny-tools = ["get_subagent_result", "steer_subagent", "stop_subagent"], pane = true }
 
 # Project instructions prepended to a skill's SKILL.md.
 [skill-instructions]

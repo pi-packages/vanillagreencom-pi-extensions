@@ -32,9 +32,7 @@ fn print_install_summary(
     let bar = "─".repeat(60);
     eprintln!("\n{bar}");
     if global {
-        eprintln!(
-            "⚠  GLOBAL install — affects every project on this machine"
-        );
+        eprintln!("⚠  GLOBAL install — affects every project on this machine");
         eprintln!("{bar}");
     } else {
         eprintln!("vstack add");
@@ -381,7 +379,7 @@ pub fn run(
         || pi_extension_filter.is_some();
     if global && non_interactive && !all && !has_item_filter {
         eprintln!(
-"
+            "
 Refusing --global without an item filter or --all.
 
 Unfiltered --global installs every agent, skill, hook, and Pi package
@@ -426,7 +424,7 @@ Drop --global to install at project scope (default).
                 format!("{a} agent(s), {s} skill(s), {h} hook(s), {p} Pi package(s)")
             };
             eprintln!(
-"
+                "
 Refusing --global --all over an existing global install.
 
 Global scope already has {existing} item(s): {breakdown}.
@@ -445,7 +443,9 @@ source (e.g. switching vstack repos, or starting clean), pass --clobber:
   vstack add --global --all --clobber -y
 "
             );
-            anyhow::bail!("--global --all refused on non-empty global lock; pass --clobber to override");
+            anyhow::bail!(
+                "--global --all refused on non-empty global lock; pass --clobber to override"
+            );
         }
     }
 
@@ -714,11 +714,15 @@ source (e.g. switching vstack repos, or starting clean), pass --clobber:
             &skill_names,
         );
 
-        let agent_color_map: std::collections::HashMap<String, Option<String>> = selected_agents
+        let harnesses_by_agent: std::collections::HashMap<String, Vec<Harness>> = selected_agents
             .iter()
-            .map(|agent| (agent.name.clone(), agent.color.clone()))
+            .map(|agent| (agent.name.clone(), harnesses.clone()))
             .collect();
-        crate::project_config::write_agent_colors(&config::project_root(), &agent_color_map);
+        crate::project_config::write_agent_frontmatter_defaults(
+            &config::project_root(),
+            &selected_agents,
+            &harnesses_by_agent,
+        );
     }
 
     let mut project_config = crate::project_config::ProjectConfig::load(&config::project_root());
