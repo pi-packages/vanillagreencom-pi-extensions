@@ -156,7 +156,7 @@ export function instructions(mode: Mode, cwd: string, clarityEscape: boolean): s
 			"Do NOT produce caveman-styled prose this turn.",
 			...boundaries,
 			suffix,
-			"You MUST end your reply with exactly one line containing only the literal two-word text Caveman resume (no period, no quotes, no extra words on that line, no caveman-translated summary). This is non-negotiable — emit the sentinel even if you forgot everything else above.",
+			"You MUST end your reply with exactly one line containing only the literal two-word text Caveman resume (no period, no quotes, nothing else on that line, no caveman-translated summary). Non-negotiable.",
 		].filter(Boolean).join("\n");
 	}
 
@@ -175,7 +175,7 @@ export function instructions(mode: Mode, cwd: string, clarityEscape: boolean): s
 	}
 
 	const modeText: Record<Exclude<Mode, "off" | "micro">, string> = {
-		lite: "Tight professional prose with COMPLETE sentences (no fragments — fragments are full mode). Active voice. Strip filler words ('basically', 'essentially', 'just', 'really', 'simply', 'actually'), hedges ('could potentially', 'might possibly', 'I think', 'sort of'), and pleasantries. Drop decorative articles where they add no information ('parses flags' beats 'parses the flags'; keep articles when they carry grammatical work like 'a Rust CLI'). Each sentence does load-bearing work; cut redundant clauses.",
+		lite: "Tight professional prose, complete sentences (no fragments). Active voice. Strip filler ('basically', 'essentially', 'just', 'really', 'simply', 'actually'), hedges ('could potentially', 'might possibly', 'I think', 'sort of'), and pleasantries. Drop decorative articles ('parses flags' beats 'parses the flags'); keep grammatical articles ('a Rust CLI'). Each sentence load-bearing; cut redundant clauses.",
 		full: "Terse caveman. Drop articles where it does not hurt meaning. Fragments OK. Pattern: \"[thing] [action] [reason]. [next step].\" Keep technical terms exact.",
 		ultra: "Maximum English compression. Abbreviate common technical words. Use → for causality. One word when one word is enough. Preserve exact technical terms, identifiers, file paths.",
 	};
