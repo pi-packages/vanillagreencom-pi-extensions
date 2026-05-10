@@ -897,26 +897,40 @@ pub fn append_system_remove(target: &Path, name: &str) -> Result<AppendSystemRem
 }
 
 /// Run `append_system_upsert` for a Pi extension, reading the markdown body
-/// from `<package_dir>/<pi.appendSystem>`. Best-effort: a missing or empty
-/// file is silently skipped. Returns `Ok(true)` if the file changed.
+/// from `<package_dir>/<pi.appendSystem>`. Returns `Ok(true)` if the file
+/// changed.
+///
+/// When the extension does not declare `pi.appendSystem` (or the referenced
+/// file is missing/empty), any previously-installed block for this extension
+/// is stripped from `APPEND_SYSTEM.md`. This makes refresh self-healing when
+/// an extension drops its instructions payload.
 pub fn install_append_system_for(
     ext: &PiExtension,
     package_dir: &Path,
     global: bool,
 ) -> Result<bool> {
     let Some(rel) = ext.append_system.as_deref() else {
-        return Ok(false);
+        return remove_append_system_if_present(&ext.name, global);
     };
     let source = package_dir.join(rel);
     let content = match std::fs::read_to_string(&source) {
         Ok(s) => s,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return remove_append_system_if_present(&ext.name, global);
+        }
         Err(e) => return Err(e.into()),
     };
     if content.trim().is_empty() {
-        return Ok(false);
+        return remove_append_system_if_present(&ext.name, global);
     }
     append_system_upsert(&append_system_path(global), &ext.name, &content)
+}
+
+fn remove_append_system_if_present(name: &str, global: bool) -> Result<bool> {
+    match remove_append_system_for(name, global)? {
+        AppendSystemRemoveOutcome::Updated | AppendSystemRemoveOutcome::Deleted => Ok(true),
+        AppendSystemRemoveOutcome::NoOp => Ok(false),
+    }
 }
 
 /// Drop the named block from the scope's APPEND_SYSTEM.md. Best-effort.

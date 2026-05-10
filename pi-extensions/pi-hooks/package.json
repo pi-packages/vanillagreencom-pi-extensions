@@ -14,8 +14,7 @@
   "pi": {
     "extensions": [
       "./extensions/hooks.ts"
-    ],
-    "appendSystem": "./instructions.md"
+    ]
   },
   "vstack": {
     "extensionManager": {
@@ -84,7 +83,6 @@
   "files": [
     "extensions/",
     "README.md",
-    "instructions.md",
     "package.json"
   ],
   "repository": {
