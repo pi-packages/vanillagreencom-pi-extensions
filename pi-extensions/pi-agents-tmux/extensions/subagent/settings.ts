@@ -99,10 +99,6 @@ export function settingString(key: string, fallback: string, cwd?: string): stri
 	return typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback;
 }
 
-export function subagentToolAccess(cwd?: string): "frontmatter" | "all" {
-	return settingString("subagentToolAccess", "all", cwd) === "frontmatter" ? "frontmatter" : "all";
-}
-
 export function subagentModelSource(cwd?: string): "frontmatter" | "parent" {
 	return settingString("subagentModelSource", "frontmatter", cwd) === "parent" ? "parent" : "frontmatter";
 }
@@ -116,7 +112,8 @@ export function normalizedPiToolName(tool: string): string {
 }
 
 export function selectedToolsForAgent(agent: AgentConfig, cwd: string | undefined, extraTools: string[] = [], activeTools?: string[]): string[] | undefined {
-	const baseTools = subagentToolAccess(cwd) === "all" ? (activeTools ?? agent.tools ?? []) : (agent.tools ?? []);
+	void cwd;
+	const baseTools = activeTools ?? [];
 	const denied = new Set((agent.denyTools ?? []).map(normalizedPiToolName));
 	const tools = [...baseTools, ...extraTools]
 		.map((tool) => tool.trim())

@@ -83,7 +83,7 @@ trading-design = "Dark theme, green/red accents."
 [agent-frontmatter]
 rust = { color = "green" }
 planner = { model = "opus", effort = "xhigh", color = "blue" }
-reviewer-perf = { tools = ["read", "grep", "find", "ls", "bash"] }
+reviewer-perf = { deny-tools = ["bash", "edit"] }
 
 # Harness-specific frontmatter values win over top-level values.
 [agent-frontmatter.claude]
@@ -93,7 +93,7 @@ planner = { background = true, isolation = "worktree", memory = "none" }
 researcher = { color = "purple", model = "openai-codex/gpt-5.5:xhigh", deny-tools = ["bash"] }
 ```
 
-Prefer `deny-tools` for maintenance: Claude Code writes it as native `disallowedTools`, and Pi agents use it through the `pi-agents-tmux` extension while inheriting active tools by default. Claude Code also supports `effort`, `background`, `isolation`, and `memory` in generated subagent frontmatter; vstack defaults Claude `isolation` to `worktree`, defaults `memory` off, and maps Pi-style `pane` defaults to Claude `background: true`. Vstack omits Pi `tools` by default; it remains supported only for rare strict allowlists. OpenCode uses permissions instead, and Cursor/Codex do not have the same per-agent tools frontmatter. For Pi agents installed through vstack, frontmatter edits belong in `[agent-frontmatter.pi]`, not in `.pi/agents/<name>.md`; generated agent files are overwritten by `vstack refresh`. The Pi `/agents` popup writes model/deny-tools/color changes to this table, and only writes `tools` when you explicitly add or keep a strict allowlist.
+Prefer `deny-tools` for maintenance: Claude Code writes it as native `disallowedTools`, OpenCode writes it as `permission: <tool>: deny`, and Pi agents use it through the `pi-agents-tmux` extension while inheriting active tools by default. Claude Code also supports `effort`, `background`, `isolation`, and `memory` in generated subagent frontmatter; vstack defaults Claude `isolation` to `worktree`, defaults `memory` off, and maps Pi-style `pane` defaults to Claude `background: true`. Cursor/Codex do not have the same per-agent tool-deny frontmatter. For Pi agents installed through vstack, frontmatter edits belong in `[agent-frontmatter]` or a harness-specific table in `vstack.toml`, not in `.pi/agents/<name>.md`; generated agent files are overwritten by `vstack refresh`. The Pi `/agents` popup writes model/deny-tools/color changes to shared `[agent-frontmatter]` so all generated harness files update where those fields apply.
 
 Custom safety hooks (`[[custom-hooks]]`) follow the same pattern. Direct edits to generated agent or skill files are also picked up automatically where possible, but `vstack.toml` is the stable home for generated frontmatter overrides and reusable project guidance.
 

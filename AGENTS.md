@@ -20,7 +20,7 @@ cli/src/
 │   ├── cursor.rs        → .cursor/rules/*.mdc (description + alwaysApply + skills)
 │   ├── opencode.rs      → .opencode/agents/*.md (YAML frontmatter + skills)
 │   ├── codex.rs         → .codex/agents/*.toml (developer_instructions + skills)
-│   └── pi.rs            → .pi/agents/*.md (name, description, deny-tools, optional tools, model, pane)
+│   └── pi.rs            → .pi/agents/*.md (name, description, deny-tools, model, pane)
 └── tui/                 Install wizard: install_flow, state, summary, multiselect, render
 
 (agent.rs, skill.rs, hook.rs, frontmatter.rs are simple parsers — names match their job.)
@@ -136,7 +136,7 @@ rust = "Always run clippy before committing."
 [agent-frontmatter]
 rust = { color = "green" }
 planner = { model = "opus", effort = "xhigh", color = "blue" }
-reviewer-perf = { tools = ["read", "grep", "find", "ls", "bash"] }
+reviewer-perf = { deny-tools = ["bash", "edit"] }
 
 # Harness-specific overrides win over top-level entries.
 [agent-frontmatter.claude]
@@ -160,9 +160,8 @@ trading-design = "Dark theme, green/red accents."
 
 ## Per-Harness Tool Overrides
 
-- Prefer `deny-tools`. Claude Code writes it as native `disallowedTools` and supports `effort`, `background`, `isolation`, `memory`. Pi emits `deny-tools` for `pi-agents-tmux` (default = active parent tools minus denials). Pi `tools` is omitted by default; supported only for rare strict allowlists.
-- OpenCode uses `permission` for tool access; vstack maps role to `mode` and does not emit per-agent permissions.
-- Cursor and Codex don't use the same agent `tools` frontmatter.
+- Prefer `deny-tools`. Claude Code writes it as native `disallowedTools` and supports `effort`, `background`, `isolation`, `memory`. Pi emits `deny-tools` for `pi-agents-tmux` (default = active parent tools minus denials). OpenCode emits `permission: <tool>: deny` entries from the same deny list.
+- Cursor and Codex don't use the same per-agent tool-deny frontmatter; Codex subagents use sandbox/approval configuration instead.
 
 ## Rules
 

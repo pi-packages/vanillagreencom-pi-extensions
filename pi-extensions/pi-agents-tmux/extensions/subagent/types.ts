@@ -114,7 +114,6 @@ export interface VstackModalLock {
 
 export interface AgentFrontmatterEdit {
 	model: string;
-	tools: string[];
 	denyTools: string[];
 	color: string;
 }

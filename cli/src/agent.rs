@@ -233,10 +233,11 @@ pub struct AgentFrontmatterOverrides {
     /// Exact harness model id to write. Prefer harness-specific overrides when
     /// providers use different model id formats.
     pub model: Option<String>,
-    /// Tool allowlist for harnesses that support scoped agent tools (Pi and Claude Code).
+    /// Legacy tool allowlist override. Prefer `deny-tools`; deny-only mappings are
+    /// portable across Claude Code, OpenCode, and Pi.
     #[serde(default, deserialize_with = "deserialize_optional_tools")]
     pub tools: Option<Vec<String>>,
-    /// Tool denylist applied after defaults or an explicit `tools` allowlist.
+    /// Tool denylist applied after harness defaults.
     /// Generators either emit a native deny field (for example Claude Code
     /// `disallowedTools`) or preserve the denylist for the harness extension.
     #[serde(default, deserialize_with = "deserialize_optional_tools")]

@@ -1355,10 +1355,9 @@ export default function (pi: ExtensionAPI) {
 		const agentLines = discovery.agents
 			.map((agent) => {
 				const model = agent.model ? ` model=${agent.model}` : "";
-				const tools = agent.tools ? ` tools=${agent.tools.join(",")}` : "";
 				const denyTools = agent.denyTools && agent.denyTools.length > 0 ? ` deny-tools=${agent.denyTools.join(",")}` : "";
 				const pane = agent.pane ? " pane=true" : "";
-				return `- ${agent.name}: ${agent.description} (${agent.source}${model}${tools}${denyTools}${pane})`;
+				return `- ${agent.name}: ${agent.description} (${agent.source}${model}${denyTools}${pane})`;
 			})
 			.join("\n");
 

@@ -19,7 +19,6 @@ export interface AgentConfig {
 	name: string;
 	description: string;
 	color?: string;
-	tools?: string[];
 	denyTools?: string[];
 	model?: string;
 	pane: boolean;
@@ -32,9 +31,6 @@ export interface AgentDiscoveryResult {
 	agents: AgentConfig[];
 	projectAgentsDir: string | null;
 }
-
-const READ_ONLY_TOOLS = ["read", "grep", "find", "ls", "bash"];
-const FULL_TOOLS = ["read", "grep", "find", "ls", "bash", "edit", "write"];
 
 function normalizeModel(model: unknown): string | undefined {
 	if (typeof model !== "string" || model.trim().length === 0) return undefined;
@@ -59,19 +55,6 @@ function parseToolList(value: unknown): string[] | undefined {
 		return tools.length > 0 ? tools : undefined;
 	}
 	return undefined;
-}
-
-function parseTools(value: unknown, name: string): string[] | undefined {
-	const explicit = parseToolList(value);
-	if (explicit) return explicit;
-	return defaultToolsForName(name);
-}
-
-function defaultToolsForName(name: string): string[] | undefined {
-	if (name === "generalist" || name === "rust" || name === "iced" || name === "worker") {
-		return FULL_TOOLS;
-	}
-	return READ_ONLY_TOOLS;
 }
 
 function asString(value: unknown): string | undefined {
@@ -123,7 +106,6 @@ function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig
 			name,
 			description,
 			color: asString(frontmatter.color),
-			tools: parseTools(frontmatter.tools, name),
 			denyTools: parseToolList(frontmatter["deny-tools"] ?? frontmatter.denyTools ?? frontmatter.disallowedTools),
 			model: normalizeModel(frontmatter.model),
 			pane: asBoolean(frontmatter.pane ?? frontmatter.persistentPane),

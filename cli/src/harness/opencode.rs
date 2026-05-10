@@ -1,11 +1,12 @@
 use crate::agent::{self, Agent, AgentRole};
 use crate::hook::Hook;
 use anyhow::Result;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 /// Generate an OpenCode agent as a markdown file in `.opencode/agents/<name>.md`.
 ///
-/// Format: YAML frontmatter (description, mode, model, permission/tools)
+/// Format: YAML frontmatter (description, mode, model, permission)
 /// followed by the agent body as the system prompt.
 pub fn generate_agent(
     agent: &Agent,
@@ -39,6 +40,14 @@ pub fn generate_agent(
     output.push_str(&format!("mode: {mode}\n"));
     output.push_str(&format!("model: {model}\n"));
 
+    let denied_permissions = opencode_denied_permissions_for(agent, &frontmatter);
+    if !denied_permissions.is_empty() {
+        output.push_str("permission:\n");
+        for permission in denied_permissions {
+            output.push_str(&format!("  {permission}: deny\n"));
+        }
+    }
+
     output.push_str("---\n\n");
     output.push_str("> **Never edit this file directly.** To make additions or modifications, edit the appropriate section in `./vstack.toml`. Then run `vstack refresh`.\n\n");
 
@@ -67,5 +76,124 @@ fn yaml_str(s: &str) -> String {
         format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
     } else {
         s.to_string()
+    }
+}
+
+fn opencode_denied_permissions_for(
+    agent: &Agent,
+    frontmatter: &agent::AgentFrontmatterOverrides,
+) -> Vec<String> {
+    let tools = frontmatter
+        .deny_tools
+        .clone()
+        .unwrap_or_else(|| opencode_default_deny_tools_for(agent));
+    dedupe_permissions(
+        tools
+            .iter()
+            .filter_map(|tool| opencode_permission_name(tool))
+            .collect(),
+    )
+}
+
+fn opencode_default_deny_tools_for(agent: &Agent) -> Vec<String> {
+    let mut tools = vec!["task".into()];
+    if !agent.name.eq_ignore_ascii_case("planner") {
+        tools.push("question".into());
+    }
+    tools
+}
+
+fn opencode_permission_name(tool: &str) -> Option<String> {
+    let normalized = tool.trim().to_ascii_lowercase().replace(['_', '-'], "");
+    let permission = match normalized.as_str() {
+        "read" => "read",
+        "edit" | "write" | "patch" | "applypatch" | "multiedit" | "notebookedit" => "edit",
+        "glob" | "find" | "ls" | "list" => "glob",
+        "grep" => "grep",
+        "bash" | "shell" => "bash",
+        "task" | "agent" | "subagent" | "spawnagent" | "spawnagentsoncsv" => "task",
+        "skill" => "skill",
+        "lsp" => "lsp",
+        "question" => "question",
+        "webfetch" | "websearch" | "web" | "webresearch" | "webanswer" | "codesearch" => "webfetch",
+        other if !other.is_empty() => return Some(tool.trim().to_string()),
+        _ => return None,
+    };
+    Some(permission.into())
+}
+
+fn dedupe_permissions(permissions: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for permission in permissions {
+        if !permission.is_empty() && seen.insert(permission.clone()) {
+            out.push(permission);
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent::{Agent, AgentExtras, AgentRole};
+
+    fn agent_fixture(name: &str, role: AgentRole, model: &str) -> Agent {
+        Agent {
+            name: name.into(),
+            description: "OpenCode test agent".into(),
+            model: model.into(),
+            role,
+            color: Some("green".into()),
+            body: format!("# {name}\n\nIntro.\n"),
+            source_path: PathBuf::new(),
+        }
+    }
+
+    #[test]
+    fn generate_agent_writes_default_deny_permissions() {
+        let dir =
+            std::env::temp_dir().join(format!("vstack_opencode_agent_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let agent = agent_fixture("reviewer", AgentRole::Reviewer, "sonnet");
+        let path = generate_agent(&agent, &dir, &[], &[], &[], &AgentExtras::default()).unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("permission:\n"));
+        assert!(content.contains("  task: deny\n"));
+        assert!(content.contains("  question: deny\n"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn generate_agent_maps_deny_tools_to_opencode_permissions() {
+        let dir =
+            std::env::temp_dir().join(format!("vstack_opencode_agent_deny_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let agent = agent_fixture("engineer", AgentRole::Engineer, "opus");
+        let extras = AgentExtras {
+            frontmatter: agent::AgentFrontmatterOverrides {
+                deny_tools: Some(vec![
+                    "bash".into(),
+                    "write".into(),
+                    "apply_patch".into(),
+                    "subagent".into(),
+                ]),
+                ..Default::default()
+            },
+            ..AgentExtras::default()
+        };
+        let path = generate_agent(&agent, &dir, &[], &[], &[], &extras).unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("  bash: deny\n"));
+        assert!(content.contains("  edit: deny\n"));
+        assert!(content.contains("  task: deny\n"));
+        assert_eq!(content.matches("  edit: deny\n").count(), 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

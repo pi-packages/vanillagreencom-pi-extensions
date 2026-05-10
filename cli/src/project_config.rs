@@ -958,7 +958,7 @@ fn project_config_header() -> String {
     out.push_str("# every install and refresh.\n");
     out.push_str("#\n");
     out.push_str("# Skills live in [agent-skills]. Generated frontmatter\n");
-    out.push_str("# overrides like model, effort, deny-tools, optional tools, color, pane,\n");
+    out.push_str("# overrides like model, effort, deny-tools, color, pane,\n");
     out.push_str("# and Claude background/isolation/memory live in\n");
     out.push_str("# [agent-frontmatter] or [agent-frontmatter.pi].\n");
     out.push_str("#\n");
@@ -1392,20 +1392,16 @@ fn agent_frontmatter_heading() -> String {
     out.push_str("# ── Agent Frontmatter ────────────────────────────────\n");
     out.push_str("# Optional generated-frontmatter overrides. Top-level entries\n");
     out.push_str("# apply to every harness; harness-specific tables win. Prefer\n");
-    out.push_str("# harness-specific model/tool values when formats differ. Prefer\n");
-    out.push_str(
-        "# deny-tools for maintainable restrictions; use tools only for strict allowlists.\n",
-    );
-    out.push_str("# Supported fields: color, model, effort, deny-tools, tools, pane,\n");
+    out.push_str("# harness-specific model values when formats differ. Prefer\n");
+    out.push_str("# deny-tools for maintainable restrictions.\n");
+    out.push_str("# Supported fields: color, model, effort, deny-tools, pane,\n");
     out.push_str("# background, isolation, memory, mode, sandbox-mode, model-reasoning-effort.\n");
     out.push_str("# Unknown fields ignored. Claude: effort/background/isolation/memory.\n");
     out.push_str("# Pi: pane/model suffix. Codex: model-reasoning-effort.\n");
     out.push_str("# Examples:\n");
     out.push_str("# rust = { color = \"green\" }\n");
     out.push_str("# planner = { model = \"opus\", effort = \"xhigh\", background = true, isolation = \"worktree\", memory = \"none\", color = \"blue\" }\n");
-    out.push_str(
-        "# reviewer-perf = { tools = [\"read\", \"grep\", \"find\", \"ls\", \"bash\"] }\n",
-    );
+    out.push_str("# reviewer-perf = { deny-tools = [\"bash\", \"edit\"] }\n");
     out.push_str("# scout = { deny-tools = [\"bash\"], isolation = \"none\" }\n");
     out.push_str("#\n");
     out
@@ -1450,9 +1446,7 @@ fn sync_agent_frontmatter_heading(content: &str) -> String {
 fn agent_frontmatter_pi_heading() -> String {
     let mut out = String::new();
     out.push_str("# Pi-specific frontmatter overrides. This is where the\n");
-    out.push_str(
-        "# Pi /agents popup writes model, deny-tools, optional tools, and color changes for\n",
-    );
+    out.push_str("# Pi /agents popup writes model, deny-tools, and color changes for\n");
     out.push_str("# vstack-managed project agents.\n");
     out.push_str("# Examples:\n");
     out.push_str("# rust = { color = \"orange\" }\n");
@@ -2011,7 +2005,7 @@ rust = "Always run clippy before committing."
 researcher = { color = "purple", model = "generic-model", effort = "high", background = false, isolation = "none", memory = "project" }
 
 [agent-frontmatter.pi]
-researcher = { model = "openai-codex/gpt-5.5:xhigh", tools = "read, grep, web_research" }
+researcher = { model = "openai-codex/gpt-5.5:xhigh", deny-tools = "bash, question" }
 
 [agent-frontmatter.claude]
 researcher = { model = "opus[1m]", effort = "xhigh", background = true, isolation = "worktree" }
@@ -2023,10 +2017,7 @@ researcher = { model = "opus[1m]", effort = "xhigh", background = true, isolatio
         let pi = config.frontmatter_for("researcher", "pi");
         assert_eq!(pi.color.as_deref(), Some("purple"));
         assert_eq!(pi.model.as_deref(), Some("openai-codex/gpt-5.5:xhigh"));
-        assert_eq!(
-            pi.tools,
-            Some(vec!["read".into(), "grep".into(), "web_research".into()])
-        );
+        assert_eq!(pi.deny_tools, Some(vec!["bash".into(), "question".into()]));
         let claude = config.frontmatter_for("researcher", "claude-code");
         assert_eq!(claude.model.as_deref(), Some("opus[1m]"));
         assert_eq!(claude.effort.as_deref(), Some("xhigh"));
@@ -2190,9 +2181,7 @@ rust = "Always use thiserror for errors."
         assert!(updated.contains("Agent Frontmatter"));
         assert!(updated.contains("Pi-specific frontmatter overrides"));
         assert!(updated.contains("# planner = { model = \"opus\", effort = \"xhigh\", background = true, isolation = \"worktree\", memory = \"none\", color = \"blue\" }"));
-        assert!(updated.contains(
-            "# reviewer-perf = { tools = [\"read\", \"grep\", \"find\", \"ls\", \"bash\"] }"
-        ));
+        assert!(updated.contains("# reviewer-perf = { deny-tools = [\"bash\", \"edit\"] }"));
         assert!(updated.contains("# rust = { color = \"orange\" }"));
         assert!(updated.contains("Generated frontmatter"));
         assert!(

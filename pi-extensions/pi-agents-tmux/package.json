@@ -212,20 +212,6 @@
           "requiresReload": true
         },
         {
-          "key": "subagentToolAccess",
-          "label": "Subagent tool access",
-          "description": "Choose whether child agents inherit all active Pi tools minus deny-tools, or receive only tools listed in their frontmatter allowlist minus deny-tools.",
-          "type": "enum",
-          "enumValues": [
-            "all",
-            "frontmatter"
-          ],
-          "default": "all",
-          "category": "Execution",
-          "apply": "reload",
-          "requiresReload": true
-        },
-        {
           "key": "subagentModelSource",
           "label": "Subagent model source",
           "description": "Choose whether child agents use the model from agent frontmatter or inherit the parent session model.",
