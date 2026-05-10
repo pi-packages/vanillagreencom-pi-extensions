@@ -33,12 +33,23 @@ pub fn generate_agent(
         .model
         .clone()
         .unwrap_or_else(|| agent.model_id("openai"));
+    let reasoning_effort = opencode_reasoning_effort_for(agent, &frontmatter);
+    let color = opencode_color_for(agent, extras, &frontmatter);
 
     let mut output = String::new();
     output.push_str("---\n");
     output.push_str(&format!("description: {}\n", yaml_str(&agent.description)));
     output.push_str(&format!("mode: {mode}\n"));
     output.push_str(&format!("model: {model}\n"));
+    if let Some(color) = color {
+        output.push_str(&format!("color: {}\n", yaml_str(&color)));
+    }
+    if let Some(reasoning_effort) = reasoning_effort {
+        output.push_str("options:\n");
+        output.push_str(&format!("  reasoningEffort: {reasoning_effort}\n"));
+        output.push_str("  reasoningSummary: auto\n");
+        output.push_str("  textVerbosity: medium\n");
+    }
 
     let denied_permissions = opencode_denied_permissions_for(agent, &frontmatter);
     if !denied_permissions.is_empty() {
@@ -77,6 +88,61 @@ fn yaml_str(s: &str) -> String {
     } else {
         s.to_string()
     }
+}
+
+fn opencode_reasoning_effort_for(
+    agent: &Agent,
+    frontmatter: &agent::AgentFrontmatterOverrides,
+) -> Option<String> {
+    frontmatter
+        .model_reasoning_effort
+        .clone()
+        .or_else(|| frontmatter.effort.clone())
+        .or_else(|| agent::effort_for_model(&agent.model).map(String::from))
+        .filter(|effort| !is_none_value(effort))
+}
+
+fn is_none_value(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "" | "none" | "false" | "off" | "no"
+    )
+}
+
+fn opencode_color_for(
+    agent: &Agent,
+    extras: &agent::AgentExtras,
+    frontmatter: &agent::AgentFrontmatterOverrides,
+) -> Option<String> {
+    frontmatter
+        .color
+        .as_ref()
+        .or(extras.color.as_ref())
+        .or(agent.color.as_ref())
+        .and_then(|color| opencode_color_name(color))
+}
+
+fn opencode_color_name(color: &str) -> Option<String> {
+    let trimmed = color.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.starts_with('#')
+        && trimmed.len() == 7
+        && trimmed.chars().skip(1).all(|c| c.is_ascii_hexdigit())
+    {
+        return Some(trimmed.to_string());
+    }
+    let mapped = match trimmed.to_ascii_lowercase().as_str() {
+        "primary" | "secondary" | "accent" | "success" | "warning" | "error" | "info" => trimmed,
+        "red" => "error",
+        "green" => "success",
+        "yellow" | "orange" => "warning",
+        "blue" | "cyan" | "teal" => "info",
+        "magenta" | "purple" | "violet" => "accent",
+        _ => return None,
+    };
+    Some(mapped.to_string())
 }
 
 fn opencode_denied_permissions_for(
@@ -160,6 +226,11 @@ mod tests {
         let agent = agent_fixture("reviewer", AgentRole::Reviewer, "sonnet");
         let path = generate_agent(&agent, &dir, &[], &[], &[], &AgentExtras::default()).unwrap();
         let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("color: success\n"));
+        assert!(content.contains("options:\n"));
+        assert!(content.contains("  reasoningEffort: high\n"));
+        assert!(content.contains("  reasoningSummary: auto\n"));
+        assert!(content.contains("  textVerbosity: medium\n"));
         assert!(content.contains("permission:\n"));
         assert!(content.contains("  task: deny\n"));
         assert!(content.contains("  question: deny\n"));
@@ -193,6 +264,34 @@ mod tests {
         assert!(content.contains("  edit: deny\n"));
         assert!(content.contains("  task: deny\n"));
         assert_eq!(content.matches("  edit: deny\n").count(), 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn generate_agent_honors_opencode_reasoning_and_color_overrides() {
+        let dir = std::env::temp_dir().join(format!(
+            "vstack_opencode_agent_options_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let agent = agent_fixture("researcher", AgentRole::Analyst, "haiku");
+        let extras = AgentExtras {
+            frontmatter: agent::AgentFrontmatterOverrides {
+                color: Some("#336699".into()),
+                effort: Some("low".into()),
+                model_reasoning_effort: Some("high".into()),
+                ..Default::default()
+            },
+            ..AgentExtras::default()
+        };
+        let path = generate_agent(&agent, &dir, &[], &[], &[], &extras).unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("color: \"#336699\"\n"));
+        assert!(content.contains("  reasoningEffort: high\n"));
+        assert!(!content.contains("  reasoningEffort: low\n"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

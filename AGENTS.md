@@ -160,7 +160,7 @@ trading-design = "Dark theme, green/red accents."
 
 ## Per-Harness Tool Overrides
 
-- Prefer `deny-tools`. Claude Code writes it as native `disallowedTools` and supports `effort`, `background`, `isolation`, `memory`. Pi emits `deny-tools` for `pi-agents-tmux` (default = active parent tools minus denials). OpenCode emits `permission: <tool>: deny` entries from the same deny list.
+- Prefer `deny-tools`. Claude Code writes it as native `disallowedTools` and supports `effort`, `background`, `isolation`, `memory`. Pi emits `deny-tools` for `pi-agents-tmux` (default = active parent tools minus denials). OpenCode emits `permission: <tool>: deny` entries from the same deny list, maps `color` to theme/hex values, and writes reasoning under `options.reasoningEffort` with summary/verbosity defaults.
 - Cursor and Codex don't use the same per-agent tool-deny frontmatter; Codex subagents use sandbox/approval configuration instead.
 
 ## Rules
