@@ -140,7 +140,12 @@ function statusLabel(mode: Mode): string | undefined {
 }
 
 function shouldClarityEscape(prompt: string): boolean {
-	return /(security|vulnerab|exploit|secret|token|password|credential|delete|drop\s+table|rm\s+-rf|destructive|irreversible|danger|confirm|clarify|confused|explain again|not clear|ambiguous)/i.test(prompt);
+	// Trigger normal-clarity prose for security topics, explicit destructive
+	// shell/SQL commands, explicit warning vocabulary, and clear user-confusion
+	// signals. Do not match common verbs like `delete` or `confirm` on their
+	// own — in a coding context they appear in routine work and produced false
+	// escapes every turn.
+	return /(security|vulnerab|exploit|secret|token|password|credential|drop\s+table|rm\s+-rf|force[- ]?push|git\s+reset\s+--hard|destructive|irreversible|\bdanger(ous)?\b|clarify|confused|explain again|not clear|ambiguous)/i.test(prompt);
 }
 
 function instructions(mode: Mode, cwd: string, clarityEscape: boolean): string {
@@ -152,7 +157,7 @@ function instructions(mode: Mode, cwd: string, clarityEscape: boolean): string {
 	const suffix = settingString("customPromptSuffix", "", cwd).trim();
 	if (clarityEscape) {
 		return [
-			"Caveman mode is active, but this turn appears to need safety/clarity. Use normal clear prose for warnings, irreversible actions, or clarification. After clear part, you may add a short 'Caveman resume.' note.",
+			"Caveman mode is active, but this turn appears to need safety/clarity. Use normal clear prose for the entire reply — do not produce any caveman-styled prose. End with exactly one line containing the literal text: Caveman resume. (no quotes, no extra words, no caveman-translated summary).",
 			...boundaries,
 			suffix,
 		].filter(Boolean).join("\n");
@@ -175,11 +180,17 @@ function instructions(mode: Mode, cwd: string, clarityEscape: boolean): string {
 		full: "Full: terse smart caveman. Drop articles/filler/hedging. Fragments OK. Pattern: [thing] [action] [reason]. [next step]. Technical terms exact.",
 		ultra: "Ultra: maximum terse English. Abbreviate common technical words, use arrows for causality, one word when one word enough. Preserve exact technical terms.",
 	};
+	// Auto-clarity only makes sense for modes that actually shift register away
+	// from normal English (full/ultra). lite is just tight professional prose, so
+	// there is nothing to escape from and the rule produced incoherent output.
+	const autoClarityRule = mode === "lite"
+		? undefined
+		: "Auto-clarity rule: for security warnings, irreversible actions, confusing multi-step sequences, or user confusion, temporarily use normal clarity; resume caveman after clear part.";
 	return [
 		"Caveman communication mode active for assistant natural-language chat.",
 		modeText[mode],
 		"No pleasantries. No filler. No unnecessary hedging. Accuracy over terseness if conflict.",
-		"Auto-clarity rule: for security warnings, irreversible actions, confusing multi-step sequences, or user confusion, temporarily use normal clarity; resume caveman after clear part.",
+		autoClarityRule,
 		...boundaries,
 		suffix,
 	].filter(Boolean).join("\n");
