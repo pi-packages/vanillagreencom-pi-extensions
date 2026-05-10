@@ -22,11 +22,11 @@ SCRIPTS="$SKILL_DIR/scripts"
 
 # Prefer the checkout's bridge CLI/extension so this smoke covers the
 # code under test even when an older package copy is installed globally.
-if [[ -z "${PI_BRIDGE_BIN:-}" && -x "$REPO_ROOT/pi-extensions/session-bridge/bin/pi-bridge.js" ]]; then
-  export PI_BRIDGE_BIN="$REPO_ROOT/pi-extensions/session-bridge/bin/pi-bridge.js"
+if [[ -z "${PI_BRIDGE_BIN:-}" && -x "$REPO_ROOT/pi-extensions/pi-session-bridge/bin/pi-bridge.js" ]]; then
+  export PI_BRIDGE_BIN="$REPO_ROOT/pi-extensions/pi-session-bridge/bin/pi-bridge.js"
 fi
-if [[ -z "${PI_SESSION_BRIDGE_EXTENSION:-}" && -f "$REPO_ROOT/pi-extensions/session-bridge/extensions/session-bridge.ts" ]]; then
-  export PI_SESSION_BRIDGE_EXTENSION="$REPO_ROOT/pi-extensions/session-bridge/extensions/session-bridge.ts"
+if [[ -z "${PI_SESSION_BRIDGE_EXTENSION:-}" && -f "$REPO_ROOT/pi-extensions/pi-session-bridge/extensions/session-bridge.ts" ]]; then
+  export PI_SESSION_BRIDGE_EXTENSION="$REPO_ROOT/pi-extensions/pi-session-bridge/extensions/session-bridge.ts"
 fi
 
 # shellcheck source=../scripts/lib/pi-bridge-paths.sh

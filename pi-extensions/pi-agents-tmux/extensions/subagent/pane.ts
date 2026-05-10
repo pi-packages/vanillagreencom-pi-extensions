@@ -220,7 +220,7 @@ function resolveSessionBridgeExtension(cwd?: string): string | undefined {
 		process.env.PI_SESSION_BRIDGE_EXTENSION,
 		path.join(piUserDir(), "packages", SESSION_BRIDGE_PACKAGE_ID, "extensions", "session-bridge.ts"),
 		path.join(projectPackagesDir, SESSION_BRIDGE_PACKAGE_ID, "extensions", "session-bridge.ts"),
-		path.resolve(cwd ?? process.cwd(), "pi-extensions", "session-bridge", "extensions", "session-bridge.ts"),
+		path.resolve(cwd ?? process.cwd(), "pi-extensions", "pi-session-bridge", "extensions", "session-bridge.ts"),
 	].filter((candidate): candidate is string => Boolean(candidate));
 	return candidates.find((candidate) => fs.existsSync(candidate));
 }

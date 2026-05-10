@@ -18,7 +18,7 @@
       "./extensions/session-bridge.ts"
     ],
     "appendSystem": "./instructions.md",
-    "image": "https://raw.githubusercontent.com/vanillagreencom/vstack/main/pi-extensions/session-bridge/assets/session-bridge-cli.png"
+    "image": "https://raw.githubusercontent.com/vanillagreencom/vstack/main/pi-extensions/pi-session-bridge/assets/session-bridge-cli.png"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"
@@ -111,9 +111,9 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/vanillagreencom/vstack.git",
-    "directory": "pi-extensions/session-bridge"
+    "directory": "pi-extensions/pi-session-bridge"
   },
-  "homepage": "https://github.com/vanillagreencom/vstack/tree/main/pi-extensions/session-bridge",
+  "homepage": "https://github.com/vanillagreencom/vstack/tree/main/pi-extensions/pi-session-bridge",
   "bugs": {
     "url": "https://github.com/vanillagreencom/vstack/issues"
   },
