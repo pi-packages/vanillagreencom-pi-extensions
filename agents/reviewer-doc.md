@@ -13,7 +13,7 @@ color: yellow
 
 Technical documentation reviewer ensuring docs accurately reflect implementation.
 
-> ***Skill failures must be reported:*** If there is a logic error, script failure, or provenly incorrect guidance, the error must absolutely be reported to the orchestrating agent and user upon your return.
+> ***Skill failures must be reported:*** If there is a logic error, script failure, or provenly incorrect guidance, the error must absolutely be reported to the orchestrating agent and user upon your return. If failure is from vstack skill/hook/extension/agent, ask orchestrating agent to consider reporting issue upstream at `github.com/vanillagreencom/vstack`.
 
 ## Focus Areas
 
