@@ -62,6 +62,63 @@ export function settingString(key: string, fallback: string, cwd?: string): stri
 	return typeof value === "string" ? value : fallback;
 }
 
+export interface ConfigurationSource {
+	source: "user" | "project" | "default";
+	path?: string;
+	userPath: string;
+	projectPath: string;
+	legacyKeys: string[];
+}
+
+// Walks user → project settings.json files (matching readVstackConfig order)
+// and reports which file's `mode` key won the merge, plus any legacy keys
+// (`enabled`, `defaultMode`) present alongside `mode`. Project wins on tie.
+export function configurationSource(cwd?: string): ConfigurationSource {
+	const [userPath, projectPath] = piSettingsPaths(cwd);
+	const legacyKeys = new Set<string>();
+	let sourcePath: string | undefined;
+	let sourceLabel: "user" | "project" | "default" = "default";
+	for (const [label, path] of [["user", userPath], ["project", projectPath]] as const) {
+		if (!existsSync(path)) continue;
+		try {
+			const parsed = JSON.parse(readFileSync(path, "utf8"));
+			const config = parsed?.vstack?.extensionManager?.config?.[CONFIG_ID];
+			if (!config || typeof config !== "object" || Array.isArray(config)) continue;
+			if (typeof config.mode === "string") {
+				sourceLabel = label;
+				sourcePath = path;
+			}
+			for (const key of ["enabled", "defaultMode"]) {
+				if (key in config) legacyKeys.add(key);
+			}
+		} catch {
+			// Ignore malformed optional manager config.
+		}
+	}
+	return { source: sourceLabel, path: sourcePath, userPath, projectPath, legacyKeys: [...legacyKeys] };
+}
+
+// Best-effort read of the pi-claude-bridge extension-manager setting that
+// controls whether the caveman block is forwarded into Claude's prompt.
+// Does not consult bridge's own claude-bridge.json file (a separate channel);
+// /caveman debug surfaces this caveat.
+export function bridgeCavemanHookEnabled(cwd?: string): boolean | undefined {
+	let value: boolean | undefined;
+	for (const path of piSettingsPaths(cwd)) {
+		if (!existsSync(path)) continue;
+		try {
+			const parsed = JSON.parse(readFileSync(path, "utf8"));
+			const config = parsed?.vstack?.extensionManager?.config?.["@vanillagreen/pi-claude-bridge"];
+			if (config && typeof config === "object" && !Array.isArray(config) && typeof config.includeCavemanHook === "boolean") {
+				value = config.includeCavemanHook;
+			}
+		} catch {
+			// Ignore malformed optional manager config.
+		}
+	}
+	return value;
+}
+
 export function normalizeMode(input: string | undefined): Mode | undefined {
 	const mode = (input ?? "").trim().toLowerCase();
 	if (MODE_VALUES.includes(mode as Mode)) return mode as Mode;

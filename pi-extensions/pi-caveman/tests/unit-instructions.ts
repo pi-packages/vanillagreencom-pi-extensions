@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 
-import { instructions, shouldClarityEscape, type Mode } from "../extensions/prompt.ts";
+import { bridgeCavemanHookEnabled, configurationSource, instructions, shouldClarityEscape, type Mode } from "../extensions/prompt.ts";
 
 const SNAP_DIR = join(dirname(fileURLToPath(import.meta.url)), "__snapshots__");
 const UPDATE = process.env.UPDATE_SNAPSHOTS === "1";
@@ -112,6 +112,65 @@ describe("instructions() snapshot matrix", () => {
 				assert.match(rendered, /^You MUST respond in caveman /, `${mode}${clarity ? " clarity" : ""} opener mismatch`);
 			}
 		}
+	});
+});
+
+describe("configurationSource() and bridgeCavemanHookEnabled()", () => {
+	it("returns source='default' when no settings file declares mode", () => {
+		writeFileSync(join(userDir, "settings.json"), "{}");
+		const src = configurationSource(projectDir);
+		assert.equal(src.source, "default");
+		assert.equal(src.path, undefined);
+		assert.deepEqual(src.legacyKeys, []);
+	});
+
+	it("returns source='user' when only user settings declares mode", () => {
+		writeUserConfig({ mode: "full" });
+		const src = configurationSource(projectDir);
+		assert.equal(src.source, "user");
+		assert.equal(src.path, join(userDir, "settings.json"));
+	});
+
+	it("returns source='project' when project overrides user", () => {
+		writeUserConfig({ mode: "full" });
+		const projectSettings = { vstack: { extensionManager: { config: { "@vanillagreen/pi-caveman": { mode: "lite" } } } } };
+		writeFileSync(join(projectDir, ".pi", "settings.json"), JSON.stringify(projectSettings));
+		const src = configurationSource(projectDir);
+		assert.equal(src.source, "project");
+		assert.equal(src.path, join(projectDir, ".pi", "settings.json"));
+	});
+
+	it("detects legacy keys (enabled, defaultMode) alongside mode", () => {
+		writeUserConfig({ mode: "full", enabled: true, defaultMode: "full" });
+		const src = configurationSource(projectDir);
+		assert.deepEqual(src.legacyKeys.sort(), ["defaultMode", "enabled"]);
+	});
+
+	it("reads bridge includeCavemanHook from manager config", () => {
+		const settings = {
+			vstack: {
+				extensionManager: {
+					config: {
+						"@vanillagreen/pi-caveman": { mode: "full" },
+						"@vanillagreen/pi-claude-bridge": { includeCavemanHook: true },
+					},
+				},
+			},
+		};
+		writeFileSync(join(userDir, "settings.json"), JSON.stringify(settings));
+		assert.equal(bridgeCavemanHookEnabled(projectDir), true);
+	});
+
+	it("returns undefined when bridge config is absent", () => {
+		writeUserConfig({ mode: "full" });
+		assert.equal(bridgeCavemanHookEnabled(projectDir), undefined);
+	});
+
+	// Reset between describe blocks so the clarity-escape phrase tests below
+	// don't see leftover legacy keys from this block's last writeUserConfig.
+	after(() => {
+		writeFileSync(join(userDir, "settings.json"), "{}");
+		writeFileSync(join(projectDir, ".pi", "settings.json"), "{}");
 	});
 });
 

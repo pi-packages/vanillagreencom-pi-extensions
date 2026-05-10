@@ -110,7 +110,7 @@
         {
           "key": "customPromptSuffix",
           "label": "Custom prompt suffix",
-          "description": "Extra instruction appended to caveman prompt injection.",
+          "description": "Extra instruction appended after the imperative caveman directives. Useful for project-specific guidance, but a contradicting suffix can weaken the directive — keep it consistent with the active mode.",
           "type": "string",
           "default": "",
           "category": "Advanced",

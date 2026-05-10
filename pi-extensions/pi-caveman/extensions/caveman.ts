@@ -1,6 +1,8 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
 	CONFIG_ID,
+	bridgeCavemanHookEnabled,
+	configurationSource,
 	instructions,
 	normalizeActiveMode,
 	normalizeMode,
@@ -38,7 +40,42 @@ const SUBCOMMAND_DESCRIPTIONS: Record<string, string> = {
 	ultra: "Caveman ultra — maximum compression",
 	micro: "Caveman micro — prompt-minimized compression",
 	toggle: "Toggle caveman mode on/off",
+	debug: "Show resolved mode, settings paths, legacy-key conflicts, and the rendered prompt block",
 };
+
+function debugReport(state: CavemanState, ctx: ExtensionContext): string {
+	const cwd = ctx.cwd;
+	const configured = configuredMode(cwd);
+	const effective = effectiveMode(state, cwd);
+	const src = configurationSource(cwd);
+	const bridgeHook = bridgeCavemanHookEnabled(cwd);
+	const overrideLine = state.override === null
+		? `Override: none (configured mode "${configured}" wins)`
+		: `Override: "${state.override}" (session)`;
+	const sourceLine = src.source === "default"
+		? "Source: default (no `mode` key found in any settings.json)"
+		: `Source: ${src.source} (${src.path})`;
+	const legacyLine = src.legacyKeys.length > 0
+		? `Legacy keys present alongside \`mode\`: ${src.legacyKeys.join(", ")} (harmless but stale; remove via the extension manager)`
+		: "Legacy keys: none";
+	const bridgeLine = bridgeHook === undefined
+		? "Bridge `includeCavemanHook`: not set (defaults apply; if you use claude-bridge, check its config separately)"
+		: `Bridge \`includeCavemanHook\`: ${bridgeHook}`;
+	const rendered = effective === "off"
+		? "(empty — mode is off)"
+		: instructions(effective, cwd, false);
+	return [
+		`Effective mode: ${effective}`,
+		overrideLine,
+		sourceLine,
+		`Settings paths consulted (in order): ${src.userPath}, ${src.projectPath}`,
+		legacyLine,
+		bridgeLine,
+		"",
+		"--- Rendered prompt block ---",
+		rendered,
+	].join("\n");
+}
 
 interface CavemanState {
 	override: Mode | null;
@@ -179,6 +216,10 @@ export default function caveman(pi: ExtensionAPI): void {
 		state = restoreState(ctx);
 		syncStatus(ctx);
 		notifyListeners();
+		const legacy = configurationSource(ctx.cwd).legacyKeys;
+		if (legacy.length > 0 && ctx.hasUI) {
+			ctx.ui.notify(`pi-caveman: legacy settings keys detected (${legacy.join(", ")}) alongside \`mode\`. They are ignored; remove them in the extension manager. Run /caveman debug for details.`, "info");
+		}
 	});
 	pi.on("session_tree", (_event, ctx) => {
 		activeCtx = ctx;
@@ -198,6 +239,10 @@ export default function caveman(pi: ExtensionAPI): void {
 			ctx.ui.notify(statusText(state, ctx.cwd), "info");
 			return;
 		}
+		if (arg === "debug") {
+			ctx.ui.notify(debugReport(state, ctx), "info");
+			return;
+		}
 		const current = effectiveMode(state, ctx.cwd);
 		let nextOverride: Mode;
 		if (!arg || arg === "toggle") {
@@ -205,7 +250,7 @@ export default function caveman(pi: ExtensionAPI): void {
 		} else {
 			const parsed = normalizeMode(arg);
 			if (!parsed) {
-				ctx.ui.notify("Unknown caveman mode. Try lite, full, ultra, micro, toggle, off, or status.", "warning");
+				ctx.ui.notify("Unknown caveman mode. Try lite, full, ultra, micro, toggle, off, status, or debug.", "warning");
 				return;
 			}
 			nextOverride = parsed;
@@ -227,7 +272,7 @@ export default function caveman(pi: ExtensionAPI): void {
 		handler: async (args, ctx) => applySubcommand(args, ctx),
 	});
 
-	for (const sub of ["lite", "full", "ultra", "micro", "toggle"] as const) {
+	for (const sub of ["lite", "full", "ultra", "micro", "toggle", "debug"] as const) {
 		pi.registerCommand(`caveman:${sub}`, {
 			description: SUBCOMMAND_DESCRIPTIONS[sub],
 			handler: async (_args, ctx) => applySubcommand(sub, ctx),
