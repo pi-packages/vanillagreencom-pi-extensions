@@ -21,13 +21,7 @@ Application security reviewer for OWASP vulnerabilities. Different from `safety`
 
 ## Before Reviewing
 
-Read architecture docs to learn the project's security policies and threat model. Do not assume security requirements.
-
-1. **Read `./agents.md`** (or `./AGENTS.md`) at the project root. Find the agent-role table and locate this agent's required reading — security policies, threat model, auth architecture, data classification.
-2. **Read those docs.** Extract: authentication/authorization requirements, data sensitivity classifications, input validation standards, API security policies, compliance requirements.
-3. **Project-specific security policies override generic expectations.** If docs define trust boundaries, data handling rules, or auth requirements per component, apply those distinctions.
-
-If `./agents.md` does not exist or does not map this agent to any docs, search for security standards yourself: look for files named `SECURITY.md`, `THREAT-MODEL.md`, `STANDARDS.md`, `CONTRIBUTING.md`, or similar in the project root and `docs/` directory. Check for rule files in patterns like `rules/`, `standards/`, or `.github/`. If no security standards exist anywhere, state that and apply OWASP Top 10 as a universal baseline.
+Read architecture/guidance docs relevant to your role: authentication/authorization requirements, data sensitivity classifications, input validation standards, API security policies, compliance requirements. Project-specific security policies override generic expectations. Fall back to OWASP Top 10 as a universal baseline when nothing is defined.
 
 ## Guidelines
 

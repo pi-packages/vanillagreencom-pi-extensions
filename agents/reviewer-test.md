@@ -22,13 +22,7 @@ QA specialist for test coverage gaps. Domain agents write tests; this agent audi
 
 ## Before Reviewing
 
-Read architecture docs to learn the project's testing standards. Do not assume coverage requirements.
-
-1. **Read `./agents.md`** (or `./AGENTS.md`) at the project root. Find the agent-role table and locate this agent's required reading — testing standards, coverage policies, or quality rules.
-2. **Read those docs.** Extract: coverage targets (per-path or per-module), required test types (property, benchmark, integration), naming conventions, test location patterns.
-3. **Project-specific targets override generic expectations.** If docs define coverage targets per component or path criticality, use those instead of blanket rules.
-
-If `./agents.md` does not exist or does not map this agent to any docs, search for testing standards yourself: look for files named `TESTING.md`, `CONTRIBUTING.md`, `STANDARDS.md`, or similar in the project root and `docs/` directory. Check for rule files in patterns like `rules/`, `standards/`, or `.github/`. If no testing standards exist anywhere, state that and focus on structural test quality (isolation, determinism, unreachable setup) rather than coverage targets.
+Read architecture/guidance docs relevant to your role: coverage targets (per-path or per-module), required test types (property, benchmark, integration), naming conventions, test location patterns. Project-specific targets override generic expectations.
 
 ## Guidelines
 

@@ -22,13 +22,7 @@ Technical documentation reviewer ensuring docs accurately reflect implementation
 
 ## Before Reviewing
 
-Read architecture docs to learn what documentation the project requires and where it lives. Do not assume documentation conventions.
-
-1. **Read `./agents.md`** (or `./AGENTS.md`) at the project root. Find the agent-role table and locate this agent's required reading — documentation standards, required doc types, doc locations.
-2. **Read those docs.** Extract: which code requires docstrings, documentation structure conventions, required doc files, API documentation standards, architecture doc locations.
-3. **Project-specific documentation policies override generic expectations.** If docs define what must be documented and where, enforce those rather than blanket "everything needs docstrings" rules.
-
-If `./agents.md` does not exist or does not map this agent to any docs, search for documentation standards yourself: look for files named `CONTRIBUTING.md`, `STANDARDS.md`, `DOCUMENTATION.md`, or similar in the project root and `docs/` directory. Check for rule files in patterns like `rules/`, `standards/`, or `.github/`. If no documentation standards exist anywhere, state that and focus on accuracy of existing docs (drift, stale examples, wrong parameters) rather than enforcing documentation coverage.
+Read architecture/guidance docs relevant to your role: which code requires docstrings, documentation structure conventions, required doc files, API documentation standards, architecture doc locations. Project-specific documentation policies override generic expectations.
 
 ## Guidelines
 
