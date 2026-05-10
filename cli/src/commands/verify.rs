@@ -252,9 +252,22 @@ fn hash_dir_walk(dir: &Path) -> u64 {
 }
 
 fn should_skip_hash_dir(name: &str) -> bool {
+    // Keep in sync with config::should_skip_hash_dir. `.test-output` is a
+    // pi-claude-bridge integration-test artifact dir; running its tests
+    // creates symlinks/logs that are gitignored and never part of the
+    // distributed package, so they must not influence install drift.
     matches!(
         name,
-        "node_modules" | ".git" | ".turbo" | ".next" | ".cache" | "build" | "out" | "coverage" | ".pi"
+        "node_modules"
+            | ".git"
+            | ".turbo"
+            | ".next"
+            | ".cache"
+            | "build"
+            | "out"
+            | "coverage"
+            | ".pi"
+            | ".test-output"
     )
 }
 

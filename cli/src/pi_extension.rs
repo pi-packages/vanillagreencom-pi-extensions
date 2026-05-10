@@ -98,6 +98,11 @@ pub fn list_npm_packages(global: bool) -> Result<Vec<String>> {
 /// List vstack-copied packages installed in the chosen scope by reading the
 /// packages directory. These are directories with a `package.json` (npm-style)
 /// that vstack copied from a source repo.
+///
+/// Walks one extra level into npm-scope dirs (names starting with `@`) so
+/// scoped packages like `@vanillagreen/pi-foo` are reported as
+/// `@vanillagreen/pi-foo`, matching their lock-entry and source-index keys.
+/// Without this, every scoped install looks uninstalled to update-pi.
 pub fn list_installed_vstack_packages(global: bool) -> Vec<String> {
     let dir = crate::config::pi_packages_dir(global);
     let Ok(entries) = std::fs::read_dir(&dir) else {
@@ -109,12 +114,29 @@ pub fn list_installed_vstack_packages(global: bool) -> Vec<String> {
         if !path.is_dir() {
             continue;
         }
+        let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if file_name.starts_with('@') {
+            // npm scope dir; recurse one level for `@scope/pkg` entries.
+            let Ok(sub_entries) = std::fs::read_dir(&path) else {
+                continue;
+            };
+            for sub in sub_entries.flatten() {
+                let sub_path = sub.path();
+                if !sub_path.is_dir() || !sub_path.join("package.json").exists() {
+                    continue;
+                }
+                if let Some(sub_name) = sub_path.file_name().and_then(|n| n.to_str()) {
+                    names.push(format!("{file_name}/{sub_name}"));
+                }
+            }
+            continue;
+        }
         if !path.join("package.json").exists() {
             continue;
         }
-        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-            names.push(name.to_string());
-        }
+        names.push(file_name.to_string());
     }
     names.sort();
     names
@@ -723,6 +745,10 @@ const COPY_DIR_SKIP_NAMES: &[&str] = &[
     "out",
     "coverage",
     ".pi",
+    // Integration-test scratch dir (pi-claude-bridge). Gitignored, not in
+    // any package's `files` field. Must stay in sync with the hash-skip
+    // sets in config::should_skip_hash_dir / verify::should_skip_hash_dir.
+    ".test-output",
 ];
 
 fn should_skip_copy_entry(name: &str) -> bool {
@@ -903,13 +929,41 @@ fn copy_dir(src: &Path, dst: &Path) -> Result<()> {
     while let Some(next) = walker.next() {
         let entry = next?;
         let name = entry.file_name().to_string_lossy().to_string();
-        if entry.file_type().is_dir() && should_skip_copy_entry(&name) {
+        let file_type = entry.file_type();
+        if file_type.is_dir() && should_skip_copy_entry(&name) {
             walker.skip_current_dir();
             continue;
         }
         let rel = entry.path().strip_prefix(src)?;
         let target = dst.join(rel);
-        if entry.file_type().is_dir() {
+        if file_type.is_symlink() {
+            // Recreate the link instead of letting fs::copy resolve it.
+            // `vstack verify -g` byte-compares source and install; a copied
+            // symlink that became a regular file in the install reads as
+            // install drift on every refresh.
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            if target.is_symlink() || target.is_file() {
+                std::fs::remove_file(&target).with_context(|| {
+                    format!("removing existing {} for symlink replace", target.display())
+                })?;
+            } else if target.is_dir() {
+                std::fs::remove_dir_all(&target).with_context(|| {
+                    format!("removing existing dir {} for symlink replace", target.display())
+                })?;
+            }
+            let link_target = std::fs::read_link(entry.path()).with_context(|| {
+                format!("reading symlink target at {}", entry.path().display())
+            })?;
+            std::os::unix::fs::symlink(&link_target, &target).with_context(|| {
+                format!(
+                    "recreating symlink {} → {}",
+                    target.display(),
+                    link_target.display()
+                )
+            })?;
+        } else if file_type.is_dir() {
             std::fs::create_dir_all(&target)?;
         } else {
             if let Some(parent) = target.parent() {
@@ -1694,6 +1748,107 @@ mod tests {
             }
         });
 
+        let _ = std::fs::remove_dir_all(&sandbox);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pi_copy_dir_preserves_symlinks() {
+        // Pi packages have their own copy_dir (separate from installer.rs).
+        // Both must preserve symlinks; without this, integration tests that
+        // create symlink artifacts (e.g. pi-claude-bridge's `.test-output/`)
+        // make every refresh report install drift.
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "vstack_pi_copy_dir_symlink_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let src = root.join("src");
+        let dst = root.join("dst");
+        std::fs::create_dir_all(src.join("logs")).unwrap();
+        let real = src.join("logs").join("a.log");
+        std::fs::write(&real, b"hello\n").unwrap();
+        symlink(&real, src.join("logs").join("latest")).unwrap();
+
+        copy_dir(&src, &dst).unwrap();
+
+        let dst_link = dst.join("logs").join("latest");
+        let meta = std::fs::symlink_metadata(&dst_link).unwrap();
+        assert!(
+            meta.file_type().is_symlink(),
+            "pi copy_dir must preserve symlinks; got file_type={:?}",
+            meta.file_type()
+        );
+        assert_eq!(std::fs::read_link(&dst_link).unwrap(), real);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn pi_copy_dir_skips_test_output_dir() {
+        // `.test-output/` is gitignored test scratch; it must not ship into
+        // the install dir even if the package author forgets to delete it.
+        let root = std::env::temp_dir().join(format!(
+            "vstack_pi_copy_dir_skip_test_output_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let src = root.join("src");
+        let dst = root.join("dst");
+        std::fs::create_dir_all(src.join(".test-output").join("nested")).unwrap();
+        std::fs::write(
+            src.join(".test-output").join("nested").join("out.log"),
+            b"junk",
+        )
+        .unwrap();
+        std::fs::write(src.join("package.json"), b"{}").unwrap();
+
+        copy_dir(&src, &dst).unwrap();
+
+        assert!(dst.join("package.json").exists());
+        assert!(
+            !dst.join(".test-output").exists(),
+            ".test-output must be skipped during install"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn list_installed_vstack_packages_reports_scoped_packages() {
+        let sandbox = std::env::temp_dir().join(format!(
+            "vstack_list_installed_scoped_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&sandbox);
+        let pi_dir = sandbox.join("agent");
+        let pkgs_dir = pi_dir.join("packages");
+        // Scoped package: <scope>/packages/@scope/name/package.json
+        let scoped = pkgs_dir.join("@vanillagreen").join("pi-foo");
+        std::fs::create_dir_all(&scoped).unwrap();
+        std::fs::write(
+            scoped.join("package.json"),
+            r#"{"name":"@vanillagreen/pi-foo"}"#,
+        )
+        .unwrap();
+        // Unscoped package alongside it: <scope>/packages/legacy/package.json
+        let legacy = pkgs_dir.join("legacy-pkg");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(
+            legacy.join("package.json"),
+            r#"{"name":"legacy-pkg"}"#,
+        )
+        .unwrap();
+
+        let names = with_pi_dir(&pi_dir, || list_installed_vstack_packages(true));
+        assert!(
+            names.iter().any(|n| n == "@vanillagreen/pi-foo"),
+            "scoped package must be reported with full @scope/name; got {names:?}"
+        );
+        assert!(
+            names.iter().any(|n| n == "legacy-pkg"),
+            "unscoped package alongside scope dir must still appear; got {names:?}"
+        );
         let _ = std::fs::remove_dir_all(&sandbox);
     }
 }

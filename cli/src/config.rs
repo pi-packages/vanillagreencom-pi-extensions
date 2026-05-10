@@ -243,14 +243,37 @@ fn is_dead_local_path(entry: &str) -> bool {
 /// True iff `entry` is a local path under the OS temp directory. These paths
 /// are valid to install from explicitly, but should not be remembered as
 /// durable package sources.
+///
+/// Matches both raw and canonicalized forms because a non-existent path
+/// can't be canonicalized (`canonicalize` requires an existing path), and
+/// macOS reports `/tmp` raw while canonicalize maps it to `/private/tmp`.
+/// Without checking both forms, a path like `/tmp/vstack-install-foo` that
+/// has already been cleaned up by the installer is treated as non-temporary
+/// and gets remembered as a sticky source.
 fn is_temporary_local_path(entry: &str) -> bool {
     let Some(path) = expanded_local_path(entry) else {
         return false;
     };
-    let temp = std::env::temp_dir();
-    let temp = temp.canonicalize().unwrap_or(temp);
-    let path = path.canonicalize().unwrap_or(path);
-    path.starts_with(temp)
+    let raw_temp = std::env::temp_dir();
+    let canonical_temp = raw_temp.canonicalize().unwrap_or_else(|_| raw_temp.clone());
+    let raw_path = path.clone();
+    let canonical_path = path.canonicalize().unwrap_or_else(|_| path.clone());
+
+    let mut prefixes: Vec<PathBuf> = vec![raw_temp.clone(), canonical_temp.clone()];
+    // macOS: /tmp is a symlink to /private/tmp. canonicalize() follows it,
+    // but a non-existent /tmp/foo can't be canonicalized, so we also accept
+    // the raw /tmp form whenever the canonical form is /private/tmp (or
+    // vice versa).
+    if canonical_temp == Path::new("/private/tmp") {
+        prefixes.push(PathBuf::from("/tmp"));
+    }
+    if raw_temp == Path::new("/tmp") {
+        prefixes.push(PathBuf::from("/private/tmp"));
+    }
+
+    prefixes
+        .iter()
+        .any(|p| raw_path.starts_with(p) || canonical_path.starts_with(p))
 }
 
 fn expanded_local_path(entry: &str) -> Option<PathBuf> {
@@ -419,17 +442,39 @@ pub fn project_root() -> PathBuf {
 }
 
 fn find_project_root() -> PathBuf {
-    let Ok(mut dir) = std::env::current_dir() else {
+    let Ok(start) = std::env::current_dir() else {
         return PathBuf::from(".");
     };
+    find_project_root_within(&start, &user_home_dir())
+}
+
+/// Walk up from `start` looking for project markers, refusing to claim `home`
+/// itself unless `.vstack-lock.json` lives there. Pure inner function so tests
+/// can drive it without touching the real `$HOME`/CWD.
+fn find_project_root_within(start: &Path, home: &Path) -> PathBuf {
+    // Compare canonical paths so symlinks/aliases don't slip past the home
+    // guard. If canonicalize fails, fall back to the literal path.
+    let canonical_home = home.canonicalize().unwrap_or_else(|_| home.to_path_buf());
+    let mut dir = start.to_path_buf();
     loop {
-        if dir.join(".vstack-lock.json").exists()
-            || dir.join(".claude").is_dir()
-            || dir.join(".cursor").is_dir()
-            || dir.join(".codex").is_dir()
-            || dir.join(".opencode").is_dir()
-            || dir.join(".pi").is_dir()
-            || dir.join(".agents").is_dir()
+        // Lock file is the only signal strong enough to override the home
+        // guard — its presence means the user explicitly opted this dir in.
+        if dir.join(".vstack-lock.json").exists() {
+            return dir;
+        }
+        let canonical_dir = dir.canonicalize().unwrap_or_else(|_| dir.clone());
+        let is_home = canonical_dir == canonical_home;
+        // ~/.claude, ~/.cursor, etc. are user-scoped harness configs, not
+        // project markers. Without this guard, running vstack anywhere under
+        // $HOME (outside a real project) treats $HOME itself as the project
+        // root and routes project-scope writes into user state.
+        if !is_home
+            && (dir.join(".claude").is_dir()
+                || dir.join(".cursor").is_dir()
+                || dir.join(".codex").is_dir()
+                || dir.join(".opencode").is_dir()
+                || dir.join(".pi").is_dir()
+                || dir.join(".agents").is_dir())
         {
             return dir;
         }
@@ -437,7 +482,7 @@ fn find_project_root() -> PathBuf {
             break;
         }
     }
-    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    start.to_path_buf()
 }
 
 /// Get current timestamp as ISO 8601 string (UTC)
@@ -532,21 +577,61 @@ fn hash_dir_bytes(dir: &Path) -> u64 {
         if !entry.file_type().is_file() {
             continue;
         }
+        // Read content first; if unreadable, skip the entire entry. Folding
+        // relpath without content would change the hash whenever a file
+        // becomes temporarily unreadable (permission flake, broken symlink),
+        // even though source bytes did not change — false-positive staleness.
+        let Ok(content) = std::fs::read(entry.path()) else {
+            continue;
+        };
         let rel = entry.path().strip_prefix(dir).unwrap_or(entry.path());
-        // Hash relative path then file content into the running state
         state = fnv1a_chain(state, rel.to_string_lossy().as_bytes());
-        if let Ok(content) = std::fs::read(entry.path()) {
-            state = fnv1a_chain(state, &content);
-        }
+        state = fnv1a_chain(state, &content);
     }
     state
 }
 
 fn should_skip_hash_dir(name: &str) -> bool {
+    // Keep in sync with verify::should_skip_hash_dir. `.test-output` is
+    // pi-claude-bridge's integration-test scratch dir — gitignored, never
+    // shipped, and contains symlinks that make verify report false drift.
     matches!(
         name,
-        "node_modules" | ".git" | ".turbo" | ".next" | ".cache" | "build" | "out" | "coverage" | ".pi"
+        "node_modules"
+            | ".git"
+            | ".turbo"
+            | ".next"
+            | ".cache"
+            | "build"
+            | "out"
+            | "coverage"
+            | ".pi"
+            | ".test-output"
     )
+}
+
+/// Extract every line under a `[table]` header from a TOML file. Stops at
+/// the next top-level table header. Returns empty bytes if the table or file
+/// is missing.
+fn extract_toml_table_section(path: &Path, table: &str) -> Vec<u8> {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let header = format!("[{}]", table);
+    let mut result = Vec::new();
+    let mut capturing = false;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            capturing = trimmed == header;
+            continue;
+        }
+        if capturing {
+            result.extend_from_slice(line.as_bytes());
+            result.push(b'\n');
+        }
+    }
+    result
 }
 
 /// Extract the relevant section for a given name from a TOML file.
@@ -702,6 +787,17 @@ pub fn compute_source_hash(entry: &LockEntry) -> String {
             let file = source_root.join("hooks").join(format!("{}.sh", entry.name));
             if file.exists() {
                 state = fnv1a_chain(state, &hash_file_bytes(&file).to_le_bytes());
+            }
+            // Hook attribution lives in source vstack.toml [hook-events]
+            // (keyed by event:matcher, not hook name). Re-targeting a hook —
+            // e.g. "PostToolUse:Edit|Write" = ["engineer"] → "all" — must mark
+            // the hook stale even when the .sh file is unchanged. Hash the
+            // entire table so any role-list change invalidates every hook;
+            // re-running refresh is cheap, missing the change is not.
+            let source_config = source_root.join("vstack.toml");
+            let section = extract_toml_table_section(&source_config, "hook-events");
+            if !section.is_empty() {
+                state = fnv1a_chain(state, &section);
             }
         }
         ItemKind::PiExtension => {
@@ -860,6 +956,39 @@ pub fn reconcile_lock_with_disk(lock: &mut LockFile, global: bool, source: &str)
         eprintln!("  Removed stale lock entry (Pi package missing): {name}");
         lock.remove(&name);
         modified = true;
+    }
+
+    // Re-add Pi packages found on disk but missing from the lock. Source of
+    // truth: <scope>/.vstack-source.json — every entry there was placed by
+    // vstack and records its origin repo. Skills already get this recovery
+    // path; without it Pi extensions silently disappear from `vstack list`
+    // and refresh after a lost lock file.
+    if let Ok(source_index) = crate::pi_extension::read_source_index(global) {
+        for (pkg_name, idx_entry) in &source_index {
+            if lock.entries.contains_key(pkg_name) {
+                continue;
+            }
+            if !crate::pi_extension::is_pi_extension_installed(pkg_name, global) {
+                continue;
+            }
+            let entry_source = idx_entry
+                .source_repo
+                .clone()
+                .unwrap_or_else(|| source.to_string());
+            let mut entry = LockEntry {
+                name: pkg_name.clone(),
+                kind: ItemKind::PiExtension,
+                source: entry_source,
+                harnesses: vec!["pi".to_string()],
+                method: InstallMethod::Copy,
+                installed_at: now.clone(),
+                source_hash: String::new(),
+            };
+            entry.source_hash = compute_source_hash(&entry);
+            eprintln!("  Recovered lock entry for installed pi-package: {pkg_name}");
+            lock.add(entry);
+            modified = true;
+        }
     }
 
     modified
@@ -1050,6 +1179,239 @@ mod source_registry_tests {
         );
         // Must not collapse to the bare FNV offset constant.
         assert_ne!(h1, format!("{:016x}", FNV_OFFSET));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn find_project_root_refuses_home_with_only_user_harness_dirs() {
+        let dir = sandbox("find_root_home");
+        let fake_home = dir.join("home");
+        fs::create_dir_all(fake_home.join(".claude")).unwrap();
+        fs::create_dir_all(fake_home.join(".pi")).unwrap();
+        let workdir = fake_home.join("random-non-project");
+        fs::create_dir_all(&workdir).unwrap();
+
+        let root = find_project_root_within(&workdir, &fake_home);
+        assert_eq!(
+            root, workdir,
+            "$HOME with .claude/.pi must NOT be claimed as project root; fall back to CWD"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn find_project_root_accepts_home_when_lock_file_present() {
+        let dir = sandbox("find_root_home_lock");
+        let fake_home = dir.join("home");
+        fs::create_dir_all(&fake_home).unwrap();
+        fs::write(fake_home.join(".vstack-lock.json"), "{}").unwrap();
+        let workdir = fake_home.join("sub");
+        fs::create_dir_all(&workdir).unwrap();
+
+        let root = find_project_root_within(&workdir, &fake_home);
+        assert_eq!(
+            root.canonicalize().unwrap(),
+            fake_home.canonicalize().unwrap(),
+            "explicit lock file at $HOME overrides the home guard"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn find_project_root_finds_real_project_under_home() {
+        let dir = sandbox("find_root_real_project");
+        let fake_home = dir.join("home");
+        fs::create_dir_all(fake_home.join(".claude")).unwrap();
+        let project = fake_home.join("work").join("app");
+        fs::create_dir_all(project.join(".claude")).unwrap();
+        let workdir = project.join("src");
+        fs::create_dir_all(&workdir).unwrap();
+
+        let root = find_project_root_within(&workdir, &fake_home);
+        assert_eq!(
+            root, project,
+            "real project under $HOME should still be detected"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn hook_hash_tracks_hook_events_table_changes() {
+        let dir = sandbox("hook_hash_events");
+        fs::create_dir_all(dir.join("hooks")).unwrap();
+        fs::write(
+            dir.join("hooks").join("my-hook.sh"),
+            b"#!/usr/bin/env bash\necho hi\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.join("vstack.toml"),
+            "[hook-events]\n\"PostToolUse:Edit|Write\" = [\"engineer\"]\n",
+        )
+        .unwrap();
+
+        let entry = LockEntry {
+            name: "my-hook".to_string(),
+            kind: ItemKind::Hook,
+            source: dir.display().to_string(),
+            harnesses: vec!["claude-code".to_string()],
+            method: InstallMethod::Symlink,
+            installed_at: "2026-05-09T00:00:00Z".to_string(),
+            source_hash: String::new(),
+        };
+        let h1 = compute_source_hash(&entry);
+
+        // Re-target the hook without touching the .sh file.
+        fs::write(
+            dir.join("vstack.toml"),
+            "[hook-events]\n\"PostToolUse:Edit|Write\" = \"all\"\n",
+        )
+        .unwrap();
+        let h2 = compute_source_hash(&entry);
+
+        assert_ne!(
+            h1, h2,
+            "changing [hook-events] role list must invalidate hook source hash"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn hash_dir_bytes_skips_unreadable_files_atomically() {
+        // Build two trees: A has files (a, b). B has the same files plus a
+        // third file (c) we'll make unreadable. Hashing B with c unreadable
+        // must equal hashing A — i.e. an unreadable file must contribute
+        // nothing, including no relpath bytes.
+        let dir = sandbox("hash_dir_unreadable");
+        let a = dir.join("a");
+        let b = dir.join("b");
+        fs::create_dir_all(&a).unwrap();
+        fs::create_dir_all(&b).unwrap();
+        fs::write(a.join("one.txt"), b"one").unwrap();
+        fs::write(a.join("two.txt"), b"two").unwrap();
+        fs::write(b.join("one.txt"), b"one").unwrap();
+        fs::write(b.join("two.txt"), b"two").unwrap();
+        let extra = b.join("three.txt");
+        fs::write(&extra, b"three").unwrap();
+
+        let hash_a = hash_dir_bytes(&a);
+        // Sanity: with all files readable, hashes diverge.
+        let hash_b_full = hash_dir_bytes(&b);
+        assert_ne!(hash_a, hash_b_full);
+
+        // Unreadable on Unix: chmod 000. Skip the assertion if we couldn't
+        // strip read permission (e.g. running as root).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&extra, fs::Permissions::from_mode(0o000)).unwrap();
+            let readable = fs::read(&extra).is_ok();
+            if !readable {
+                let hash_b_partial = hash_dir_bytes(&b);
+                // Restore so cleanup can run.
+                let _ = fs::set_permissions(&extra, fs::Permissions::from_mode(0o644));
+                assert_eq!(
+                    hash_a, hash_b_partial,
+                    "unreadable file must contribute neither relpath nor content bytes"
+                );
+            } else {
+                let _ = fs::set_permissions(&extra, fs::Permissions::from_mode(0o644));
+            }
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn is_temporary_local_path_catches_nonexistent_temp_paths() {
+        // Use the actual temp_dir() so the test works on whatever OS we run
+        // on. Append a path component that we never create on disk.
+        let temp = std::env::temp_dir();
+        let phantom = temp.join("vstack-phantom-never-created-xyz123");
+        assert!(
+            !phantom.exists(),
+            "precondition: phantom path must not exist"
+        );
+
+        assert!(
+            is_temporary_local_path(&phantom.display().to_string()),
+            "non-existent path under temp_dir must still be flagged temporary"
+        );
+    }
+
+    #[test]
+    fn is_temporary_local_path_handles_tmp_private_tmp_aliasing() {
+        // On macOS /tmp is a symlink to /private/tmp; on Linux they are
+        // distinct dirs (but generally /tmp is the temp dir). We only
+        // assert the positive direction: paths under /tmp are temp.
+        if std::env::temp_dir() == Path::new("/tmp")
+            || std::env::temp_dir().starts_with("/private/tmp")
+        {
+            assert!(is_temporary_local_path("/tmp/vstack-install-foo"));
+        }
+    }
+
+    #[test]
+    fn reconcile_recovers_pi_extensions_present_on_disk_missing_from_lock() {
+        // Drive reconciliation through a sandbox PI_CODING_AGENT_DIR. We
+        // populate the source index plus a fake installed package, leave
+        // the lock empty, and verify reconcile re-adds the lock entry.
+        let dir = sandbox("reconcile_recovers_pi");
+        let pi_dir = dir.join("pi-agent");
+        fs::create_dir_all(&pi_dir).unwrap();
+        let pkg_root = pi_dir.join("packages").join("@vanillagreen");
+        let installed_pkg = pkg_root.join("pi-foo");
+        fs::create_dir_all(&installed_pkg).unwrap();
+        fs::write(
+            installed_pkg.join("package.json"),
+            r#"{"name":"@vanillagreen/pi-foo","version":"1.0.0"}"#,
+        )
+        .unwrap();
+
+        // Source repo with a matching pi-extension dir so compute_source_hash succeeds.
+        let source_repo = dir.join("source-repo");
+        let src_pkg = source_repo.join("pi-extensions").join("pi-foo");
+        fs::create_dir_all(&src_pkg).unwrap();
+        fs::write(
+            src_pkg.join("package.json"),
+            r#"{"name":"@vanillagreen/pi-foo","version":"1.0.0"}"#,
+        )
+        .unwrap();
+
+        // Source index pointing at the source repo.
+        let index_path = pi_dir.join(".vstack-source.json");
+        let index_json = serde_json::json!({
+            "@vanillagreen/pi-foo": {
+                "sourceRepo": source_repo.display().to_string(),
+                "sourcePath": src_pkg.display().to_string(),
+                "sourceVersion": "1.0.0"
+            }
+        });
+        fs::write(&index_path, index_json.to_string()).unwrap();
+
+        // Redirect global pi dir to the sandbox via the shared lock so we
+        // don't race other PI_CODING_AGENT_DIR-mutating tests.
+        let (modified, recovered) = crate::test_util::with_pi_dir(&pi_dir, || {
+            let mut lock = LockFile {
+                version: 1,
+                ..Default::default()
+            };
+            let modified = reconcile_lock_with_disk(
+                &mut lock,
+                true,
+                &source_repo.display().to_string(),
+            );
+            let recovered = lock.entries.get("@vanillagreen/pi-foo").cloned();
+            (modified, recovered)
+        });
+
+        assert!(modified, "reconcile must report modification");
+        let recovered = recovered.expect("pi extension lock entry must be re-added");
+        assert_eq!(recovered.kind, ItemKind::PiExtension);
+        assert_eq!(recovered.source, source_repo.display().to_string());
+        assert!(
+            !recovered.source_hash.is_empty(),
+            "recovered entry must carry a source hash"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 }

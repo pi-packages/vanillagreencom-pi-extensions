@@ -779,15 +779,49 @@ fn relative_path(from: &Path, to: &Path) -> Result<PathBuf> {
     Ok(rel)
 }
 
-/// Recursively copy a directory
+/// Recursively copy a directory.
+///
+/// Preserves symlinks instead of dereferencing them. `std::fs::copy` follows
+/// symlinks and writes the resolved bytes, which made every package whose
+/// tests/build produce symlink artifacts report `vstack verify -g` install
+/// drift (source had a symlink, install had a real file with the resolved
+/// content). Recreating the link via `std::os::unix::fs::symlink` keeps the
+/// install dir byte-comparable to the source.
 fn copy_dir(src: &Path, dst: &Path) -> Result<()> {
     std::fs::create_dir_all(dst)?;
     for entry in walkdir::WalkDir::new(src).min_depth(1) {
         let entry = entry?;
         let rel = entry.path().strip_prefix(src)?;
         let target = dst.join(rel);
+        let file_type = entry.file_type();
 
-        if entry.file_type().is_dir() {
+        if file_type.is_symlink() {
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            // Replace any pre-existing entry at the destination so reinstall
+            // is idempotent. `remove_file` works for both files and symlinks;
+            // dirs need `remove_dir_all`.
+            if target.is_symlink() || target.is_file() {
+                std::fs::remove_file(&target).with_context(|| {
+                    format!("removing existing {} for symlink replace", target.display())
+                })?;
+            } else if target.is_dir() {
+                std::fs::remove_dir_all(&target).with_context(|| {
+                    format!("removing existing dir {} for symlink replace", target.display())
+                })?;
+            }
+            let link_target = std::fs::read_link(entry.path()).with_context(|| {
+                format!("reading symlink target at {}", entry.path().display())
+            })?;
+            std::os::unix::fs::symlink(&link_target, &target).with_context(|| {
+                format!(
+                    "recreating symlink {} → {}",
+                    target.display(),
+                    link_target.display()
+                )
+            })?;
+        } else if file_type.is_dir() {
             std::fs::create_dir_all(&target)?;
         } else {
             if let Some(parent) = target.parent() {
@@ -949,6 +983,87 @@ mod tests {
             "expected absolute symlink target, got {rel:?}"
         );
         assert_eq!(rel, std::fs::canonicalize(&target).unwrap());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_dir_preserves_symlinks_instead_of_dereferencing() {
+        // Reproduces the pi-claude-bridge install-drift bug: source ships a
+        // symlink, install must too — otherwise verify reports drift on
+        // every package whose tests/build emit symlink artifacts.
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "vstack_copy_dir_symlink_{}_{}",
+            std::process::id(),
+            crate::config::now_iso().replace([':', '-'], "")
+        ));
+        let src = root.join("src");
+        let dst = root.join("dst");
+        std::fs::create_dir_all(src.join("logs")).unwrap();
+        let real_log = src.join("logs").join("2026-05-10-provider-1.log");
+        std::fs::write(&real_log, b"line one\nline two\n").unwrap();
+        symlink(&real_log, src.join("logs").join("latest")).unwrap();
+
+        copy_dir(&src, &dst).unwrap();
+
+        let dst_latest = dst.join("logs").join("latest");
+        let meta = std::fs::symlink_metadata(&dst_latest).unwrap();
+        assert!(
+            meta.file_type().is_symlink(),
+            "copy_dir must preserve symlinks; got file_type={:?}",
+            meta.file_type()
+        );
+        assert_eq!(
+            std::fs::read_link(&dst_latest).unwrap(),
+            real_log,
+            "symlink target must round-trip"
+        );
+        // Reading through the symlink still resolves to the real file.
+        assert_eq!(
+            std::fs::read(&dst_latest).unwrap(),
+            b"line one\nline two\n"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_dir_replaces_existing_symlink_on_reinstall() {
+        // Reinstall path: dst already has a symlink, src now points
+        // somewhere else — dst must end up matching src's new target.
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "vstack_copy_dir_resymlink_{}_{}",
+            std::process::id(),
+            crate::config::now_iso().replace([':', '-'], "")
+        ));
+        let src = root.join("src");
+        let dst = root.join("dst");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&dst).unwrap();
+        std::fs::write(src.join("a.log"), b"A").unwrap();
+        std::fs::write(src.join("b.log"), b"B").unwrap();
+        symlink(src.join("b.log"), src.join("latest")).unwrap();
+
+        // Pre-existing dst symlink pointing at A; copy_dir should replace
+        // it with the new symlink pointing at B.
+        std::fs::write(dst.join("a.log"), b"A").unwrap();
+        std::fs::write(dst.join("b.log"), b"B").unwrap();
+        symlink(dst.join("a.log"), dst.join("latest")).unwrap();
+
+        copy_dir(&src, &dst).unwrap();
+
+        let resolved = std::fs::read_link(dst.join("latest")).unwrap();
+        assert_eq!(
+            resolved,
+            src.join("b.log"),
+            "reinstall must overwrite stale symlink"
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
