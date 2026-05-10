@@ -1,11 +1,58 @@
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
-import { unlink } from "node:fs/promises";
+import { rm, unlink } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import { SessionManager, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { canonicalPath } from "./paths.js";
+import { canonicalPath, expandHome } from "./paths.js";
 import { configuredSessionDir, settingBoolean } from "./settings.js";
 import { LEGACY_STATUS_KEY, VSTACK_MODAL_LOCK_SYMBOL, type Scope, type SessionInfo, type VstackModalLock } from "./types.js";
+
+function piUserDir(): string {
+	return resolve(expandHome(process.env.PI_CODING_AGENT_DIR?.trim() || "~/.pi/agent"));
+}
+
+function safeFileName(value: string): string {
+	return value.replace(/[^\w.-]+/g, "_");
+}
+
+// Per-session vstack tree (new layout):
+//   ~/.pi/agent/vstack/sessions/<id>/<package>/...
+// Deleting this dir removes data from every vstack extension that opted into
+// the shared layout (pi-agents-tmux, pi-prompt-stash, pi-output-policy, ...).
+function perSessionVstackDir(sessionId: string): string {
+	return join(piUserDir(), "vstack", "sessions", safeFileName(sessionId));
+}
+
+// Legacy per-package layout (pre path-flip):
+//   ~/.pi/agent/vstack/<package>/sessions/<id>/...
+// Cleaned up here in case migration on session_start never ran (session was
+// never reopened before deletion).
+function legacyPerPackageSessionDirs(sessionId: string): string[] {
+	const safe = safeFileName(sessionId);
+	const root = join(piUserDir(), "vstack");
+	const legacyPackages = ["pi-agents-tmux", "prompt-stash", "pi-output-policy"];
+	return legacyPackages.map((pkg) => join(root, pkg, "sessions", safe));
+}
+
+async function removeExtensionSessionData(sessionId: string): Promise<void> {
+	const targets = [perSessionVstackDir(sessionId), ...legacyPerPackageSessionDirs(sessionId)];
+	for (const dir of targets) {
+		if (!existsSync(dir)) continue;
+		try {
+			await rm(dir, { recursive: true, force: true });
+		} catch {
+			// Best-effort. Failure leaves the dir on disk but does not block the
+			// primary session-file deletion.
+		}
+	}
+}
+
+function sessionIdFromPath(sessionPath: string): string {
+	const base = sessionPath.split(/[\\/]/).pop() ?? sessionPath;
+	return base.replace(/\.jsonl?$/i, "");
+}
 
 function appendSessionInfoFallback(sessionPath: string, name: string): void {
 	const ids = new Set<string>();
@@ -38,19 +85,31 @@ export function renameSession(path: string, name: string): void {
 	}
 }
 
-export async function deleteSessionFile(sessionPath: string, cwd: string): Promise<{ ok: boolean; method: "trash" | "unlink"; error?: string }> {
+export async function deleteSessionFile(
+	sessionPath: string,
+	cwd: string,
+	sessionId?: string,
+): Promise<{ ok: boolean; method: "trash" | "unlink"; error?: string }> {
+	const id = sessionId && sessionId.trim() ? sessionId.trim() : sessionIdFromPath(sessionPath);
+
+	let primary: { ok: boolean; method: "trash" | "unlink"; error?: string } | undefined;
 	if (settingBoolean("deleteUsesTrash", true, cwd)) {
 		const trashArgs = sessionPath.startsWith("-") ? ["--", sessionPath] : [sessionPath];
 		const trashResult = spawnSync("trash", trashArgs, { encoding: "utf8" });
-		if (trashResult.status === 0 || !existsSync(sessionPath)) return { ok: true, method: "trash" };
+		if (trashResult.status === 0 || !existsSync(sessionPath)) primary = { ok: true, method: "trash" };
 	}
 
-	try {
-		await unlink(sessionPath);
-		return { ok: true, method: "unlink" };
-	} catch (error) {
-		return { ok: false, method: "unlink", error: error instanceof Error ? error.message : String(error) };
+	if (!primary) {
+		try {
+			await unlink(sessionPath);
+			primary = { ok: true, method: "unlink" };
+		} catch (error) {
+			return { ok: false, method: "unlink", error: error instanceof Error ? error.message : String(error) };
+		}
 	}
+
+	await removeExtensionSessionData(id);
+	return primary;
 }
 
 export async function loadSessionsForScope(cwd: string, scope: Scope, onProgress?: (loaded: number, total: number) => void): Promise<SessionInfo[]> {

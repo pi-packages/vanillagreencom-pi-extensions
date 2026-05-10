@@ -54,8 +54,33 @@ function sessionIdForContext(ctx: ExtensionContext): string {
 	return `ephemeral-${process.pid}`;
 }
 
+const SESSION_FOLDER = "pi-output-policy";
+
 function artifactDir(ctx: ExtensionContext): string {
-	return join(piUserDir(), "vstack", "pi-output-policy", "sessions", safeFileName(sessionIdForContext(ctx)), "artifacts");
+	return join(piUserDir(), "vstack", "sessions", safeFileName(sessionIdForContext(ctx)), SESSION_FOLDER, "artifacts");
+}
+
+function legacyPackageArtifactDir(ctx: ExtensionContext): string {
+	return join(piUserDir(), "vstack", SESSION_FOLDER, "sessions", safeFileName(sessionIdForContext(ctx)), "artifacts");
+}
+
+function migrateLegacyPackageArtifacts(ctx: ExtensionContext): void {
+	const legacyDir = legacyPackageArtifactDir(ctx);
+	const targetDir = artifactDir(ctx);
+	if (resolve(legacyDir) === resolve(targetDir) || !existsSync(legacyDir)) return;
+	if (existsSync(targetDir)) return;
+	try {
+		mkdirSync(dirname(targetDir), { recursive: true, mode: 0o700 });
+		renameSync(legacyDir, targetDir);
+	} catch {
+		try {
+			cpSync(legacyDir, targetDir, { recursive: true, force: false });
+			rmSync(legacyDir, { recursive: true, force: true });
+		} catch {
+			// Leave legacy artifacts in place if filesystem refuses migration; new
+			// artifacts still land at targetDir.
+		}
+	}
 }
 
 function legacyProjectArtifactDirs(cwd: string): string[] {
@@ -69,6 +94,7 @@ function legacyProjectArtifactDirs(cwd: string): string[] {
 }
 
 function migrateLegacyProjectArtifacts(ctx: ExtensionContext): void {
+	migrateLegacyPackageArtifacts(ctx);
 	const targetRoot = artifactDir(ctx);
 	for (const legacyDir of legacyProjectArtifactDirs(ctx.cwd)) {
 		if (legacyDir === resolve(targetRoot) || !existsSync(legacyDir)) continue;

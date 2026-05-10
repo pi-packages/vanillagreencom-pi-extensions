@@ -53,6 +53,7 @@ import {
 	ensurePersistentPane,
 	execCapture,
 	mapWithConcurrencyLimit,
+	migrateLegacyPackageRuntime,
 	migrateLegacyProjectRuntime,
 	paneExists,
 	queuePersistentPaneTask,
@@ -693,6 +694,7 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		ctx.ui.setStatus("agent", undefined);
+		await migrateLegacyPackageRuntime(runtimeSessionId(ctx), runtimeRoot);
 		await migrateLegacyProjectRuntime(ctx.cwd, runtimeRoot);
 		try {
 			const records = await readTaskRegistry(runtimeRoot);

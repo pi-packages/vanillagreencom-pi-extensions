@@ -41,6 +41,10 @@ export function runtimeSessionId(ctx: ExtensionContext): string {
 }
 
 export function sessionRuntimeDir(sessionId: string): string {
+	return path.join(piUserDir(), "vstack", "sessions", safeFileName(sessionId), PACKAGE_ID);
+}
+
+export function legacyPackageSessionRuntimeDir(sessionId: string): string {
 	return path.join(piUserDir(), "vstack", PACKAGE_ID, "sessions", safeFileName(sessionId));
 }
 

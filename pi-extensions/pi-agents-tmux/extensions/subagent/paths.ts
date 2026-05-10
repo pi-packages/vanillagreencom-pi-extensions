@@ -105,5 +105,9 @@ export function legacyProjectRuntimeDirs(cwd: string): string[] {
 }
 
 export function piPackageRuntimeRoots(): string[] {
+	return [path.join(piUserDir(), "vstack", "sessions")];
+}
+
+export function legacyPiPackageRuntimeRoots(): string[] {
 	return [path.join(piUserDir(), "vstack", PACKAGE_ID, "sessions")];
 }

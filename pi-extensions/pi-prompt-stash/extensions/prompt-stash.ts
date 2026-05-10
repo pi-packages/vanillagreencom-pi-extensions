@@ -67,8 +67,28 @@ function sessionIdForContext(ctx: ExtensionContext): string {
 	return `ephemeral-${process.pid}`;
 }
 
+const SESSION_FOLDER = "prompt-stash";
+
 function sessionStoreDir(ctx: ExtensionContext): string {
-	return join(piUserDir(), "vstack", "prompt-stash", "sessions", safeFileName(sessionIdForContext(ctx)));
+	return join(piUserDir(), "vstack", "sessions", safeFileName(sessionIdForContext(ctx)), SESSION_FOLDER);
+}
+
+function legacyPackageSessionStoreDir(ctx: ExtensionContext): string {
+	return join(piUserDir(), "vstack", SESSION_FOLDER, "sessions", safeFileName(sessionIdForContext(ctx)));
+}
+
+function migrateLegacyPackageStore(ctx: ExtensionContext): void {
+	const legacyDir = legacyPackageSessionStoreDir(ctx);
+	const targetDir = sessionStoreDir(ctx);
+	if (resolve(legacyDir) === resolve(targetDir) || !existsSync(legacyDir)) return;
+	if (existsSync(targetDir)) return;
+	try {
+		mkdirSync(dirname(targetDir), { recursive: true, mode: 0o700 });
+		renameSync(legacyDir, targetDir);
+	} catch {
+		// Leave legacy tree in place if filesystem refuses migration; new state
+		// still lands at targetDir on first stash.
+	}
 }
 
 function projectSettingsPath(cwd: string): string {
@@ -143,6 +163,7 @@ function configuredStoreFile(ctx: ExtensionContext): string {
 }
 
 function storePath(ctx: ExtensionContext): string {
+	migrateLegacyPackageStore(ctx);
 	return join(sessionStoreDir(ctx), configuredStoreFile(ctx));
 }
 

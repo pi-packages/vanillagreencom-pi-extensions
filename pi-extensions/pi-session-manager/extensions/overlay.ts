@@ -289,7 +289,7 @@ class SessionManagerOverlay implements Focusable {
 		if (!target) return;
 		this.mode = "deleting";
 		this.requestRender();
-		const result = await deleteSessionFile(target.path, this.ctx.cwd);
+		const result = await deleteSessionFile(target.path, this.ctx.cwd, target.id);
 		if (result.ok) {
 			this.sessions = this.sessions.filter((session) => !samePath(session.path, target.path));
 			this.mode = "browse";
@@ -336,7 +336,7 @@ class SessionManagerOverlay implements Focusable {
 		const failures: string[] = [];
 		for (const target of targets) {
 			if (this.isCurrent(target)) continue;
-			const result = await deleteSessionFile(target.path, this.ctx.cwd);
+			const result = await deleteSessionFile(target.path, this.ctx.cwd, target.id);
 			if (result.ok) {
 				deleted += 1;
 				if (result.method === "trash") trashed += 1;
@@ -628,6 +628,9 @@ class SessionManagerOverlay implements Focusable {
 				? `This removes ${deleteCountLabel} in this project.`
 				: `This removes ${deleteCountLabel} across all paths and projects.`
 			: "This removes the session file.";
+		const extensionDataMessage = deleteAll
+			? "Also removes all vstack extension data for these sessions (sub-agent panes, inboxes/outboxes, transcripts, prompt stash, captured outputs)."
+			: "Also removes all vstack extension data for this session (sub-agent panes, inboxes/outboxes, transcripts, prompt stash, captured outputs).";
 		const optionRow = (index: 0 | 1, label: string) => {
 			const selected = this.deleteConfirmSelection === index;
 			const prefix = selected ? "› " : "  ";
@@ -637,12 +640,31 @@ class SessionManagerOverlay implements Focusable {
 			return selected ? this.theme.bg(index === 0 ? "toolErrorBg" : "selectedBg", padded) : padded;
 		};
 
+		const wrapPlain = (text: string, width: number): string[] => {
+			if (width <= 0) return [text];
+			const words = text.split(/\s+/);
+			const lines: string[] = [];
+			let current = "";
+			for (const word of words) {
+				const candidate = current ? `${current} ${word}` : word;
+				if (visibleWidth(candidate) <= width) {
+					current = candidate;
+				} else {
+					if (current) lines.push(current);
+					current = word;
+				}
+			}
+			if (current) lines.push(current);
+			return lines.length > 0 ? lines : [""];
+		};
+		const extensionDataLines = wrapPlain(extensionDataMessage, boxInner).map((line) => boxRow(ui.warning(line)));
 		const boxLines = [
 			top(),
 			boxRow(centerAnsi(ui.error(this.theme.bold(deleteAll ? "Delete all sessions?" : "Delete session?")), boxInner)),
 			boxRow(centerAnsi(ui.accent(subject), boxInner)),
 			boxRow(""),
 			boxRow(ui.warning(removeMessage)),
+			...extensionDataLines,
 			boxRow(ui.dim("If trash is unavailable, deletion is permanent.")),
 			boxDivider(),
 			boxRow(optionRow(0, deleteAll ? `Delete ${deleteCountLabel}` : "Delete this session")),
