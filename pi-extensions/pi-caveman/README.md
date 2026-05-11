@@ -51,4 +51,5 @@ Arguments support autocomplete.
 - Session override state and the last active mode persist in the Pi session and restore from the active branch.
 - Settings live in Pi/vstack `settings.json`; project settings override user settings.
 - QOL can use the caveman bridge for its compact statusline badge and `Alt+C` editor shortcut.
-- The clarity/safety escape is prompt policy: destructive, security-sensitive, or ambiguous turns get explicit normal-clarity guidance while mode can remain active for later turns.
+- The hard clarity-safety escape only fires when the user prompt names an explicit irreversible destructive operation (force-push, drop table, rm -rf, hard reset, destructive/irreversible). The model still self-elects plain prose for genuine destructive confirmations via an inline auto-clarity rule, but no longer escapes on soft signals like "confused" or "security".
+- Boundary toggles keep caveman out of text destined for other systems: code/identifiers, commit messages and PR descriptions, formal reviews, and external writes (Linear/GitHub issues + comments, PR/code-review comments, chat). Caveman is for in-chat replies.

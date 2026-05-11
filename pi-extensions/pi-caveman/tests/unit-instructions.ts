@@ -10,7 +10,7 @@ import { bridgeCavemanHookEnabled, configurationSource, instructions, shouldClar
 const SNAP_DIR = join(dirname(fileURLToPath(import.meta.url)), "__snapshots__");
 const UPDATE = process.env.UPDATE_SNAPSHOTS === "1";
 const MODES = ["lite", "full", "ultra", "micro"] as const;
-const BOUNDARY_KEYS = ["boundaryNormalForCode", "boundaryNormalForCommits", "boundaryNormalForReviews"] as const;
+const BOUNDARY_KEYS = ["boundaryNormalForCode", "boundaryNormalForCommits", "boundaryNormalForReviews", "boundaryNormalForExternalWrites"] as const;
 
 let originalPiDir;
 let tmpRoot;
@@ -198,25 +198,38 @@ describe("configurationSource() and bridgeCavemanHookEnabled()", () => {
 	});
 });
 
-describe("shouldClarityEscape() — current behavior baseline", () => {
+describe("shouldClarityEscape() — narrowed to irreversible destructive ops only", () => {
+	// Hard escape fires only for explicit destructive shell/SQL/git patterns +
+	// the literal words `destructive` / `irreversible`. Soft signals
+	// (security/confused/clarify/ambiguous) used to live here and produced
+	// false escapes on routine technical turns; they are now handled by the
+	// inline auto-clarity rule (model judgment), not by hard prompt injection.
 	const shouldMatch = [
-		"please review for security vulnerabilities",
 		"this would force-push and rewrite history",
 		"DROP TABLE users",
 		"rm -rf the build dir",
 		"git reset --hard origin/main",
-		"is this a credential exposure?",
+		"git push --force origin main",
 		"that's a destructive operation",
-		"can you clarify the trade-off",
-		"I'm confused about the data flow",
-		"the spec is ambiguous",
+		"this is an irreversible migration",
 	];
+	// Verbatim user prompts from the live session that previously tripped the
+	// regex; regression-tested so they stay quiet.
 	const shouldNotMatch = [
 		"refactor the parser to use the new API",
 		"add a unit test for the queue",
 		"format the table output",
 		"please confirm the version bumped",
 		"delete the old log entries",
+		"please review for security vulnerabilities",
+		"is this a credential exposure?",
+		"can you clarify the trade-off",
+		"I'm confused about the data flow",
+		"the spec is ambiguous",
+		"Can you explain to me more about what 507 is about? We dont need to measure performance on non consumer surfaces (dev dashboard, etc.) so i'm confused by 1) what this issue is and 2) what the questions are about",
+		"I want to audit our code, benchmarking, performance checks, etc. for anything that is unneccisarily measuring non consumer surfaces specifically.",
+		"What is --secondary-window about? At some point we will have real secondary windows that are consumer surfaces (for example a chart extracted into its own window) - so does that framing change anything?",
+		"Yes.",
 	];
 	for (const phrase of shouldMatch) {
 		it(`MATCHES: ${phrase}`, () => {

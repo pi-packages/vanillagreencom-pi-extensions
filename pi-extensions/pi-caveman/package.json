@@ -1,6 +1,6 @@
 {
   "name": "@vanillagreen/pi-caveman",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Native Pi caveman communication mode with session persistence, slash command control, status badge, and settings-manager integration.",
   "license": "MIT",
   "keywords": [
@@ -56,7 +56,7 @@
         {
           "key": "autoClarityEscape",
           "label": "Auto clarity escape",
-          "description": "Temporarily use normal clarity for destructive/security/clarification turns.",
+          "description": "Inject a full plain-prose system block when the user prompt names an explicit irreversible destructive operation (force-push, drop table, rm -rf, hard reset, etc.). Soft signals like 'confused' or 'security' no longer trigger this — the inline auto-clarity rule still lets the model self-elect plain prose for genuine destructive confirmations.",
           "type": "boolean",
           "default": true,
           "category": "Safety",
@@ -102,6 +102,15 @@
           "key": "boundaryNormalForReviews",
           "label": "Normal reviews",
           "description": "Tell the model to keep formal reviews/PR text normal unless explicitly asked otherwise.",
+          "type": "boolean",
+          "default": true,
+          "category": "Boundaries",
+          "apply": "live"
+        },
+        {
+          "key": "boundaryNormalForExternalWrites",
+          "label": "Normal external writes",
+          "description": "Tell the model to keep text destined for external systems normal: Linear/Jira/GitHub issue bodies and comments, PR/code-review comments, and chat messages (Slack/Discord/Teams/email). Caveman remains for in-chat replies only.",
           "type": "boolean",
           "default": true,
           "category": "Boundaries",

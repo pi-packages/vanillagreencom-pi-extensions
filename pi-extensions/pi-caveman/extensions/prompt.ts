@@ -130,13 +130,16 @@ export function normalizeActiveMode(input: string | undefined): ActiveMode | und
 	return mode && mode !== "off" ? mode : undefined;
 }
 
-// Trigger normal-clarity prose for security topics, explicit destructive
-// shell/SQL commands, explicit warning vocabulary, and clear user-confusion
-// signals. Do not match common verbs like `delete` or `confirm` on their own —
-// in a coding context they appear in routine work and produced false escapes
-// every turn.
+// Trigger the hard clarity-escape (full plain-prose reply + `Caveman resume`
+// sentinel) ONLY for explicit irreversible destructive operations the user is
+// about to confirm or run. Previously this regex also matched
+// security/secret/token/credential vocabulary and user-confusion signals
+// (`confused`, `clarify`, `ambiguous`, `not clear`, `explain again`), which
+// fired on routine technical turns and made the escape feel like the default.
+// Those soft signals belong in the model's own judgment via the inline
+// auto-clarity rule, not in a hard prompt-level injection.
 export function shouldClarityEscape(prompt: string): boolean {
-	return /(security|vulnerab|exploit|secret|token|password|credential|drop\s+table|rm\s+-rf|force[- ]?push|git\s+reset\s+--hard|destructive|irreversible|\bdanger(ous)?\b|clarify|confused|explain again|not clear|ambiguous)/i.test(prompt);
+	return /(drop\s+table|rm\s+-rf|force[- ]?push|git\s+reset\s+--hard|git\s+push\s+(?:[^\n]*\s)?--force|\bdestructive\b|\birreversible\b)/i.test(prompt);
 }
 
 export function instructions(mode: Mode, cwd: string, clarityEscape: boolean): string {
@@ -145,6 +148,7 @@ export function instructions(mode: Mode, cwd: string, clarityEscape: boolean): s
 	if (settingBoolean("boundaryNormalForCode", true, cwd)) boundaries.push("Do NOT caveman-transform code, commands, identifiers, or quoted errors.");
 	if (settingBoolean("boundaryNormalForCommits", true, cwd)) boundaries.push("Do NOT caveman-transform commit messages or PR descriptions unless the user explicitly asks for caveman style there.");
 	if (settingBoolean("boundaryNormalForReviews", true, cwd)) boundaries.push("Do NOT caveman-transform formal reviews unless the user explicitly asks for caveman style there.");
+	if (settingBoolean("boundaryNormalForExternalWrites", true, cwd)) boundaries.push("Do NOT caveman-transform external writes — Linear/Jira/GitHub issue bodies and comments, PR/code-review comments, or chat messages (Slack/Discord/Teams/email) — unless the user explicitly asks for caveman style there. Caveman is for in-chat replies, not text destined for another system.");
 	const suffix = settingString("customPromptSuffix", "", cwd).trim();
 
 	if (clarityEscape) {
@@ -165,10 +169,11 @@ export function instructions(mode: Mode, cwd: string, clarityEscape: boolean): s
 		if (settingBoolean("boundaryNormalForCode", true, cwd)) compactBoundaries.push("Code/commands/identifiers/quoted errors unchanged.");
 		if (settingBoolean("boundaryNormalForCommits", true, cwd)) compactBoundaries.push("Commit/PR text normal unless user asks caveman.");
 		if (settingBoolean("boundaryNormalForReviews", true, cwd)) compactBoundaries.push("Formal reviews normal unless user asks caveman.");
+		if (settingBoolean("boundaryNormalForExternalWrites", true, cwd)) compactBoundaries.push("External writes (Linear/GitHub issue bodies + comments, PR/code-review, chat) normal unless user asks caveman.");
 		return [
 			"You MUST respond in caveman micro style.",
 			"Cut filler/pleasantries/hedging. Fragments OK. Technical terms exact. Accuracy > brevity.",
-			"For security/destructive/ambiguous turns, switch to normal clarity, then resume.",
+			"For confirmations of irreversible destructive operations only (force-push, drop table, rm -rf, hard reset, branch delete), switch that passage to normal clarity inline. Do NOT write 'Caveman resume' — that sentinel is only used when the system injects it.",
 			...compactBoundaries,
 			suffix,
 		].filter(Boolean).join("\n");
@@ -189,9 +194,16 @@ export function instructions(mode: Mode, cwd: string, clarityEscape: boolean): s
 	// Auto-clarity only makes sense for modes that actually shift register away
 	// from normal English (full/ultra). lite is just tight professional prose, so
 	// there is nothing to escape from.
+	//
+	// Wording deliberately narrow: scoped to irreversible destructive operations
+	// the user is being asked to confirm, not to soft signals like "security"
+	// topics or "clearly confused" — those caused the model to plain-prose almost
+	// every turn. Explicitly tells the model NOT to emit the literal `Caveman
+	// resume` sentinel here; that sentinel belongs only to the hard-escape branch
+	// (`shouldClarityEscape` regex match) where the system injects it.
 	const autoClarityRule = mode === "lite"
 		? undefined
-		: "Auto-clarity rule: for security warnings, irreversible actions, or turns where the user is clearly confused, switch to normal clear prose for the affected portion of the reply, then resume caveman.";
+		: "Auto-clarity rule: if you are about to confirm or carry out an irreversible destructive action (force-push, drop table, rm -rf, hard reset, branch delete, destroying user data), switch ONLY that confirmation/warning passage to normal clear prose inline. Do NOT write the literal phrase 'Caveman resume' — that sentinel is reserved for system-injected escapes.";
 
 	return [
 		`You MUST respond in caveman ${mode} style for natural-language replies. This OVERRIDES default verbosity habits.`,
