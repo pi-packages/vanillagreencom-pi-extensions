@@ -1961,6 +1961,9 @@ run_loop() {
           # HTTP poller resets promptly when tmux rings the pane bell.
           if [[ "$_sub_harness" == "opencode" ]] && (( $(bell_flag_for_pane "$inner_id") == 1 )); then
             touch_oc_bell_marker "$inner_id"
+            local _sub_win_id
+            _sub_win_id=$(window_id_for_pane "$inner_id")
+            [[ -n "$_sub_win_id" ]] && clear_bell_for_window "$_sub_win_id"
           fi
           continue
         fi
