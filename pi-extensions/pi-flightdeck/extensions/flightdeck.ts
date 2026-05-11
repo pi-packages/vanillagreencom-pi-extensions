@@ -35,9 +35,16 @@ import {
 	sortedIssues,
 } from "./state.js";
 import {
+	buildPaneTargetToIdMap,
+	formatUsageCompact,
+	getAgentsBridge,
+	type AgentsBridgeItem,
+} from "./agents-bridge.js";
+import {
 	ANSI_BELL,
 	ansiGreen,
 	ansiYellow,
+	daemonHealthChip,
 	divider,
 	dotIndicator,
 	frameContentWidth,
@@ -184,6 +191,16 @@ interface DashboardCache {
 	lastSnapshot?: FlightdeckSnapshot;
 	pauseSeenIssue?: string;
 	pauseSeenAt?: number;
+	// Tmux `session:window.pane` → `%N` map, refreshed on each tick so issue
+	// rows can join against the pi-agents-tmux stats bridge.
+	paneTargetToId: Map<string, string>;
+}
+
+function usageForIssue(issue: IssueRecord, paneMap: Map<string, string>, bridge: ReturnType<typeof getAgentsBridge>): AgentsBridgeItem | undefined {
+	if (!bridge) return undefined;
+	const paneId = issue.pane_target ? paneMap.get(issue.pane_target) : undefined;
+	if (!paneId) return undefined;
+	return bridge.getByPaneId(paneId);
 }
 
 function defaultDashboardState(cwd?: string): DashboardState {
@@ -226,7 +243,7 @@ function renderPauseBannerLines(snapshot: FlightdeckSnapshot, theme: Theme, widt
 	return framePanel(lines, width, theme, "warning", " PAUSE — awaiting user ");
 }
 
-function renderDashboardLines(snapshot: FlightdeckSnapshot, theme: Theme, width: number, state: DashboardState, cwd: string): string[] {
+function renderDashboardLines(snapshot: FlightdeckSnapshot, theme: Theme, width: number, state: DashboardState, cwd: string, paneMap: Map<string, string>): string[] {
 	if (state === "hidden") return [];
 	const issues = sortedIssues(snapshot.master);
 	const max = Math.max(1, Math.floor(settingNumber("dashboardMaxItems", 8, cwd)));
@@ -236,23 +253,23 @@ function renderDashboardLines(snapshot: FlightdeckSnapshot, theme: Theme, width:
 	for (const issue of issues) counts[issue.state ?? "?"] = (counts[issue.state ?? "?"] ?? 0) + 1;
 	const summaryParts: string[] = [];
 	const order: IssueState[] = ["prompting", "merge-ready", "submitting", "waiting", "merged", "aborted", "dead"];
-	for (const s of order) if (counts[s]) summaryParts.push(theme.fg(stateColor(s), `${stateGlyph(s)} ${counts[s]}`));
-	const daemonDot = dotIndicator(theme, snapshot.daemon.pidAlive);
-	const heartbeatAge = snapshot.daemon.heartbeatAgeSec;
-	const heartbeatLabel = heartbeatAge !== undefined
-		? (heartbeatAge < 30 ? theme.fg("dim", `hb ${formatAge(heartbeatAge)}`) : theme.fg("warning", `hb ${formatAge(heartbeatAge)}`))
-		: theme.fg("dim", "hb —");
+	// Suppress the per-state count strip when the single issue row below
+	// already shows the same state badge — avoids "✱ 1 · CC-511 · ✱ waiting".
+	const showStateCounts = totalIssues > 1;
+	if (showStateCounts) for (const s of order) if (counts[s]) summaryParts.push(theme.fg(stateColor(s), `${stateGlyph(s)} ${counts[s]}`));
+	const daemonHealth = daemonHealthChip(theme, snapshot.daemon.pidAlive, snapshot.daemon.heartbeatAgeSec);
 	const queueLen = snapshot.master?.merge_queue?.length ?? 0;
 	const queueBadge = queueLen > 0 ? ` ${theme.fg("muted", "·")} ${theme.fg("accent", `merge-queue ${queueLen}`)}` : "";
 	const headerLeft = `${theme.fg("customMessageLabel", theme.bold("Flightdeck"))} ${theme.fg("muted", `${totalIssues} issue${totalIssues === 1 ? "" : "s"}`)}${summaryParts.length > 0 ? ` ${theme.fg("muted", "·")} ${summaryParts.join(theme.fg("dim", " "))}` : ""}${queueBadge}`;
-	const headerRight = `${daemonDot} ${theme.fg("dim", "daemon")} ${theme.fg("muted", "·")} ${heartbeatLabel}`;
-	const header = `${headerLeft}  ${theme.fg("dim", "·")}  ${headerRight}`;
+	const header = `${headerLeft}  ${theme.fg("dim", "·")}  ${daemonHealth}`;
+	const bridge = getAgentsBridge();
 	if (state === "compact") {
 		const lines = [header];
 		const visible = issues.slice(0, max);
 		for (const [index, issue] of visible.entries()) {
 			const isLast = index === visible.length - 1 && issues.length === visible.length;
-			lines.push(`${panelBranch(theme, isLast ? "└" : "├", treeStyle)}${renderIssueLine(issue, theme, snapshot)}`);
+			const stats = usageForIssue(issue, paneMap, bridge);
+			lines.push(`${panelBranch(theme, isLast ? "└" : "├", treeStyle)}${renderIssueLine(issue, theme, snapshot, stats)}`);
 		}
 		const hidden = Math.max(0, issues.length - visible.length);
 		if (hidden > 0) lines.push(`${panelBranch(theme, "└", treeStyle)}${theme.fg("muted", `… ${hidden} more`)}`);
@@ -262,28 +279,33 @@ function renderDashboardLines(snapshot: FlightdeckSnapshot, theme: Theme, width:
 	const lines = [header, ""];
 	for (const [index, issue] of issues.entries()) {
 		const isLast = index === issues.length - 1;
-		lines.push(`${panelBranch(theme, isLast ? "└" : "├", treeStyle)}${renderIssueLine(issue, theme, snapshot)}`);
+		const stats = usageForIssue(issue, paneMap, bridge);
+		lines.push(`${panelBranch(theme, isLast ? "└" : "├", treeStyle)}${renderIssueLine(issue, theme, snapshot, stats)}`);
 		const stem = panelBranch(theme, "│", treeStyle);
-		const detailRows = renderIssueDetailLines(issue, theme);
+		const detailRows = renderIssueDetailLines(issue, theme, stats);
 		for (const row of detailRows) lines.push(`${stem}${row}`);
 	}
 	return framePanel(lines, width, theme);
 }
 
-function renderIssueLine(issue: IssueRecord, theme: Theme, _snapshot: FlightdeckSnapshot): string {
+function renderIssueLine(issue: IssueRecord, theme: Theme, _snapshot: FlightdeckSnapshot, stats?: AgentsBridgeItem): string {
 	const state = stateBadge(theme, issue.state);
 	const harness = harnessChip(theme, issue.harness);
 	const pr = issue.pr_number ? theme.fg("accent", `PR#${issue.pr_number}`) : theme.fg("dim", "no-PR");
 	const sub = issue.substate ? ` ${theme.fg("dim", "·")} ${tagBadge(theme, issue.substate)}` : "";
 	const polled = ageSecondsSince(issue.last_polled_at);
 	const polledTxt = polled !== undefined ? ` ${theme.fg("dim", `(${formatAge(polled)})`)}` : "";
-	return `${theme.bold(theme.fg("text", issue.issue))} ${theme.fg("dim", "·")} ${state} ${theme.fg("dim", "·")} ${harness} ${theme.fg("dim", "·")} ${pr}${sub}${polledTxt}`;
+	const usageText = formatUsageCompact(stats?.usage);
+	const usageTxt = usageText ? ` ${theme.fg("dim", "·")} ${theme.fg("dim", usageText)}` : "";
+	return `${theme.bold(theme.fg("text", issue.issue))} ${theme.fg("dim", "·")} ${state} ${theme.fg("dim", "·")} ${harness} ${theme.fg("dim", "·")} ${pr}${sub}${usageTxt}${polledTxt}`;
 }
 
-function renderIssueDetailLines(issue: IssueRecord, theme: Theme): string[] {
+function renderIssueDetailLines(issue: IssueRecord, theme: Theme, stats?: AgentsBridgeItem): string[] {
 	const out: string[] = [];
 	if (issue.pane_target) out.push(theme.fg("dim", `pane ${issue.pane_target}`));
 	if (issue.launch?.model || issue.launch?.effort) out.push(theme.fg("dim", `run  ${formatLaunchProfile(issue)}`));
+	const usageText = formatUsageCompact(stats?.usage);
+	if (usageText) out.push(theme.fg("dim", `cost ${usageText}`));
 	if (issue.worktree) out.push(theme.fg("dim", `wt   ${compactPath(issue.worktree)}`));
 	const decisions = issue.decisions_log ?? [];
 	const last = decisions[decisions.length - 1];
@@ -361,7 +383,7 @@ function activePopupCwd(ctx: ExtensionContext | ExtensionCommandContext): string
 
 // ----- Tab renderers --------------------------------------------------------
 
-function renderOverviewTab(snapshot: FlightdeckSnapshot, ui: PopupUiState, width: number, theme: Theme, viewportRows: number): string[] {
+function renderOverviewTab(snapshot: FlightdeckSnapshot, ui: PopupUiState, width: number, theme: Theme, viewportRows: number, paneMap: Map<string, string>): string[] {
 	const issues = sortedIssues(snapshot.master);
 	const filtered = ui.search.trim()
 		? issues.filter((issue) => {
@@ -381,7 +403,11 @@ function renderOverviewTab(snapshot: FlightdeckSnapshot, ui: PopupUiState, width
 		}
 		return lines;
 	}
-	const hdr = formatOverviewHeader(theme, width);
+	const bridge = getAgentsBridge();
+	const statsByIssue = new Map<string, AgentsBridgeItem | undefined>();
+	for (const issue of filtered) statsByIssue.set(issue.issue, usageForIssue(issue, paneMap, bridge));
+	const hasStats = Array.from(statsByIssue.values()).some((stat) => Boolean(stat?.usage));
+	const hdr = formatOverviewHeader(theme, width, hasStats);
 	lines.push(hdr);
 	lines.push(divider(width, theme));
 	const rows = Math.max(1, viewportRows - lines.length - 2);
@@ -390,7 +416,8 @@ function renderOverviewTab(snapshot: FlightdeckSnapshot, ui: PopupUiState, width
 	for (const [vi, issue] of filtered.slice(ui.scroll, ui.scroll + rows).entries()) {
 		const idx = ui.scroll + vi;
 		const selected = idx === ui.selected;
-		const row = formatOverviewRow(issue, theme, width);
+		const statsText = formatUsageCompact(statsByIssue.get(issue.issue)?.usage);
+		const row = formatOverviewRow(issue, theme, width, statsText, hasStats);
 		lines.push(selected ? selectedRow(theme, row, width) : row);
 	}
 	if (tail > 0) lines.push(theme.fg("dim", `↓ ${tail} more`));
@@ -398,27 +425,32 @@ function renderOverviewTab(snapshot: FlightdeckSnapshot, ui: PopupUiState, width
 	if (issue) {
 		lines.push("");
 		lines.push(divider(width, theme));
-		lines.push(...renderIssueDetailBlock(issue, theme, width));
+		lines.push(...renderIssueDetailBlock(issue, theme, width, statsByIssue.get(issue.issue)));
 	}
 	return lines;
 }
 
-function formatOverviewHeader(theme: Theme, width: number): string {
-	const line = `${pad(label(theme, "ID"), 18)} ${pad(label(theme, "STATE"), 14)} ${pad(label(theme, "HARNESS"), 10)} ${pad(label(theme, "PR"), 8)} ${pad(label(theme, "SUBSTATE"), 26)} ${label(theme, "AGE")}`;
+function formatOverviewHeader(theme: Theme, width: number, hasStats: boolean): string {
+	const base = `${pad(label(theme, "ID"), 18)} ${pad(label(theme, "STATE / PROMPT"), 32)} ${pad(label(theme, "HARNESS"), 10)} ${pad(label(theme, "PR"), 8)}`;
+	const stats = hasStats ? ` ${pad(label(theme, "COST / TURNS / TOKENS"), 30)}` : "";
+	const line = `${base}${stats} ${label(theme, "AGE")}`;
 	return truncateToWidth(line, width, "");
 }
 
-function formatOverviewRow(issue: IssueRecord, theme: Theme, width: number): string {
+function formatOverviewRow(issue: IssueRecord, theme: Theme, width: number, stats: string | undefined, hasStats: boolean): string {
 	const id = pad(theme.fg("text", issue.issue), 18);
-	const state = pad(stateBadge(theme, issue.state), 14);
+	const stateAndPrompt = issue.substate
+		? `${stateBadge(theme, issue.state)} ${theme.fg("dim", "·")} ${tagBadge(theme, issue.substate)}`
+		: stateBadge(theme, issue.state);
+	const state = pad(stateAndPrompt, 32);
 	const harness = pad(harnessChip(theme, issue.harness), 10);
 	const pr = pad(issue.pr_number ? theme.fg("accent", `#${issue.pr_number}`) : theme.fg("dim", "—"), 8);
-	const sub = pad(issue.substate ? tagBadge(theme, issue.substate) : theme.fg("dim", "—"), 26);
+	const statsCell = hasStats ? ` ${pad(stats ? theme.fg("dim", stats) : theme.fg("dim", "—"), 30)}` : "";
 	const age = formatAge(ageSecondsSince(issue.last_polled_at));
-	return truncateToWidth(`${id} ${state} ${harness} ${pr} ${sub} ${theme.fg("dim", age)}`, width, "");
+	return truncateToWidth(`${id} ${state} ${harness} ${pr}${statsCell} ${theme.fg("dim", age)}`, width, "");
 }
 
-function renderIssueDetailBlock(issue: IssueRecord, theme: Theme, width: number): string[] {
+function renderIssueDetailBlock(issue: IssueRecord, theme: Theme, width: number, stats?: AgentsBridgeItem): string[] {
 	const lines: string[] = [];
 	lines.push(`${theme.fg("customMessageLabel", theme.bold(issue.issue))} ${theme.fg("dim", "·")} ${stateBadge(theme, issue.state)} ${theme.fg("dim", "·")} ${harnessChip(theme, issue.harness)}`);
 	if (issue.pane_target) lines.push(`${label(theme, "pane:")} ${theme.fg("text", issue.pane_target)}`);
@@ -426,6 +458,11 @@ function renderIssueDetailBlock(issue: IssueRecord, theme: Theme, width: number)
 	if (issue.worktree) lines.push(`${label(theme, "wt:")}   ${theme.fg("text", compactPath(issue.worktree))}`);
 	if (issue.pr_number) lines.push(`${label(theme, "PR:")}   ${theme.fg("accent", `#${issue.pr_number}`)}`);
 	if (issue.substate) lines.push(`${label(theme, "tag:")}  ${tagBadge(theme, issue.substate)}`);
+	const usageText = formatUsageCompact(stats?.usage);
+	if (usageText) {
+		const modelSuffix = stats?.model ? ` ${theme.fg("dim", `(${stats.model})`)}` : "";
+		lines.push(`${label(theme, "usage:")} ${theme.fg("text", usageText)}${modelSuffix}`);
+	}
 	if (issue.unknown_since) {
 		const sec = ageSecondsSince(issue.unknown_since);
 		lines.push(`${label(theme, "unknown:")} ${theme.fg("warning", formatAge(sec))}`);
@@ -445,19 +482,28 @@ function renderIssueDetailBlock(issue: IssueRecord, theme: Theme, width: number)
 	return lines.flatMap((line) => wrapLine(line, width));
 }
 
+interface LiveEvent {
+	ts: string;          // HH:MM:SS short form, for display
+	isoTs: string;       // full ISO timestamp, for sorting
+	kind: "daemon" | "decision" | "event-pending" | "event-wake" | "heartbeat-fold";
+	line: string;
+	count?: number;
+}
+
 function renderLiveFeedTab(snapshot: FlightdeckSnapshot, ui: PopupUiState, width: number, theme: Theme, viewportRows: number, cwd: string): string[] {
 	const max = Math.max(20, Math.floor(settingNumber("liveFeedLines", 200, cwd)));
-	const events: Array<{ ts: string; kind: string; line: string }> = [];
+	const raw: LiveEvent[] = [];
 	for (const line of (snapshot.daemon.logTail ?? []).slice(-max)) {
-		const ts = (line.match(/^[^ ]+/)?.[0] ?? "").slice(11, 19);
-		events.push({ kind: "daemon", line, ts });
+		const isoTs = line.match(/^[^ ]+/)?.[0] ?? "";
+		raw.push({ kind: classifyDaemonLogLine(line) === "heartbeat" ? "daemon" : "daemon", line, ts: isoTs.slice(11, 19), isoTs });
 	}
 	const decisions = flatDecisionsLog(snapshot.master, max);
 	for (const d of decisions) {
-		events.push({ kind: "decision", line: `${d.ts} [decision] ${d.issue} ${d.prompt_tag} → ${d.answer}`, ts: d.ts.slice(11, 19) });
+		raw.push({ kind: "decision", line: `${d.ts} [decision] ${d.issue} ${d.prompt_tag} → ${d.answer}`, ts: d.ts.slice(11, 19), isoTs: d.ts });
 	}
 	for (const ev of snapshot.pendingEvents.slice(-max)) {
-		events.push({ kind: "event-pending", line: `${ev.ts ?? ""} [pending] pane=${ev.pane_id ?? "?"} tag=${ev.tag ?? "?"} reason=${ev.reason ?? "?"} age=${ev.stable_age_sec ?? 0}s`, ts: (ev.ts ?? "").slice(11, 19) });
+		const isoTs = ev.ts ?? "";
+		raw.push({ kind: "event-pending", line: `${isoTs} [pending] pane=${ev.pane_id ?? "?"} tag=${ev.tag ?? "?"} reason=${ev.reason ?? "?"} age=${ev.stable_age_sec ?? 0}s`, ts: isoTs.slice(11, 19), isoTs });
 	}
 	for (const ev of snapshot.wakeEvents.slice(-max)) {
 		const tag = ev.classifier_tag ?? "?";
@@ -465,11 +511,14 @@ function renderLiveFeedTab(snapshot: FlightdeckSnapshot, ui: PopupUiState, width
 		const extra = ev.event_type === "question" && typeof ev.question === "object"
 			? ` request_id=${ev.request_id ?? "?"}`
 			: ev.event_type === "subagent-completion" ? " subagent-completion" : "";
-		events.push({ kind: "event-wake", line: `${ev.ts ?? ""} [adapter:${ev.harness ?? "?"}] pane=${ev.pane_id ?? "?"} tag=${tag}${extra}${text ? ` :: ${text}` : ""}`, ts: (ev.ts ?? "").slice(11, 19) });
+		const isoTs = ev.ts ?? "";
+		raw.push({ kind: "event-wake", line: `${isoTs} [adapter:${ev.harness ?? "?"}] pane=${ev.pane_id ?? "?"} tag=${tag}${extra}${text ? ` :: ${text}` : ""}`, ts: isoTs.slice(11, 19), isoTs });
 	}
-	events.sort((a, b) => a.line.localeCompare(b.line));
+	// Chronological order — the prior `localeCompare(line)` sort mixed daemon
+	// timestamps with adapter timestamps and obscured causality.
+	raw.sort((a, b) => a.isoTs.localeCompare(b.isoTs));
+	const events = foldHeartbeats(raw);
 	const filtered = ui.search.trim() ? events.filter((e) => e.line.toLowerCase().includes(ui.search.trim().toLowerCase())) : events;
-	clampSelection(ui, filtered.length, viewportRows);
 	const lines: string[] = [];
 	lines.push(searchRow(theme, ui.search, width));
 	lines.push("");
@@ -478,16 +527,70 @@ function renderLiveFeedTab(snapshot: FlightdeckSnapshot, ui: PopupUiState, width
 		return lines;
 	}
 	const rows = Math.max(1, viewportRows - lines.length - 1);
-	const sliceStart = Math.max(0, filtered.length - rows);
-	for (const ev of filtered.slice(sliceStart)) {
-		const colored = ev.kind === "daemon"
-			? colorizeDaemonLogLine(ev.line, theme)
-			: ev.kind === "decision" ? theme.fg("accent", ev.line)
-			: ev.kind === "event-wake" ? theme.fg("text", ev.line)
-			: theme.fg("warning", ev.line);
-		lines.push(truncateToWidth(colored, width, ""));
+	clampSelection(ui, filtered.length, rows);
+	const start = Math.max(0, Math.min(ui.scroll, Math.max(0, filtered.length - rows)));
+	const end = Math.min(filtered.length, start + rows);
+	if (start > 0) lines.push(theme.fg("dim", `↑ ${start} earlier`));
+	for (const [vi, ev] of filtered.slice(start, end).entries()) {
+		const idx = start + vi;
+		const selected = idx === ui.selected;
+		const colored = colorizeLiveEvent(ev, theme);
+		const rowText = truncateToWidth(colored, width, "");
+		lines.push(selected ? selectedRow(theme, rowText, width) : rowText);
 	}
+	const tail = Math.max(0, filtered.length - end);
+	if (tail > 0) lines.push(theme.fg("dim", `↓ ${tail} more`));
 	return lines;
+}
+
+function colorizeLiveEvent(ev: LiveEvent, theme: Theme): string {
+	switch (ev.kind) {
+		case "daemon": return colorizeDaemonLogLine(ev.line, theme);
+		case "decision": return theme.fg("accent", ev.line);
+		case "event-wake": return theme.fg("text", ev.line);
+		case "event-pending": return theme.fg("warning", ev.line);
+		case "heartbeat-fold": return theme.fg("dim", ev.line);
+	}
+}
+
+// Consecutive `[heartbeat]` daemon lines fold into one summary row so the
+// feed surfaces real activity. Non-heartbeat lines split the run.
+function foldHeartbeats(events: LiveEvent[]): LiveEvent[] {
+	const out: LiveEvent[] = [];
+	let runStart: LiveEvent | undefined;
+	let runEnd: LiveEvent | undefined;
+	let runCount = 0;
+	const flush = () => {
+		if (!runStart || runCount === 0) return;
+		if (runCount === 1) {
+			out.push(runStart);
+		} else {
+			const endTs = runEnd?.ts ?? runStart.ts;
+			out.push({
+				kind: "heartbeat-fold",
+				ts: endTs,
+				isoTs: runEnd?.isoTs ?? runStart.isoTs,
+				line: `${runStart.ts}→${endTs}  ×${runCount} heartbeats (daemon alive)`,
+				count: runCount,
+			});
+		}
+		runStart = undefined;
+		runEnd = undefined;
+		runCount = 0;
+	};
+	for (const ev of events) {
+		const isHeartbeat = ev.kind === "daemon" && /\[heartbeat\]/.test(ev.line);
+		if (isHeartbeat) {
+			if (!runStart) runStart = ev;
+			runEnd = ev;
+			runCount += 1;
+			continue;
+		}
+		flush();
+		out.push(ev);
+	}
+	flush();
+	return out;
 }
 
 function renderConversationsTab(snapshot: FlightdeckSnapshot, conversations: Map<string, ConversationTurn[]>, ui: PopupUiState, width: number, theme: Theme, viewportRows: number, cwd: string): string[] {
@@ -585,6 +688,59 @@ function renderDecisionsTab(snapshot: FlightdeckSnapshot, ui: PopupUiState, widt
 	return lines;
 }
 
+type HarnessKey = "opencode" | "claude" | "pi" | "codex";
+const HARNESS_KEY_BY_NAME: Record<string, HarnessKey> = { opencode: "opencode", claude: "claude", pi: "pi", codex: "codex" };
+
+function isActiveIssue(issue: IssueRecord): boolean {
+	return issue.state !== "merged" && issue.state !== "aborted" && issue.state !== "dead";
+}
+
+function expectedSubscribersByHarness(snapshot: FlightdeckSnapshot): Record<HarnessKey, number> {
+	const out: Record<HarnessKey, number> = { opencode: 0, claude: 0, pi: 0, codex: 0 };
+	for (const issue of Object.values(snapshot.master?.issues ?? {})) {
+		if (!isActiveIssue(issue)) continue;
+		const key = HARNESS_KEY_BY_NAME[issue.harness ?? ""];
+		if (key) out[key] += 1;
+	}
+	return out;
+}
+
+function formatSubscriberCounts(theme: Theme, counts: Record<HarnessKey, number>, expected: Record<HarnessKey, number>): string {
+	const pairs: Array<{ label: string; key: HarnessKey }> = [
+		{ label: "oc", key: "opencode" },
+		{ label: "cc", key: "claude" },
+		{ label: "pi", key: "pi" },
+		{ label: "cx", key: "codex" },
+	];
+	const parts = pairs.map(({ label, key }) => {
+		const actual = counts[key];
+		const want = expected[key];
+		const tag = want > 0 ? `${label}=${actual}/${want}` : `${label}=${actual}`;
+		if (want > 0 && actual < want) return theme.fg("warning", tag);
+		if (want > 0 && actual === want) return theme.fg("success", tag);
+		return theme.fg("text", tag);
+	});
+	return parts.join(theme.fg("dim", " "));
+}
+
+function unsubscribedPanes(snapshot: FlightdeckSnapshot, expected: Record<HarnessKey, number>, counts: Record<HarnessKey, number>): IssueRecord[] {
+	// Heuristic: if a harness has fewer subscribers than active tracked issues
+	// of that harness, surface all active issues for that harness so the user
+	// can spot which one is missing its adapter (e.g., pi-bridge not running).
+	const missingHarnesses = new Set<string>();
+	for (const key of Object.keys(expected) as HarnessKey[]) {
+		if (expected[key] > counts[key]) missingHarnesses.add(key);
+	}
+	if (missingHarnesses.size === 0) return [];
+	const out: IssueRecord[] = [];
+	for (const issue of Object.values(snapshot.master?.issues ?? {})) {
+		if (!isActiveIssue(issue)) continue;
+		const key = HARNESS_KEY_BY_NAME[issue.harness ?? ""];
+		if (key && missingHarnesses.has(key)) out.push(issue);
+	}
+	return out;
+}
+
 function renderDaemonTab(snapshot: FlightdeckSnapshot, ui: PopupUiState, width: number, theme: Theme, viewportRows: number): string[] {
 	const lines: string[] = [];
 	const d = snapshot.daemon;
@@ -598,7 +754,17 @@ function renderDaemonTab(snapshot: FlightdeckSnapshot, ui: PopupUiState, width: 
 	const wp = d.wakePending;
 	lines.push(`${label(theme, "wake-pending:")} ${wp ? theme.fg("warning", `${wp.in_flight?.length ?? 0} in-flight since ${wp.delivered_at?.slice(11, 19) ?? "?"}`) : theme.fg("success", "none")}`);
 	const counts = d.subscriberCounts;
-	lines.push(`${label(theme, "subscribers:")} ${theme.fg("text", `oc=${counts.opencode} cc=${counts.claude} pi=${counts.pi} cx=${counts.codex}`)}`);
+	const expected = expectedSubscribersByHarness(snapshot);
+	lines.push(`${label(theme, "subscribers:")} ${formatSubscriberCounts(theme, counts, expected)}`);
+	const unsubscribed = unsubscribedPanes(snapshot, expected, counts);
+	if (unsubscribed.length > 0) {
+		lines.push(`${label(theme, "unsubscribed:")} ${theme.fg("warning", `${unsubscribed.length} tracked pane${unsubscribed.length === 1 ? "" : "s"} without an adapter subscriber`)}`);
+		for (const issue of unsubscribed.slice(0, 6)) {
+			const hint = issue.pane_target ? `pane ${issue.pane_target}` : "(no pane recorded)";
+			lines.push(`   ${theme.fg("dim", "· ")}${theme.fg("text", issue.issue)} ${theme.fg("dim", "·")} ${harnessChip(theme, issue.harness)} ${theme.fg("dim", "·")} ${theme.fg("dim", hint)}`);
+		}
+		if (unsubscribed.length > 6) lines.push(`   ${theme.fg("dim", `… ${unsubscribed.length - 6} more`)}`);
+	}
 	if (snapshot.masterStatePath) lines.push(`${label(theme, "master state:")} ${theme.fg("text", compactPath(snapshot.masterStatePath))}`);
 	if (snapshot.masterError) lines.push(theme.fg("error", `master read error: ${snapshot.masterError}`));
 	lines.push("");
@@ -636,6 +802,7 @@ export default function flightdeck(pi: ExtensionAPI): void {
 	const cache: DashboardCache = {
 		conversations: new Map(),
 		state: defaultDashboardState(),
+		paneTargetToId: new Map(),
 	};
 	let activeCtx: ExtensionContext | undefined;
 	let poller: ReturnType<typeof setInterval> | undefined;
@@ -650,6 +817,7 @@ export default function flightdeck(pi: ExtensionAPI): void {
 			const turnsPerPane = Math.max(1, Math.floor(settingNumber("conversationsHistory", 5, cwd)));
 			const excerptChars = Math.max(120, Math.floor(settingNumber("conversationExcerptChars", 800, cwd)));
 			cache.conversations = foldWakeEventsIntoConversations(cache.conversations, snapshot.wakeEvents, turnsPerPane, excerptChars);
+			cache.paneTargetToId = buildPaneTargetToIdMap();
 		}
 		cache.lastSnapshot = snapshot;
 		return snapshot;
@@ -698,7 +866,7 @@ export default function flightdeck(pi: ExtensionAPI): void {
 				if (showBanner && snapshot) lines.push(...renderPauseBannerLines(snapshot, theme, width));
 				if (dashboardEnabled && active && snapshot) {
 					if (lines.length > 0) lines.push("");
-					lines.push(...renderDashboardLines(snapshot, theme, width, cache.state, ctx.cwd));
+					lines.push(...renderDashboardLines(snapshot, theme, width, cache.state, ctx.cwd, cache.paneTargetToId));
 				}
 				return lines;
 			},
@@ -847,7 +1015,7 @@ export default function flightdeck(pi: ExtensionAPI): void {
 						const tabRows = Math.max(4, innerRows - lines.length - 3);
 						let body: string[] = [];
 						switch (ui.tab) {
-							case TAB_OVERVIEW: body = renderOverviewTab(snapshot, ui, innerWidth, theme, tabRows); break;
+							case TAB_OVERVIEW: body = renderOverviewTab(snapshot, ui, innerWidth, theme, tabRows, cache.paneTargetToId); break;
 							case TAB_LIVE: body = renderLiveFeedTab(snapshot, ui, innerWidth, theme, tabRows, activePopupCwd(ctx)); break;
 							case TAB_CONVERSATIONS: body = renderConversationsTab(snapshot, cache.conversations, ui, innerWidth, theme, tabRows, activePopupCwd(ctx)); break;
 							case TAB_CONFLICTS: body = renderConflictsTab(snapshot, ui, innerWidth, theme); break;
@@ -874,13 +1042,19 @@ export default function flightdeck(pi: ExtensionAPI): void {
 		const counts: Record<string, number> = {};
 		for (const issue of issues) counts[issue.state ?? "?"] = (counts[issue.state ?? "?"] ?? 0) + 1;
 		const order: IssueState[] = ["prompting", "merge-ready", "submitting", "waiting", "merged", "aborted", "dead"];
-		const summary = order.filter((s) => counts[s]).map((s) => theme.fg(stateColor(s), `${stateGlyph(s)} ${counts[s]} ${s}`)).join(theme.fg("dim", "  ·  "));
+		// Same redundancy-suppression rule as the mini dashboard: when there's
+		// exactly one issue the table row already shows the state badge.
+		const showStateCounts = issues.length > 1;
+		const summary = showStateCounts
+			? order.filter((s) => counts[s]).map((s) => theme.fg(stateColor(s), `${stateGlyph(s)} ${counts[s]} ${s}`)).join(theme.fg("dim", "  ·  "))
+			: "";
 		const queue = snapshot.master?.merge_queue?.length ?? 0;
 		const queuePart = queue > 0 ? ` ${theme.fg("dim", "·")} ${theme.fg("accent", `merge-queue ${queue}`)}` : "";
-		const heartbeat = snapshot.daemon.heartbeatAgeSec;
-		const hbColor = heartbeat === undefined ? "dim" : heartbeat < 30 ? "success" : heartbeat < 120 ? "warning" : "error";
-		const headerRight = `${dotIndicator(theme, snapshot.daemon.pidAlive)} ${theme.fg("dim", "daemon")} ${theme.fg("muted", "·")} ${theme.fg(hbColor, `hb ${formatAge(heartbeat)}`)}`;
-		const sessionLine = `${theme.fg("muted", "session")} ${theme.fg("text", snapshot.tmux.sessionName)} ${theme.fg("dim", snapshot.tmux.sessionId)}`;
+		const headerRight = daemonHealthChip(theme, snapshot.daemon.pidAlive, snapshot.daemon.heartbeatAgeSec);
+		// tmux session_id ($N) is dropped here — it never changes for the life
+		// of the session and visually collides with USD cost strings; the
+		// Daemon tab still shows it for diagnostics.
+		const sessionLine = `${theme.fg("muted", "session")} ${theme.fg("text", snapshot.tmux.sessionName)}`;
 		const left = `${sessionLine}  ${theme.fg("dim", "·")}  ${theme.fg("muted", `${issues.length} issue${issues.length === 1 ? "" : "s"}`)}${summary ? `  ${theme.fg("dim", "·")}  ${summary}` : ""}${queuePart}`;
 		const padded = pad(left, Math.max(0, width - visibleWidth(headerRight) - 2));
 		return truncateToWidth(`${padded}  ${headerRight}`, width, "");

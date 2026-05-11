@@ -121,13 +121,18 @@ export function panelBranch(theme: Theme, branch: "├" | "└" | "│", style: 
 	return theme.fg(PANEL_RULE_COLOR, `${branch}─ `);
 }
 
+// Nerd Font cog (matches pi-agents-tmux dashboard "working" glyph) so the
+// two stacked dashboards read with the same visual weight for the
+// "agent is currently working" row.
+export const COG_GLYPH = "\uf013";
+
 export function stateColor(state: IssueState | string | undefined): "success" | "warning" | "error" | "accent" | "muted" | "dim" {
 	switch (state) {
 		case "merged": return "success";
 		case "merge-ready": return "accent";
 		case "submitting": return "accent";
 		case "prompting": return "warning";
-		case "waiting": return "muted";
+		case "waiting": return "warning";
 		case "aborted": return "error";
 		case "dead": return "error";
 		default: return "dim";
@@ -140,7 +145,7 @@ export function stateGlyph(state: IssueState | string | undefined): string {
 		case "merge-ready": return "▲";
 		case "submitting": return "◆";
 		case "prompting": return "?";
-		case "waiting": return "○";
+		case "waiting": return COG_GLYPH;
 		case "aborted": return "✗";
 		case "dead": return "×";
 		default: return "·";
@@ -201,6 +206,25 @@ export function bool(theme: Theme, value: boolean | undefined, ok = "yes", bad =
 
 export function dotIndicator(theme: Theme, alive: boolean): string {
 	return alive ? theme.fg("success", "●") : theme.fg("error", "●");
+}
+
+// Combined daemon health: dot + "daemon" label, optionally followed by a
+// staleness suffix when the heartbeat is older than ~30s. Replaces the
+// two-token `● daemon  ·  hb Xs` rendering so the header has one canonical
+// daemon-health object instead of two stating the same fact.
+export function daemonHealthChip(theme: Theme, alive: boolean, heartbeatAgeSec: number | undefined): string {
+	if (!alive) return `${theme.fg("error", "●")} ${theme.fg("error", "daemon dead")}`;
+	if (heartbeatAgeSec === undefined) return `${theme.fg("warning", "●")} ${theme.fg("warning", "daemon no-pulse")}`;
+	if (heartbeatAgeSec >= 120) return `${theme.fg("error", "●")} ${theme.fg("error", `daemon stale ${formatAgeShort(heartbeatAgeSec)}`)}`;
+	if (heartbeatAgeSec >= 30) return `${theme.fg("warning", "●")} ${theme.fg("warning", `daemon stale ${formatAgeShort(heartbeatAgeSec)}`)}`;
+	return `${theme.fg("success", "●")} ${theme.fg("dim", "daemon")}`;
+}
+
+function formatAgeShort(sec: number): string {
+	if (sec < 60) return `${sec}s`;
+	if (sec < 3600) return `${Math.floor(sec / 60)}m`;
+	if (sec < 86_400) return `${Math.floor(sec / 3600)}h`;
+	return `${Math.floor(sec / 86_400)}d`;
 }
 
 export function muted(theme: Theme, text: string): string { return theme.fg("dim", text); }

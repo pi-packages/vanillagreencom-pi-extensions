@@ -9,14 +9,14 @@ When Pi is running as the flightdeck **master agent** in a tmux session, this ex
 ## What it shows
 
 - **Pause banner** — when flightdeck master sets `paused_for_user`, a high-contrast yellow-framed banner appears above the editor with the issue id, reason, and prompt excerpt. Clears automatically when master resumes.
-- **Persistent dashboard widget** — compact tree of tracked issues with state badges, harness chip, launch model/effort when available, PR number, last decision, and age. Rendered only in the master/coordinator pane; suppressed in child subagent panes (detected via `PI_SUBAGENT_CHILD_AGENT`) so the same project state isn't echoed inside each agent.
+- **Persistent dashboard widget** — compact tree of tracked issues with state badges, harness chip, launch model/effort when available, PR number, last decision, age, and per-pane cost/turns/tokens (sourced from pi-agents-tmux via the `vstack.pi.agents` bridge when both extensions are installed). Rendered only in the master/coordinator pane; suppressed in child subagent panes (detected via `PI_SUBAGENT_CHILD_AGENT`) so the same project state isn't echoed inside each agent. Daemon health collapses into a single dot+label chip — only shown explicitly when stale (≥ 30s) or dead.
 - **`/flightdeck` popup** (F6) — full mission-control view with six tabs:
-  - **Overview** — one row per tracked issue, with detail block for the selected one.
-  - **Live feed** — daemon log, pending events queue, adapter wake events, and decisions interleaved.
+  - **Overview** — one row per tracked issue with `STATE / PROMPT` (combined), harness, PR, cost/turns/tokens, and age; detail block for the selected issue includes usage + model.
+  - **Live feed** — chronologically sorted daemon log + pending events + adapter wake events + decisions, with consecutive `[heartbeat]` lines folded into a single summary row and `↑/↓` scrollback through the full backlog.
   - **Conversations** — last assistant turn per inner pane, captured from adapter wake events.
   - **Conflicts & merges** — merge queue + file-level conflict graph edges.
   - **Decisions** — flat audit of every prompt-tag → answer master has issued.
-  - **Daemon** — pid, heartbeat age, busy/wake-pending state, subscriber counts, log tail.
+  - **Daemon** — pid, heartbeat age, busy/wake-pending state, subscriber counts shown as `actual/expected` per harness (green when matched, yellow when short), an `unsubscribed:` row listing tracked panes without an adapter sidecar, and the daemon log tail.
 
 ## Read-only by design
 

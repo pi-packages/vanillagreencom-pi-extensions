@@ -7,6 +7,7 @@ export const CONFIG_ID = "@vanillagreen/pi-agents-tmux";
 export const SESSION_BRIDGE_PACKAGE_ID = "@vanillagreen/pi-session-bridge";
 export const INSTALL_SYMBOL = Symbol.for("vstack.pi-agents-tmux.installed");
 export const STATUSLINE_SYMBOL = Symbol.for("vstack.pi-agents-tmux.statusline");
+export const STATS_BRIDGE_SYMBOL = Symbol.for("vstack.pi.agents");
 export const MAX_PARALLEL_TASKS = 8;
 export const MAX_CONCURRENCY = 4;
 export const COLLAPSED_ITEM_COUNT = 10;
@@ -31,6 +32,21 @@ export interface SubagentStatuslineInfo {
 
 export interface SubagentStatuslineBridge {
 	getCurrentSubagent(cwd?: string): SubagentStatuslineInfo | undefined;
+}
+
+export interface SubagentStatsItem {
+	agent: string;
+	paneId?: string;
+	status?: string;
+	kind?: string;
+	model?: string;
+	usage?: { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number; contextTokens: number; turns: number };
+	updatedAt?: string;
+}
+
+export interface SubagentStatsBridge {
+	getByPaneId(paneId: string): SubagentStatsItem | undefined;
+	list(): SubagentStatsItem[];
 }
 
 export const AGENT_ASCII_COLOR_SEQUENCE: AgentAsciiColor[] = ["magenta", "green", "blue", "cyan", "yellow", "red"];

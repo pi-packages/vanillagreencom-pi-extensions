@@ -178,6 +178,15 @@ Use `steer_subagent` for mid-run correction. It targets `pi-session-bridge` (`st
 
 Use `stop_subagent` to kill a persistent pane from the parent agent. It removes the pane registry/dashboard row and marks any non-terminal active task as blocked, but preserves the session file so the next default start/delegation resumes memory.
 
+## Cross-extension stats bridge
+
+The extension publishes a read-only stats bridge on `globalThis[Symbol.for("vstack.pi.agents")]` with two methods:
+
+- `getByPaneId(paneId: string)` — returns the current dashboard item for a tmux pane id (`%N`), including `usage` (input/output/cache/cost/turns/contextTokens) and `model` if known.
+- `list()` — returns all dashboard items.
+
+Other vstack extensions (e.g. `pi-flightdeck`) join their own per-pane records against this bridge to surface live cost/turns/tokens without depending on internals.
+
 ## Artifacts and events
 
 - One-shot JSON-mode agents write JSONL transcripts under `transcripts/<agent>/`.

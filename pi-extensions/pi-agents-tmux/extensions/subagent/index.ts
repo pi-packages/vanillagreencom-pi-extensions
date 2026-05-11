@@ -143,10 +143,13 @@ import {
 	type PaneTaskStatus,
 	type SingleResult,
 	type SteerSubagentDetails,
+	STATS_BRIDGE_SYMBOL,
 	STATUSLINE_SYMBOL,
 	type SubagentDashboardItem,
 	type SubagentDashboardState,
 	type SubagentDetails,
+	type SubagentStatsBridge,
+	type SubagentStatsItem,
 	type SubagentStatuslineBridge,
 	SUBAGENT_WIDGET_KEY,
 	type UsageStats,
@@ -247,6 +250,27 @@ export default function (pi: ExtensionAPI) {
 	let agentCommandCompletions: Array<{ value: string; label: string; description: string; pane: boolean }> = [];
 	let dashboardState: SubagentDashboardState = { collapsed: false, mode: "normal", visible: true, items: {} };
 	let dashboardCtx: ExtensionContext | undefined;
+
+	const toStatsItem = (item: SubagentDashboardItem): SubagentStatsItem => ({
+		agent: item.agent,
+		paneId: item.paneId,
+		status: item.status,
+		kind: item.kind,
+		model: item.model,
+		usage: item.usage,
+		updatedAt: item.updatedAt,
+	});
+	const statsBridge: SubagentStatsBridge = {
+		getByPaneId(paneId: string) {
+			if (!paneId) return undefined;
+			const match = Object.values(dashboardState.items).find((item) => item.paneId === paneId);
+			return match ? toStatsItem(match) : undefined;
+		},
+		list() {
+			return Object.values(dashboardState.items).map(toStatsItem);
+		},
+	};
+	(globalThis as unknown as Record<PropertyKey, unknown>)[STATS_BRIDGE_SYMBOL] = statsBridge;
 
 	const syncDashboard = (ctx = dashboardCtx) => {
 		if (!ctx?.hasUI || childAgentName || !dashboardEnabled(ctx.cwd) || !dashboardState.visible) {
