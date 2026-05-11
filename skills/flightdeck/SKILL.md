@@ -206,11 +206,7 @@ Daemon env vars (read by `flightdeck-daemon`):
 
 ## Testing
 
-Local tests live under `tests/` (see `tests/README.md`). `tests/live-wake.sh` is the full daemon wake smoke test: it spawns a real Pi master in tmux, smoke-tests `pane-poll --batch -` against the live bash inner pane when run inside tmux, starts `flightdeck-daemon --in-tmux-window --master-harness pi`, rings that pane's bell, then asserts the wake reached Pi through `pi-bridge history` and that the daemon log recorded `harness=pi via=pi-bridge` (failing if the log is absent). Runtime is roughly 2 minutes and requires tmux, a real `pi` binary, GNU bash 5+, GNU date, `jq`, and `git`.
-
-Use `tests/live-wake.sh --no-tmux` for CI-friendly shape checks only. It validates GNU bash/date, executable script paths, and bash syntax without spawning tmux, Pi, or the daemon.
-
-Daemon artifacts can be cleaned between runs with `rm -f /run/user/$UID/flightdeck/fd-*-s*.* /tmp/flightdeck-$UID/fd-*-s*.* 2>/dev/null || true`.
+Daemon/wake-path smoke test at `tests/live-wake.sh` (see `tests/README.md`). Only relevant when debugging the daemon, pane-poll, or wake delivery — normal master operation never invokes it.
 
 ## Workflows
 
