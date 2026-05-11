@@ -197,11 +197,13 @@ oc_register_port_pid() {
 # the spawn-discovery file. Caller (pane-respond / pane-poll) tries the
 # registry FIRST; this is the fallback when no registry entry exists yet
 # (e.g., open-terminal just ran but watch.md hasn't called pane-registry
-# init). Empty stdout + non-zero exit when no spawn file or fields blank.
+# init). Uses the same freshness gate as pane-registry oc-attach-args.
+# Empty stdout + non-zero exit when no spawn file, stale adapter, or fields blank.
 oc_attach_args_from_spawn() {
   local issue="$1"
   local spawn_file; spawn_file=$(oc_spawn_file "$issue")
   [[ -f "$spawn_file" ]] || return 1
+  oc_adapter_is_fresh "$issue" 2>/dev/null || return 1
   local url sid
   url=$(jq -r '.url // ""' "$spawn_file" 2>/dev/null || echo "")
   sid=$(jq -r '.session_id // ""' "$spawn_file" 2>/dev/null || echo "")

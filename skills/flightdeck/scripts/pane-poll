@@ -193,7 +193,7 @@ if [[ "$HARNESS" == "claude" && $oc_used -eq 0 ]]; then
     derived_issue=$(oc_issue_from_pane_target "$DERIVE_TARGET")
     if [[ -n "$derived_issue" ]]; then
       cc_spawn="$(cc_spawn_file "$derived_issue")"
-      if [[ -f "$cc_spawn" ]]; then
+      if [[ -f "$cc_spawn" ]] && cc_adapter_is_fresh "$derived_issue" 2>/dev/null; then
         cc_url=$(jq -r '.url // ""' "$cc_spawn" 2>/dev/null || echo "")
         cc_transcript=$(jq -r '.transcript // ""' "$cc_spawn" 2>/dev/null || echo "")
         if [[ -n "$cc_url" && -n "$cc_transcript" ]]; then
@@ -260,7 +260,7 @@ if [[ "$HARNESS" == "codex" && $oc_used -eq 0 && $cc_used -eq 0 && $pi_used -eq 
     derived_issue=$(oc_issue_from_pane_target "$DERIVE_TARGET")
     if [[ -n "$derived_issue" ]]; then
       cx_spawn="$(cx_spawn_file "$derived_issue")"
-      if [[ -f "$cx_spawn" ]]; then
+      if [[ -f "$cx_spawn" ]] && cx_adapter_is_fresh "$derived_issue" 2>/dev/null; then
         cx_url=$(jq -r '.url // ""' "$cx_spawn" 2>/dev/null || echo "")
         cx_thread=$(jq -r '.thread_id // ""' "$cx_spawn" 2>/dev/null || echo "")
         if [[ -n "$cx_url" && -n "$cx_thread" ]]; then
