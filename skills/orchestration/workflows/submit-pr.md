@@ -48,7 +48,20 @@ fi
    PR_NUM=$(.agents/skills/github/scripts/github.sh -C "[WORKTREE_PATH]" pr-view --json number,state 2>/dev/null | jq -r .number)
    ```
 
-3. **Build PR body** from current workflow state using template (omit empty sections):
+3. **Build PR body** from current workflow state using the template below (omit empty sections).
+
+   **PR body MUST be written to a file before being passed to `pr-create`.** PR bodies frequently contain Markdown backticks (`` `WindowKind` ``, fenced code blocks, validation command lists). Passing them inline through any shell that performs command substitution — including unquoted heredocs in nested workflows — will execute those backticks against the local shell and corrupt the body. Use one of:
+
+   ```bash
+   BODY_FILE="[WORKTREE_PATH]/tmp/pr-body-[ISSUE_ID]-$(date +%Y%m%d-%H%M%S).md"
+   mkdir -p "$(dirname "$BODY_FILE")"
+   cat > "$BODY_FILE" <<'PR_BODY_EOF'
+   ## Summary
+   - ...
+   PR_BODY_EOF
+   ```
+
+   The quoted heredoc terminator (`<<'PR_BODY_EOF'`) is what disables backtick interpolation — the unquoted form (`<<PR_BODY_EOF`) does **not** and is forbidden for PR bodies. Alternatively, write the file via your harness's `write` / `Write` tool with the full Markdown as the string content; that path performs no shell interpretation.
 
    ```markdown
    ## Summary
@@ -81,20 +94,22 @@ fi
 
 4. **Create or update PR**:
 
-   **No existing PR** → create with `defer-ci` label:
+   **No existing PR** → create with `defer-ci` label. Always pass the body via `--body-file`:
    ```bash
    ISSUE_TITLE=$(.agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID] | jq -r '.title')
 
    .agents/skills/github/scripts/github.sh -C "[WORKTREE_PATH]" pr-create \
      --title "[PREFIX]([ISSUE_ID]): $ISSUE_TITLE" \
-     --body "[PR_BODY]" \
+     --body-file "$BODY_FILE" \
      --label defer-ci
    ```
 
-   **Existing PR** (`$PR_NUM` set) → update body and ensure label:
+   **Existing PR** (`$PR_NUM` set) → update body and ensure label. `gh pr edit` also supports `--body-file`:
    ```bash
-   gh pr edit "$PR_NUM" --body "[PR_BODY]" --add-label defer-ci 2>/dev/null || true
+   gh pr edit "$PR_NUM" --body-file "$BODY_FILE" --add-label defer-ci 2>/dev/null || true
    ```
+
+   **Never** inline a PR body containing backticks or fenced code blocks via `--body "..."`. If you must produce one for tooling that lacks `--body-file`, write to a file and use `gh pr edit "$PR_NUM" --body-file "$BODY_FILE"` rather than constructing the argument in shell.
 
 ---
 

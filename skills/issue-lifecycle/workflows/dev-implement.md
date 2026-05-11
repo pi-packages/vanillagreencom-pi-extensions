@@ -328,6 +328,14 @@ Development-only feature exception: do not apply `needs-perf-test` for work isol
 Future work beyond current scope. NOT for the next agent — for backlog/orchestrator.
 (Skip if none)
 
+**Marker prefixes** — use the prefixes below for bullets that belong to a different lifecycle stage of the current PR, not to the backlog. The orchestrator's `review-pr.md` § 9 audit drops these so they are not converted into new tracked issues:
+
+- `current_workflow_action:` — Item the current `review-pr` cycle should handle itself (e.g., "recompute coverage table"). Do not file as a new issue.
+- `handoff_to_submit_pr:` — Item the upcoming `submit-pr` step will produce (e.g., "PR description must record before/after CI wall-time"). Belongs in the PR body, not in the issue tracker.
+- `handoff_to_merge_pr:` — Item the eventual `merge-pr` step will handle.
+
+Bullets without a prefix are treated as genuine new backlog work and routed through the TPM audit.
+
 ### Handoff Notes
 Context the next agent in this bundle needs to complete its current-scope work (e.g., struct changes, API contracts, file locations). Do NOT put aspirational suggestions or future work here — those belong in Discovered Work.
 (Skip if none)

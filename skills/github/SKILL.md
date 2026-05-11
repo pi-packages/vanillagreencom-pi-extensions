@@ -124,6 +124,18 @@ Bot token supports direct tokens (`ghp_*`, `gho_*`, `ghs_*`, `ghr_*`, `github_pa
 
 **`Expected VAR_SIGN, actual: UNKNOWN_CHAR`**: Use multi-line GraphQL + `-F` for variables (shell escaping issue with `$` in single-line queries).
 
+**`gh` says `bad credentials` / `HTTP 401` even though `gh auth status` is healthy**: A stale or wrong-account `GH_TOKEN` / `GITHUB_TOKEN` in the environment masks the keyring/`gh auth login` credentials — `gh` prefers the env var. This happens often when a bot token was exported for one command in a parent shell and is still active. Verify:
+
+```bash
+# Are env tokens leaking into this shell?
+env | grep -E '^(GH_TOKEN|GITHUB_TOKEN)='
+
+# Inspect what gh resolves:
+gh auth status
+```
+
+If an unwanted token is set, prefer scoping it down (`GH_TOKEN="" gh ...` for a single call) or unset it explicitly: `unset GH_TOKEN GITHUB_TOKEN`. The `pr-create` wrapper above intentionally sets `GH_TOKEN="$token"` only for its one subprocess; it does not export it into the parent shell.
+
 ## Dependencies
 
 - `gh` CLI (authenticated)

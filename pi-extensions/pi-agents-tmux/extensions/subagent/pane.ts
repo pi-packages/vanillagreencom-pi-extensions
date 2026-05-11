@@ -790,7 +790,14 @@ export async function runPersistentPaneAgent(
 
 	const queued = await queuePersistentPaneTask(runtimeRoot, parentSessionId, defaultCwd, agent, task, cwd, parentModel, parentThinkingLevel, pi, pi.getActiveTools());
 	const sessionText = queued.sessionMode === "live" ? "reused live pane" : queued.sessionMode === "resumed" ? "resumed saved pane session" : "started new pane session";
-	const text = queued.duplicate ? `Duplicate task for ${agent.name} already queued; reused existing task ${queued.taskId}.` : `Queued task for ${agent.name} (${sessionText}).`;
+	// Surface the taskId in the assistant-visible content so the orchestrator
+	// can persist it without an extra get_subagent_result round-trip. The
+	// structured `taskId` field on the return is preserved for tool callers
+	// that read it directly; this text exists for harnesses that only see the
+	// content text of a tool result.
+	const text = queued.duplicate
+		? `Duplicate task for ${agent.name} already queued; reused existing task ${queued.taskId}. Task ID: ${queued.taskId}`
+		: `Queued task for ${agent.name} (${sessionText}). Task ID: ${queued.taskId}`;
 	return {
 		agent: agent.name,
 		agentSource: agent.source,

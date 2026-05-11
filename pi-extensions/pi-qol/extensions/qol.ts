@@ -50,6 +50,7 @@ import {
 	conversationTranscriptText,
 	firstUserMessageText,
 	generateAutoRenameName,
+	isStaleCtxError,
 	withAutoRenamePrefix,
 } from "./qol/session-rename.js";
 import {
@@ -122,34 +123,56 @@ export default function qol(pi: ExtensionAPI): void {
 	};
 
 	const attemptAutoRename = async (ctx: ExtensionContext, options: { force?: boolean; fullConversation?: boolean; notify?: boolean } = {}) => {
-		const force = options.force === true;
-		if (!force && !autoRenameEnabled(ctx.cwd)) return;
-		if (autoRenameInProgress) return;
-		if (!force && (autoRenameAttempted || pi.getSessionName())) return;
-		const branch = ctx.sessionManager.getBranch?.() ?? [];
-		const maxInputChars = Math.max(200, Math.floor(settingNumber("sessionAutoRename.maxInputChars", 2000, ctx.cwd)));
-		const sourceText = options.fullConversation ? conversationTranscriptText(branch, maxInputChars) : firstUserMessageText(branch);
-		if (!sourceText) {
-			if (force) autoRenameNotify(ctx, "No user message found to name this session.", "warning", true);
-			return;
-		}
-		const generation = autoRenameGeneration;
-		if (!force) autoRenameAttempted = true;
-		autoRenameInProgress = true;
+		// All ctx reads here can throw if the captured context has been replaced
+		// by newSession / fork / switchSession / reload. Wrap the whole body so
+		// a stale ctx aborts the rename quietly instead of crashing pi (and
+		// killing the in-flight tool dispatch that triggered agent_end).
 		try {
-			const result = await generateAutoRenameName(sourceText, ctx, options.fullConversation === true);
-			if (generation !== autoRenameGeneration) return;
-			if (!result.name) {
-				autoRenameNotify(ctx, "No session name generated.", "warning", options.notify === true || force);
+			const force = options.force === true;
+			let cwd: string | undefined;
+			try {
+				cwd = ctx.cwd;
+			} catch (error) {
+				if (isStaleCtxError(error)) return;
+				throw error;
+			}
+			if (!force && !autoRenameEnabled(cwd)) return;
+			if (autoRenameInProgress) return;
+			if (!force && (autoRenameAttempted || pi.getSessionName())) return;
+			let branch;
+			try {
+				branch = ctx.sessionManager.getBranch?.() ?? [];
+			} catch (error) {
+				if (isStaleCtxError(error)) return;
+				throw error;
+			}
+			const maxInputChars = Math.max(200, Math.floor(settingNumber("sessionAutoRename.maxInputChars", 2000, cwd)));
+			const sourceText = options.fullConversation ? conversationTranscriptText(branch, maxInputChars) : firstUserMessageText(branch);
+			if (!sourceText) {
+				if (force) autoRenameNotify(ctx, "No user message found to name this session.", "warning", true);
 				return;
 			}
-			if (!force && pi.getSessionName()) return;
-			const name = withAutoRenamePrefix(result.name, ctx.cwd);
-			if (!name) return;
-			pi.setSessionName(name);
-			autoRenameNotify(ctx, `Session named: ${name} (${result.source})`, "info", options.notify === true || force);
-		} finally {
-			if (generation === autoRenameGeneration) autoRenameInProgress = false;
+			const generation = autoRenameGeneration;
+			if (!force) autoRenameAttempted = true;
+			autoRenameInProgress = true;
+			try {
+				const result = await generateAutoRenameName(sourceText, ctx, options.fullConversation === true);
+				if (generation !== autoRenameGeneration) return;
+				if (!result.name) {
+					autoRenameNotify(ctx, "No session name generated.", "warning", options.notify === true || force);
+					return;
+				}
+				if (!force && pi.getSessionName()) return;
+				const name = withAutoRenamePrefix(result.name, cwd);
+				if (!name) return;
+				pi.setSessionName(name);
+				autoRenameNotify(ctx, `Session named: ${name} (${result.source})`, "info", options.notify === true || force);
+			} finally {
+				if (generation === autoRenameGeneration) autoRenameInProgress = false;
+			}
+		} catch (error) {
+			if (isStaleCtxError(error)) return;
+			throw error;
 		}
 	};
 

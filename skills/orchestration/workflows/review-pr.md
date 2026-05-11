@@ -12,7 +12,7 @@ Pre-submission code review with fix handling, QA checks, and issue audit.
 
 **Caller context parameters** (via `⤵`):
 - `worktree`: worktree path
-- `agents` (optional): list of review agent names. Default: all 5.
+- `agents` (optional): list of review agent names. Default: every `reviewer-*` agent discovered in the active harness registry (typically all installed `reviewer-*` from `vstack.toml` `[agent-skills]`, e.g. `reviewer-arch`, `reviewer-doc`, `reviewer-error`, `reviewer-perf`, `reviewer-safety`, `reviewer-security`, `reviewer-structure`, `reviewer-test`). Do not hardcode a count — enumerate from the registry.
 - `lifecycle` (optional): `"managed"` (return to caller at § 11) | `"self"` (default, standalone).
 - `dev_agent` (optional): name of alive dev agent for fix delegation. If absent, fixes use sub-agent tasks.
 - `issue_id` (optional): issue tracker ID. If absent, extracted from branch.
@@ -79,7 +79,16 @@ If `CYCLES > 0`: This is a re-review. Include the "Previous review cycle context
 TEAM=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] '.team_name // empty')
 ```
 
-**Determine agent list**: If `agents` context provided, use only those. Otherwise default to all configured review agents.
+**Determine agent list**: If `agents` context provided, use only those. Otherwise enumerate every `reviewer-*` agent from the active harness registry (do not hardcode a fixed set or count):
+
+```bash
+# Pi: list reviewer agents the current session can dispatch
+.agents/skills/orchestration/scripts/list-review-agents 2>/dev/null \
+  || ls .pi/agents/reviewer-*.md 2>/dev/null | xargs -n1 basename | sed 's/\.md$//' \
+  || ls .claude/agents/reviewer-*.md 2>/dev/null | xargs -n1 basename | sed 's/\.md$//'
+```
+
+If no `reviewer-*` agents are installed, skip review delegation and report `No review agents configured` to the user.
 
 Before any spawn, read existing reviewer state:
 ```bash
@@ -125,6 +134,11 @@ Otherwise, set `EXTERNAL_REVIEW_REQUESTED=true` → § 2.2.
 ```
 
 Delegate to each active review agent in `[AGENTS]` in parallel with the prompt below. **If `EXTERNAL_REVIEW_REQUESTED=true`**, launch the external review (block below) in the *same parallel batch* as the internal reviewers so the user does not wait for serialized completion.
+
+**Harness-specific batching:** External review is a shell command (`second-opinion review`), not an in-harness sub-agent task, so different harnesses combine the two waves differently:
+
+- **Claude Code / Codex / OpenCode** — spawn internal reviewers via the harness's sub-agent task API and run the external review shell command from the same delegation step; the parallel batch is a logical wave, not a single API call.
+- **Pi** (`pi-agents-tmux`) — the `subagent` tool with `tasks: [...]` accepts only Pi agents, not arbitrary shell commands. Launch the external review via `bg_task` action `spawn` **immediately before** the `subagent` parallel-tasks call (or immediately after — ordering does not matter, but they must be in the same turn). Both run concurrently and both count toward the same `OUTSTANDING` set in § 3.
 
 **Delegation prompt:** Follow exactly, fill placeholders, add nothing else. Omit lines/sections with empty placeholders.
 
@@ -505,6 +519,15 @@ Issue suggestions: [N] items → § 9 audit
    ```
    If bundled: also extract from each sub-issue via `.agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID] --with-bundle | jq -r '.children[].id'`.
    Parse "Discovered Work" section bullets into audit items with `origin: "discovered"`, `found_by: [agent]`. Skip if section absent or "(Skip if none)".
+
+   **Filter out workflow-internal handoffs.** Skip any bullet that is already owned by a later step of the current orchestration cycle. These are not discovered work — they are reminders the dev agent left for itself or for `submit-pr`:
+   - Bullet text starts with `handoff_to_submit_pr:` or `handoff_to_merge_pr:` (explicit handoff marker)
+   - Bullet text starts with `current_workflow_action:` (item the current `review-pr` / `submit-pr` cycle will handle itself)
+   - Bullet describes a PR-body / PR-description / submit-pr / merge-pr task **and** the corresponding issue acceptance criterion is still open (`submit-pr.md` will produce it)
+
+   These items must not be routed through the TPM audit — they are already in-flight in the current workflow. Drop them silently from the audit-input file in step 4 below. If unsure whether a bullet is a handoff vs new work, prefer keeping it in the audit (TPM can dedupe), but explicit `handoff_to_*` / `current_workflow_action:` prefixes are authoritative — always skip those.
+
+   Dev agents should prefix such bullets with one of those markers when writing completion summaries; the `issue-lifecycle` dev workflow documents the marker grammar.
 
 3. **Skip if** no issue suggestions AND escalated_items empty AND no discovered work items. → § 10
 

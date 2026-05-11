@@ -30,6 +30,14 @@ export function autoRenameEnabled(cwd?: string): boolean {
 	return settingBoolean("sessionAutoRename.enabled", true, cwd);
 }
 
+// pi raises this exact prefix when a captured ExtensionContext is touched
+// after newSession / fork / switchSession / reload. Recognising it lets us
+// abort gracefully instead of crashing the host process.
+export function isStaleCtxError(error: unknown): boolean {
+	const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+	return /extension ctx is stale/i.test(message);
+}
+
 function autoRenameCtxAlive(ctx: ExtensionContext): boolean {
 	// Auto-rename runs from a deferred timer / async path, so the captured
 	// extension context can be invalidated mid-flight by newSession / fork /
@@ -41,6 +49,16 @@ function autoRenameCtxAlive(ctx: ExtensionContext): boolean {
 		return ctx.hasUI;
 	} catch {
 		return false;
+	}
+}
+
+// Read a ctx property without crashing if the ctx has been replaced. Used
+// for the cwd-derived setting reads that downstream helpers depend on.
+function readCtxCwd(ctx: ExtensionContext): string | undefined {
+	try {
+		return ctx.cwd;
+	} catch {
+		return undefined;
 	}
 }
 
@@ -230,7 +248,13 @@ function modelCost(model: any): number {
 }
 
 async function cheapestAvailableAutoRenameModel(ctx: ExtensionContext): Promise<AutoRenameAuth | undefined> {
-	const registry = ctx.modelRegistry as any;
+	let registry: any;
+	try {
+		registry = ctx.modelRegistry as any;
+	} catch (error) {
+		if (isStaleCtxError(error)) return undefined;
+		throw error;
+	}
 	const rawModels = typeof registry.getAvailable === "function" ? registry.getAvailable() : typeof registry.getAll === "function" ? registry.getAll() : [];
 	const models = Array.isArray(rawModels) ? rawModels.filter((model) => model?.input?.includes?.("text") ?? true) : [];
 	models.sort((a, b) => modelCost(a) - modelCost(b) || modelLabel(a).localeCompare(modelLabel(b)));
@@ -239,7 +263,8 @@ async function cheapestAvailableAutoRenameModel(ctx: ExtensionContext): Promise<
 			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
 			const headers = headerRecord(auth.headers);
 			if (auth.ok && (auth.apiKey || headers)) return { apiKey: auth.apiKey, headers, label: modelLabel(model), model, source: "cheapest" };
-		} catch {
+		} catch (error) {
+			if (isStaleCtxError(error)) return undefined;
 			// Try the next available model.
 		}
 	}
@@ -247,48 +272,58 @@ async function cheapestAvailableAutoRenameModel(ctx: ExtensionContext): Promise<
 }
 
 async function resolveAutoRenameModel(ctx: ExtensionContext, configured: string): Promise<AutoRenameAuth | undefined> {
-	if (configured.trim().toLowerCase() === "cheapest") return cheapestAvailableAutoRenameModel(ctx);
-	const model = resolveConfiguredModel(ctx, configured);
-	if (!model) {
-		autoRenameDebug(ctx, `model not found: ${configured}`, "warning");
-		return undefined;
-	}
 	try {
-		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-		const headers = headerRecord(auth.headers);
-		if (!auth.ok) {
-			autoRenameDebug(ctx, `auth unavailable for ${modelLabel(model)}: ${auth.error}`, "warning");
+		if (configured.trim().toLowerCase() === "cheapest") return await cheapestAvailableAutoRenameModel(ctx);
+		const model = resolveConfiguredModel(ctx, configured);
+		if (!model) {
+			autoRenameDebug(ctx, `model not found: ${configured}`, "warning");
 			return undefined;
 		}
-		if (!auth.apiKey && !headers) {
-			autoRenameDebug(ctx, `no auth for ${modelLabel(model)}; use /login or models.json`, "warning");
+		try {
+			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+			const headers = headerRecord(auth.headers);
+			if (!auth.ok) {
+				autoRenameDebug(ctx, `auth unavailable for ${modelLabel(model)}: ${auth.error}`, "warning");
+				return undefined;
+			}
+			if (!auth.apiKey && !headers) {
+				autoRenameDebug(ctx, `no auth for ${modelLabel(model)}; use /login or models.json`, "warning");
+				return undefined;
+			}
+			return { apiKey: auth.apiKey, headers, label: modelLabel(model), model, source: configured };
+		} catch (error) {
+			if (isStaleCtxError(error)) return undefined;
+			autoRenameDebug(ctx, `auth failed for ${modelLabel(model)}: ${stringifyError(error)}`, "warning");
 			return undefined;
 		}
-		return { apiKey: auth.apiKey, headers, label: modelLabel(model), model, source: configured };
 	} catch (error) {
-		autoRenameDebug(ctx, `auth failed for ${modelLabel(model)}: ${stringifyError(error)}`, "warning");
-		return undefined;
+		if (isStaleCtxError(error)) return undefined;
+		throw error;
 	}
 }
 
 export async function generateAutoRenameName(query: string, ctx: ExtensionContext, fullConversation = false): Promise<{ name?: string; source: string }> {
-	const maxNameChars = Math.max(20, Math.floor(settingNumber("sessionAutoRename.maxNameChars", DEFAULT_AUTO_RENAME_NAME_CHARS, ctx.cwd)));
-	const maxTokens = Math.max(16, Math.floor(settingNumber("sessionAutoRename.maxTokens", DEFAULT_AUTO_RENAME_MAX_TOKENS, ctx.cwd)));
+	// Snapshot cwd once. If the ctx has already gone stale, fall through with
+	// undefined cwd — downstream settings reads handle that and the rename
+	// will abort with "none".
+	const cwd = readCtxCwd(ctx);
+	const maxNameChars = Math.max(20, Math.floor(settingNumber("sessionAutoRename.maxNameChars", DEFAULT_AUTO_RENAME_NAME_CHARS, cwd)));
+	const maxTokens = Math.max(16, Math.floor(settingNumber("sessionAutoRename.maxTokens", DEFAULT_AUTO_RENAME_MAX_TOKENS, cwd)));
 	const prompt = fullConversation
 		? `${AUTO_RENAME_SYSTEM_PROMPT}\n\nName this session using the conversation transcript below. Return only the title.\n\n${query}`
-		: autoRenamePrompt(query, ctx.cwd);
+		: autoRenamePrompt(query, cwd);
 	const message: Message = {
 		content: [{ text: prompt, type: "text" }],
 		role: "user",
 		timestamp: Date.now(),
 	};
 
-	for (const configured of autoRenameModelSettings(ctx.cwd)) {
+	for (const configured of autoRenameModelSettings(cwd)) {
 		const resolved = await resolveAutoRenameModel(ctx, configured);
 		if (!resolved) continue;
 		try {
 			const controller = new AbortController();
-			const timeoutMs = Math.max(1000, Math.floor(settingNumber("sessionAutoRename.timeoutMs", DEFAULT_AUTO_RENAME_TIMEOUT_MS, ctx.cwd)));
+			const timeoutMs = Math.max(1000, Math.floor(settingNumber("sessionAutoRename.timeoutMs", DEFAULT_AUTO_RENAME_TIMEOUT_MS, cwd)));
 			const timeout = setTimeout(() => controller.abort(), timeoutMs);
 			timeout.unref?.();
 			try {
@@ -308,12 +343,13 @@ export async function generateAutoRenameName(query: string, ctx: ExtensionContex
 				clearTimeout(timeout);
 			}
 		} catch (error) {
+			if (isStaleCtxError(error)) return { source: "none" };
 			autoRenameDebug(ctx, `${resolved.label} failed: ${stringifyError(error)}`, "warning");
 		}
 	}
 
-	const deterministic = deterministicAutoRenameName(query, ctx.cwd);
-	return deterministic ? { name: deterministic, source: `fallback:${autoRenameFallbackMode(ctx.cwd)}` } : { source: "none" };
+	const deterministic = deterministicAutoRenameName(query, cwd);
+	return deterministic ? { name: deterministic, source: `fallback:${autoRenameFallbackMode(cwd)}` } : { source: "none" };
 }
 
 export function withAutoRenamePrefix(name: string, cwd?: string): string {
