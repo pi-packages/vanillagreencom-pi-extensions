@@ -256,7 +256,7 @@ The user-visible output blocks at the end of `terminate.md` and `close-issue.md`
 The daemon (`flightdeck-daemon`) drives wake delivery; the master agent only runs when there's work. Operational caveats worth knowing:
 
 - **Worst-case wake latency on master crash**: `FD_WAKE_PENDING_TTL + FD_POLL_SEC` (default 302s). If master crashes between turn-start and ack-clear, the daemon waits one TTL before reverting in-flight state and re-firing.
-- **State directory privacy**: `FD_STATE_DIR` (default `/tmp`) must be user-owned. Recommended `FD_STATE_DIR=$XDG_RUNTIME_DIR/flightdeck` or `/tmp/flightdeck-$UID` with mode 0700.
+- **State directory privacy**: `FD_STATE_DIR` (default `$XDG_RUNTIME_DIR/flightdeck`, fallback `/tmp/flightdeck-$UID`) must be user-owned and mode 0700. Override via env if you need a different location.
 - **PID reuse race**: stranded `.draining.<pid>` files and stale `BUSY_FILE` recovery can be delayed if the kernel reuses a PID before next startup GC. Acceptable in practice — startup GC sweeps within seconds of next daemon start.
 - **Concurrent flightdecks per tmux session**: refused via flock. One daemon per tmux session_id at a time. Run separate sessions if you need parallel flightdeck instances.
 

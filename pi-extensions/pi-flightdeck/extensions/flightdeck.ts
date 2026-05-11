@@ -607,15 +607,14 @@ function foldHeartbeats(events: LiveEvent[]): LiveEvent[] {
 
 function renderConversationsTab(snapshot: FlightdeckSnapshot, conversations: Map<string, ConversationTurn[]>, ui: PopupUiState, width: number, theme: Theme, viewportRows: number, cwd: string): string[] {
 	const issues = sortedIssues(snapshot.master);
+	// Build a pane-id → issue map so the rendered rows show the issue id
+	// alongside the raw pane id. Modern registry entries store the
+	// immutable `pane_id` (`%N`) at init; legacy entries are backfilled by
+	// `pane-registry reconcile`. The conversation Map is keyed by pane_id
+	// from wake events, so this join is direct.
 	const issueByPane = new Map<string, IssueRecord>();
 	for (const issue of issues) {
-		// Modern registry entries store the immutable `pane_id` (`%N`); we key
-		// by it primarily so conversations grouped by pane_id from wake
-		// events join cleanly. Fall back to `pane_target` for legacy entries
-		// that predate pane_id storage (those are backfilled opportunistically
-		// by `pane-registry reconcile`).
-		const key = issue.pane_id || issue.pane_target || "";
-		if (key) issueByPane.set(key, issue);
+		if (issue.pane_id) issueByPane.set(issue.pane_id, issue);
 	}
 	const excerptChars = Math.max(120, Math.floor(settingNumber("conversationExcerptChars", 800, cwd)));
 	const lines: string[] = [];
@@ -633,7 +632,9 @@ function renderConversationsTab(snapshot: FlightdeckSnapshot, conversations: Map
 		? entries.filter(([pane, turns]) => `${pane} ${turns.map((t) => t.excerpt).join(" ")}`.toLowerCase().includes(ui.search.trim().toLowerCase()))
 		: entries;
 	for (const [pane, turns] of filtered) {
-		lines.push(`${theme.fg("customMessageLabel", theme.bold(pane))} ${theme.fg("dim", `(${turns.length} turn${turns.length === 1 ? "" : "s"})`)}`);
+		const issue = issueByPane.get(pane);
+		const issueLabel = issue ? ` ${theme.fg("accent", issue.issue)}` : "";
+		lines.push(`${theme.fg("customMessageLabel", theme.bold(pane))}${issueLabel} ${theme.fg("dim", `(${turns.length} turn${turns.length === 1 ? "" : "s"})`)}`);
 		for (const turn of turns.slice(-3)) {
 			const ts = turn.ts.slice(11, 19);
 			lines.push(`  ${theme.fg("dim", ts)} ${harnessChip(theme, turn.harness)} ${theme.fg("dim", "·")} ${tagBadge(theme, turn.tag)}`);
