@@ -11,14 +11,16 @@ show_help() {
     cat << 'EOF'
 Post PR-Level Comment
 
-Usage: post-comment.sh <PR-number> <body>
+Usage: post-comment.sh <PR-number> [body | --body-file PATH]
 
 Arguments:
   PR-number    PR number (or branch name, or empty for current branch)
-  body         Comment text
+  body         Comment text (inline; unsafe for Markdown with backticks)
 
 Options:
-  --dry-run    Show what would be posted without executing
+  --body-file PATH  Read body from a file (preferred for any Markdown
+                    with backticks, code fences, or shell metachars).
+  --dry-run         Show what would be posted without executing
 
 Output:
 {
@@ -27,8 +29,15 @@ Output:
 }
 
 Examples:
-  # Post comment to PR
+  # Plain string only — safe inline
   post-comment.sh 23 "Addressed all feedback"
+
+  # Markdown with backticks/code — use --body-file
+  cat > tmp/comment.md <<'EOF'
+  ## Summary
+  - Fixed `WindowKind` enum.
+  EOF
+  post-comment.sh 23 --body-file tmp/comment.md
 
   # Current branch's PR
   post-comment.sh "" "Changes pushed"
@@ -43,24 +52,34 @@ EOF
 post_comment() {
     local pr_ref=""
     local body=""
+    local body_file=""
+    local body_set=false body_file_set=false
+    local pr_ref_set=false
     local dry_run="false"
 
-    # Parse arguments
+    # Parse arguments. Positional body is kept for backward compatibility,
+    # but new orchestration callers should use --body-file.
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --help|-h)
                 show_help
                 exit 0
                 ;;
+            --body)
+                body="$2"; body_set=true; shift 2
+                ;;
+            --body-file)
+                body_file="$2"; body_file_set=true; shift 2
+                ;;
             --dry-run)
                 dry_run="true"
                 shift
                 ;;
             *)
-                if [ -z "$pr_ref" ] || [ "$pr_ref" = "--" ]; then
-                    pr_ref="$1"
-                elif [ -z "$body" ]; then
-                    body="$1"
+                if [ "$pr_ref_set" = false ]; then
+                    pr_ref="$1"; pr_ref_set=true
+                elif [ "$body_set" = false ]; then
+                    body="$1"; body_set=true
                 else
                     echo "{\"error\": \"Unexpected argument: $1\"}" >&2
                     exit 1
@@ -70,8 +89,25 @@ post_comment() {
         esac
     done
 
+    # Resolve body source: --body-file wins when set, else positional/--body.
+    if [ "$body_set" = true ] && [ "$body_file_set" = true ]; then
+        echo '{"error": "--body and --body-file are mutually exclusive"}' >&2
+        exit 1
+    fi
+    if [ "$body_file_set" = true ]; then
+        if [ -z "$body_file" ]; then
+            echo '{"error": "--body-file requires a non-empty path argument"}' >&2
+            exit 1
+        fi
+        if [ ! -r "$body_file" ]; then
+            echo "{\"error\": \"--body-file path not readable: $body_file\"}" >&2
+            exit 1
+        fi
+        body=$(cat -- "$body_file")
+    fi
+
     if [ -z "$body" ]; then
-        echo '{"error": "Comment body required"}' >&2
+        echo '{"error": "Comment body required (positional, --body, or --body-file)"}' >&2
         exit 1
     fi
 

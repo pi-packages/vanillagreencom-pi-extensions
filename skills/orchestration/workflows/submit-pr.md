@@ -409,10 +409,15 @@ All bot review comments resolved (or max iterations). Verify no late-arriving th
    - `issue_id`: [ISSUE_ID]
    - `pr_number`: [PR_NUMBER]
 
-2. **Post summary** — skip if no fixes AND no issues created:
+2. **Post summary** — skip if no fixes AND no issues created. Write the summary to a file first so Markdown backticks and code fences cannot be command-substituted by the shell:
    ```bash
-   .agents/skills/github/scripts/github.sh post-comment [PR_NUMBER] "[SUMMARY_CONTENT]"
-   .agents/skills/linear/scripts/linear.sh comments create [ISSUE_ID] --body "[SUMMARY_CONTENT]"
+   SUMMARY_FILE="[WORKTREE_PATH]/tmp/submit-summary-[ISSUE_ID]-$(date +%Y%m%d-%H%M%S).md"
+   mkdir -p "$(dirname "$SUMMARY_FILE")"
+   cat > "$SUMMARY_FILE" <<'SUMMARY_EOF'
+   [filled SUMMARY_CONTENT — see template below]
+   SUMMARY_EOF
+   .agents/skills/github/scripts/github.sh post-comment [PR_NUMBER] --body-file "$SUMMARY_FILE"
+   .agents/skills/linear/scripts/linear.sh comments create [ISSUE_ID] --body "$(cat "$SUMMARY_FILE")"
    ```
 
    **Summary content template** (omit empty sections):

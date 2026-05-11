@@ -241,15 +241,36 @@ export default function qol(pi: ExtensionAPI): void {
 		const delayMs = Math.max(1, Math.floor(settingNumber("compaction.idleTimeoutSeconds", DEFAULT_IDLE_COMPACTION_SECONDS, ctx.cwd))) * 1000;
 		idleCompactionTimer = setTimeout(() => {
 			idleCompactionTimer = undefined;
-			if (!ctx.isIdle?.()) return;
+			// Same stale-ctx risk as auto-rename: the captured ctx may be invalidated
+			// by newSession/fork/switchSession/reload between schedule and fire.
+			// Bail silently if so; the next session_start will reschedule.
+			try {
+				if (!ctx.isIdle?.()) return;
+			} catch (error) {
+				if (isStaleCtxError(error)) return;
+				throw error;
+			}
 			const latestReason = compactionTriggerReason(ctx);
 			if (!latestReason) return;
-			if (ctx.hasUI && settingBoolean("compaction.notify", true, ctx.cwd)) ctx.ui.notify(`QOL idle compaction starting: ${latestReason}`, "info");
-			ctx.compact?.({
-				customInstructions: `QOL idle compaction triggered after inactivity because ${latestReason}. Preserve current task state, decisions, files, blockers, and next steps.`,
-				onComplete: () => { if (ctx.hasUI && settingBoolean("compaction.notify", true, ctx.cwd)) ctx.ui.notify("QOL idle compaction completed.", "info"); },
-				onError: (error: Error) => { if (ctx.hasUI && settingBoolean("compaction.notify", true, ctx.cwd)) ctx.ui.notify(`QOL idle compaction failed: ${stringifyError(error)}`, "error"); },
-			});
+			const notifySafely = (message: string, level: "info" | "error") => {
+				try {
+					if (ctx.hasUI && settingBoolean("compaction.notify", true, ctx.cwd)) ctx.ui.notify(message, level);
+				} catch (error) {
+					if (isStaleCtxError(error)) return;
+					throw error;
+				}
+			};
+			notifySafely(`QOL idle compaction starting: ${latestReason}`, "info");
+			try {
+				ctx.compact?.({
+					customInstructions: `QOL idle compaction triggered after inactivity because ${latestReason}. Preserve current task state, decisions, files, blockers, and next steps.`,
+					onComplete: () => notifySafely("QOL idle compaction completed.", "info"),
+					onError: (error: Error) => notifySafely(`QOL idle compaction failed: ${stringifyError(error)}`, "error"),
+				});
+			} catch (error) {
+				if (isStaleCtxError(error)) return;
+				throw error;
+			}
 		}, delayMs);
 		idleCompactionTimer.unref?.();
 	};

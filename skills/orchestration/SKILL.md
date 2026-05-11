@@ -258,6 +258,8 @@ Rules:
 
 The delegation message (containing the `<delegation_format>` content) follows as a separate message after the bootstrap.
 
+**Pi exception** (`pi-agents-tmux`): one tool call per delegation. The bootstrap above is auto-injected by the child pi process as its system prompt (built from the agent's frontmatter + role boundaries); the `task` argument to `subagent` is the filled `<delegation_format>` content alone. Do not send the bootstrap separately and do not prepend it to the `task` string — either double-injects the role boundaries. See the Pi note at the top of this skill for the full dispatch model.
+
 #### Format Tags Are Literal
 
 `<bootstrap_format>`, `<delegation_format>`, and `<output_format>` tags define exact content. When sending or presenting content from these tags:

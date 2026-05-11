@@ -11,15 +11,16 @@ show_help() {
     cat << 'EOF'
 Reply to Review Thread or Comment
 
-Usage: post-reply.sh <id> <body> [options]
+Usage: post-reply.sh <id> [body | --body-file PATH] [options]
 
 Arguments:
   id            Thread ID (PRRT_...) or numeric comment ID
-  body          Reply text
+  body          Reply text (inline; unsafe for Markdown with backticks)
 
 Options:
-  --pr <N>      PR number (required for numeric comment ID, ignored for thread ID)
-  --dry-run     Show what would be posted without executing
+  --body-file PATH  Read reply body from a file (preferred for Markdown).
+  --pr <N>          PR number (required for numeric comment ID, ignored for thread ID)
+  --dry-run         Show what would be posted without executing
 
 Output:
 {
@@ -28,8 +29,11 @@ Output:
 }
 
 Examples:
-  # Reply to a thread (preferred - uses GraphQL)
+  # Plain reply — safe inline
   post-reply.sh PRRT_kwDOQchwXs5n... "Thanks, fixed!"
+
+  # Markdown reply — use --body-file
+  post-reply.sh PRRT_kwDOQchwXs5n... --body-file tmp/reply.md
 
   # Reply to a comment by numeric ID (legacy - uses REST)
   post-reply.sh 2633519824 "Fixed!" --pr 23
@@ -94,10 +98,12 @@ reply_via_rest() {
 post_reply() {
     local id=""
     local body=""
+    local body_file=""
+    local body_set=false body_file_set=false
+    local id_set=false
     local pr_ref=""
     local dry_run="false"
 
-    # Parse arguments
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --help|-h)
@@ -108,15 +114,21 @@ post_reply() {
                 pr_ref="$2"
                 shift 2
                 ;;
+            --body)
+                body="$2"; body_set=true; shift 2
+                ;;
+            --body-file)
+                body_file="$2"; body_file_set=true; shift 2
+                ;;
             --dry-run)
                 dry_run="true"
                 shift
                 ;;
             *)
-                if [ -z "$id" ]; then
-                    id="$1"
-                elif [ -z "$body" ]; then
-                    body="$1"
+                if [ "$id_set" = false ]; then
+                    id="$1"; id_set=true
+                elif [ "$body_set" = false ]; then
+                    body="$1"; body_set=true
                 else
                     echo "{\"error\": \"Unexpected argument: $1\"}" >&2
                     exit 1
@@ -131,8 +143,24 @@ post_reply() {
         exit 1
     fi
 
+    if [ "$body_set" = true ] && [ "$body_file_set" = true ]; then
+        echo '{"error": "--body and --body-file are mutually exclusive"}' >&2
+        exit 1
+    fi
+    if [ "$body_file_set" = true ]; then
+        if [ -z "$body_file" ]; then
+            echo '{"error": "--body-file requires a non-empty path argument"}' >&2
+            exit 1
+        fi
+        if [ ! -r "$body_file" ]; then
+            echo "{\"error\": \"--body-file path not readable: $body_file\"}" >&2
+            exit 1
+        fi
+        body=$(cat -- "$body_file")
+    fi
+
     if [ -z "$body" ]; then
-        echo '{"error": "Reply body required"}' >&2
+        echo '{"error": "Reply body required (positional, --body, or --body-file)"}' >&2
         exit 1
     fi
 

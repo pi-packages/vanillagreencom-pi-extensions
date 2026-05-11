@@ -106,13 +106,14 @@ run_safety_checks() {
 
 main() {
     local title="" body="" body_file="" base="main" head="" draft=false dry_run=false force=false
+    local body_set=false body_file_set=false
     local -a labels=()
 
     while [ $# -gt 0 ]; do
         case "$1" in
             --title) title="$2"; shift 2 ;;
-            --body) body="$2"; shift 2 ;;
-            --body-file) body_file="$2"; shift 2 ;;
+            --body) body="$2"; body_set=true; shift 2 ;;
+            --body-file) body_file="$2"; body_file_set=true; shift 2 ;;
             --base) base="$2"; shift 2 ;;
             --head) head="$2"; shift 2 ;;
             --label) labels+=("$2"); shift 2 ;;
@@ -124,12 +125,17 @@ main() {
         esac
     done
 
-    # --body and --body-file are mutually exclusive.
-    if [ -n "$body" ] && [ -n "$body_file" ]; then
+    # Track flag presence separately from value so empty arguments fail loudly
+    # (`--body-file ""` must not be silently ignored).
+    if [ "$body_set" = true ] && [ "$body_file_set" = true ]; then
         echo "Error: --body and --body-file are mutually exclusive. Pick one." >&2
         exit 1
     fi
-    if [ -n "$body_file" ]; then
+    if [ "$body_file_set" = true ]; then
+        if [ -z "$body_file" ]; then
+            echo "Error: --body-file requires a non-empty path argument." >&2
+            exit 1
+        fi
         if [ ! -f "$body_file" ]; then
             echo "Error: --body-file path not found: $body_file" >&2
             exit 1
@@ -161,8 +167,12 @@ main() {
     if [ "$dry_run" = true ]; then
         local token_status="not configured (will use current user)"
         [ -n "$token" ] && token_status="configured"
-        local body_preview="${body:-(none)}"
-        [ -n "$body_file" ] && body_preview="(from file: $body_file)"
+        local body_preview="(none)"
+        if [ "$body_file_set" = true ]; then
+            body_preview="(from file: $body_file)"
+        elif [ "$body_set" = true ]; then
+            body_preview="$body"
+        fi
         echo ""
         echo "Would create PR:"
         echo "  Title: $title"
@@ -178,9 +188,9 @@ main() {
     # Build gh command. Prefer --body-file when supplied so callers can avoid
     # shell-interpolation hazards entirely (gh reads the file verbatim).
     local -a cmd=(gh pr create --title "$title" --base "$base" --head "$head")
-    if [ -n "$body_file" ]; then
+    if [ "$body_file_set" = true ]; then
         cmd+=(--body-file "$body_file")
-    elif [ -n "$body" ]; then
+    elif [ "$body_set" = true ]; then
         cmd+=(--body "$body")
     fi
     for label in "${labels[@]}"; do cmd+=(--label "$label"); done

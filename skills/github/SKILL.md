@@ -27,7 +27,7 @@ CLI wrapper for GitHub API operations used in PR workflows. Provides structured 
 | `pr-review-status <N> [--baseline-ts TS --baseline-threads N]` | Check review state, determine if action needed |
 | `pr-list-ready [--all] [--format=safe\|table]` | List PRs ready for merge |
 | `pr-list-failing [--all] [--format=safe\|table]` | List PRs with CI failures |
-| `pr-create [--title T] [--body B] [--draft] [--dry-run] [--force]` | Create PR as bot. Safety checks: not main, has commits, pushed. `--force` skips checks. |
+| `pr-create [--title T] [--body B \| --body-file PATH] [--draft] [--dry-run] [--force]` | Create PR as bot. Safety checks: not main, has commits, pushed. Prefer `--body-file` for Markdown with backticks/code fences; `--body` is safe only for plain strings. `--force` skips checks. |
 | `pr-merge <N> [--check\|--force\|--auto]` | Merge PR. `--check`: JSON readiness only. `--auto`: queue for auto-merge if blocked now. Three exit codes — see below. |
 | `pr-cross-check [N...] [--quick\|--verify]` | Cross-PR analysis. `--verify`: full build+test (auto-detects build system). |
 | `pr-issue <N> [--format=safe\|text]` | Extract issue ID from PR branch (configurable via `GH_ISSUE_PATTERN`) |
@@ -134,7 +134,16 @@ env | grep -E '^(GH_TOKEN|GITHUB_TOKEN)='
 gh auth status
 ```
 
-If an unwanted token is set, prefer scoping it down (`GH_TOKEN="" gh ...` for a single call) or unset it explicitly: `unset GH_TOKEN GITHUB_TOKEN`. The `pr-create` wrapper above intentionally sets `GH_TOKEN="$token"` only for its one subprocess; it does not export it into the parent shell.
+If an unwanted token is set, prefer scoping both variables down for a single call (`gh` honours `GH_TOKEN` then `GITHUB_TOKEN` in order, so clearing only one is not enough):
+
+```bash
+# Single-call scoping — clears both for this one invocation only.
+env -u GH_TOKEN -u GITHUB_TOKEN gh pr list
+# Or, equivalently:
+GH_TOKEN= GITHUB_TOKEN= gh pr list
+```
+
+For the rest of the shell: `unset GH_TOKEN GITHUB_TOKEN`. The `pr-create` wrapper above intentionally sets `GH_TOKEN="$token"` only for its one subprocess; it does not export it into the parent shell.
 
 ## Dependencies
 

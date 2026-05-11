@@ -367,7 +367,13 @@ Issue suggestions: [N] items → § 6.2 audit
    | Already fixed (from § 3) | Use `draft_response` from finding |
 
    ```bash
+   # The reply bodies above are plain strings without backticks or fenced
+   # code, so inline --body (positional) is safe. If a draft_response or
+   # rationale contains backticks/fences (e.g. quoted code suggestions),
+   # write the body to a file and use --body-file instead.
    .agents/skills/github/scripts/github.sh post-reply "[THREAD_ID]" "[REPLY_BODY]" --pr "[PR_NUMBER]"
+   # Markdown-heavy alternative:
+   #   .agents/skills/github/scripts/github.sh post-reply "[THREAD_ID]" --body-file "$REPLY_FILE" --pr "[PR_NUMBER]"
    .agents/skills/github/scripts/github.sh resolve-thread "[THREAD_ID]"
    .agents/skills/orchestration/scripts/workflow-state append [ISSUE_ID] pr_comment_review.replied '{"source_id":"[THREAD_ID]","commit":"[COMMIT_SHA]","outcome":"[applied|skipped|blocked|already_fixed]"}'
    ```
@@ -448,9 +454,10 @@ Before posting, skip any `source_id` already present in `pr_comment_review.repli
 
    **For questions** (automatic): Post `draft_response` from JSON.
 
-   **Posting mechanism:**
-   - Inline threads: `.agents/skills/github/scripts/github.sh post-reply "[THREAD_ID]" "[RESPONSE]" --pr "[PR_NUMBER]"`
-   - PR-level comments: `.agents/skills/github/scripts/github.sh post-comment "[PR_NUMBER]" "> Re: [QUOTE]\n\n[RESPONSE]"`
+   **Posting mechanism** — use inline `--body "..."` only when the response is a plain string. If `[RESPONSE]` quotes the original comment (which usually contains backticks or code fences), write to a file and pass `--body-file`:
+   - Inline threads (plain): `.agents/skills/github/scripts/github.sh post-reply "[THREAD_ID]" "[RESPONSE]" --pr "[PR_NUMBER]"`
+   - Inline threads (Markdown): write to `[WORKTREE_PATH]/tmp/reply-[THREAD_ID].md` then `... post-reply "[THREAD_ID]" --body-file "$REPLY_FILE" --pr "[PR_NUMBER]"`
+   - PR-level comments (Markdown with quoted blocks): write to `[WORKTREE_PATH]/tmp/comment-[PR_NUMBER].md` then `... post-comment "[PR_NUMBER]" --body-file "$COMMENT_FILE"`
    - Use `1.` `2.` `3.` numbering, never `#N` (GitHub auto-links `#N` to PRs/issues)
 
    **Contested bot reviews** — when domain agent classifies a bot's blocking comment as noise:
@@ -507,10 +514,15 @@ If user requests fixes for skipped items → delegate via § 6.1 (single item), 
 1. **Reconcile fixes** — skip if no fixes applied:
    Invoke: `⤵ workflows/fix-reconcile.md § 1-9 → § 7.3 step 2`
 
-2. **Post summary** — skip if no fixes AND no issues created:
+2. **Post summary** — skip if no fixes AND no issues created. Write the summary to a file first so Markdown is shell-safe:
    ```bash
-   .agents/skills/github/scripts/github.sh post-comment [PR_NUMBER] "[SUMMARY_CONTENT]"
-   .agents/skills/linear/scripts/linear.sh comments create [ISSUE_ID] --body "[SUMMARY_CONTENT]"
+   SUMMARY_FILE="[WORKTREE_PATH]/tmp/pr-comments-summary-[ISSUE_ID]-$(date +%Y%m%d-%H%M%S).md"
+   mkdir -p "$(dirname "$SUMMARY_FILE")"
+   cat > "$SUMMARY_FILE" <<'SUMMARY_EOF'
+   [filled SUMMARY_CONTENT — see template below]
+   SUMMARY_EOF
+   .agents/skills/github/scripts/github.sh post-comment [PR_NUMBER] --body-file "$SUMMARY_FILE"
+   .agents/skills/linear/scripts/linear.sh comments create [ISSUE_ID] --body "$(cat "$SUMMARY_FILE")"
    ```
 
    ```markdown

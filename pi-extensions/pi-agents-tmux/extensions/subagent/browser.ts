@@ -703,6 +703,17 @@ function readTranscriptTail(transcriptPath: string | undefined, maxLines: number
 				else if (innerType) push(`${role}: (${innerType})`);
 				continue;
 			}
+			// tool_execution_start/end carry identity in inner.toolName + inner.toolCallId
+			// at the top level (not inside a .message or .call). Render the tool name
+			// and a short id so dedup doesn't collapse two distinct tool runs into a
+			// single bare event-type line.
+			if (innerType && typeof inner?.toolName === "string") {
+				const rawId = typeof inner.toolCallId === "string" ? inner.toolCallId : "";
+				const id = rawId ? rawId.split("|").pop()?.slice(-8) : undefined;
+				const suffix = id ? ` · ${id}` : "";
+				push(`${innerType} ${inner.toolName}${suffix}`);
+				continue;
+			}
 			if (innerType) {
 				push(innerType);
 				continue;

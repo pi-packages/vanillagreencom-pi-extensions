@@ -43,11 +43,17 @@ fi
 
 2. **Skip if** `FIXED_COUNT == 0` AND `AUDIT_ISSUES == 0` AND `PR_ISSUES == 0` AND `ESCALATED_COUNT == 0`. → § 2
 
-3. **Post to git host and issue tracker** — consolidate all review cycle results from state:
+3. **Post to git host and issue tracker** — consolidate all review cycle results from state. Write the summary to a file first so Markdown backticks and fenced code blocks are not command-substituted by the shell (same hazard as the submit-pr PR body):
    ```bash
-   .agents/skills/github/scripts/github.sh post-comment [PR_NUMBER] "[SUMMARY_CONTENT]"
-   .agents/skills/linear/scripts/linear.sh comments create [ISSUE_ID] --body "[SUMMARY_CONTENT]"
+   SUMMARY_FILE="[WORKTREE_PATH]/tmp/post-summary-[ISSUE_ID]-$(date +%Y%m%d-%H%M%S).md"
+   mkdir -p "$(dirname "$SUMMARY_FILE")"
+   cat > "$SUMMARY_FILE" <<'SUMMARY_EOF'
+   [filled SUMMARY_CONTENT — see template below]
+   SUMMARY_EOF
+   .agents/skills/github/scripts/github.sh post-comment [PR_NUMBER] --body-file "$SUMMARY_FILE"
+   .agents/skills/linear/scripts/linear.sh comments create [ISSUE_ID] --body "$(cat "$SUMMARY_FILE")"
    ```
+   The Linear path still uses `--body` because `linear.sh` does not accept `--body-file`; `"$(cat ...)"` is safe because the heredoc has already been written to disk and the substitution only re-reads the literal bytes.
 
    **Summary content template** (omit empty sections):
 

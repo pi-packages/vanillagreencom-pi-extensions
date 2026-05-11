@@ -300,12 +300,22 @@ export default function (pi: ExtensionAPI) {
 
 	const updateDashboard = (item: SubagentDashboardItem) => {
 		const key = dashboardItemKey(item);
+		const existing = dashboardState.items[key];
 		if (item.kind === "pane") {
-			for (const [existingKey, existing] of Object.entries(dashboardState.items)) {
-				if (existingKey !== key && existing.kind === "pane" && existing.agent === item.agent) delete dashboardState.items[existingKey];
+			for (const [existingKey, existingPane] of Object.entries(dashboardState.items)) {
+				if (existingKey !== key && existingPane.kind === "pane" && existingPane.agent === item.agent) delete dashboardState.items[existingKey];
 			}
 		}
-		dashboardState.items[key] = item;
+		// Carry lifecycle timestamps forward when the caller omitted them. Bg
+		// updaters in parallel/single/chain mode (updateOneshotDashboard, the
+		// post-await dashboard refreshes) write only status/message/usage and
+		// would otherwise blow away the startedAt set by subagents:started —
+		// without which appendBgChatMessages cannot emit a delegation row.
+		dashboardState.items[key] = {
+			...item,
+			startedAt: item.startedAt ?? existing?.startedAt,
+			completedAt: item.completedAt ?? existing?.completedAt,
+		};
 		const maxKeep = Math.max(10, dashboardMaxItems(dashboardCtx?.cwd) * 3);
 		const sorted = Object.values(dashboardState.items).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 		dashboardState.items = Object.fromEntries(sorted.slice(0, maxKeep).map((entry) => [dashboardItemKey(entry), entry]));
@@ -1911,8 +1921,12 @@ export default function (pi: ExtensionAPI) {
 			if (details.mode === "single" && details.results.length === 1) {
 				const r = details.results[0];
 				if (r.duplicateQueued) return new Container();
-				const isError = r.exitCode !== 0 || r.stopReason === "error" || r.stopReason === "aborted";
-				const isQueued = !isError && Boolean(r.taskId && r.paneId);
+				// runSingleAgent uses exitCode -1 as the still-running sentinel while
+				// emitting streaming partials; only a positive exitCode (or a terminal
+				// stopReason) is a real failure.
+				const isRunning = r.exitCode === -1;
+				const isError = !isRunning && (r.exitCode > 0 || r.stopReason === "error" || r.stopReason === "aborted");
+				const isQueued = !isError && !isRunning && Boolean(r.taskId && r.paneId);
 				const displayItems = getDisplayItems(r.messages);
 				const finalOutput = getFinalOutput(r.messages);
 				const queued = queuedPaneLine(r);
@@ -1921,7 +1935,9 @@ export default function (pi: ExtensionAPI) {
 				if (expanded) {
 					if (isQueued) return expandedQueuedTaskComponent(r);
 					const container = new Container();
-					let header = agentStatusLine(theme, r.agent, isQueued ? "Queued task" : isError ? "failed" : "completed", isQueued ? "warning" : isError ? "error" : "success", theme.fg("dim", ` · ${isQueued ? "pane" : "bg"}`));
+					const statusLabel = isQueued ? "Queued task" : isRunning ? "working" : isError ? "failed" : "completed";
+					const statusTone = isQueued || isRunning ? "warning" : isError ? "error" : "success";
+					let header = agentStatusLine(theme, r.agent, statusLabel, statusTone, theme.fg("dim", ` · ${isQueued ? "pane" : "bg"}`));
 					if (isError && r.stopReason) header += ` ${theme.fg("error", `[${r.stopReason}]`)}`;
 					header += truncationBadge(r);
 					container.addChild(wrappedText(header));
@@ -1972,7 +1988,9 @@ export default function (pi: ExtensionAPI) {
 					return wrappedText(text);
 				}
 
-				let text = queued || agentStatusLine(theme, r.agent, isError ? "failed" : "completed", isError ? "error" : "success", `${theme.fg("dim", " · bg")}${theme.fg("dim", " · ctrl+o")}`);
+				const compactStatusLabel = isRunning ? "working" : isError ? "failed" : "completed";
+				const compactStatusTone = isRunning ? "warning" : isError ? "error" : "success";
+				let text = queued || agentStatusLine(theme, r.agent, compactStatusLabel, compactStatusTone, `${theme.fg("dim", " · bg")}${theme.fg("dim", " · ctrl+o")}`);
 				if (isError && r.stopReason) text += ` ${theme.fg("error", `[${r.stopReason}]`)}`;
 				text += truncationBadge(r);
 				if (queued) text += `\n${subagentBranch(theme, "└", cwd)}${theme.fg("dim", r.task ? oneLinePreview(r.task, 120) : "queued task")}`;
@@ -2006,7 +2024,18 @@ export default function (pi: ExtensionAPI) {
 
 			if (details.mode === "chain") {
 				const successCount = details.results.filter((r) => r.exitCode === 0).length;
-				const icon = successCount === details.results.length ? theme.fg("success", ICONS.check) : theme.fg("error", ICONS.times);
+				const runningCount = details.results.filter((r) => r.exitCode === -1).length;
+				const chainStepIcon = (r: SingleResult) =>
+					r.exitCode === -1
+						? theme.fg("warning", ICONS.cog)
+						: r.exitCode === 0
+							? theme.fg("success", ICONS.check)
+							: theme.fg("error", ICONS.times);
+				const icon = runningCount > 0
+					? theme.fg("warning", ICONS.cog)
+					: successCount === details.results.length
+						? theme.fg("success", ICONS.check)
+						: theme.fg("error", ICONS.times);
 
 				if (expanded) {
 					const container = new Container();
@@ -2020,7 +2049,7 @@ export default function (pi: ExtensionAPI) {
 					);
 
 					for (const r of details.results) {
-						const rIcon = r.exitCode === 0 ? theme.fg("success", ICONS.check) : theme.fg("error", ICONS.times);
+						const rIcon = chainStepIcon(r);
 						const displayItems = getDisplayItems(r.messages);
 						const finalOutput = getFinalOutput(r.messages);
 
@@ -2067,7 +2096,7 @@ export default function (pi: ExtensionAPI) {
 					theme.fg("toolTitle", theme.bold("chain ")) +
 					theme.fg("accent", `${successCount}/${details.results.length} steps`);
 				for (const r of details.results) {
-					const rIcon = r.exitCode === 0 ? theme.fg("success", ICONS.check) : theme.fg("error", ICONS.times);
+					const rIcon = chainStepIcon(r);
 					const displayItems = getDisplayItems(r.messages);
 					text += `\n\n${theme.fg("muted", `─── Step ${r.step}: `)}${theme.fg("accent", r.agent)} ${rIcon}${truncationBadge(r)}`;
 					if (displayItems.length === 0) text += `\n${theme.fg("muted", "(no output)")}`;

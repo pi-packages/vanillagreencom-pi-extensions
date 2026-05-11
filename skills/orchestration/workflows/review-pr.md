@@ -79,16 +79,18 @@ If `CYCLES > 0`: This is a re-review. Include the "Previous review cycle context
 TEAM=$(.agents/skills/orchestration/scripts/workflow-state get [ISSUE_ID] '.team_name // empty')
 ```
 
-**Determine agent list**: If `agents` context provided, use only those. Otherwise enumerate every `reviewer-*` agent from the active harness registry (do not hardcode a fixed set or count):
+**Determine agent list**: If `agents` context provided, use only those. Otherwise enumerate every `reviewer-*` agent from the active harness registries (do not hardcode a fixed set or count):
 
 ```bash
-# Pi: list reviewer agents the current session can dispatch
-.agents/skills/orchestration/scripts/list-review-agents 2>/dev/null \
-  || ls .pi/agents/reviewer-*.md 2>/dev/null | xargs -n1 basename | sed 's/\.md$//' \
-  || ls .claude/agents/reviewer-*.md 2>/dev/null | xargs -n1 basename | sed 's/\.md$//'
+AGENTS=$(.agents/skills/orchestration/scripts/list-review-agents)
+if [ $? -ne 0 ] || [ -z "$AGENTS" ]; then
+  # Report and skip review delegation.
+  echo "No reviewer-* agents installed in any harness registry; skipping review delegation" >&2
+  # → § 5 (verdict pass, no items to handle)
+fi
 ```
 
-If no `reviewer-*` agents are installed, skip review delegation and report `No review agents configured` to the user.
+The `list-review-agents` script scans `.pi/agents`, `.claude/agents`, `.agents`, `.codex/agents`, and `.opencode/agent` (whichever exist) for `reviewer-*` files, dedupes, and exits non-zero if none are found. The output is one agent name per line.
 
 Before any spawn, read existing reviewer state:
 ```bash
@@ -520,14 +522,15 @@ Issue suggestions: [N] items → § 9 audit
    If bundled: also extract from each sub-issue via `.agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID] --with-bundle | jq -r '.children[].id'`.
    Parse "Discovered Work" section bullets into audit items with `origin: "discovered"`, `found_by: [agent]`. Skip if section absent or "(Skip if none)".
 
-   **Filter out workflow-internal handoffs.** Skip any bullet that is already owned by a later step of the current orchestration cycle. These are not discovered work — they are reminders the dev agent left for itself or for `submit-pr`:
-   - Bullet text starts with `handoff_to_submit_pr:` or `handoff_to_merge_pr:` (explicit handoff marker)
-   - Bullet text starts with `current_workflow_action:` (item the current `review-pr` / `submit-pr` cycle will handle itself)
-   - Bullet describes a PR-body / PR-description / submit-pr / merge-pr task **and** the corresponding issue acceptance criterion is still open (`submit-pr.md` will produce it)
+   **Filter out workflow-internal handoffs.** Skip any Discovered Work bullet whose leading token after `- ` is one of the markers below. The marker MUST be the first token — anything before it (such as `[Type]`) prevents the match. The canonical bullet form is documented in `issue-lifecycle/workflows/dev-implement.md` § 9:
 
-   These items must not be routed through the TPM audit — they are already in-flight in the current workflow. Drop them silently from the audit-input file in step 4 below. If unsure whether a bullet is a handoff vs new work, prefer keeping it in the audit (TPM can dedupe), but explicit `handoff_to_*` / `current_workflow_action:` prefixes are authoritative — always skip those.
+   - `- handoff_to_submit_pr: [doc] PR-body content for X (estimate: N)` — produced by the upcoming `submit-pr` step.
+   - `- handoff_to_merge_pr: [process] ... (estimate: N)` — produced by the eventual `merge-pr` step.
+   - `- current_workflow_action: [doc] ... (estimate: N)` — item the current `review-pr` cycle will handle itself.
 
-   Dev agents should prefix such bullets with one of those markers when writing completion summaries; the `issue-lifecycle` dev workflow documents the marker grammar.
+   Match by exact regex `^-\s+(handoff_to_submit_pr|handoff_to_merge_pr|current_workflow_action):\s`. These items must not be routed through the TPM audit — they are already in-flight in the current workflow. Drop them silently from the audit-input file in step 4 below.
+
+   This filter applies only to Discovered Work bullets parsed from completion summaries. Escalated items and review JSON `category: "issue"` suggestions remain in the audit input unchanged — the orchestrator has already decided those are tracked work.
 
 3. **Skip if** no issue suggestions AND escalated_items empty AND no discovered work items. → § 10
 
