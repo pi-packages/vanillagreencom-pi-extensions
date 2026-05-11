@@ -2,7 +2,7 @@
 
 Pane targeting, bell handling, and capture-pane idioms for safely observing the per-issue panes spawned by orchestration.
 
-> **Fallback path notice:** all four supported harnesses (opencode, claude code, pi, codex) have a wired adapter — `pane-poll` and `pane-respond` route data through HTTP / Unix-socket / WS rather than tmux capture-pane / send-keys. The tmux primitives below remain the **fallback path** for panes whose bridge metadata is absent (legacy session, port exhausted, missing dependency). Daemon and scripts log `<adapter>-unavailable: <reason>` before falling through, never silent.
+> **Fallback path notice:** all four supported harnesses (opencode, claude code, pi, codex) have a wired adapter — `pane-poll` and `pane-respond` route data through HTTP / Unix-socket / WS rather than tmux capture-pane / send-keys. The tmux primitives below remain the **fallback path** for panes whose bridge metadata is absent OR whose recorded metadata is stale. Adapter args (`pane-registry oc-attach-args` / `cc-channel-args` / `pi-bridge-args` / `cx-bridge-args`) gate on per-harness freshness probes — `oc_adapter_is_fresh` (oc server pid alive), `cc_adapter_is_fresh` (cc port reachable + transcript exists), `pi_bridge_is_fresh` (pid alive + socket exists + protocol matches), `cx_adapter_is_fresh` (cx ws host:port reachable). When a probe fails, args are empty and the daemon falls back to capture-pane polling rather than marking the pane subscribed against a dead adapter. Daemon and scripts log `<adapter>-unavailable: <reason>` before falling through, never silent.
 
 ## Pane-0 rule
 
@@ -38,7 +38,7 @@ for pane_idx in $(tmux list-panes -t <session>:<window> -F '#{pane_index}'); do
 done
 ```
 
-Persist the resolved index per issue as `pane_target` in master state (e.g., `"pane_target": "HT:cc-463.0"`). Use it for every subsequent capture-pane and send-keys call on that issue.
+Persist BOTH `pane_target` (`"HT:cc-463.0"`) and the immutable `pane_id` (`"%403"`) in master state. `pane-registry init` resolves and stores both at spawn time; reconcile / drift recovery keep them in sync. The daemon and pane-poll prefer `pane_id` because pi/codex auto-rename their tmux window once the TUI starts, which breaks any `pane_target`-only lookup once the window name changes.
 
 If fingerprinting fails (no sentinel matches on any pane), default to pane 0 and log a warning. Pane 0 is right for opencode and claude code in standard layouts.
 

@@ -33,7 +33,7 @@ cd /path/to/your/project
 vstack add vanillagreencom/vstack --skill flightdeck -y
 ```
 
-Flightdeck's required dependencies (`github`, `linear`, `project-management`, `decider`) are auto-pulled. It's also included by default when an orchestrator-role agent is installed (see `[role-skills]` in `vstack.toml`).
+Flightdeck's required dependencies (`github`, `linear`, `project-management`) are auto-pulled per SKILL.md frontmatter. `decider` and `worktree` are optional. There is no orchestrator role in this repo's root `vstack.toml` — install flightdeck explicitly per project that needs it.
 
 ## System Dependencies
 
@@ -41,13 +41,17 @@ Flightdeck's required dependencies (`github`, `linear`, `project-management`, `d
 
 ## Configuration (env vars)
 
-See `SKILL.md § Configuration` for the canonical list. Common overrides:
+See `SKILL.md § Configuration` for the canonical list (master-loop + daemon). Common overrides:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `FLIGHTDECK_POLL_INTERVAL` | `30` | Seconds between poll cycles |
+| `FD_POLL_SEC` | `2` | Daemon inner-pane poll cadence |
+| `FD_MASTER_TURN_TTL` | `3600` | Maximum master turn duration before the busy lock is treated as stale |
+| `FD_WAKE_PENDING_TTL` | `300` | Wake-pending revert threshold when master crashes mid-turn |
+| `FD_SPAWN_MODE` | `detach` | `detach` (setsid+nohup) or `tmux-window` (visible daemon window); recommended `tmux-window` for codex/opencode/pi/omp |
+| `FD_STATE_DIR` | `$XDG_RUNTIME_DIR/flightdeck` (or `/tmp/flightdeck-$UID`) | Daemon-private state directory |
 | `FLIGHTDECK_FORCE_MERGE_AFTER_SECS` | `240` | UNKNOWN-state wait threshold before considering force-merge |
-| `FLIGHTDECK_STATE_DIR` | `tmp` | Master-state file directory |
+| `FLIGHTDECK_STATE_DIR` | `tmp` | Master-state file directory (project-relative) |
 | `FLIGHTDECK_AUTO_MERGE` | `1` | Set `0` to escalate `merge-now` instead of auto-answering |
 | `FLIGHTDECK_LAUNCH_MODEL` | unset | Default `open-terminal --model` override when the workflow/user does not pass `--model` |
 | `FLIGHTDECK_LAUNCH_EFFORT` | unset | Default `open-terminal --effort` / thinking override when the workflow/user does not pass `--effort` |
@@ -61,10 +65,10 @@ Every script in `scripts/` appears in `SKILL.md`'s Scripts table. No hidden scri
 |--------|--------------|
 | `open-terminal` | Launch worktree(s) with selected harness plus optional `--model`/`--effort` overrides — never hand-roll tmux/terminal commands |
 | `parallel-groups` | Read/manage parallel issue groups |
-| `flightdeck-state` | Atomic CRUD on `tmp/flightdeck-state-<TMUX_SESSION>.json` (init/get/set/append/increment/archive/master-busy). `init` sweeps stale `.tmp.<PID>` orphans; `archive` rotates terminated state to `<file>-<terminated_at>.json.archive`; `master-busy lock\|unlock\|check` writes the daemon's busy-lockfile atomically |
-| `flightdeck-daemon` | External bash wake driver. Per-pane subscribers across all four harnesses (opencode/claude/pi/codex) emit normalized turn-end events into the wake-events log; daemon drains and wakes master via `tmux paste-buffer` on canonical classifier tags. Adapter-unavailable panes fall back to the legacy capture-pane + bell + hash-stable loop. Actions: `start \| stop \| status \| events \| ack` |
+| `flightdeck-state` | Atomic CRUD on `tmp/flightdeck-state-<TMUX_SESSION>.json` (init/get/set/append/increment/archive/master-busy). `init` sweeps stale `.tmp.<PID>` orphans; `archive` rotates terminated state to `<file>-<terminated_at>.json.archive`; `master-busy lock [--master-pane <%N>] [--owner-pid <PID>] \| unlock \| check` writes the daemon's busy-lockfile atomically. Daemon validates the lock by pane-alive + (owner-pid alive if recorded) + `FD_MASTER_TURN_TTL`. Do NOT pass the calling shell's `$$` |
+| `flightdeck-daemon` | External bash wake driver. Per-pane subscribers across all four harnesses (opencode/claude/pi/codex) emit normalized turn-end events into the wake-events log; daemon drains and wakes master on canonical classifier tags. Adapter-unavailable / freshness-failed panes fall back to the legacy capture-pane + bell + hash-stable loop; the per-tick subscriber liveness watchdog clears `OC_SUBSCRIBED[pane]` if a sidecar dies so the pane resumes on fallback. Wake delivery is per-harness: Pi via `pi-bridge send --pid <master_pid>`, Codex via `$flightdeck` grammar, others via `/flightdeck` slash form; tmux paste-buffer is the fallback transport. Actions: `start [--master-harness <h>] [--inner-harnesses <h1>,...] [--foreground\|--in-tmux-window] [--debug-pane <%N>] \| stop \| status \| health \| find-window \| events \| ack` |
 | `codex-app-server-spawn` / `codex-app-server-stop` | Idempotent per-session bring-up + teardown of the codex `app-server --listen ws://...` shared by all `codex --remote` panes |
-| `pane-registry` | Issue↔pane mapping wrapper. Tracks per-harness bridge metadata (oc/cc/pi/cx URL+id+port fields); per-harness `*-bridge-args <ISSUE>` and `find-by-pane <pane-target>` lookups drive adapter dispatch in pane-respond / pane-poll |
+| `pane-registry` | Issue↔pane mapping wrapper. `init` resolves the immutable tmux `pane_id` (`%N`) alongside `pane_target`; `reconcile` keys liveness on `pane_id` and opportunistically backfills it for legacy entries; `list --format inner-panes` emits `pane_id` when present. Tracks per-harness bridge metadata (oc/cc/pi/cx URL+id+port fields); per-harness `*-bridge-args <ISSUE>` and `find-by-pane <pane-target>` lookups drive adapter dispatch in pane-respond / pane-poll. Adapter-args paths gate on freshness probes (`<h>_adapter_is_fresh`): stale URL/socket/pid → empty stdout → daemon falls back to capture-pane instead of marking the pane subscribed against a dead adapter |
 | `pane-poll` | Bell + per-harness adapter (opencode `/session/<id>/message`, claude JSONL tail, `pi-bridge history`, `codex-bridge turns`) or tmux capture-pane fallback + classify |
 | `pane-respond` | Send to pane: free-text / `--option N` / `--option-multi` / `--keys` / `--question <reqID> --answer "<label>" \| --answer-multi "l1,l2" \| --answer-text "free text" \| --answers-json '[[...]]' \| --reject` (opencode/Pi structured question APIs; Pi free text requires `allowCustom=true`; `--answers-json` handles multi-tab requests). Per-harness adapters route via `opencode run --attach` / question API, channel POST, `pi-bridge send` / `answer|reject`, `codex-bridge send`; tmux paste-buffer fallback. Validates rebase payloads have preserve/apply/verify triplet |
 | `pane-clear-bell` | Atomic chained `select-window` cycle |
@@ -87,9 +91,9 @@ Lessons that motivated this skill, distilled into domain-grouped docs under `pat
 
 State file: `tmp/flightdeck-state-<TMUX_SESSION>.json`. Inspect with `jq`.
 
-To see flightdeck's view of the world from outside:
+To see flightdeck's view of the world from outside, run from the project root (or pass `--session <NAME>`):
 ```
-$(.agents/skills/flightdeck/scripts/flightdeck-state get $SESSION) | jq
+.agents/skills/flightdeck/scripts/flightdeck-state get '.' | jq
 ```
 
 To see what flightdeck would do for a captured prompt without sending:

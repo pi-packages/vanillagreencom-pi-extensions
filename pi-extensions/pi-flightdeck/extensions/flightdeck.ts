@@ -609,12 +609,13 @@ function renderConversationsTab(snapshot: FlightdeckSnapshot, conversations: Map
 	const issues = sortedIssues(snapshot.master);
 	const issueByPane = new Map<string, IssueRecord>();
 	for (const issue of issues) {
-		// best-effort pane_target → pane_id mapping is not stored in master state;
-		// we key conversations by pane_id from wake events. Match via pane_target's
-		// session:window.0 form vs the pane's pane_id is impossible without tmux,
-		// so we render conversations grouped by pane_id with whatever issue id we
-		// can match by harness+window prefix.
-		issueByPane.set(issue.pane_target ?? "", issue);
+		// Modern registry entries store the immutable `pane_id` (`%N`); we key
+		// by it primarily so conversations grouped by pane_id from wake
+		// events join cleanly. Fall back to `pane_target` for legacy entries
+		// that predate pane_id storage (those are backfilled opportunistically
+		// by `pane-registry reconcile`).
+		const key = issue.pane_id || issue.pane_target || "";
+		if (key) issueByPane.set(key, issue);
 	}
 	const excerptChars = Math.max(120, Math.floor(settingNumber("conversationExcerptChars", 800, cwd)));
 	const lines: string[] = [];

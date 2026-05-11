@@ -117,9 +117,9 @@ Lessons distilled from real multi-issue session experience are grouped by domain
 |--------|---------|
 | `open-terminal` | Launch worktree(s) for one or more issues with selected harness plus optional model/effort overrides — **never hand-roll tmux/terminal commands; use this for every session spawn** |
 | `parallel-groups` | Read/manage parallel issue groups |
-| `flightdeck-state` | Master-state CRUD wrapper — atomic init/get/set/append/increment/archive for `tmp/flightdeck-state-<TMUX_SESSION>.json`. `init` sweeps stale `.tmp.<PID>` orphans from prior crashed writes; `archive` rotates a terminated state file to `<file>-<terminated_at>.json.archive` so the next session in the same tmux name starts clean. `master-busy lock\|unlock\|check` writes/clears the daemon's master-busy lockfile atomically (temp+mv) |
-| `flightdeck-daemon` | External bash wake driver. Per-pane subscribers — opencode HTTP-attach (Phase 1), claude JSONL tail (Phase 2), pi-bridge stream (Phase 3), codex-bridge stream (Phase 4) — emit normalized turn-end events into a wake-events log; daemon main loop drains and routes canonical-tag events through wake_master. Panes without adapter metadata fall through to the legacy capture-pane / bell / hash-stable loop. Coalesces multiple ready panes into one wake. Writes events JSONL master can drain. Actions: `start \| stop \| status \| events \| ack` |
-| `pane-registry` | Issue↔pane mapping CRUD. `init` resolves and stores the immutable tmux `pane_id` (`%N`) alongside `pane_target`. `reconcile` and `remove-merged` check liveness by `pane_id` (with `window_name` fallback for legacy entries; legacy entries are backfilled opportunistically). Required because pi/codex auto-rename their tmux window once the TUI starts, which a `window_name`-keyed reconcile would interpret as the entry being stale. |
+| `flightdeck-state` | Master-state CRUD wrapper — atomic init/get/set/append/increment/archive for `tmp/flightdeck-state-<TMUX_SESSION>.json`. `init` sweeps stale `.tmp.<PID>` orphans from prior crashed writes; `archive` rotates a terminated state file to `<file>-<terminated_at>.json.archive` so the next session in the same tmux name starts clean. `master-busy lock [--master-pane <%N>] [--owner-pid <PID>] \| unlock \| check` writes/clears the daemon's master-busy lockfile atomically (temp+mv). The lock records `{master_pane_id, started_at}` and optionally an `owner_pid`; daemon validates the lock via pane-alive + (owner-pid alive if recorded) + `FD_MASTER_TURN_TTL`. Do NOT pass the calling shell's `$$` as owner-pid — the wrapper exits before the daemon reads the file |
+| `flightdeck-daemon` | External bash wake driver. Per-pane subscribers — opencode HTTP-attach (Phase 1), claude JSONL tail (Phase 2), pi-bridge stream (Phase 3), codex-bridge stream (Phase 4) — emit normalized turn-end events into a wake-events log; daemon main loop drains and routes canonical-tag events through wake_master. Panes without adapter metadata fall through to the legacy capture-pane / bell / hash-stable loop. Per-tick subscriber liveness watchdog clears `OC_SUBSCRIBED[pane]` when the sidecar dies so the pane resumes on capture-pane fallback. Coalesces multiple ready panes into one wake. Wake delivery is per-harness: Pi via `pi-bridge send --pid <master_pid>` (auto-detected from `pi-bridge list` cwd match, or `--master-harness pi` explicit), Codex via `$flightdeck` grammar, others via `/flightdeck` slash form; tmux paste-buffer is the fallback transport when bridge send fails. Same-pid self-exec resume after `FD_MAX_LIFETIME`. Actions: `start [--master-harness <h>] [--inner-harnesses <h1>,...] [--foreground\|--in-tmux-window] [--debug-pane <%N>] \| stop \| status \| health \| find-window \| events \| ack` |
+| `pane-registry` | Issue↔pane mapping CRUD. `init` resolves and stores the immutable tmux `pane_id` (`%N`) alongside `pane_target` (gated on `tmux list-panes -t <pane>` so a bogus `--window` cannot poison `pane_id` with the active pane). `reconcile` and `remove-merged` check liveness by `pane_id` (with `window_name` fallback for legacy entries; legacy entries are backfilled opportunistically). Required because pi/codex auto-rename their tmux window once the TUI starts, which a `window_name`-keyed reconcile would interpret as the entry being stale. `list --format inner-panes` emits `pane_id` when present (daemon `--inner` accepts `%N` directly), `pane_target` otherwise. Adapter args (`oc-attach-args`, `cc-channel-args`, `pi-bridge-args`, `cx-bridge-args`) gate on freshness probes (`<h>_adapter_is_fresh`): stale URL/socket/pid → empty stdout → daemon falls back to capture-pane instead of marking the pane subscribed against a dead adapter. |
 | `pane-poll` | Single-window status read. Per-harness adapter routes: opencode → `GET /session/<id>/message`; claude → tail of `~/.claude/projects/<encoded-cwd>/<uuid>.jsonl`; pi → `pi-bridge history`; codex → `codex-bridge turns`. Tmux `capture-pane` is the fallback when a pane has no bridge metadata. Bell flag + classify. |
 | `pane-respond` | Send a response to a pane. Modes: positional `<payload>` (free-text), `--option N` (numeric option pick — Claude Code uses arrow navigation, opencode/pi/codex adapters send digits as message text), `--option-multi N1,N2,...` (multi-select toggles), `--keys k1,k2,...` (raw key sequence — rejected unless `--keys-allow-tmux`), `--question <reqID> --answer "<label>" \| --answer-multi "l1,l2" \| --answer-text "free text" \| --answers-json '[[...]]' \| --reject` (opencode/Pi structured question APIs; Pi `--answer-text` is only for `allowCustom=true`; `--answers-json` is for multi-tab requests). Adapter routes: opencode → `opencode run --attach --format json` / HTTP question API; claude → channel POST; pi → `pi-bridge send` / `pi-bridge answer|reject`; codex → `codex-bridge send`. Tmux paste-buffer fallback when bridge metadata absent. Validates rebase-multi-choice payloads include the preserve/apply/verify triplet. |
 | `pane-clear-bell` | Atomic chained-command bell clear (no flicker) |
@@ -128,7 +128,7 @@ Lessons distilled from real multi-issue session experience are grouped by domain
 
 ## Schema — master state
 
-`tmp/flightdeck-state-<TMUX_SESSION_ID>.json` is keyed by tmux session ID. It survives compaction and is rehydrated on `watch` re-entry. On terminate, the file is rotated to `tmp/flightdeck-state-<TMUX_SESSION_ID>-<terminated_at>.json.archive` (see `terminate.md § 5`) so the next session reusing the same tmux name doesn't inherit prior state.
+Master state lives at `<project-root>/<FLIGHTDECK_STATE_DIR>/flightdeck-state-<TMUX_SESSION_NAME>.json` (default `<project-root>/tmp/flightdeck-state-<NAME>.json`). `flightdeck-state` keys the filename by `tmux display-message -p '#S'` — the human-readable session **name**, not the session id. Daemon-private files in `FD_STATE_DIR` (default `$XDG_RUNTIME_DIR/flightdeck`, fallback `/tmp/flightdeck-$UID`) are keyed instead by `SESSION_KEY=s<N>` derived from `#{session_id}` (e.g., session id `$21` → `s21`); they survive a tmux session rename, master state does not. The file survives compaction and is rehydrated on `watch` re-entry. On terminate, master state is rotated to `flightdeck-state-<TMUX_SESSION_NAME>-<terminated_at>.json.archive` (see `terminate.md § 5`).
 
 ```json
 {
@@ -140,15 +140,22 @@ Lessons distilled from real multi-issue session experience are grouped by domain
       "window": "<window-name>",
       "pane_target": "<TMUX_SESSION>:<window>.0",
       "pane_id": "%403",
-      "harness": "claude|opencode|codex|...",
+      "harness": "claude|opencode|codex|pi",
       "launch": { "model": "<model-or-null>", "effort": "<effort-or-null>" },
       "worktree": "<absolute path>",
       "pr_number": 0,
+      "oc_url":  "<server-url-or-null>",  "oc_session_id": "<id-or-null>",  "oc_port": 0,
+      "cc_url":  "<server-url-or-null>",  "cc_session_uuid": "<uuid-or-null>",  "cc_port": 0,  "cc_transcript": "<path-or-null>",
+      "pi_bridge_pid": 0,  "pi_bridge_socket": "<path-or-null>",  "pi_session_id": "<id-or-null>",
+      "cx_ws":   "<ws-url-or-null>",  "cx_thread_id": "<id-or-null>",
       "state": "prompting",
       "substate": "merge-ready-but-unknown",
       "unknown_since": "<ISO8601>",
       "last_capture_hash": "sha256:...",
       "last_response_at": "<ISO8601>",
+      "spawned_at": "<ISO8601>",
+      "last_polled_at": "<ISO8601>",
+      "orchestration_started": true,
       "scope_files_declared": 5,
       "scope_files_actual": 27,
       "decisions_log": [
@@ -169,16 +176,30 @@ State enum: `state ∈ {waiting, prompting, submitting, merge-ready, merged, abo
 
 ## Configuration
 
+Master-loop (workflow) env vars:
+
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `FLIGHTDECK_POLL_INTERVAL` | `30` | Seconds between poll cycles in `watch.md` § 2 |
 | `FLIGHTDECK_FORCE_MERGE_AFTER_SECS` | `240` | UNKNOWN-state wait threshold before considering force-merge (predicate also requires APPROVED + green + disjoint) |
-| `FLIGHTDECK_STATE_DIR` | `tmp` | Override for master-state file directory |
+| `FLIGHTDECK_STATE_DIR` | `tmp` | Project-relative master-state file directory |
 | `FLIGHTDECK_DEBOUNCE_CYCLES` | `2` | Consecutive poll cycles required for "all-done" termination check |
 | `FLIGHTDECK_AUTO_MERGE` | `1` | When `0`, the `merge-now` handler escalates instead of auto-answering. For sessions where the human gate is desired (compliance, big-blast-radius PRs) |
 | `FLIGHTDECK_HIJACK_GRACE_SECS` | `90` | Seconds after spawn that master tolerates no orchestration `workflow-state-<ISSUE>.json` before escalating "orchestration-never-started". Catches hijacked panes / failed launches. |
 | `FLIGHTDECK_LAUNCH_MODEL` | unset | Default `open-terminal --model` override when the workflow/user does not pass `--model`. |
 | `FLIGHTDECK_LAUNCH_EFFORT` | unset | Default `open-terminal --effort` / thinking override when the workflow/user does not pass `--effort`. |
+
+Daemon env vars (read by `flightdeck-daemon`):
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `FD_POLL_SEC` | `2` | Inner-pane poll cadence |
+| `FD_OC_POLL_SEC` | `2` | OpenCode subscriber poll cadence |
+| `FD_GRACE_SEC` | `30` | Cold-start grace per pane; bells suppressed during this window |
+| `FD_WAKE_PENDING_TTL` | `300` | Wake-pending revert threshold when master crashes mid-turn |
+| `FD_MASTER_TURN_TTL` | `3600` | Maximum master turn duration before the busy lock is treated as stale even if the master pane is still alive |
+| `FD_SPAWN_MODE` | `detach` | `detach` (setsid+nohup, default) or `tmux-window` (visible in-session daemon window). Recommended `tmux-window` for codex/opencode/pi/omp masters where backgrounding is unreliable |
+| `FD_MAX_LIFETIME` | `14400` | Seconds before daemon exec()s itself for a fresh process (0 disables) |
+| `FD_STATE_DIR` | `$XDG_RUNTIME_DIR/flightdeck` (or `/tmp/flightdeck-$UID`) | Daemon-private state directory (heartbeat, busy, wake-pending, subscriber pid files). Must be user-owned, mode 0700 |
 
 ## Workflows
 
@@ -223,9 +244,11 @@ The user-visible output blocks at the end of `terminate.md` and `close-issue.md`
 3. **Verify-don't-trust**. Never advance an issue's state on an agent's claim alone. Run the verification grep first.
 4. **Cleanup scope is anchored to the asking pane's registered worktree**, not to a global "what flightdeck thinks". Extract the path from the prompt text and compare to the registry entry for that pane.
 5. **Aggressive autonomy on known shapes; escalate on novel shapes**. The classifier returns a tag for known prompt shapes. Unmatched prompts return `generic-multi-choice` and the handler escalates to user — it does NOT pick the first option.
-6. **Daemon-driven wake; no blocking sleeps**. `flightdeck-daemon` (spawned at session start by `watch.md § 1`) is the canonical wake mechanism — it polls inner panes every 2s and types `/flightdeck watch --from-daemon<Enter>` into the master pane via `tmux paste-buffer` when any pane needs attention. Master ends each turn after running `flightdeck-daemon ack` (atomic drain + clear-pending) and removing the master-busy lockfile. No `sleep` workaround, no harness scheduler primitive — the daemon owns wake delivery for every harness uniformly.
+6. **Daemon-driven wake; no blocking sleeps**. `flightdeck-daemon` (spawned at session start by `watch.md § 1`) is the canonical wake mechanism — it polls inner panes every `FD_POLL_SEC` seconds (default 2) and delivers a per-harness wake payload to the master when any pane needs attention. Master ends each turn after running `flightdeck-daemon ack` (atomic drain + clear-pending) and removing the master-busy lockfile. No `sleep` workaround, no harness scheduler primitive — the daemon owns wake delivery for every harness uniformly.
+   - **Wake payload is harness-aware** (see `wake_payload_for_harness` in `flightdeck-daemon`). Codex receives `$flightdeck watch --from-daemon`, Pi receives `/skill:flightdeck watch --from-daemon`, Claude / OpenCode / unset receive `/flightdeck watch --from-daemon`. The daemon `start` call accepts `--master-harness <h>` for this; if omitted, the daemon auto-detects Pi via a `pi-bridge list` cwd match against the master pane and otherwise defaults to the slash form.
+   - **Wake transport is harness-aware**. For Pi masters the daemon calls `pi-bridge send --pid <master_pid>` because tmux paste-buffer never reaches Pi's alt-screen input loop; for all other harnesses (and as a fallback when the Pi bridge is unresolved) the daemon uses `tmux load-buffer + paste-buffer + send-keys Enter` against `master_pane_id`.
    - **Claude Code optional**: `ScheduleWakeup({delaySeconds: 1800})` MAY be armed as a defensive fallback ("if daemon dies, wake me"). Not load-bearing.
-   - **Other harnesses**: no scheduler needed. The daemon's send-keys works for claude/codex/opencode/pi uniformly.
+   - **Other harnesses**: no scheduler needed. The daemon owns wake delivery uniformly via the per-harness payload + transport described above.
 7. **All scripts must appear in this SKILL.md's Scripts table.** No "hidden" scripts. README.md mirrors the table for human readers.
 
 ## Operational caveats

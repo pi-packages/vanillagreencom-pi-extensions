@@ -93,9 +93,12 @@ For each tracked issue currently in a non-terminal state (`waiting | prompting |
    ```
 2. Parse JSON. If `dead: true` → `pane-registry set-state <ISSUE> dead` and continue.
 
-   **Pane-fingerprint drift recovery**: if `fingerprint_match: false` AND `pane_index_suggest` is non-null, the orchestrator pane moved (sub-agent restart, layout reflow, harness restart). Update the registry to the suggested index and log a warning:
+   **Pane-fingerprint drift recovery**: if `fingerprint_match: false` AND `pane_index_suggest` is non-null, the orchestrator pane moved (sub-agent restart, layout reflow, harness restart). Re-resolve both the human-readable `pane_target` AND the immutable `pane_id` (the daemon now keys liveness on `pane_id` — see x-harness review finding #4; updating only `pane_target` would leave the daemon watching the old pane id):
    ```
-   .agents/skills/flightdeck/scripts/pane-registry set <ISSUE> pane_target "\"<session>:<window>.<suggest>\""
+   NEW_TARGET="<session>:<window>.<suggest>"
+   NEW_PANE_ID=$(tmux display-message -p -t "$NEW_TARGET" '#{pane_id}' 2>/dev/null || echo "")
+   .agents/skills/flightdeck/scripts/pane-registry set <ISSUE> pane_target "\"$NEW_TARGET\""
+   [[ -n "$NEW_PANE_ID" ]] && .agents/skills/flightdeck/scripts/pane-registry set <ISSUE> pane_id "\"$NEW_PANE_ID\""
    ```
    Re-poll on the new index this cycle. If `fingerprint_match: false` AND `pane_index_suggest` is null, no sibling matched the orchestrator sentinel either — the pane may be genuinely idle/blank or the agent crashed; treat the read as authoritative for this cycle and let the state machine route normally (often `idle` → no-op).
 3. Otherwise update state machine based on `tag`:
@@ -217,7 +220,7 @@ End-of-turn handoff to the daemon:
    ```
    Order matters: clearing wake-pending FIRST then releasing busy means the daemon's next tick sees a clean state. Reversing the order leaves a window where daemon could create a new wake before master cleared pending.
 
-3. **End the turn**. The daemon will type `/flightdeck watch --from-daemon<Enter>` into this pane when the next attention-ready event arrives. Do NOT use `sleep` (blocks the turn) and do NOT use `ScheduleWakeup`-equivalent (no longer needed; daemon owns wake). On Claude Code specifically, you MAY arm a defensive `ScheduleWakeup({delaySeconds: 1800})` as a "if daemon is dead, wake me anyway" safety net — but this is optional, not load-bearing.
+3. **End the turn**. The daemon will send the per-harness wake payload to this pane when the next attention-ready event arrives. Wake delivery uses `pi-bridge send --pid <master_pid>` for Pi masters and `tmux load-buffer + paste-buffer + send-keys Enter` for everyone else; payload is `/flightdeck watch --from-daemon` for Claude/OpenCode/default, `$flightdeck watch --from-daemon` for Codex, `/skill:flightdeck watch --from-daemon` for Pi (see `wake_payload_for_harness` in `flightdeck-daemon`). Do NOT use `sleep` (blocks the turn) and do NOT use `ScheduleWakeup`-equivalent (no longer needed; daemon owns wake). On Claude Code specifically, you MAY arm a defensive `ScheduleWakeup({delaySeconds: 1800})` as a "if daemon is dead, wake me anyway" safety net — but this is optional, not load-bearing.
 
 If `paused_for_user` is set, do NOT release the busy lock or end the turn. Wait for user to re-invoke `watch` after addressing the pause.
 
