@@ -4,7 +4,7 @@ Phase 2 of the unified-comms migration. Replaces tmux send-keys + capture-pane f
 
 ## Mechanism
 
-**Inbound (send):** an MCP webhook server (vendored at `lib/claude-channel-server/webhook.ts`, ~30 line Bun) is spawned by claude itself as an MCP stdio subprocess via the per-pane `.mcp.json`. The webhook listens on a flightdeck-allocated TCP port (range `8780-8879`, host-global, flock-guarded). Master POSTs to `http://127.0.0.1:<port>/` and the body arrives in claude's context as:
+**Inbound (send):** an MCP webhook server (vendored at `lib/claude-channel-server/webhook.ts`, small Bun server) is spawned by claude itself as an MCP stdio subprocess via the per-pane `.mcp.json`. The webhook listens on a flightdeck-allocated TCP port (range `8780-8879`, host-global, flock-guarded). `GET /healthz` is reserved for side-effect-free freshness probes; master POSTs to `http://127.0.0.1:<port>/` and the body arrives in claude's context as:
 
 ```
 <channel source="webhook" session="<ISSUE>" path="/" method="POST">
@@ -85,7 +85,7 @@ The flightdeck mechanism (port allocator, MCP webhook, JSONL tail, daemon subscr
 | `pane-poll` buffer | Last assistant text from JSONL transcript | `tmux capture-pane` |
 | Daemon wake source | JSONL tail filtered for `stop_reason` arrival | bell flag + hash-stability |
 
-Falls back when bridge metadata absent (legacy session, port exhausted, claude < 2.1.80, wrong auth, no bun) — logged as `cc-channel-unavailable: <reason>`. Never silent.
+Falls back when bridge metadata absent or stale (legacy session, port exhausted, claude < 2.1.80, wrong auth, no bun, transcript missing, `/healthz` fails) — logged as `cc-channel-unavailable: <reason>`. Never silent.
 
 ## Versioning
 

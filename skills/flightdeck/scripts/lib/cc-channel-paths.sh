@@ -33,25 +33,32 @@ cc_pane_id_safe() {
 cc_subscriber_pid_file() { echo "$(fd_resolve_state_dir)/fd-cc-subscriber-${2:?session_key required}-$(cc_pane_id_safe "$1").pid"; }
 
 # Freshness probe for the claude-channel adapter (cross-harness review
-# finding #2). The cc spawn file doesn't carry a server pid, so we check
-# the two artifacts the subscriber needs: a reachable HTTP port and an
-# existing transcript file. /dev/tcp is bash-native (no nc dependency)
-# and short-timed via SECONDS guard.
+# finding #2). The cc spawn file doesn't carry a server pid, so we check the
+# transcript file and hit the webhook's side-effect-free /healthz endpoint.
+# The HTTP result is cached briefly to avoid repeated round trips per cycle.
 cc_adapter_is_fresh() {
   local issue="$1"
   [[ -z "$issue" ]] && return 1
-  local spawn_file port transcript
+  local spawn_file port transcript url key cached body
   spawn_file=$(cc_spawn_file "$issue")
   [[ -f "$spawn_file" ]] || return 1
   port=$(jq -r '.port // empty' "$spawn_file" 2>/dev/null)
   transcript=$(jq -r '.transcript // empty' "$spawn_file" 2>/dev/null)
+  url=$(jq -r '.url // empty' "$spawn_file" 2>/dev/null)
   [[ -n "$transcript" && -f "$transcript" ]] || return 1
   [[ "$port" =~ ^[1-9][0-9]*$ ]] || return 1
-  # Bash /dev/tcp probe with a hard cap. Errors (port closed, ECONNREFUSED)
-  # produce a non-zero exit immediately.
-  ( exec 3<>"/dev/tcp/127.0.0.1/$port" ) 2>/dev/null || return 1
-  exec 3>&- 3<&-
-  return 0
+  [[ -n "$url" ]] || url="http://127.0.0.1:$port"
+  key="cc|$url|$transcript"
+  cached=$(fd_adapter_freshness_cache_get "$key" "${FD_ADAPTER_FRESHNESS_TTL:-5}" 2>/dev/null || echo "")
+  [[ "$cached" == "true" ]] && return 0
+  [[ "$cached" == "false" ]] && return 1
+  body=$(curl -fsS --max-time 1 "$url/healthz" 2>/dev/null || echo "")
+  if grep -q '^ok health' <<< "$body"; then
+    fd_adapter_freshness_cache_set "$key" true 2>/dev/null || true
+    return 0
+  fi
+  fd_adapter_freshness_cache_set "$key" false 2>/dev/null || true
+  return 1
 }
 
 # Probe a TCP port on 127.0.0.1 — returns 0 if free, 1 if in use.

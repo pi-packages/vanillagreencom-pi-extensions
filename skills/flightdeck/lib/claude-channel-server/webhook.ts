@@ -31,12 +31,16 @@ Bun.serve({
   port: PORT,
   hostname: '127.0.0.1',
   async fetch(req) {
+    const url = new URL(req.url)
+    if (url.pathname === '/healthz') {
+      return new Response(`ok health session=${SESSION} port=${PORT}\n`)
+    }
     const body = await req.text()
     await mcp.notification({
       method: 'notifications/claude/channel',
       params: {
         content: body,
-        meta: { session: SESSION, path: new URL(req.url).pathname, method: req.method },
+        meta: { session: SESSION, path: url.pathname, method: req.method },
       },
     })
     return new Response(`ok session=${SESSION} port=${PORT}\n`)

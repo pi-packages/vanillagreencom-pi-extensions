@@ -35,28 +35,29 @@ cx_pane_id_safe() {
 cx_subscriber_pid_file() { echo "$(fd_resolve_state_dir)/fd-cx-subscriber-${2:?session_key required}-$(cx_pane_id_safe "$1").pid"; }
 
 # Freshness probe for the codex app-server adapter (cross-harness review
-# finding #2). cx_spawn_file records ws_url (host:port). Probe the port
-# via /dev/tcp; if unreachable, return non-zero so the daemon falls back
-# to capture-pane instead of marking the pane subscribed against a dead
-# app-server.
+# finding #2). cx_spawn_file records ws_url (host:port) and thread id. Probe
+# the actual JSON-RPC bridge (`list`) instead of only opening the TCP port;
+# cache the result briefly to avoid repeated WebSocket handshakes per cycle.
 cx_adapter_is_fresh() {
   local issue="$1"
   [[ -z "$issue" ]] && return 1
-  local spawn_file url host port
+  local spawn_file url thread key cached timeout
   spawn_file=$(cx_spawn_file "$issue")
   [[ -f "$spawn_file" ]] || return 1
   url=$(jq -r '.url // empty' "$spawn_file" 2>/dev/null)
-  [[ -n "$url" ]] || return 1
-  # url is ws://host:port — strip the scheme and split on `:`.
-  url="${url#ws://}"
-  url="${url#wss://}"
-  host="${url%%:*}"
-  port="${url##*:}"
-  port="${port%%/*}"
-  [[ -n "$host" && "$port" =~ ^[1-9][0-9]*$ ]] || return 1
-  ( exec 3<>"/dev/tcp/$host/$port" ) 2>/dev/null || return 1
-  exec 3>&- 3<&-
-  return 0
+  thread=$(jq -r '.thread_id // empty' "$spawn_file" 2>/dev/null)
+  [[ -n "$url" && -n "$thread" ]] || return 1
+  key="cx|$url|$thread"
+  cached=$(fd_adapter_freshness_cache_get "$key" "${FD_ADAPTER_FRESHNESS_TTL:-5}" 2>/dev/null || echo "")
+  [[ "$cached" == "true" ]] && return 0
+  [[ "$cached" == "false" ]] && return 1
+  timeout="${FD_CODEX_RPC_TIMEOUT_MS:-1000}"
+  if FD_CODEX_RPC_TIMEOUT_MS="$timeout" cx_bridge_run list --url "$url" >/dev/null 2>&1; then
+    fd_adapter_freshness_cache_set "$key" true 2>/dev/null || true
+    return 0
+  fi
+  fd_adapter_freshness_cache_set "$key" false 2>/dev/null || true
+  return 1
 }
 
 cx_port_is_free() {

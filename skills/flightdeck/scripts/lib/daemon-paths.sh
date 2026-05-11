@@ -49,6 +49,54 @@ fd_wake_pending()      { echo "$1/fd-wake-pending-${2}"; }
 fd_events_file()       { echo "$1/fd-daemon-events-${2}.jsonl"; }
 fd_heartbeat_file()    { echo "$1/fd-daemon-${2}.heartbeat"; }
 
+# Host-user-scoped adapter freshness cache. Strong freshness probes can cost
+# an HTTP/WebSocket round trip, so pane-registry / pane-poll cache the boolean
+# result briefly (default 5s) keyed by adapter URL + session/thread.
+fd_adapter_freshness_cache_file() { echo "$(fd_resolve_state_dir)/fd-adapter-freshness-cache.json"; }
+fd_adapter_freshness_cache_lock() { echo "$(fd_resolve_state_dir)/fd-adapter-freshness-cache.lock"; }
+
+fd_adapter_freshness_cache_get() {
+  local key="$1" ttl="${2:-${FD_ADAPTER_FRESHNESS_TTL:-5}}"
+  [[ "$ttl" =~ ^[0-9]+$ ]] || ttl=5
+  (( ttl <= 0 )) && return 1
+  local file; file=$(fd_adapter_freshness_cache_file)
+  [[ -f "$file" ]] || return 1
+  local row ok ts now age
+  row=$(jq -r --arg k "$key" '(.[$k] // empty) | [.ok, .ts] | @tsv' "$file" 2>/dev/null) || return 1
+  [[ -n "$row" ]] || return 1
+  ok=$(awk -F'\t' '{print $1}' <<< "$row")
+  ts=$(awk -F'\t' '{print $2}' <<< "$row")
+  [[ "$ts" =~ ^[0-9]+$ ]] || return 1
+  now=$(date +%s)
+  age=$(( now - ts ))
+  (( age < 0 )) && age=0
+  (( age <= ttl )) || return 1
+  [[ "$ok" == "true" || "$ok" == "false" ]] || return 1
+  echo "$ok"
+}
+
+fd_adapter_freshness_cache_set() {
+  local key="$1" ok="$2"
+  [[ "$ok" == "true" || "$ok" == "false" ]] || return 1
+  local ttl="${FD_ADAPTER_FRESHNESS_TTL:-5}"
+  [[ "$ttl" =~ ^[0-9]+$ ]] || ttl=5
+  (( ttl <= 0 )) && return 0
+  local file lock tmp now
+  file=$(fd_adapter_freshness_cache_file)
+  lock=$(fd_adapter_freshness_cache_lock)
+  [[ -f "$file" ]] || echo '{}' > "$file"
+  now=$(date +%s)
+  exec 223>"$lock"
+  flock 223
+  tmp="${file}.tmp.$$"
+  if jq --arg k "$key" --argjson ok "$ok" --argjson ts "$now" '.[$k] = {ok:$ok, ts:$ts}' "$file" > "$tmp" 2>/dev/null; then
+    mv "$tmp" "$file"
+  else
+    rm -f "$tmp"
+  fi
+  exec 223>&-
+}
+
 # Derive session key from a tmux session_id like "$143" → "s143".
 fd_session_key_from_id() {
   local id="$1"

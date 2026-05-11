@@ -39,22 +39,32 @@ oc_pane_id_safe() {
 # kill cross-session sidecars (bugs review finding #3).
 oc_subscriber_pid_file()  { echo "$(fd_resolve_state_dir)/fd-subscriber-${2:?session_key required}-$(oc_pane_id_safe "$1").pid"; }
 
-# Cheap adapter-freshness probe for OC: the opencode-serve process spawned
-# by open-terminal records its pid in `oc_spawn_file($issue).server_pid`.
-# If that pid is dead, the registered url/session won't accept requests,
-# the subscriber would crash on first call, and the daemon would silently
-# skip the capture-pane fallback (cross-harness review finding #2). The
-# probe is fast (one file read + one signal-0 check) so it's safe to call
-# from `pane-registry oc-attach-args` on every resolution.
+# Adapter-freshness probe for OC: first verify the opencode-serve pid from
+# `oc_spawn_file($issue).server_pid`, then perform a bounded HTTP request to
+# the message endpoint. The HTTP result is cached briefly because attach-args
+# can be resolved multiple times in one watch cycle.
 oc_adapter_is_fresh() {
   local issue="$1"
   [[ -z "$issue" ]] && return 1
-  local spawn_file pid
+  local spawn_file pid url sid key cached
   spawn_file=$(oc_spawn_file "$issue")
   [[ -f "$spawn_file" ]] || return 1
   pid=$(jq -r '.server_pid // empty' "$spawn_file" 2>/dev/null)
   [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
-  kill -0 "$pid" 2>/dev/null
+  kill -0 "$pid" 2>/dev/null || return 1
+  url=$(jq -r '.url // empty' "$spawn_file" 2>/dev/null)
+  sid=$(jq -r '.session_id // empty' "$spawn_file" 2>/dev/null)
+  [[ -n "$url" && -n "$sid" ]] || return 1
+  key="oc|$url|$sid"
+  cached=$(fd_adapter_freshness_cache_get "$key" "${FD_ADAPTER_FRESHNESS_TTL:-5}" 2>/dev/null || echo "")
+  [[ "$cached" == "true" ]] && return 0
+  [[ "$cached" == "false" ]] && return 1
+  if command -v curl >/dev/null 2>&1 && curl -fsS --max-time 1 "$url/session/$sid/message" >/dev/null 2>&1; then
+    fd_adapter_freshness_cache_set "$key" true 2>/dev/null || true
+    return 0
+  fi
+  fd_adapter_freshness_cache_set "$key" false 2>/dev/null || true
+  return 1
 }
 
 # Per-port opencode-serve subprocess paths. Server is spawned by
