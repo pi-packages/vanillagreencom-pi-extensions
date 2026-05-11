@@ -223,27 +223,13 @@ export default function qol(pi: ExtensionAPI): void {
 	const applyWorkingIndicatorMode = (ctx: ExtensionContext): void => {
 		if (!ctx.hasUI) return;
 		const mode = settingString("workingIndicator.mode", "animated", ctx.cwd);
-		switch (mode) {
-			case "hidden":
-				ctx.ui.setWorkingVisible(false);
-				return;
-			case "messageOnly":
-				ctx.ui.setWorkingVisible(true);
-				ctx.ui.setWorkingIndicator({ frames: [] });
-				return;
-			case "static":
-				ctx.ui.setWorkingVisible(true);
-				ctx.ui.setWorkingIndicator({ frames: [ctx.ui.theme.fg("accent", "●")] });
-				return;
-			case "slow":
-				ctx.ui.setWorkingVisible(true);
-				ctx.ui.setWorkingIndicator({ intervalMs: 320 });
-				return;
-			default:
-				ctx.ui.setWorkingVisible(true);
-				ctx.ui.setWorkingIndicator(undefined);
-				return;
+		if (mode === "static") {
+			ctx.ui.setWorkingVisible(true);
+			ctx.ui.setWorkingIndicator({ frames: [ctx.ui.theme.fg("accent", "●")] });
+			return;
 		}
+		ctx.ui.setWorkingVisible(true);
+		ctx.ui.setWorkingIndicator(undefined);
 	};
 
 	const updateThinkingTimerEnabled = (ctx: ExtensionContext): boolean => {
