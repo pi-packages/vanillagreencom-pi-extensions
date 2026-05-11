@@ -16,6 +16,15 @@ npm-debug.log*
 yarn-error.log
 .pnpm-debug.log
 
+# Stray tsc emit next to pi-extension TS sources (Pi loads .ts directly).
+# Intentional bundles (pi-claude-bridge/bundle, pi-session-bridge/bin) are
+# whitelisted below.
+pi-extensions/*/extensions/**/*.js
+pi-extensions/*/extensions/**/*.js.map
+pi-extensions/*/extensions/**/*.d.ts
+!pi-extensions/pi-claude-bridge/bundle/**
+!pi-extensions/pi-session-bridge/bin/**
+
 # OS / editor junk
 .DS_Store
 Thumbs.db
