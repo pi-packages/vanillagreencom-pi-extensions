@@ -4,6 +4,17 @@
 
 Native Pi caveman communication mode: fewer output tokens, same technical accuracy.
 
+## Highlights
+
+- Identity-framed opener with per-mode Bad/Good few-shot anchors.
+- Lite is filler-free full-sentence prose, explicitly distinct from caveman shorthand.
+- Anti-markdown rule names the forbidden tokens (`**Bold**`, `## Heading`, `### Sub`) so chat replies don't render as doc pages.
+- Clarity-escape regex limited to literal destructive ops; no false fires on "confused", "security", or "clarify".
+- Silent clarity escape (no marker line) prevents the `Caveman <verb>:` label leak that comes from teaching the model a sentinel pattern.
+- Boundary clause covers code, commits/PRs, reviews, and external writes (issue bodies, PR comments, chat, email).
+- Per-session warning when `claude-bridge` is installed with `includeCavemanHook: false` while caveman is active, so the directive isn't silently swallowed.
+- Live-validated across multi-turn conversations on Opus 4.7 (claude-bridge) and gpt-5.5 (openai-codex native).
+
 ## Install
 
 Via [npm](https://www.npmjs.com/package/@vanillagreen/pi-caveman):
