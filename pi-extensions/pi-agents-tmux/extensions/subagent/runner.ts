@@ -275,7 +275,9 @@ export async function runSingleAgent(
 		agent: agentName,
 		agentSource: agent.source,
 		task,
-		exitCode: 0,
+		// -1 = still running. Real exit code is set after proc.close; streaming
+		// partials must not look completed to callers that key on exitCode.
+		exitCode: -1,
 		messages: [],
 		stderr: "",
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },

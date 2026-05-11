@@ -115,6 +115,24 @@ export function dashboardTranscriptLabel(items: SubagentDashboardItem[], cwd: st
 	return `${refs.length} transcripts · ${refs[0]} +${refs.length - 1}`;
 }
 
+// Disambiguate repeat bg launches: the 2nd "reviewer-arch" of the session
+// renders as "reviewer-arch 2" so two rows with the same agent name aren't
+// indistinguishable. Uses taskId for identity and start-time for occurrence
+// order; mirrors browser.ts dashboardDisplayLabels.
+function dashboardLabelsForItems(items: SubagentDashboardItem[]): Map<string, string> {
+	const total = new Map<string, number>();
+	for (const item of items) total.set(item.agent, (total.get(item.agent) ?? 0) + 1);
+	const occurrence = new Map<string, number>();
+	const labels = new Map<string, string>();
+	for (const item of items) {
+		const next = (occurrence.get(item.agent) ?? 0) + 1;
+		occurrence.set(item.agent, next);
+		const label = (total.get(item.agent) ?? 1) > 1 && next > 1 ? `${item.agent} ${next}` : item.agent;
+		labels.set(item.taskId, label);
+	}
+	return labels;
+}
+
 export function renderDashboardWidgetLines(state: SubagentDashboardState, theme: Theme, cwd: string, width: number): string[] {
 	// Sort by start time first so the row order is stable.
 	const items = Object.values(state.items).sort((a, b) => {
@@ -123,6 +141,7 @@ export function renderDashboardWidgetLines(state: SubagentDashboardState, theme:
 		if (aKey === bKey) return 0;
 		return aKey < bKey ? -1 : 1;
 	});
+	const displayLabels = dashboardLabelsForItems(items);
 	if (!dashboardEnabled(cwd) || !state.visible || items.length === 0) return [];
 	const running = items.filter((item) => item.status === "running" || item.status === "queued").length;
 	const waiting = items.filter((item) => item.status === "waiting").length;
@@ -170,10 +189,11 @@ export function renderDashboardWidgetLines(state: SubagentDashboardState, theme:
 	}
 	const maxItems = state.mode === "compact" || state.collapsed ? 1 : state.mode === "normal" ? Math.min(3, dashboardMaxItems(cwd)) : dashboardMaxItems(cwd);
 	const shown = items.slice(0, maxItems);
-	const nameWidth = Math.min(24, Math.max(0, ...shown.map((item) => visibleWidth(item.agent))));
+	const shownLabels = shown.map((item) => displayLabels.get(item.taskId) ?? item.agent);
+	const nameWidth = Math.min(24, Math.max(0, ...shownLabels.map((label) => visibleWidth(label))));
 	for (const [index, item] of shown.entries()) {
 		const branch = subagentBranch(theme, index === shown.length - 1 && items.length <= shown.length ? "└" : "├", cwd);
-		const name = padAnsi(ansiMagenta(theme.bold(item.agent)), nameWidth);
+		const name = padAnsi(ansiMagenta(theme.bold(shownLabels[index])), nameWidth);
 		const rowParts: string[] = [
 			dashboardStatusText(item, theme),
 			theme.fg("dim", dashboardKindLabel(item.kind)),

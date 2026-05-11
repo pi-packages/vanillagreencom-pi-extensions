@@ -651,37 +651,92 @@ export function activeDashboardItems(items: SubagentDashboardItem[]): SubagentDa
 
 function readTranscriptTail(transcriptPath: string | undefined, maxLines: number): string[] {
 	if (!transcriptPath) return [];
+	// Pi's --mode json stream emits ~50-100x more streaming-delta events
+	// (message_update, tool_execution_update) than terminal ones, and the
+	// deltas carry partial/empty argument objects. Rendering them produces a
+	// flood of duplicate "assistant: [tool] bash {}" lines that don't reflect
+	// real activity. Restrict to terminal lifecycle events that carry final
+	// content. tool_execution_start is kept so we still see the tool call
+	// before its result arrives.
+	const INCLUDED_EVENT_TYPES = new Set([
+		"start",
+		"agent_start",
+		"session",
+		"turn_start",
+		"turn_end",
+		"message_end",
+		"tool_execution_start",
+		"tool_execution_end",
+		"tool_result_end",
+		"exit",
+	]);
 	try {
 		const raw = fs.readFileSync(transcriptPath, "utf-8");
 		const lines = raw.split(/\r?\n/);
 		const rendered: string[] = [];
+		let lastRendered: string | undefined;
+		const push = (text: string) => {
+			if (text === lastRendered) return;
+			lastRendered = text;
+			rendered.push(text);
+		};
 		for (const line of lines) {
 			if (!line.trim()) continue;
 			let event: any;
-			try { event = JSON.parse(line); } catch { rendered.push(line); continue; }
+			try { event = JSON.parse(line); } catch { push(line); continue; }
 			const inner = event?.event && typeof event.event === "object" ? event.event : event;
+			const innerType = typeof inner?.type === "string" ? inner.type : undefined;
+			if (innerType && !INCLUDED_EVENT_TYPES.has(innerType)) continue;
 			const msg = inner?.message;
 			if (msg && typeof msg === "object") {
-				const role = msg.role || inner.type || "?";
+				const role = msg.role || innerType || "?";
 				const content = Array.isArray(msg.content) ? msg.content : [];
 				const textPart = content.find((c: any) => c?.type === "text");
 				const tool = content.find((c: any) => c?.type === "toolCall");
-				if (tool) rendered.push(`${role}: [tool] ${tool.name ?? "?"} ${JSON.stringify(tool.arguments ?? {}).slice(0, 80)}`);
-				else if (textPart?.text) rendered.push(`${role}: ${oneLinePreview(String(textPart.text), 200)}`);
-				else if (typeof msg.content === "string") rendered.push(`${role}: ${oneLinePreview(msg.content, 200)}`);
-				else rendered.push(`${role}: (${inner.type ?? "message"})`);
+				if (tool) {
+					const args = tool.arguments ?? tool.args ?? {};
+					const argText = JSON.stringify(args);
+					const argSuffix = argText && argText !== "{}" ? ` ${argText.slice(0, 120)}` : "";
+					push(`${role}: [tool] ${tool.name ?? "?"}${argSuffix}`);
+				} else if (textPart?.text) push(`${role}: ${oneLinePreview(String(textPart.text), 200)}`);
+				else if (typeof msg.content === "string") push(`${role}: ${oneLinePreview(msg.content, 200)}`);
+				else if (innerType) push(`${role}: (${innerType})`);
 				continue;
 			}
-			if (typeof inner?.type === "string") {
-				rendered.push(inner.type);
+			if (innerType) {
+				push(innerType);
 				continue;
 			}
-			rendered.push(line);
+			push(line);
 		}
 		return rendered.slice(-maxLines);
 	} catch {
 		return [];
 	}
+}
+
+// Multiple bg launches of the same agent name produce distinct dashboard rows
+// (keyed by taskId). Disambiguate the rendered label with a 1-based occurrence
+// suffix in start-time order: "reviewer-arch", "reviewer-arch 2", ... Pane
+// agents collapse to a single row per name so they never collide here.
+export function dashboardDisplayLabels(items: SubagentDashboardItem[]): Map<string, string> {
+	const occurrence = new Map<string, number>();
+	const total = new Map<string, number>();
+	for (const item of items) total.set(item.agent, (total.get(item.agent) ?? 0) + 1);
+	const sorted = [...items].sort((a, b) => {
+		const aKey = a.startedAt ?? a.taskId;
+		const bKey = b.startedAt ?? b.taskId;
+		if (aKey === bKey) return 0;
+		return aKey < bKey ? -1 : 1;
+	});
+	const labels = new Map<string, string>();
+	for (const item of sorted) {
+		const next = (occurrence.get(item.agent) ?? 0) + 1;
+		occurrence.set(item.agent, next);
+		const label = (total.get(item.agent) ?? 1) > 1 && next > 1 ? `${item.agent} ${next}` : item.agent;
+		labels.set(item.taskId, label);
+	}
+	return labels;
 }
 
 function renderActiveAgentList(items: SubagentDashboardItem[], ui: AgentBrowserUiState, width: number, theme: Theme, listRows: number): string[] {
@@ -705,11 +760,13 @@ function renderActiveAgentList(items: SubagentDashboardItem[], ui: AgentBrowserU
 	const itemStart = Math.max(0, ui.activeScroll);
 	const startItemIndex = Math.max(0, itemStart - 1);
 	const visible = items.slice(startItemIndex, startItemIndex + remainingRows);
+	const labels = dashboardDisplayLabels(items);
 	for (const [index, item] of visible.entries()) {
 		const absoluteIndex = startItemIndex + index + 1;
 		const selected = absoluteIndex === ui.activeSelected;
 		const icon = dashboardStatusIcon(item.status, theme);
-		const name = selected ? ansiMagenta(theme.bold(item.agent)) : ansiMagenta(item.agent);
+		const displayName = labels.get(item.taskId) ?? item.agent;
+		const name = selected ? ansiMagenta(theme.bold(displayName)) : ansiMagenta(displayName);
 		const row = `${icon} ${name}`;
 		const prefix = selected ? theme.fg("accent", "> ") : "  ";
 		lines.push(truncateToWidth(`${prefix}${row}`, width, ""));
@@ -720,14 +777,15 @@ function renderActiveAgentList(items: SubagentDashboardItem[], ui: AgentBrowserU
 	return lines;
 }
 
-function renderActiveAgentDetail(item: SubagentDashboardItem | undefined, ui: AgentBrowserUiState, width: number, rows: number, theme: Theme): string[] {
+function renderActiveAgentDetail(item: SubagentDashboardItem | undefined, displayLabel: string | undefined, ui: AgentBrowserUiState, width: number, rows: number, theme: Theme): string[] {
 	if (!item) return [`${agentPaneTitle(theme, "Detail", ui.pane === "inspector")} ${theme.fg("dim", "Select an agent to inspect.")}`];
 	const safeWidth = Math.max(8, width);
 	const wrap = (text: string): string[] => {
 		const wrapped = wrapTextWithAnsi(text, safeWidth);
 		return wrapped.length > 0 ? wrapped : [""];
 	};
-	const titleLine = `${agentPaneTitle(theme, "Detail", ui.pane === "inspector")} ${ansiMagenta(theme.bold(item.agent))} ${dashboardStatusText(item, theme)} ${theme.fg("dim", dashboardKindLabel(item.kind))}`;
+	const nameForTitle = displayLabel ?? item.agent;
+	const titleLine = `${agentPaneTitle(theme, "Detail", ui.pane === "inspector")} ${ansiMagenta(theme.bold(nameForTitle))} ${dashboardStatusText(item, theme)} ${theme.fg("dim", dashboardKindLabel(item.kind))}`;
 	const body: string[] = [];
 	body.push(...wrap(`${theme.fg("muted", "Task ID")}: ${theme.fg("dim", item.taskId)}`));
 	if (item.task) body.push(...wrap(`${theme.fg("muted", "Task")}: ${item.task}`));
@@ -951,6 +1009,43 @@ function extractSteeringBody(raw: string): string {
 	return out.join("\n").trim();
 }
 
+function appendBgChatMessages(messages: ChatMessage[], items: SubagentDashboardItem[]): void {
+	// Bg/oneshot agents skip the file bus (no inbox/outbox/.md/.json), so the
+	// file-based scan never sees them. Synthesize delegation+completion records
+	// from the dashboard item itself; the data we need is already on it.
+	const labels = dashboardDisplayLabels(items);
+	for (const item of items) {
+		if (item.kind !== "oneshot") continue;
+		const label = labels.get(item.taskId) ?? item.agent;
+		const startTs = item.startedAt ? Date.parse(item.startedAt) : Number.NaN;
+		if (Number.isFinite(startTs) && item.task) {
+			messages.push({
+				timestamp: startTs,
+				agent: item.agent,
+				taskId: item.taskId,
+				kind: "delegation",
+				from: "@orch",
+				to: `@${label}`,
+				body: item.task,
+			});
+		}
+		const isTerminal = item.status === "completed" || item.status === "failed" || item.status === "blocked" || item.status === "needs_completion";
+		if (!isTerminal) continue;
+		const endTs = item.completedAt ? Date.parse(item.completedAt) : item.updatedAt ? Date.parse(item.updatedAt) : Number.NaN;
+		if (!Number.isFinite(endTs)) continue;
+		messages.push({
+			timestamp: endTs,
+			agent: item.agent,
+			taskId: item.taskId,
+			kind: "completion",
+			from: `@${label}`,
+			to: "@orch",
+			body: item.message || "(no summary)",
+			status: item.status,
+		});
+	}
+}
+
 function loadChatMessages(runtimeRoot: string, agentNames: string[]): ChatMessage[] {
 	const messages: ChatMessage[] = [];
 	const seen = new Set<string>();
@@ -1063,10 +1158,13 @@ function wrapWithHangingIndent(text: string, indent: string, width: number): str
 	return out;
 }
 
-function renderChatRoomDetail(runtimeRoot: string, agentNames: string[], ui: AgentBrowserUiState, width: number, rows: number, theme: Theme): string[] {
+function renderChatRoomDetail(runtimeRoot: string, items: SubagentDashboardItem[], ui: AgentBrowserUiState, width: number, rows: number, theme: Theme): string[] {
 	const safeWidth = Math.max(8, width);
+	const agentNames = items.map((item) => item.agent);
 	const titleLine = `${agentPaneTitle(theme, "Chat", ui.pane === "inspector")} ${theme.fg("dim", `(${agentNames.length} agent${agentNames.length === 1 ? "" : "s"})`)}`;
 	const messages = loadChatMessages(runtimeRoot, agentNames);
+	appendBgChatMessages(messages, items);
+	messages.sort((a, b) => a.timestamp - b.timestamp);
 	const body: string[] = [];
 	if (messages.length === 0) {
 		body.push(...wrapTextWithAnsi(theme.fg("dim", "No messages yet. Delegations and completions will appear here as agents work."), safeWidth));
@@ -1119,10 +1217,11 @@ function renderActiveTabBody(items: SubagentDashboardItem[], runtimeRoot: string
 	const bodyRows = layout.bodyRows;
 	const left = renderActiveAgentList(items, ui, leftWidth, theme, layout.listRows);
 	const chatSelected = ui.activeSelected === 0;
-	const agentNames = items.map((i) => i.agent);
+	const detailItem = items[ui.activeSelected - 1];
+	const labels = dashboardDisplayLabels(items);
 	const right = chatSelected
-		? renderChatRoomDetail(runtimeRoot, agentNames, ui, rightWidth, bodyRows, theme)
-		: renderActiveAgentDetail(items[ui.activeSelected - 1], ui, rightWidth, bodyRows, theme);
+		? renderChatRoomDetail(runtimeRoot, items, ui, rightWidth, bodyRows, theme)
+		: renderActiveAgentDetail(detailItem, detailItem ? labels.get(detailItem.taskId) : undefined, ui, rightWidth, bodyRows, theme);
 	const lines: string[] = [];
 	const headerLine = `${theme.fg("muted", "View")}: ${theme.fg("text", "active")}  ${theme.fg("muted", "Items")}: ${items.length}`;
 	lines.push(...wrapTextWithAnsi(headerLine, width));
