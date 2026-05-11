@@ -175,10 +175,14 @@ registry_issue_for_pane() {
 }
 
 resolve_oc_args() {
-  local issue="$1" pane_lookup="$2" derive_target="$3" adapter_issue args derived_issue
+  local issue="$1" pane_lookup="$2" derive_target="$3" row_url="${4:-}" row_sid="${5:-}" from_batch="${6:-0}" adapter_issue args derived_issue
   adapter_issue=$(registry_issue_for_pane "$issue" "$pane_lookup")
   args=""
-  if [[ -n "$adapter_issue" ]]; then
+  if [[ -n "$adapter_issue" && -n "$row_url" && -n "$row_sid" ]]; then
+    if oc_adapter_is_fresh "$adapter_issue" 2>/dev/null; then
+      args="--url $row_url --session $row_sid"
+    fi
+  elif [[ -n "$adapter_issue" && "$from_batch" != "1" ]]; then
     args=$("$PANE_REGISTRY" oc-attach-args "$adapter_issue" 2>/dev/null || echo "")
   fi
   if [[ -z "$args" ]]; then
@@ -191,10 +195,14 @@ resolve_oc_args() {
 }
 
 resolve_cc_args() {
-  local issue="$1" pane_lookup="$2" derive_target="$3" adapter_issue args derived_issue cc_spawn cc_url cc_transcript
+  local issue="$1" pane_lookup="$2" derive_target="$3" row_url="${4:-}" row_transcript="${5:-}" from_batch="${6:-0}" adapter_issue args derived_issue cc_spawn cc_url cc_transcript
   adapter_issue=$(registry_issue_for_pane "$issue" "$pane_lookup")
   args=""
-  if [[ -n "$adapter_issue" ]]; then
+  if [[ -n "$adapter_issue" && -n "$row_url" && -n "$row_transcript" ]]; then
+    if cc_adapter_is_fresh "$adapter_issue" 2>/dev/null; then
+      args="--url $row_url --transcript $row_transcript"
+    fi
+  elif [[ -n "$adapter_issue" && "$from_batch" != "1" ]]; then
     args=$("$PANE_REGISTRY" cc-channel-args "$adapter_issue" 2>/dev/null || echo "")
   fi
   if [[ -z "$args" ]]; then
@@ -214,10 +222,14 @@ resolve_cc_args() {
 }
 
 resolve_pi_args() {
-  local issue="$1" pane_lookup="$2" derive_target="$3" adapter_issue args derived_issue pi_spawn pi_pid_v pi_socket_v
+  local issue="$1" pane_lookup="$2" derive_target="$3" row_pid="${4:-}" row_socket="${5:-}" from_batch="${6:-0}" adapter_issue args derived_issue pi_spawn pi_pid_v pi_socket_v
   adapter_issue=$(registry_issue_for_pane "$issue" "$pane_lookup")
   args=""
-  if [[ -n "$adapter_issue" ]]; then
+  if [[ -n "$adapter_issue" && -n "$row_pid" && -n "$row_socket" ]]; then
+    if pi_bridge_is_fresh "$row_pid" "$row_socket"; then
+      args="--pid $row_pid --socket $row_socket"
+    fi
+  elif [[ -n "$adapter_issue" && "$from_batch" != "1" ]]; then
     args=$("$PANE_REGISTRY" pi-bridge-args "$adapter_issue" 2>/dev/null || echo "")
   fi
   if [[ -z "$args" ]]; then
@@ -237,10 +249,14 @@ resolve_pi_args() {
 }
 
 resolve_cx_args() {
-  local issue="$1" pane_lookup="$2" derive_target="$3" adapter_issue args derived_issue cx_spawn cx_url cx_thread
+  local issue="$1" pane_lookup="$2" derive_target="$3" row_url="${4:-}" row_thread="${5:-}" from_batch="${6:-0}" adapter_issue args derived_issue cx_spawn cx_url cx_thread
   adapter_issue=$(registry_issue_for_pane "$issue" "$pane_lookup")
   args=""
-  if [[ -n "$adapter_issue" ]]; then
+  if [[ -n "$adapter_issue" && -n "$row_url" && -n "$row_thread" ]]; then
+    if cx_adapter_is_fresh "$adapter_issue" 2>/dev/null; then
+      args="--url $row_url --thread $row_thread"
+    fi
+  elif [[ -n "$adapter_issue" && "$from_batch" != "1" ]]; then
     args=$("$PANE_REGISTRY" cx-bridge-args "$adapter_issue" 2>/dev/null || echo "")
   fi
   if [[ -z "$args" ]]; then
@@ -261,6 +277,9 @@ resolve_cx_args() {
 
 poll_one() {
   local issue="$1" raw_target="$2" explicit_index="$3" harness="$4" worktree="$5" pr="$6"
+  local row_oc_url="${7:-}" row_oc_session="${8:-}" row_cc_url="${9:-}" row_cc_transcript="${10:-}"
+  local row_pi_pid="${11:-}" row_pi_socket="${12:-}" row_cx_url="${13:-}" row_cx_thread="${14:-}"
+  local from_batch="${15:-0}"
   local window_target pane_target pane_index pid window_list_target derive_target output_pane
   local bell=0 activity=0 silence=0
 
@@ -305,7 +324,7 @@ poll_one() {
   local buf="" oc_used=0 cc_used=0 pi_used=0 cx_used=0
   local oc_attach_args oc_url oc_session resp
   if [[ "$harness" == "opencode" ]]; then
-    oc_attach_args=$(resolve_oc_args "$issue" "$output_pane" "$derive_target")
+    oc_attach_args=$(resolve_oc_args "$issue" "$output_pane" "$derive_target" "$row_oc_url" "$row_oc_session" "$from_batch")
     if [[ -n "$oc_attach_args" ]]; then
       oc_used=1
       oc_url=$(awk '{for(i=1;i<=NF;i++)if($i=="--url"){print $(i+1);exit}}' <<< "$oc_attach_args")
@@ -319,7 +338,7 @@ poll_one() {
 
   local cc_args cc_transcript
   if [[ "$harness" == "claude" && $oc_used -eq 0 ]]; then
-    cc_args=$(resolve_cc_args "$issue" "$output_pane" "$derive_target")
+    cc_args=$(resolve_cc_args "$issue" "$output_pane" "$derive_target" "$row_cc_url" "$row_cc_transcript" "$from_batch")
     if [[ -n "$cc_args" ]]; then
       cc_used=1
       cc_transcript=$(awk '{for(i=1;i<=NF;i++)if($i=="--transcript"){print $(i+1);exit}}' <<< "$cc_args")
@@ -331,7 +350,7 @@ poll_one() {
 
   local pi_args pi_pid_v pi_socket_v pi_target_args pi_bin hist
   if [[ "$harness" == "pi" && $oc_used -eq 0 && $cc_used -eq 0 ]]; then
-    pi_args=$(resolve_pi_args "$issue" "$output_pane" "$derive_target")
+    pi_args=$(resolve_pi_args "$issue" "$output_pane" "$derive_target" "$row_pi_pid" "$row_pi_socket" "$from_batch")
     if [[ -n "$pi_args" ]]; then
       pi_used=1
       pi_pid_v=$(awk '{for(i=1;i<=NF;i++)if($i=="--pid"){print $(i+1);exit}}' <<< "$pi_args")
@@ -354,7 +373,7 @@ poll_one() {
 
   local cx_args cx_url cx_thread turns
   if [[ "$harness" == "codex" && $oc_used -eq 0 && $cc_used -eq 0 && $pi_used -eq 0 ]]; then
-    cx_args=$(resolve_cx_args "$issue" "$output_pane" "$derive_target")
+    cx_args=$(resolve_cx_args "$issue" "$output_pane" "$derive_target" "$row_cx_url" "$row_cx_thread" "$from_batch")
     if [[ -n "$cx_args" ]]; then
       cx_used=1
       cx_url=$(awk '{for(i=1;i<=NF;i++)if($i=="--url"){print $(i+1);exit}}' <<< "$cx_args")
@@ -367,7 +386,13 @@ poll_one() {
   fi
 
   if [[ $oc_used -eq 0 && $cc_used -eq 0 && $pi_used -eq 0 && $cx_used -eq 0 ]]; then
-    buf=$(tmux capture-pane -t "$output_pane" "${CAPTURE_ARGS[@]}" 2>/dev/null || echo "")
+    if ! buf=$(tmux capture-pane -t "$output_pane" "${CAPTURE_ARGS[@]}" 2>/dev/null); then
+      if ! tmux list-panes -t "$output_pane" >/dev/null 2>&1; then
+        json_dead "$issue" "$window_target" "$output_pane"
+        return 0
+      fi
+      buf=""
+    fi
   fi
 
   local capture_hash tag
@@ -436,22 +461,32 @@ run_batch() {
   fi
 
   refresh_tmux_metadata
-  local row issue target pane_id pane_target harness worktree pr
-  while IFS= read -r row; do
-    [[ -z "$row" ]] && continue
-    issue=$(jq -r '.issue // ""' <<< "$row")
-    pane_id=$(jq -r '.pane_id // ""' <<< "$row")
-    pane_target=$(jq -r '.pane_target // ""' <<< "$row")
+  local issue target pane_id pane_target harness worktree pr oc_url oc_session cc_url cc_transcript pi_pid pi_socket cx_url cx_thread
+  while IFS=$'\t' read -r issue pane_id pane_target harness worktree pr oc_url oc_session cc_url cc_transcript pi_pid pi_socket cx_url cx_thread; do
+    [[ -z "$issue$pane_id$pane_target" ]] && continue
     if [[ -n "$pane_id" && "$pane_id" != "null" ]]; then
       target="$pane_id"
     else
       target="$pane_target"
     fi
-    harness=$(jq -r '.harness // ""' <<< "$row")
-    worktree=$(jq -r '.worktree // ""' <<< "$row")
-    pr=$(jq -r '.pr_number // "" | tostring' <<< "$row")
-    poll_one "$issue" "$target" "" "$harness" "$worktree" "$pr"
-  done < <(jq -c '.[]' <<< "$batch_json")
+    poll_one "$issue" "$target" "" "$harness" "$worktree" "$pr" \
+      "$oc_url" "$oc_session" "$cc_url" "$cc_transcript" "$pi_pid" "$pi_socket" "$cx_url" "$cx_thread" "1"
+  done < <(jq -r '.[] | [
+    (.issue // ""),
+    (.pane_id // ""),
+    (.pane_target // ""),
+    (.harness // ""),
+    (.worktree // ""),
+    (.pr_number // "" | tostring),
+    (.oc_url // ""),
+    (.oc_session_id // ""),
+    (.cc_url // ""),
+    (.cc_transcript // ""),
+    (.pi_bridge_pid // "" | tostring),
+    (.pi_bridge_socket // ""),
+    (.cx_ws // ""),
+    (.cx_thread_id // "")
+  ] | @tsv' <<< "$batch_json")
 }
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
