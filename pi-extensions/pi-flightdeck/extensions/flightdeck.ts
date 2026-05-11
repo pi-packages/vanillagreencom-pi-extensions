@@ -679,8 +679,13 @@ export default function flightdeck(pi: ExtensionAPI): void {
 			return;
 		}
 		const snapshot = cache.lastSnapshot;
+		// Child subagent panes (spawned via pi-agents-tmux) read the same
+		// project state as the master coordinator pane, so the dashboard would
+		// otherwise render inside every child. Suppress it there; keep the
+		// pause banner since a parent pause is still actionable context.
+		const inChildPane = Boolean(process.env.PI_SUBAGENT_CHILD_AGENT);
 		const showBanner = settingBoolean("pauseBanner", true, ctx.cwd) && Boolean(snapshot?.master?.paused_for_user);
-		const dashboardEnabled = settingBoolean("dashboard", true, ctx.cwd) && cache.state !== "hidden";
+		const dashboardEnabled = !inChildPane && settingBoolean("dashboard", true, ctx.cwd) && cache.state !== "hidden";
 		const active = isFlightdeckActive(snapshot);
 		if (!active && !showBanner) {
 			ctx.ui.setWidget(WIDGET_KEY, undefined);
