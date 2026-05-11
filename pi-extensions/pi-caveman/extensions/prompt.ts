@@ -139,23 +139,24 @@ export function shouldClarityEscape(prompt: string): boolean {
 	return /(drop\s+table|rm\s+-rf|force[- ]?push|git\s+reset\s+--hard|git\s+push\s+(?:[^\n]*\s)?--force|\bdestructive\b|\birreversible\b)/i.test(prompt);
 }
 
-// Boundary lines kept compact and POSITIVE ("X stays normal English"). One
-// short list line rather than four "Do NOT caveman-transform" sentences —
-// the long boundary section was eating ~40% of the block and pushing the
-// core style directive out of recency.
+// Compact boundary clause. Each setting toggles one short label; previously
+// each was a full sentence ("Do NOT caveman-transform commit messages and PR
+// descriptions unless...") which took ~40% of the block. Live testing
+// confirmed the short-label form still keeps commit messages, PRs, and
+// external writes out of caveman style. Per-setting opt-out preserved.
 function boundaryClauses(cwd: string): string[] {
 	const items: string[] = [];
-	if (settingBoolean("boundaryNormalForCode", true, cwd)) items.push("code/commands/identifiers/quoted errors");
-	if (settingBoolean("boundaryNormalForCommits", true, cwd)) items.push("commit messages and PR descriptions");
-	if (settingBoolean("boundaryNormalForReviews", true, cwd)) items.push("formal reviews");
-	if (settingBoolean("boundaryNormalForExternalWrites", true, cwd)) items.push("external writes (issue/PR bodies + comments, code review, chat/email)");
+	if (settingBoolean("boundaryNormalForCode", true, cwd)) items.push("code");
+	if (settingBoolean("boundaryNormalForCommits", true, cwd)) items.push("commits/PRs");
+	if (settingBoolean("boundaryNormalForReviews", true, cwd)) items.push("reviews");
+	if (settingBoolean("boundaryNormalForExternalWrites", true, cwd)) items.push("external writes (issues, PR comments, chat, email)");
 	return items;
 }
 
 function boundaryLine(cwd: string): string | undefined {
 	const items = boundaryClauses(cwd);
 	if (items.length === 0) return undefined;
-	return `Boundaries — these stay normal English, NOT caveman: ${items.join("; ")}. Caveman = chat replies only.`;
+	return `Normal-English boundaries (NOT caveman): ${items.join(", ")}. Caveman = chat only.`;
 }
 
 export function instructions(mode: Mode, cwd: string, clarityEscape: boolean): string {
@@ -179,32 +180,27 @@ export function instructions(mode: Mode, cwd: string, clarityEscape: boolean): s
 		].filter(Boolean).join("\n");
 	}
 
-	// Anti-markdown rule shared by every active mode. Live testing showed
-	// Claude defaults to bold section headers (`**Section**`, `## Heading`)
-	// for technical content even when told "no decorative headers" — the
-	// behavior is baked into the base training, so the only thing that beats
-	// it is concrete forbidden tokens plus a Bad/Good showing the alternative.
-	// Same rule applied to every mode and the clean clarity branch so chat
-	// replies render as continuous caveman/prose, not as a doc page.
-	const antiMarkdown = "No markdown section headers. Forbidden tokens: `**Section**`, `## Heading`, `### Sub`, `**Word**` as a header line. Allowed: bare line breaks, inline em-dash transitions, an inline lead-in like `Cost:` or `Trade:` at line start (no asterisks, no hashes). Code blocks and inline code stay normal.";
-	const antiMarkdownBadGood = "Bad header: \"**Why**\\n\\nObject ref new each render.\" — the asterisks make it a doc header, not caveman.\nGood header: \"Why: object ref new each render.\" — inline lead-in, caveman flows.";
+	// Anti-markdown rule shared by every active mode. Names the forbidden
+	// tokens (`**Bold**`, `##`, `###`) inline because generic "no headers"
+	// wording loses to Claude's training preference for markdown structure.
+	// Bad/Good header pair was dropped after live testing showed the named-
+	// tokens rule alone is sufficient — the example was redundant insurance.
+	const antiMarkdown = "No markdown headers (no `**Bold**`, no `## Heading`, no `### Sub`). Use inline lead-ins like `Cost:` or em-dashes between thoughts. Code blocks unchanged.";
 
-	// Micro mode keeps a tight token budget. Earlier variant produced 3–5 KB
-	// responses with markdown headers — not "prompt-minimized" at all. Lock in
-	// a length anchor and the anti-markdown rule.
+	// Micro mode targets the FEWEST tokens. Length anchors got stripped after
+	// live testing showed models treated them as advisory hints, not budgets.
+	// The identity line + 'Keep it short' closer carry it instead.
 	if (mode === "micro") {
 		return [
 			"You MUST respond in caveman micro style for chat replies. You ARE a smart caveman engineer who answers in the FEWEST tokens that stay correct. Terse — fluff die, technical substance stay.",
-			"Length anchor: typical reply ~80–200 tokens. Use longer only if the user explicitly asked for detail (\"walk me through\", \"explain in depth\", \"full breakdown\").",
 			"Apply caveman from first token. No warmup (\"Let me\", \"Here's\", \"I'll\", \"Sure\"). No trailing summary.",
 			antiMarkdown,
 			"Drop articles, filler (just/really/basically/actually/simply), hedges (might/I think/sort of), pleasantries. Fragments OK. Technical terms + code exact. Pattern: [thing] [action] [reason]. [next step].",
 			"Bad: \"Sure! Let me help. The reason your component re-renders is likely because you're creating a new object reference each render.\"",
 			"Good: \"New object ref each render. Wrap in `useMemo`.\"",
-			antiMarkdownBadGood,
 			boundary,
 			suffix,
-			"Accuracy > terseness. Apply caveman to THIS reply now. Keep it short.",
+			"Accuracy > terseness. Keep it short.",
 		].filter(Boolean).join("\n");
 	}
 
@@ -234,32 +230,21 @@ export function instructions(mode: Mode, cwd: string, clarityEscape: boolean): s
 	// model has a prose anchor instead of a fragment anchor.
 	if (mode === "lite") {
 		return [
-			`You MUST respond in caveman lite style for chat replies. NOTE: 'lite' here means tight professional prose with COMPLETE SENTENCES, NOT compressed caveman shorthand. You ARE a tight professional engineer who writes complete sentences with all filler removed. Sentence-shape (subject + verb + object) every line.`,
+			`You MUST respond in caveman lite style for chat replies. NOTE: 'lite' here means tight professional prose with COMPLETE SENTENCES, NOT compressed caveman shorthand (no 'X = Y', no '→' chains, no one-word lines). You ARE a tight professional engineer who writes complete sentences with all filler removed.`,
 			"Apply from first token. No warmup (\"Let me\", \"Here's\", \"I'll\", \"Sure\", \"Now I'm going to\"). No trailing summary or \"Want me to also…\" tails.",
 			antiMarkdown,
 			"Strip: filler (just/really/basically/actually/simply/essentially), hedges (might/I think/sort of/could potentially), pleasantries.",
 			"Keep: complete sentences, grammatical articles ('a Rust CLI'), active voice, technical terms + code + identifiers + file paths + quoted errors exact.",
-			"Drop only decorative articles ('parses flags' beats 'parses the flags'); keep grammatical ones.",
-			`Bad (caveman shorthand, do NOT do this in lite): "New object ref each render. Inline obj prop = new ref → re-render. Wrap in useMemo."`,
-			`Bad (decorative header, do NOT do this): "**Why**\\n\\nThe component re-renders because of inline objects."`,
+			`Bad (caveman shorthand, NOT lite): "New object ref each render. Inline obj prop = new ref → re-render. Wrap in useMemo."`,
 			`Good: "Your component re-renders because you create a new object reference on every render. React's shallow prop comparison treats that as a new value and re-renders the child. Wrap the object in \`useMemo\` to keep the reference stable."`,
-			"Hard rule: NO 'X = Y' equation shorthand, NO '→' arrow chains, NO one-word lines, NO bulleted list of single-word items. If you find yourself writing a fragment, expand it to a sentence.",
 			boundary,
 			suffix,
-			"Accuracy beats terseness. Apply lite to THIS reply now — you MUST start the very next token in tight professional prose, complete sentences.",
+			"Accuracy beats terseness. Start the very next token in complete-sentence prose.",
 		].filter(Boolean).join("\n");
 	}
 
-	// Length anchors per mode. Without these, all modes converge to the same
-	// long technical-doc response with bold headers — Claude's default.
-	const lengthAnchor: Record<"full" | "ultra", string> = {
-		full: "Length anchor: typical reply ~150–350 tokens. Go longer only if the user explicitly asked for detail (\"walk me through\", \"explain in depth\", \"full breakdown\").",
-		ultra: "Length anchor: typical reply ~80–250 tokens. Ultra is for punchy answers — if it takes a doc page, drop a mode and ask the user what they want.",
-	};
-
 	return [
 		`You MUST respond in caveman ${mode} style for chat replies. You ARE a smart caveman engineer. Terse — fluff die, technical substance stay.`,
-		lengthAnchor[mode as "full" | "ultra"],
 		"Apply caveman from first token. No warmup (\"Let me\", \"Here's\", \"I'll\", \"Sure\", \"Now I'm going to\"). No trailing summary or \"Want me to also…\" tails.",
 		antiMarkdown,
 		"Drop: articles, filler (just/really/basically/actually/simply), hedges (might/I think/sort of), pleasantries.",
@@ -267,7 +252,6 @@ export function instructions(mode: Mode, cwd: string, clarityEscape: boolean): s
 		"Pattern: [thing] [action] [reason]. [next step].",
 		"Bad: \"Sure! Let me help. The reason your component re-renders is likely because you're creating a new object reference each render.\"",
 		"Good: \"New object ref each render. Wrap in `useMemo`.\"",
-		antiMarkdownBadGood,
 		modeDirective[mode].rule,
 		modeDirective[mode].example,
 		// Inline auto-clarity for destructive confirmations the regex didn't
@@ -276,6 +260,6 @@ export function instructions(mode: Mode, cwd: string, clarityEscape: boolean): s
 		"Self-clarity: for an irreversible destructive op confirmation (force-push, drop table, rm -rf, hard reset, branch delete), switch that passage to plain prose inline. No marker line.",
 		boundary,
 		suffix,
-		"Accuracy beats terseness when in conflict. Apply caveman to THIS reply now — you MUST start the very next token in caveman style.",
+		"Accuracy beats terseness. Start the very next token in caveman style.",
 	].filter(Boolean).join("\n");
 }

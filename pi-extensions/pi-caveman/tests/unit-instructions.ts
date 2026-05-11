@@ -112,7 +112,7 @@ describe("instructions() snapshot matrix", () => {
 		for (const mode of MODES) {
 			const rendered = instructions(mode, projectDir, false);
 			// lite labels its bad examples with a discriminator ('Bad (caveman shorthand...)') so plain /^Bad: / is too narrow.
-			assert.match(rendered, /^Bad[ (][^\n]+:?/m, `${mode} clean missing Bad: example`);
+			assert.match(rendered, /^Bad[ :(]/m, `${mode} clean missing Bad: example`);
 			assert.match(rendered, /^Good[ :]/m, `${mode} clean missing Good: example`);
 		}
 	});
@@ -144,18 +144,9 @@ describe("instructions() snapshot matrix", () => {
 		writeUserConfig({ mode: "full", boundaryNormalForCode: true, boundaryNormalForCommits: true, boundaryNormalForReviews: true, boundaryNormalForExternalWrites: true });
 		for (const mode of MODES) {
 			const rendered = instructions(mode, projectDir, false);
-			assert.match(rendered, /No markdown section headers/i, `${mode} clean must include the anti-markdown rule`);
-			assert.match(rendered, /`\*\*Section\*\*`/, `${mode} clean must name **Section** as forbidden`);
+			assert.match(rendered, /No markdown headers/i, `${mode} clean must include the anti-markdown rule`);
+			assert.match(rendered, /`\*\*Bold\*\*`/, `${mode} clean must name **Bold** as forbidden`);
 			assert.match(rendered, /`## Heading`/, `${mode} clean must name ## Heading as forbidden`);
-		}
-	});
-
-	it("non-lite clean modes include a per-mode length anchor", () => {
-		writeUserConfig({ mode: "full", boundaryNormalForCode: true, boundaryNormalForCommits: true, boundaryNormalForReviews: true, boundaryNormalForExternalWrites: true });
-		for (const mode of ["full", "ultra", "micro"] as const) {
-			const rendered = instructions(mode, projectDir, false);
-			assert.match(rendered, /Length anchor:/i, `${mode} clean must include a length anchor`);
-			assert.match(rendered, /~\d+–\d+ tokens/, `${mode} clean length anchor must give a numeric range`);
 		}
 	});
 
