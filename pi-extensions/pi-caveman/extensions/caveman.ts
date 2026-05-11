@@ -220,6 +220,13 @@ export default function caveman(pi: ExtensionAPI): void {
 		if (legacy.length > 0 && ctx.hasUI) {
 			ctx.ui.notify(`pi-caveman: legacy settings keys detected (${legacy.join(", ")}) alongside \`mode\`. They are ignored; remove them in the extension manager. Run /caveman debug for details.`, "info");
 		}
+		// Bridge users hit a silent failure mode: caveman mode is active but the
+		// claude-bridge `includeCavemanHook` flag defaults to off, so the
+		// directive never reaches Claude. Surface this once per session so the
+		// user can fix it in the extension manager.
+		if (effectiveMode(state, ctx.cwd) !== "off" && ctx.hasUI && bridgeCavemanHookEnabled(ctx.cwd) === false) {
+			ctx.ui.notify("pi-caveman: claude-bridge `includeCavemanHook` is off — caveman directives won't reach Claude. Enable it in the pi-claude-bridge settings, or /caveman debug for details.", "warning");
+		}
 	});
 	pi.on("session_tree", (_event, ctx) => {
 		activeCtx = ctx;

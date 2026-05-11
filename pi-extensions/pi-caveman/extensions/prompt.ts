@@ -130,88 +130,106 @@ export function normalizeActiveMode(input: string | undefined): ActiveMode | und
 	return mode && mode !== "off" ? mode : undefined;
 }
 
-// Trigger the hard clarity-escape (full plain-prose reply + `Caveman resume`
-// sentinel) ONLY for explicit irreversible destructive operations the user is
-// about to confirm or run. Previously this regex also matched
-// security/secret/token/credential vocabulary and user-confusion signals
-// (`confused`, `clarify`, `ambiguous`, `not clear`, `explain again`), which
-// fired on routine technical turns and made the escape feel like the default.
-// Those soft signals belong in the model's own judgment via the inline
-// auto-clarity rule, not in a hard prompt-level injection.
+// Trigger the hard clarity-escape (plain-prose reply for this turn) ONLY for
+// explicit irreversible destructive operations the user is about to confirm
+// or run. Soft signals (security/clarify/confused/ambiguous) used to live
+// here and produced false escapes on routine technical turns; they belong in
+// the model's inline judgment, not in a hard prompt swap.
 export function shouldClarityEscape(prompt: string): boolean {
 	return /(drop\s+table|rm\s+-rf|force[- ]?push|git\s+reset\s+--hard|git\s+push\s+(?:[^\n]*\s)?--force|\bdestructive\b|\birreversible\b)/i.test(prompt);
 }
 
+// Boundary lines kept compact and POSITIVE ("X stays normal English"). One
+// short list line rather than four "Do NOT caveman-transform" sentences —
+// the long boundary section was eating ~40% of the block and pushing the
+// core style directive out of recency.
+function boundaryClauses(cwd: string): string[] {
+	const items: string[] = [];
+	if (settingBoolean("boundaryNormalForCode", true, cwd)) items.push("code/commands/identifiers/quoted errors");
+	if (settingBoolean("boundaryNormalForCommits", true, cwd)) items.push("commit messages and PR descriptions");
+	if (settingBoolean("boundaryNormalForReviews", true, cwd)) items.push("formal reviews");
+	if (settingBoolean("boundaryNormalForExternalWrites", true, cwd)) items.push("external writes (issue/PR bodies + comments, code review, chat/email)");
+	return items;
+}
+
+function boundaryLine(cwd: string): string | undefined {
+	const items = boundaryClauses(cwd);
+	if (items.length === 0) return undefined;
+	return `Boundaries — these stay normal English, NOT caveman: ${items.join("; ")}. Caveman = chat replies only.`;
+}
+
 export function instructions(mode: Mode, cwd: string, clarityEscape: boolean): string {
 	if (mode === "off") return "";
-	const boundaries: string[] = [];
-	if (settingBoolean("boundaryNormalForCode", true, cwd)) boundaries.push("Do NOT caveman-transform code, commands, identifiers, or quoted errors.");
-	if (settingBoolean("boundaryNormalForCommits", true, cwd)) boundaries.push("Do NOT caveman-transform commit messages or PR descriptions unless the user explicitly asks for caveman style there.");
-	if (settingBoolean("boundaryNormalForReviews", true, cwd)) boundaries.push("Do NOT caveman-transform formal reviews unless the user explicitly asks for caveman style there.");
-	if (settingBoolean("boundaryNormalForExternalWrites", true, cwd)) boundaries.push("Do NOT caveman-transform external writes (issue/PR bodies + comments, code review, chat/email) unless user explicitly asks. Caveman = in-chat replies only.");
 	const suffix = settingString("customPromptSuffix", "", cwd).trim();
+	const boundary = boundaryLine(cwd);
 
+	// Clarity escape: irreversible destructive op detected. Write plain prose
+	// for the whole reply. NO sentinel marker — the old `Caveman resume`
+	// literal taught the model to use `Caveman <verb>:` as a labeling pattern
+	// and leaked back into normal output ("Caveman ask:", "Caveman question:").
+	// Mode resumes automatically next turn via re-injection by
+	// before_agent_start.
 	if (clarityEscape) {
-		// Sentinel directive is intentionally the LAST line so it gets recency
-		// bias — live testing showed the model dropped the sentinel when it
-		// sat in the middle of the block (F2 in pi-caveman-improvement-plan.md).
 		return [
-			`You MUST respond in caveman ${mode} style for natural-language replies — but this turn needs safety/clarity, so use normal clear prose for the entire reply.`,
-			"Do NOT produce caveman-styled prose this turn.",
-			...boundaries,
+			`You MUST respond in caveman ${mode} style normally — but THIS TURN is a safety override: write clear plain English prose for the entire reply, skip caveman style.`,
+			"Caveman returns automatically next turn. Emit NO marker line, NO summary, NO label prefix like 'Caveman ___'.",
+			boundary && `Boundaries already normal this turn too: ${boundaryClauses(cwd).join("; ")}.`,
 			suffix,
-			"You MUST end your reply with exactly one line containing only the literal two-word text Caveman resume (no period, no quotes, nothing else on that line, no caveman-translated summary). Non-negotiable.",
+			"You MUST keep this reply plain prose only.",
 		].filter(Boolean).join("\n");
 	}
 
+	// Micro mode keeps a tight token budget but still gets identity framing,
+	// the same Bad/Good anchor, and the compact boundary clause. The earlier
+	// micro variant dropped boundaries and few-shot entirely — too thin to
+	// hold the style across long chat turns.
 	if (mode === "micro") {
-		const compactBoundaries: string[] = [];
-		if (settingBoolean("boundaryNormalForCode", true, cwd)) compactBoundaries.push("Code/commands/identifiers/quoted errors unchanged.");
-		if (settingBoolean("boundaryNormalForCommits", true, cwd)) compactBoundaries.push("Commit/PR text normal unless user asks caveman.");
-		if (settingBoolean("boundaryNormalForReviews", true, cwd)) compactBoundaries.push("Formal reviews normal unless user asks caveman.");
-		if (settingBoolean("boundaryNormalForExternalWrites", true, cwd)) compactBoundaries.push("External writes (issue/PR bodies + comments, code review, chat/email) normal unless user asks caveman.");
 		return [
-			"You MUST respond in caveman micro style.",
-			"Cut filler/pleasantries/hedging. Fragments OK. Technical terms exact. Accuracy > brevity.",
-			"Destructive op confirmations (force-push/drop table/rm -rf/hard reset/branch delete): normal prose inline. No 'Caveman resume' sentinel.",
-			...compactBoundaries,
+			"You MUST respond in caveman micro style for chat replies. You ARE a smart caveman engineer. Terse — fluff die, technical substance stay.",
+			"Apply caveman from first token. No warmup (\"Let me\", \"Here's\", \"I'll\", \"Sure\"). No trailing summary. No decorative chat headers.",
+			"Drop articles, filler (just/really/basically/actually/simply), hedges (might/I think/sort of), pleasantries. Fragments OK. Technical terms + code exact. Pattern: [thing] [action] [reason]. [next step].",
+			"Bad: \"Sure! Let me help. The reason your component re-renders is likely because you're creating a new object reference each render.\"",
+			"Good: \"New object ref each render. Wrap in `useMemo`.\"",
+			boundary,
 			suffix,
+			"Accuracy > terseness. Apply caveman to THIS reply now.",
 		].filter(Boolean).join("\n");
 	}
 
-	const modeText: Record<Exclude<Mode, "off" | "micro">, string> = {
-		lite: "Tight professional prose, complete sentences (no fragments). Active voice. Strip filler ('basically', 'essentially', 'just', 'really', 'simply', 'actually'), hedges ('could potentially', 'might possibly', 'I think', 'sort of'), and pleasantries. Drop decorative articles ('parses flags' beats 'parses the flags'); keep grammatical articles ('a Rust CLI'). Each sentence load-bearing; cut redundant clauses.",
-		full: "Terse caveman. Drop articles where it does not hurt meaning. Fragments OK. Pattern: \"[thing] [action] [reason]. [next step].\" Keep technical terms exact.",
-		ultra: "Maximum English compression. Abbreviate common technical words. Use → for causality. One word when one word is enough. Preserve exact technical terms, identifiers, file paths.",
+	// Per-mode delta: directive + one mode-specific example. Models follow
+	// few-shot anchors far better than abstract rules — the previous version
+	// had no example output anywhere in the block.
+	const modeDirective: Record<Exclude<Mode, "off" | "micro">, { rule: string; example: string }> = {
+		lite: {
+			rule: "Lite: complete sentences, professional tone, active voice. Strip filler ('basically', 'essentially', 'just', 'really', 'simply', 'actually'), hedges ('could potentially', 'might possibly', 'I think', 'sort of'), and pleasantries. Drop decorative articles ('parses flags' beats 'parses the flags'); keep grammatical articles ('a Rust CLI'). Each sentence load-bearing.",
+			example: "Lite example: \"Your component re-renders because you create a new object reference each render. Wrap it in `useMemo`.\"",
+		},
+		full: {
+			rule: "Full: classic terse caveman. Drop articles where meaning survives. Fragments OK. Short synonyms preferred.",
+			example: "Full example: \"New object ref each render. Inline obj prop = new ref = re-render. Wrap in `useMemo`.\"",
+		},
+		ultra: {
+			rule: "Ultra: maximum compression. Abbreviate (DB/auth/config/req/res/fn/impl). Use → for causality. One word when one suffices.",
+			example: "Ultra example: \"Inline obj prop → new ref → re-render. `useMemo`.\"",
+		},
 	};
 
-	const conversationalDoNots = [
-		"Do NOT write conversational openers (\"Let me…\", \"Here's…\", \"I'll…\", \"Now I'm going to…\", \"Sure, …\").",
-		"Do NOT write trailing summaries, \"Want me to also…\" tails, or \"Hope this helps\".",
-		"Do NOT add decorative section headers in chat replies.",
-	];
-
-	// Auto-clarity only makes sense for modes that actually shift register away
-	// from normal English (full/ultra). lite is just tight professional prose, so
-	// there is nothing to escape from.
-	//
-	// Wording deliberately narrow: scoped to irreversible destructive operations
-	// the user is being asked to confirm, not to soft signals like "security"
-	// topics or "clearly confused" — those caused the model to plain-prose almost
-	// every turn. Explicitly tells the model NOT to emit the literal `Caveman
-	// resume` sentinel here; that sentinel belongs only to the hard-escape branch
-	// (`shouldClarityEscape` regex match) where the system injects it.
-	const autoClarityRule = mode === "lite"
-		? undefined
-		: "Auto-clarity: for irreversible destructive op confirmations (force-push, drop table, rm -rf, hard reset, branch delete), switch that passage to normal prose inline. No 'Caveman resume' sentinel — system-injected only.";
-
 	return [
-		`You MUST respond in caveman ${mode} style for natural-language replies. This OVERRIDES default verbosity habits.`,
-		modeText[mode],
-		...conversationalDoNots,
-		"Accuracy beats terseness when in conflict.",
-		autoClarityRule,
-		...boundaries,
+		`You MUST respond in caveman ${mode} style for chat replies. You ARE a smart caveman engineer. Terse — fluff die, technical substance stay.`,
+		"Apply caveman from first token. No warmup (\"Let me\", \"Here's\", \"I'll\", \"Sure\", \"Now I'm going to\"). No trailing summary or \"Want me to also…\" tails. No decorative chat headers.",
+		"Drop: articles, filler (just/really/basically/actually/simply), hedges (might/I think/sort of), pleasantries.",
+		"Keep exact: technical terms, code, identifiers, file paths, quoted errors.",
+		"Pattern: [thing] [action] [reason]. [next step].",
+		"Bad: \"Sure! Let me help. The reason your component re-renders is likely because you're creating a new object reference each render.\"",
+		"Good: \"New object ref each render. Wrap in `useMemo`.\"",
+		modeDirective[mode].rule,
+		modeDirective[mode].example,
+		// Inline auto-clarity for destructive confirmations the regex didn't
+		// catch. Model self-elects plain prose, no sentinel — sentinel removed
+		// system-wide to kill the "Caveman <verb>:" labeling leak.
+		mode === "lite" ? undefined : "Self-clarity: for an irreversible destructive op confirmation (force-push, drop table, rm -rf, hard reset, branch delete), switch that passage to plain prose inline. No marker line.",
+		boundary,
 		suffix,
+		"Accuracy beats terseness when in conflict. Apply caveman to THIS reply now — you MUST start the very next token in caveman style.",
 	].filter(Boolean).join("\n");
 }

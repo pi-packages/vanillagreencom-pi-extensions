@@ -51,5 +51,14 @@ Arguments support autocomplete.
 - Session override state and the last active mode persist in the Pi session and restore from the active branch.
 - Settings live in Pi/vstack `settings.json`; project settings override user settings.
 - QOL can use the caveman bridge for its compact statusline badge and `Alt+C` editor shortcut.
-- The hard clarity-safety escape only fires when the user prompt names an explicit irreversible destructive operation (force-push, drop table, rm -rf, hard reset, destructive/irreversible). The model still self-elects plain prose for genuine destructive confirmations via an inline auto-clarity rule, but no longer escapes on soft signals like "confused" or "security".
+- The hard clarity-safety escape only fires when the user prompt names an explicit irreversible destructive operation (force-push, drop table, rm -rf, hard reset, destructive/irreversible). The model still self-elects plain prose for genuine destructive confirmations via an inline self-clarity rule, but no longer escapes on soft signals like "confused" or "security".
+- The clarity-safety branch writes plain prose for the turn and does **not** emit any marker line. Caveman resumes automatically next turn via re-injection. (Prior versions used a literal `Caveman resume` sentinel; the model generalized that as a `Caveman <verb>:` labeling pattern and leaked it back into normal output — e.g. `Caveman ask:`, `Caveman question:`.)
 - Boundary toggles keep caveman out of text destined for other systems: code/identifiers, commit messages and PR descriptions, formal reviews, and external writes (issue/PR bodies + comments, code review, chat/email). Caveman is for in-chat replies.
+
+## Claude-bridge users
+
+pi-caveman injects its directive into Pi's `systemPrompt`. When you use `claude-bridge` as your provider, claude-bridge builds its own `systemPrompt` from Claude Code's preset and only forwards pi-side hooks that you explicitly enable. The caveman directive is one of those hooks.
+
+- Set `@vanillagreen/pi-claude-bridge` → `includeCavemanHook: true` in the extension manager. The default is **off**.
+- If caveman is active and the bridge is installed with this flag off, pi-caveman warns once at session start. Run `/caveman debug` to confirm the resolved bridge setting.
+- Non-bridge providers (native Pi providers) receive the caveman block as part of Pi's regular `systemPrompt` and do not need this flag.

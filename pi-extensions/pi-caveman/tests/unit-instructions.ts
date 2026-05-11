@@ -73,30 +73,32 @@ describe("instructions() snapshot matrix", () => {
 		assert.equal(instructions("off", projectDir, true), "");
 	});
 
-	it("clarity-escape branch puts the sentinel directive on the LAST non-empty line (F2 fix)", () => {
-		writeUserConfig({ mode: "full", boundaryNormalForCode: true, boundaryNormalForCommits: true, boundaryNormalForReviews: true, boundaryNormalForExternalWrites: true, customPromptSuffix: "PROJECT-SUFFIX" });
-		for (const mode of MODES) {
-			const rendered = instructions(mode, projectDir, true);
-			// Sentinel literal is the two-word phrase 'Caveman resume' (no period
-			// — the period was ambiguous in the directive's surrounding sentence,
-			// which made the model emit 'Caveman resume' without it during live
-			// testing).
-			assert.match(rendered, /Caveman resume\b/, `${mode} clarity escape missing sentinel literal`);
-			const lastLine = rendered.split("\n").filter((line) => line.trim().length > 0).pop();
-			assert.match(lastLine ?? "", /Caveman resume\b/, `${mode} clarity sentinel must be the last directive line (recency bias). Last line was: ${lastLine}`);
-		}
-	});
-
-	it("clarity-escape branch double-anchors imperative directives (opener + sentinel) (F2 fix)", () => {
+	it("clarity-escape branch double-anchors imperative directives (opener + closer)", () => {
 		writeUserConfig({ mode: "full", boundaryNormalForCode: true, boundaryNormalForCommits: true, boundaryNormalForReviews: true, boundaryNormalForExternalWrites: true });
 		for (const mode of MODES) {
 			const rendered = instructions(mode, projectDir, true);
 			const mustHits = rendered.match(/\bYou MUST\b/g) ?? [];
-			assert.ok(mustHits.length >= 2, `${mode} clarity needs >=2 'You MUST' directives (opener + sentinel); found ${mustHits.length}`);
+			assert.ok(mustHits.length >= 2, `${mode} clarity needs >=2 'You MUST' directives (opener + closer); found ${mustHits.length}`);
 		}
 	});
 
-	it("lite directive includes explicit filler/hedge/article guidance (F1 fix)", () => {
+	it("clarity-escape branch never emits a 'Caveman resume' sentinel (labeling-leak fix)", () => {
+		writeUserConfig({ mode: "full", boundaryNormalForCode: true, boundaryNormalForCommits: true, boundaryNormalForReviews: true, boundaryNormalForExternalWrites: true });
+		for (const mode of MODES) {
+			const rendered = instructions(mode, projectDir, true);
+			assert.doesNotMatch(rendered, /Caveman resume/, `${mode} clarity must not teach the 'Caveman resume' sentinel — it leaked back as 'Caveman ask:' / 'Caveman question:' labels in live output.`);
+		}
+	});
+
+	it("no clean-mode prompt teaches a 'Caveman <verb>' labeling pattern", () => {
+		writeUserConfig({ mode: "full", boundaryNormalForCode: true, boundaryNormalForCommits: true, boundaryNormalForReviews: true, boundaryNormalForExternalWrites: true });
+		for (const mode of MODES) {
+			const rendered = instructions(mode, projectDir, false);
+			assert.doesNotMatch(rendered, /Caveman resume/, `${mode} clean must not mention 'Caveman resume'`);
+		}
+	});
+
+	it("lite directive includes explicit filler/hedge/article guidance", () => {
 		writeUserConfig({ mode: "lite", boundaryNormalForCode: true, boundaryNormalForCommits: true, boundaryNormalForReviews: true, boundaryNormalForExternalWrites: true });
 		const rendered = instructions("lite", projectDir, false);
 		assert.match(rendered, /article/i, "lite must explicitly call out article handling");
@@ -105,26 +107,46 @@ describe("instructions() snapshot matrix", () => {
 		assert.match(rendered, /complete sentence/i, "lite must keep complete sentences (distinguishes from full's fragments)");
 	});
 
+	it("every non-micro clean mode includes a Bad/Good few-shot pair", () => {
+		writeUserConfig({ mode: "full", boundaryNormalForCode: true, boundaryNormalForCommits: true, boundaryNormalForReviews: true, boundaryNormalForExternalWrites: true });
+		for (const mode of MODES) {
+			const rendered = instructions(mode, projectDir, false);
+			assert.match(rendered, /^Bad: /m, `${mode} clean missing Bad: example`);
+			assert.match(rendered, /^Good: /m, `${mode} clean missing Good: example`);
+		}
+	});
+
+	it("every non-micro clean mode includes the identity-framing line", () => {
+		writeUserConfig({ mode: "full", boundaryNormalForCode: true, boundaryNormalForCommits: true, boundaryNormalForReviews: true, boundaryNormalForExternalWrites: true });
+		for (const mode of MODES) {
+			const rendered = instructions(mode, projectDir, false);
+			assert.match(rendered, /You ARE a smart caveman engineer/, `${mode} clean must use identity framing`);
+		}
+	});
+
+	it("no rendered prompt contains a blank-line block split (bridge anchor relies on single block)", () => {
+		writeUserConfig({ mode: "full", boundaryNormalForCode: true, boundaryNormalForCommits: true, boundaryNormalForReviews: true, boundaryNormalForExternalWrites: true });
+		for (const mode of MODES) {
+			for (const clarity of [false, true]) {
+				const rendered = instructions(mode, projectDir, clarity);
+				assert.doesNotMatch(rendered, /\n\s*\n/, `${mode}${clarity ? " clarity" : ""} must be single \\n-separated block (no \\n\\n) so claude-bridge extractBlockByMarkers sees one block`);
+			}
+		}
+	});
+
 	it("respects customPromptSuffix when set", () => {
 		writeUserConfig({ mode: "full", customPromptSuffix: "PROJECT-SUFFIX-SENTINEL" });
 		const rendered = instructions("full", projectDir, false);
 		assert.match(rendered, /PROJECT-SUFFIX-SENTINEL/);
 	});
 
-	it("every active mode renders imperative directives", () => {
+	it("every active mode renders imperative MUST directives in clean and clarity", () => {
 		writeUserConfig({ mode: "full", boundaryNormalForCode: true, boundaryNormalForCommits: true, boundaryNormalForReviews: true, boundaryNormalForExternalWrites: true });
 		for (const mode of MODES) {
 			const clean = instructions(mode, projectDir, false);
 			assert.match(clean, /\bMUST\b/, `${mode} clean missing MUST directive`);
-			// micro is the minimum-prompt mode; its clean branch deliberately
-			// omits Do NOT to preserve its token-budget framing. Every other
-			// mode and every clarity branch must contain Do NOT.
-			if (mode !== "micro") {
-				assert.match(clean, /\bDo NOT\b/, `${mode} clean missing Do NOT directive`);
-			}
 			const clarity = instructions(mode, projectDir, true);
 			assert.match(clarity, /\bMUST\b/, `${mode} clarity missing MUST directive`);
-			assert.match(clarity, /\bDo NOT\b/, `${mode} clarity missing Do NOT directive`);
 		}
 	});
 
