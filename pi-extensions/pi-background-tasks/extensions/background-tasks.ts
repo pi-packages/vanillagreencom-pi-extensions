@@ -80,6 +80,22 @@ import type {
 	TaskEventType,
 } from "./types.js";
 
+/**
+ * Clamp the rendered line count of an aboveEditor widget so it can never push
+ * the chat / status / editor above the terminal viewport top, which is what
+ * triggers pi-tui's full-screen redraw (firstChanged < prevViewportTop) and
+ * the visible flash. Keeps at least 4 lines visible; reserves enough rows for
+ * the editor + footer + a sliver of chat. Drops trailing lines and replaces
+ * them with a muted "… N more" hint.
+ */
+function clampAboveEditorWidget(lines: string[], terminalRows: number, theme: Theme): string[] {
+	const reserveForOtherUi = 10;
+	const maxLines = Math.max(4, terminalRows - reserveForOtherUi);
+	if (lines.length <= maxLines) return lines;
+	const hidden = lines.length - (maxLines - 1);
+	return [...lines.slice(0, maxLines - 1), theme.fg("muted", `… ${hidden} more (open dashboard for full view)`)];
+}
+
 export default function backgroundTasks(pi: ExtensionAPI): void {
 	const guard = pi as unknown as Record<PropertyKey, unknown>;
 	if (guard[BG_INSTALL_SYMBOL]) return;
@@ -170,30 +186,20 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 			BG_WIDGET_KEY,
 			(tui, theme) => {
 				requestWidgetRender = () => tui.requestRender();
-				let timer: ReturnType<typeof setInterval> | null = null;
-
-				const ensureTimer = () => {
-					const visible = widgetTasks();
-					if (visible.length === 0) {
-						if (timer) clearInterval(timer);
-						timer = null;
-						clearWidget();
-						return;
-					}
-					if (timer) return;
-					timer = setInterval(() => tui.requestRender(), 1_000);
-					timer.unref?.();
-				};
-
+				// Previously: setInterval(() => tui.requestRender(), 1_000) to refresh
+				// formatRelativeTime() output. That forced a TUI render every second purely
+				// to advance "5s ago" → "6s ago", which re-diffs the full screen and triggers
+				// pi-tui's above-viewport flicker every time the chat overflows. Relative-time
+				// text is now refreshed only on real task events (start / output / end / mode
+				// toggle / dashboard mutation), accepting a few seconds of staleness between
+				// events as a worthwhile tradeoff against the redraw storm.
 				return {
 					dispose() {
-						if (timer) clearInterval(timer);
 						if (requestWidgetRender) requestWidgetRender = null;
 					},
 					invalidate() {},
 					render(width: number) {
-						ensureTimer();
-						return frameWidget(renderWidgetLines(theme), width, theme);
+						return clampAboveEditorWidget(frameWidget(renderWidgetLines(theme), width, theme), tui.terminal.rows, theme);
 					},
 				};
 			},

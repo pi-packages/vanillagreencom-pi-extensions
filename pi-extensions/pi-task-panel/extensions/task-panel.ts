@@ -496,6 +496,22 @@ function renderPanelWidgetLines(state: TaskPanelState, theme: Theme, cwd: string
 	return panelFrame(lines, Math.max(1, width), theme);
 }
 
+/**
+ * Cap the widget's rendered line count so an expanded panel can't push chat / status
+ * above the terminal viewport top. pi-tui's differential renderer falls back to a
+ * full screen + scrollback clear whenever firstChanged < prevViewportTop, which is
+ * exactly what happens during streaming once the panel spans past the top of the
+ * terminal. Reserve room for editor + footer + a sliver of chat; drop overflow with
+ * a muted hint that the manage modal still shows the full list.
+ */
+function clampAboveEditorWidget(lines: string[], terminalRows: number, theme: Theme): string[] {
+	const reserveForOtherUi = 10;
+	const maxLines = Math.max(4, terminalRows - reserveForOtherUi);
+	if (lines.length <= maxLines) return lines;
+	const hidden = lines.length - (maxLines - 1);
+	return [...lines.slice(0, maxLines - 1), theme.fg("muted", `… ${hidden} more (open task manager for full view)`)];
+}
+
 function renderPanelHeader(state: TaskPanelState, theme: Theme, active?: TaskItem, hint = ""): string {
 	const remaining = remainingCount(state);
 	const activePhase = active?.phaseId ? phaseTitle(state, active.phaseId) : "";
@@ -725,10 +741,10 @@ export default function taskPanel(pi: ExtensionAPI): void {
 			ctx.ui.setWidget(WIDGET_KEY, undefined);
 			return;
 		}
-		ctx.ui.setWidget(WIDGET_KEY, (_tui, theme) => ({
+		ctx.ui.setWidget(WIDGET_KEY, (tui, theme) => ({
 			invalidate() {},
 			render(width: number): string[] {
-				return renderPanelWidgetLines(state, theme, ctx.cwd, width);
+				return clampAboveEditorWidget(renderPanelWidgetLines(state, theme, ctx.cwd, width), tui.terminal.rows, theme);
 			},
 		}), { placement: "aboveEditor" });
 	};

@@ -194,7 +194,10 @@ export default function qol(pi: ExtensionAPI): void {
 
 	const startThinkingTimerTicker = () => {
 		if (thinkingTimerTicker) return;
-		thinkingTimerTicker = setInterval(tickThinkingTimer, 100);
+		// 250ms cadence (was 100ms): user-visible precision of "thinking 1.2s" still feels live,
+		// but render rate drops 2.5x. Every tick mutates an inline chat label, which makes the
+		// pi-tui above-viewport diff (firstChanged < prevViewportTop) fire as full-screen redraws.
+		thinkingTimerTicker = setInterval(tickThinkingTimer, 250);
 		thinkingTimerTicker.unref?.();
 	};
 

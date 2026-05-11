@@ -8,7 +8,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { formatSize, getMarkdownTheme, type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { formatSize, getMarkdownTheme, type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext, type Theme } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { discoverAgents, formatAgentList, type AgentConfig, type AgentScope } from "./agents.js";
 import {
@@ -227,6 +227,19 @@ function formatSteeringForChild(agentName: string, message: string, liveBridge: 
 	].join("\n");
 }
 
+/**
+ * Cap an aboveEditor widget's line count so it can never push chat / status above
+ * the terminal viewport top — the trigger for pi-tui's full-screen redraw
+ * (firstChanged < prevViewportTop). Reserves room for editor + footer + chat sliver.
+ */
+function clampAboveEditorWidget(lines: string[], terminalRows: number, theme: Theme): string[] {
+	const reserveForOtherUi = 10;
+	const maxLines = Math.max(4, terminalRows - reserveForOtherUi);
+	if (lines.length <= maxLines) return lines;
+	const hidden = lines.length - (maxLines - 1);
+	return [...lines.slice(0, maxLines - 1), theme.fg("muted", `… ${hidden} more (open agents browser for full view)`)];
+}
+
 export default function (pi: ExtensionAPI) {
 	const guard = pi as unknown as Record<PropertyKey, unknown>;
 	if (guard[INSTALL_SYMBOL]) return;
@@ -283,10 +296,10 @@ export default function (pi: ExtensionAPI) {
 			ctx.ui.setWidget(SUBAGENT_WIDGET_KEY, undefined);
 			return;
 		}
-		ctx.ui.setWidget(SUBAGENT_WIDGET_KEY, (_tui, theme) => ({
+		ctx.ui.setWidget(SUBAGENT_WIDGET_KEY, (tui, theme) => ({
 			invalidate() {},
 			render(width: number): string[] {
-				return renderDashboardWidgetLines(dashboardState, theme, ctx.cwd, width);
+				return clampAboveEditorWidget(renderDashboardWidgetLines(dashboardState, theme, ctx.cwd, width), tui.terminal.rows, theme);
 			},
 		}), { placement: "aboveEditor" });
 	};

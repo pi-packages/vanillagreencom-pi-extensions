@@ -196,6 +196,24 @@ interface DashboardCache {
 	// Tmux `session:window.pane` → `%N` map, refreshed on each tick so issue
 	// rows can join against the pi-agents-tmux stats bridge.
 	paneTargetToId: Map<string, string>;
+	// Last applied syncWidget key. Each poller tick re-runs syncWidget, which
+	// always triggers a TUI redraw. Skipping setWidget when this key is unchanged
+	// stops the 1.5s polling cadence from re-diffing the entire screen and
+	// triggering pi-tui's above-viewport flash whenever chat overflows.
+	lastSyncKey?: string;
+}
+
+/**
+ * Cap an aboveEditor widget's line count so it can never push chat / status above
+ * the terminal viewport top, which is the trigger for pi-tui's full-screen redraw
+ * (firstChanged < prevViewportTop). Reserves room for editor + footer + chat sliver.
+ */
+function clampAboveEditorWidget(lines: string[], terminalRows: number, theme: Theme): string[] {
+	const reserveForOtherUi = 10;
+	const maxLines = Math.max(4, terminalRows - reserveForOtherUi);
+	if (lines.length <= maxLines) return lines;
+	const hidden = lines.length - (maxLines - 1);
+	return [...lines.slice(0, maxLines - 1), theme.fg("muted", `… ${hidden} more (open /flightdeck for full view)`)];
 }
 
 function usageForIssue(issue: IssueRecord, paneMap: Map<string, string>, bridge: ReturnType<typeof getAgentsBridge>): AgentsBridgeItem | undefined {
@@ -920,6 +938,7 @@ export default function flightdeck(pi: ExtensionAPI): void {
 		activeCtx = ctx;
 		if (!ctx.hasUI) {
 			ctx.ui.setWidget(WIDGET_KEY, undefined);
+			cache.lastSyncKey = "__off__";
 			return;
 		}
 		const snapshot = cache.lastSnapshot;
@@ -933,10 +952,31 @@ export default function flightdeck(pi: ExtensionAPI): void {
 		const staleAfterMin = Math.max(0, Math.floor(settingNumber("dashboardStaleAfterMin", 5, ctx.cwd)));
 		const status = flightdeckSessionStatus(snapshot, { staleAfterMin });
 		if (status === "inactive" && !showBanner) {
-			ctx.ui.setWidget(WIDGET_KEY, undefined);
+			if (cache.lastSyncKey !== "__off__") {
+				ctx.ui.setWidget(WIDGET_KEY, undefined);
+				cache.lastSyncKey = "__off__";
+			}
 			return;
 		}
-		ctx.ui.setWidget(WIDGET_KEY, (_tui, theme) => ({
+		// Build a structural key over the inputs that actually shape the rendered
+		// output. If the file-backed snapshot, the dashboard mode, and the pause
+		// state are all unchanged since the previous tick, calling setWidget would
+		// only force a redundant TUI redraw — which in turn re-diffs the entire
+		// screen and can trip pi-tui's above-viewport flash whenever the chat is
+		// taller than the terminal. Skip the call entirely when nothing changed.
+		const syncKey = JSON.stringify({
+			state: cache.state,
+			showBanner,
+			dashboardEnabled,
+			status,
+			master: snapshot?.master ?? null,
+			daemonAlive: snapshot?.daemon?.pidAlive ?? null,
+			daemonHeartbeat: snapshot?.daemon?.heartbeatAgeSec ?? null,
+			polledAt: mostRecentPollMs(snapshot) ?? null,
+		});
+		if (cache.lastSyncKey === syncKey) return;
+		cache.lastSyncKey = syncKey;
+		ctx.ui.setWidget(WIDGET_KEY, (tui, theme) => ({
 			invalidate() { /* no-op; we drive renders via setInterval+setWidget */ },
 			render(width: number): string[] {
 				const lines: string[] = [];
@@ -950,7 +990,7 @@ export default function flightdeck(pi: ExtensionAPI): void {
 						lines.push(...renderStaleHintLine(snapshot, theme, width));
 					}
 				}
-				return lines;
+				return clampAboveEditorWidget(lines, tui.terminal.rows, theme);
 			},
 		}), { placement: "aboveEditor" });
 	};
