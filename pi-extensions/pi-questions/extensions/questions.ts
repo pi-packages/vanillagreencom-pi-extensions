@@ -426,6 +426,40 @@ function answerStem(theme: Theme, last: boolean): string {
 	return theme.fg("muted", last ? "     " : "  │  ");
 }
 
+function optionIcon(selected: boolean, theme: Theme): string {
+	return selected ? theme.fg("success", ICONS.checkSquare) : theme.fg("muted", ICONS.square);
+}
+
+function renderExpandedOptionLines(tab: QuestionTab | undefined, selectedAnswers: string[] | undefined, stem: string, width: number, theme: Theme): string[] {
+	if (!tab) return [];
+	const selected = new Set(selectedAnswers ?? []);
+	const optionLabels = new Set(tab.options.map((option) => option.label));
+	const customAnswers = (selectedAnswers ?? []).filter((answer) => !optionLabels.has(answer));
+	const lines = [`${stem}${theme.fg("muted", "Options:")}`];
+
+	for (const option of tab.options) {
+		const isSelected = selected.has(option.label);
+		const prefix = `${stem}  ${optionIcon(isSelected, theme)} `;
+		const label = isSelected ? theme.fg("success", option.label) : theme.fg("text", option.label);
+		const description = option.description ? theme.fg("dim", ` — ${option.description}`) : "";
+		lines.push(...wrapStyled(prefix, `${label}${description}`, width, 6));
+	}
+
+	if (tab.allowCustom) {
+		if (customAnswers.length === 0) {
+			const label = theme.fg("text", tab.customLabel);
+			lines.push(...wrapStyled(`${stem}  ${optionIcon(false, theme)} `, `${label}${theme.fg("dim", " — custom answer")}`, width, 6));
+		} else {
+			for (const answer of customAnswers) {
+				const label = `${theme.fg("success", `${tab.customLabel}:`)} ${theme.fg("success", answer)}`;
+				lines.push(...wrapStyled(`${stem}  ${optionIcon(true, theme)} `, label, width, 6));
+			}
+		}
+	}
+
+	return lines;
+}
+
 function renderExpandedAnswerLines(request: QuestionRequest | undefined, answers: string[][], width: number, theme: Theme): string[] {
 	const count = Math.max(answers.length, request?.questions.length ?? 0);
 	const lines: string[] = [];
@@ -439,6 +473,7 @@ function renderExpandedAnswerLines(request: QuestionRequest | undefined, answers
 			lines.push(...wrapStyled(`${stem}${theme.fg("muted", "Question: ")}`, theme.fg("text", tab.question), width, 10));
 		}
 		lines.push(...wrapStyled(`${stem}${theme.fg("muted", "Answer: ")}`, theme.fg("success", formatAnswers(answers[index])), width, 10));
+		lines.push(...renderExpandedOptionLines(tab, answers[index], stem, width, theme));
 	}
 	return lines;
 }
