@@ -1,5 +1,5 @@
 import type { ExtensionCommandContext, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import { matchesKey, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 
 import {
 	DASHBOARD_FRAME_VERTICAL_OVERHEAD,
@@ -95,6 +95,36 @@ export async function openDashboard(
 
 				const getOutputLines = (task: ManagedTask | null): string[] => splitOutputLines(task ? deps.getTaskOutput(task) : "");
 				const maxOutputScroll = (task: ManagedTask | null): number => Math.max(0, getOutputLines(task).length - outputRows());
+				const sanitizeDashboardLine = (line: string): string => line
+					.replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
+					.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+					.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
+					.replace(/\t/g, "  ");
+				const wrapDashboardLine = (line: string, targetWidth: number): string[] => {
+					const sanitized = sanitizeDashboardLine(line).replace(/\r/g, "");
+					const wrapped = wrapTextWithAnsi(sanitized, Math.max(1, targetWidth));
+					return wrapped.length > 0 ? wrapped : [""];
+				};
+				const pushDetail = (target: string[], label: string, value: string, detailWidth: number, maxLines = 6) => {
+					const prefix = `${theme.fg("muted", label)}: `;
+					const indent = " ".repeat(Math.max(0, `${label}: `.length));
+					const chunks = String(value).split(/\r?\n/);
+					const lines: string[] = [];
+					chunks.forEach((chunk, index) => {
+						const lead = index === 0 ? prefix : theme.fg("muted", indent);
+						const available = Math.max(1, detailWidth - (index === 0 ? visibleWidth(`${label}: `) : indent.length));
+						const wrapped = wrapDashboardLine(chunk, available);
+						wrapped.forEach((part, partIndex) => {
+							lines.push(`${partIndex === 0 ? lead : theme.fg("muted", indent)}${part}`);
+						});
+					});
+					if (lines.length > maxLines) {
+						target.push(...lines.slice(0, Math.max(1, maxLines - 1)));
+						target.push(`${theme.fg("muted", indent)}… ${lines.length - (maxLines - 1)} more line(s)`);
+						return;
+					}
+					target.push(...lines);
+				};
 
 				const syncTaskScroll = () => {
 					const sorted = deps.sortedTasks();
@@ -173,21 +203,17 @@ export async function openDashboard(
 					if (!selected) {
 						right.push(theme.fg("dim", "Select a task to inspect output."));
 					} else {
-						const outputLines = getOutputLines(selected);
+						const outputLines = getOutputLines(selected).map(sanitizeDashboardLine);
 						const visibleOutput = outputLines.slice(outputScroll, outputScroll + outputViewportRows);
 						right.push(`${activePane === "output" ? activePill(theme, ` Watch ${selected.id} `) : inactivePill(theme, ` Watch ${selected.id} `)} ${theme.fg("dim", followOutput ? "follow" : `line ${outputScroll + 1}`)}`);
 						right.push("");
 						right.push(`${theme.fg("muted", "Status")}: ${bgStatusText(taskSnapshot(selected), theme)} · pid ${selected.pid}`);
 						right.push(`${theme.fg("muted", "Started")}: ${formatRelativeTime(selected.startedAt)} · ${formatDuration(taskElapsedMs(selected))} elapsed`);
 						if (selected.expiresAt != null) right.push(`${theme.fg("muted", "Expiry")}: ${formatRelativeTime(selected.expiresAt)}`);
-						right.push(`${theme.fg("muted", "Command")}: ${selected.command}`);
-						right.push(`${theme.fg("muted", "Cwd")}: ${selected.cwd}`);
-						right.push(`${theme.fg("muted", "Log")}: ${selected.logFile}`);
-						right.push(
-							`${theme.fg("muted", "Wakeups")}: exit=${selected.notifyOnExit ? "yes" : "no"}, output=${
-								selected.notifyOnOutput ? (selected.notifyPattern ?? "yes") : "no"
-							}`,
-						);
+						pushDetail(right, "Command", selected.command, detailPaneWidth, 4);
+						pushDetail(right, "Cwd", selected.cwd, detailPaneWidth, 2);
+						pushDetail(right, "Log", selected.logFile, detailPaneWidth, 2);
+						pushDetail(right, "Wakeups", `exit=${selected.notifyOnExit ? "yes" : "no"}, output=${selected.notifyOnOutput ? (selected.notifyPattern ?? "yes") : "no"}`, detailPaneWidth, 2);
 						right.push("", theme.fg("muted", theme.bold("Output")));
 						if (outputScroll > 0) right.push(theme.fg("dim", `↑ ${outputScroll} older line(s)`));
 						right.push(...visibleOutput);
