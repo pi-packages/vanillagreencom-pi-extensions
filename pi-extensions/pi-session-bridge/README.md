@@ -108,6 +108,30 @@ Responses and events:
 
 Clients receive events by default. Send `subscribe` with `enabled:false` to suppress live events on that connection.
 
+## Slash command behavior (vstack#10)
+
+Messages delivered via `pi-bridge send` go through
+`pi.sendUserMessage`, which currently hardcodes
+`expandPromptTemplates: false` in `@earendil-works/pi-coding-agent`.
+That affects three pi resolver paths differently:
+
+| Command shape | Via `pi-bridge send` | Via interactive editor |
+|---|---|---|
+| Bare extension command, e.g. `/flightdeck`, `/bridge:ping` | **Works** — routed through `pi.on("input")` → `_tryExecuteExtensionCommand`, which fires regardless of the expansion gate. |  Works |
+| Skill command, e.g. `/skill:flightdeck watch` | **Arrives as raw text to the LLM.** `_expandSkillCommand` is skipped. The LLM may infer intent but the skill body is not auto-loaded. | Works (full slash resolver runs) |
+| Prompt template, e.g. `/clear-ai`, project-defined `/<name>` from `.pi/prompts/*` | **Arrives as raw text.** `expandPromptTemplate` is skipped. | Works |
+
+Workarounds:
+
+- Callers that need a skill to load should send the bare extension
+  command form. The flightdeck daemon's pi master wake takes this
+  approach: `/flightdeck watch --from-daemon` is dispatched by the
+  pi-flightdeck extension which then re-dispatches into the skill via
+  `ctx.ui.pasteToEditor("/skill:flightdeck watch ...\n")`.
+- The proper fix is an upstream change to
+  `@earendil-works/pi-coding-agent`'s `sendUserMessage` to accept an
+  `expandPromptTemplates` option (tracked at vstack#10).
+
 ## No-LLM checks
 
 ```bash

@@ -59,8 +59,9 @@ The background daemon (`flightdeck-daemon`) is configurable but defaults are fin
 | `FD_WAKE_PENDING_TTL` | `300` | Wake-pending revert threshold when master crashes mid-turn |
 | `FD_MASTER_TURN_TTL` | `3600` | Maximum master turn duration before the busy lock is treated as stale even if the master pane is still alive |
 | `FD_ADAPTER_FRESHNESS_TTL` | `5` | Seconds to cache adapter freshness probe results keyed by URL + session/thread; set `0` to disable cache during debugging |
+| `FD_ADAPTER_READ_TIMEOUT_SEC` | `2` | Caps each adapter read subprocess (curl/pi-bridge/codex-bridge/gh) in the TS `pane-poll`. Fractional seconds honored. When an adapter read times out or returns an empty body, the TS path clears the per-harness `*_used` flag and falls through to tmux capture-pane on the same tick. **This is a deliberate divergence from the bash sibling**, which marks the adapter as used as soon as fresh args exist and leaves the buffer empty when curl times out (a wedged opencode/pi/codex adapter classifies as idle in bash until the freshness probe expires; in TS the same tick recovers via tmux). The bash siblings (`FLIGHTDECK_USE_TS_PANE_POLL=0`) do not honor this knob. |
 | `FD_SPAWN_MODE` | `detach` | `detach` (setsid+nohup, default) or `tmux-window` (visible in-session daemon window). Recommended `tmux-window` for codex/opencode/pi masters where backgrounding is unreliable |
-| `FD_MAX_LIFETIME` | `14400` | Seconds before daemon exec()s itself for a fresh process (0 disables) |
+| `FD_MAX_LIFETIME` | `14400` | Seconds before daemon exec()s itself for a fresh process (0 disables). **TS-port divergence:** bash uses `exec` (PID preserved); TS spawns a detached successor and exits (PID changes). External tooling must re-read PID_FILE each call rather than caching the initial PID. `status/health/stop` already do this. Master/dashboard contracts unaffected (BUSY_FILE.pid is the master's own PID, not the daemon's). |
 | `FD_STATE_DIR` | `$XDG_RUNTIME_DIR/flightdeck` (or `/tmp/flightdeck-$UID`) | Daemon-private state directory (heartbeat, busy, wake-pending, subscriber pid files). Must be user-owned, mode 0700 |
 
 ## Scripts
@@ -80,6 +81,32 @@ You don't run any of these by hand in normal use — the skill calls them. Liste
 | `parallel-groups` | Reads parallel-execution groups for the current planning cycle. |
 | `codex-app-server-spawn` / `-stop` | Brings up / tears down the shared Codex bridge server for codex-mode sessions. |
 | `pane-clear-bell` | Clears the tmux bell flag without screen flicker after answering. |
+
+### TypeScript port status
+
+The scripts above ship as bash trampolines that exec the TypeScript
+port under `skills/flightdeck/lib/flightdeck-core/` by default. Each
+trampoline checks `FLIGHTDECK_USE_TS_<SCRIPT>` first, then the global
+`FLIGHTDECK_USE_TS`; both default to `1`. Set either to `0` to route
+back to the `.bash` sibling.
+
+- **Default is TS.** `bun` is a hard runtime dependency — the
+  trampoline execs `bun .../src/bin/<script>.ts` unless the operator
+  opts out.
+- **The `.bash` siblings remain in place** as the opt-out target for at
+  least one full production cycle on TS defaults. They are still the
+  canonical body for some paths (the daemon `start` action below; the
+  `subscribers.bash` body shared between bash and TS daemons).
+- **`flightdeck-daemon start` still defaults to the bash sibling.** The
+  TS run-loop + subscriber lifecycle is fully ported and parity-tested,
+  but the `start` sub-action keeps a separate opt-in gate
+  (`FLIGHTDECK_USE_TS_DAEMON_START=1` or `FLIGHTDECK_USE_TS=1`) so the
+  riskiest 1500-LOC code path waits on one full production cycle before
+  flipping. Other daemon CLI actions (`status`/`events`/`ack`/`health`/
+  `stop`/`find-window`) run through TS by default.
+- **Parity tests** under `lib/flightdeck-core/tests/parity/` are the
+  baseline; live-wake.sh under the same gate is the production gate
+  before flipping a default.
 
 ## Patterns
 
@@ -110,7 +137,16 @@ cd /path/to/your/project
 vstack add vanillagreencom/vstack --skill flightdeck -y
 ```
 
-Pulls in required dependencies (`github`, `linear`, `project-management`). System requirements: `bash` 4+, `tmux` 3.x, `jq`, `gh`, `flock`. Mac users: install GNU coreutils for `sha256sum` and GNU date.
+Pulls in required dependencies (`github`, `linear`, `project-management`).
+
+System requirements:
+- `bash` 4+, `tmux` 3.x, `jq`, `gh`, `flock`, and `bun`
+  (https://bun.sh). `bun` is required for the default TS path and for
+  the parity test suite under `lib/flightdeck-core/tests/`. Mac users:
+  install GNU coreutils for `sha256sum` and GNU date.
+- Operators who must run the legacy bash path (set
+  `FLIGHTDECK_USE_TS=0`) can omit `bun`, but live-test coverage of the
+  bash-only path will stop after the next stable rollout cycle.
 
 ## Debugging
 
@@ -128,9 +164,59 @@ If flightdeck seems stuck on a prompt, the usual cause is a novel prompt shape t
 - **State directory privacy**: `FD_STATE_DIR` (default `$XDG_RUNTIME_DIR/flightdeck`, fallback `/tmp/flightdeck-$UID`) must be user-owned and mode 0700.
 - **PID reuse race**: stranded `.draining.<pid>` files and stale `BUSY_FILE` recovery can be delayed if the kernel reuses a PID before next startup GC. Acceptable in practice — startup GC sweeps within seconds of next daemon start.
 
+### TS-default caveats
+
+These tradeoffs apply on the default TS path:
+
+- **Batch polling is timeout-bounded but still sequential**. Adapter
+  reads honor `FD_ADAPTER_READ_TIMEOUT_SEC` so no single pane can wedge
+  the tick, but panes are still polled one after the other. Full async
+  parallelism arrives in a later iteration.
+- **Daemon PID changes across `FD_MAX_LIFETIME` boundaries** (only
+  when the TS daemon `start` is opted in via
+  `FLIGHTDECK_USE_TS_DAEMON_START=1`). The TS daemon spawns a detached
+  successor on max-lifetime rollover instead of `exec`-replacing itself
+  in place. PID_FILE is updated by the successor; external watchers
+  must re-read PID_FILE each call rather than caching the initial PID.
+  The successor is invoked with the internal `--from-handoff` flag so
+  it preserves the predecessor's wake-pending / events /
+  wake-events.log instead of running the fresh-start wipe. The bash
+  daemon preserves PID across the rollover. Master / pi-flightdeck
+  dashboard contracts are unaffected (master uses BUSY_FILE.pid which
+  is the master's own PID, not the daemon's; the dashboard re-reads
+  PID_FILE each tick).
+- **Session-lock hot path uses in-process `flock(2)`** via bun:ffi for
+  the per-tick session-lock decisions, avoiding a per-call `flock(1)`
+  fork. Falls back to spawning `flock(1)` on runtimes where bun:ffi
+  can't dlopen libc.
+- **Subscribers carry a parent-watchdog**: each subscriber polls the
+  daemon's pid every 5s and exits cleanly when the daemon dies, so a
+  crashed daemon doesn't orphan tail/jq processes.
+
 ## Tests
 
-`tests/live-wake.sh` runs the full daemon wake path against a real Pi master — useful when you've changed the daemon or pane-poll code paths. Takes ~2 minutes, requires tmux + a real `pi` binary. `tests/live-wake.sh --no-tmux` is a quick shape-check that runs in CI.
+Two separate test surfaces cover flightdeck:
+
+- **Bun parity suite** (`lib/flightdeck-core/tests/`): unit + parity
+  tests for every ported script. Each parity test runs both the bash
+  and TS implementations against the same input and asserts equivalent
+  output / on-disk state.
+
+  ```
+  cd skills/flightdeck/lib/flightdeck-core
+  bun test
+  bun run typecheck
+  ```
+
+  Parity green is necessary but not sufficient before flipping any
+  `FLIGHTDECK_USE_TS*` default — the live wake suite must also pass
+  under the same gate.
+
+- **Live wake** (`tests/live-wake.sh`): exercises the full daemon wake
+  path against a real Pi master — useful when you've changed the daemon
+  or pane-poll code paths. Takes ~2 minutes, requires tmux + a real
+  `pi` binary. `tests/live-wake.sh --no-tmux` is a quick shape-check
+  that runs in CI.
 
 See `tests/README.md` for setup and cleanup.
 

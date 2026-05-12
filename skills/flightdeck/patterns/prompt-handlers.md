@@ -139,7 +139,11 @@ VERIFY: <exact test command for the project's test runner>
 
 ### Validation
 
-`scripts/pane-respond` rejects rebase-multi-choice payloads that don't include all three sections. Each section must be non-empty. The script grep-checks for `PRESERVE:`, `APPLY:`, and `VERIFY:` lines before sending.
+`pane-respond` rejects rebase-multi-choice payloads that don't include
+all three sections. Each section must be non-empty and labeled
+`PRESERVE:`, `APPLY:`, `VERIFY:`. The TS port enforces the same
+contract through its validator and is covered by parity tests against
+the bash body.
 
 ## Handler: `audit-relation-prompt`
 
@@ -245,7 +249,14 @@ For rebase-multi-choice post-action specifically:
 
 Number keys are NOT option shortcuts in Claude Code prompts — the footer says `Enter to select · ↑/↓ to navigate`. A digit gets buffered as text (often into a "Type something" free-text field) and the trailing Enter fires on whatever option the arrow cursor is currently on, which defaults to option 1. Sending `"2"` looks like it picked option 2 but actually picks option 1; the bug is silent.
 
-`pane-respond --option N` dispatches per harness via `select_option_for_harness`. The Claude Code adapter sends `(N-1) × Down` then `Enter`. Add new adapters in `scripts/pane-respond` when supporting other harnesses; do not extend the Down-key mechanic blindly.
+`pane-respond --option N` dispatches per harness via
+`select_option_for_harness`. The Claude Code adapter sends `(N-1) ×
+Down` then `Enter`. When adding adapters for new harnesses, update both
+implementations while the `.bash` siblings are still in tree:
+`lib/flightdeck-core/src/bin/pane-respond.ts` (default TS path) and
+`scripts/pane-respond.bash` (legacy bash sibling), plus the matching
+parity test under `lib/flightdeck-core/tests/parity/`. Do not extend
+the Down-key mechanic blindly.
 
 ### Multi-step forms (`--keys`)
 

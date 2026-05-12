@@ -2,7 +2,7 @@
 
 Pane targeting, bell handling, and capture-pane idioms for safely observing the per-issue panes spawned by orchestration.
 
-> **Fallback path notice:** all four supported harnesses (opencode, claude code, pi, codex) have a wired adapter — `pane-poll` and `pane-respond` route data through HTTP / Unix-socket / WS rather than tmux capture-pane / send-keys. The tmux primitives below remain the **fallback path** for panes whose bridge metadata is absent OR whose recorded metadata is stale. Adapter args (`pane-registry oc-attach-args` / `cc-channel-args` / `pi-bridge-args` / `cx-bridge-args`) gate on per-harness freshness probes — `oc_adapter_is_fresh` (oc server pid alive + `GET /session/<id>/message` succeeds), `cc_adapter_is_fresh` (transcript exists + webhook `/healthz` succeeds), `pi_bridge_is_fresh` (pid alive + socket exists + protocol matches), `cx_adapter_is_fresh` (`codex-bridge list --url <ws>` succeeds). HTTP/WebSocket results are cached for `FD_ADAPTER_FRESHNESS_TTL` seconds. `pane-poll` applies the same probes to its direct spawn-file fallback before using metadata from `oc-spawn-*`, `cc-spawn-*`, `pi-spawn-*`, or `cx-spawn-*`. When a probe fails, args are empty and the daemon falls back to capture-pane polling rather than marking the pane subscribed against a dead adapter. Daemon and scripts log `<adapter>-unavailable: <reason>` before falling through, never silent.
+> **Fallback path notice:** all four supported harnesses (opencode, claude code, pi, codex) have a wired adapter — `pane-poll` and `pane-respond` route data through HTTP / Unix-socket / WS rather than tmux capture-pane / send-keys. The tmux primitives below remain the **fallback path** for panes whose bridge metadata is absent OR whose recorded metadata is stale. Adapter args (`pane-registry oc-attach-args` / `cc-channel-args` / `pi-bridge-args` / `cx-bridge-args`) gate on per-harness freshness probes — `oc_adapter_is_fresh` (oc server pid alive + `GET /session/<id>/message` succeeds), `cc_adapter_is_fresh` (transcript exists + webhook `/healthz` succeeds), `pi_bridge_is_fresh` (pid alive + socket exists + protocol matches), `cx_adapter_is_fresh` (`codex-bridge list --url <ws>` succeeds). HTTP/WebSocket results are cached for `FD_ADAPTER_FRESHNESS_TTL` seconds. The default TS `pane-poll` additionally caps each adapter read subprocess at `FD_ADAPTER_READ_TIMEOUT_SEC` (default 2s, fractional values honored) so a stale adapter cannot dominate a poll tick; the timeout is independent of — and applies after — the freshness probe cache. `pane-poll` applies the same probes to its direct spawn-file fallback before using metadata from `oc-spawn-*`, `cc-spawn-*`, `pi-spawn-*`, or `cx-spawn-*`. When a probe fails, args are empty and the daemon falls back to capture-pane polling rather than marking the pane subscribed against a dead adapter. Daemon and scripts log `<adapter>-unavailable: <reason>` before falling through, never silent.
 
 ## Pane-0 rule
 
@@ -144,7 +144,10 @@ Inner pane's shell is dead because the worktree was removed mid-session. Subsequ
 
 To add an adapter for a new harness:
 1. Verify the actual contract by inspecting the harness in interactive use (server endpoints, socket protocol, or keystroke mechanic).
-2. Add a `<harness>_*_*` function in the relevant script (`pane-respond`, `pane-poll`, `flightdeck-daemon`).
-3. Register it in the dispatch case.
-4. Update both tables above with the mechanic.
-5. Add a smoke test under `skills/flightdeck/tests/<harness>-smoke`.
+2. Add a `<harness>_*_*` function in the bash body (`scripts/pane-respond`, `scripts/pane-poll`, `scripts/flightdeck-daemon`).
+3. Mirror the same logic in the TS port under `lib/flightdeck-core/src/bin/<script>.ts` (and any helper module under `src/adapters/`, `src/paths/`, etc.) — the trampoline runs TS by default, so the TS path is the production code.
+4. Register the new adapter in both dispatch sites (bash + TS).
+5. Update both tables above with the mechanic.
+6. Add a parity test under `lib/flightdeck-core/tests/parity/` that runs both implementations against the same input and asserts equivalent output.
+7. Add a smoke test under `skills/flightdeck/tests/<harness>-smoke` and update `tests/live-wake.sh` if the wake path is affected.
+8. Reflect any new env var in `skills/flightdeck/README.md` (operator-facing table) and `skills/flightdeck/SKILL.md` (Configuration section).

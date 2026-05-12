@@ -9,7 +9,7 @@ When Pi is running as the flightdeck **master agent** in a tmux session, this ex
 ## What it shows
 
 - **Pause banner** — when flightdeck master sets `paused_for_user`, a high-contrast yellow-framed banner appears above the editor with the issue id, reason, and prompt excerpt. Clears automatically when master resumes.
-- **Persistent dashboard widget** — compact tree of tracked issues with state badges, harness chip, launch model/effort when available, PR number, last decision, age, and per-pane cost/turns/tokens (sourced from pi-agents-tmux via the `vstack.pi.agents` bridge when both extensions are installed). Rendered only in the master/coordinator pane; suppressed in child subagent panes (detected via `PI_SUBAGENT_CHILD_AGENT`) so the same project state isn't echoed inside each agent. Daemon health collapses into a single dot+label chip — only shown explicitly when stale (≥ 30s) or dead. If the daemon is gone AND the most recent issue poll is older than `dashboardStaleAfterMin` minutes (default `5`), the issue tree is replaced by a single-line hint inviting the operator to restart flightdeck or archive the leftover state file — prevents a dead session's state file from rendering a phantom dashboard a day later. Set `dashboardStaleAfterMin` to `0` to disable the stale check.
+- **Persistent dashboard widget** — compact tree of tracked issues with state badges, harness chip, launch model/effort when available, PR number, last decision, age, and per-pane cost/turns/tokens (sourced from pi-agents-tmux via the `vstack.pi.agents` bridge when both extensions are installed). Rendered only in the master/coordinator pane; suppressed in child panes — both pi-agents-tmux subagent panes (detected via `PI_SUBAGENT_CHILD_AGENT`) and flightdeck-launched worker panes (detected via `FLIGHTDECK_CHILD_PANE`, set by `open-terminal` when spawning a pi pane for an issue) — so the same project state isn't echoed inside each agent. Daemon health collapses into a single dot+label chip — only shown explicitly when stale (≥ 30s) or dead. If the daemon is gone AND the most recent issue poll is older than `dashboardStaleAfterMin` minutes (default `5`), the issue tree is replaced by a single-line hint inviting the operator to restart flightdeck or archive the leftover state file — prevents a dead session's state file from rendering a phantom dashboard a day later. Set `dashboardStaleAfterMin` to `0` to disable the stale check.
 - **`/flightdeck` popup** (F6) — full mission-control view with six tabs:
   - **Overview** — one row per tracked issue with `STATE / PROMPT` (combined), harness, PR, cost/turns/tokens, and age; detail block for the selected issue includes usage + model.
   - **Live feed** — chronologically sorted daemon log + pending events + adapter wake events + decisions, with consecutive `[heartbeat]` lines folded into a single summary row and `↑/↓` scrollback through the full backlog.
@@ -48,18 +48,25 @@ Configurable in `/extensions:settings` under `Flightdeck Dashboard`.
 | `stateDir` | _(auto)_ | Override `FD_STATE_DIR` resolution |
 | `flightdeckStateDir` | `tmp` | Project-relative master-state directory (`FLIGHTDECK_STATE_DIR`) |
 
-Daemon tuning env vars remain owned by the flightdeck skill/daemon, not this read-only extension. Notable operator knob: `FD_OC_BACKOFF_MAX_SEC` (default `16`) caps OpenCode subscriber exponential backoff after unchanged `/question` + `/session/<id>/message` polls; new question ids, response hash changes, and daemon bell markers in `FD_STATE_DIR` reset the subscriber back to `FD_OC_POLL_SEC` (the daemon clears the tmux bell after marking it).
+Daemon tuning env vars remain owned by the flightdeck skill/daemon, not this read-only extension. Notable operator knobs: `FD_OC_BACKOFF_MAX_SEC` (default `16`) caps OpenCode subscriber exponential backoff after unchanged `/question` + `/session/<id>/message` polls; new question ids, response hash changes, and daemon bell markers in `FD_STATE_DIR` reset the subscriber back to `FD_OC_POLL_SEC` (the daemon clears the tmux bell after marking it). `FD_ADAPTER_READ_TIMEOUT_SEC` (default `2`, fractional honored) caps adapter read subprocesses in the default TS `pane-poll`. `FLIGHTDECK_USE_TS=0` (or `FLIGHTDECK_USE_TS_<SCRIPT>=0`) opts a script back to its `.bash` sibling. The TS daemon `start` run-loop has its own opt-in gate (`FLIGHTDECK_USE_TS_DAEMON_START=1`) until one stable production cycle on TS; when active the daemon PID changes across `FD_MAX_LIFETIME` boundaries (the dashboard already re-reads PID_FILE each tick and is unaffected). See the flightdeck skill `README.md` daemon tuning table for the full env reference.
 
 ## Commands
 
 | Command | Action |
 |---|---|
 | `/flightdeck` | Open the mission-control popup (also F6) |
+| `/flightdeck watch [args]` | Dispatch the `flightdeck watch` workflow. Used by the flightdeck daemon's pi-master wake (vstack#9). Routes through `ctx.ui.pasteToEditor("/skill:flightdeck watch ...\n")` so the skill is loaded with its full `_expandSkillCommand` path — a workaround for vstack#10 (`pi-bridge send` bypasses pi's slash resolvers). |
 | `/flightdeck:toggle` | Cycle the persistent dashboard widget hidden → compact → expanded (also Alt+M) |
 
 ## How it reads state
 
-State paths mirror `skills/flightdeck/scripts/lib/daemon-paths.sh` and `flightdeck-state`:
+State paths mirror the flightdeck path helpers — the TS
+`skills/flightdeck/lib/flightdeck-core/src/paths/daemon.ts` (default
+runtime) and its bash sibling
+`skills/flightdeck/scripts/lib/daemon-paths.sh` (kept as the opt-out
+target) — plus `flightdeck-state`. Future dashboard maintainers should
+treat the two resolvers as a coupled pair: any change to file naming
+or layout must land in both. Today they emit byte-identical paths.
 
 - Master state — `<project-root>/<FLIGHTDECK_STATE_DIR>/flightdeck-state-<TMUX_SESSION_NAME>.json`
 - Daemon files — `${FD_STATE_DIR}/fd-{daemon,master,wake,...}-<SESSION_KEY>.{pid,log,heartbeat,busy,jsonl}`
@@ -78,6 +85,25 @@ vstack add vanillagreencom/vstack --pi-extension pi-flightdeck --harness pi -y
 # or globally:
 vstack add vanillagreencom/vstack --global --pi-extension pi-flightdeck --harness pi -y
 ```
+
+## Known limitations
+
+- **Pi master wake routes via the bare `/flightdeck` extension
+  command** rather than `/skill:flightdeck`. The flightdeck daemon
+  sends `/flightdeck watch --from-daemon` to pi masters because
+  `pi-bridge send` bypasses pi's `_expandSkillCommand` resolver
+  (vstack#10). The `/flightdeck watch` handler here re-dispatches
+  via `ctx.ui.pasteToEditor("/skill:flightdeck watch ...\n")` to
+  load the skill. If you call `pi-bridge send` directly with
+  `/skill:flightdeck ...`, the skill is NOT loaded — use the bare
+  `/flightdeck ...` form instead. Fix requires an upstream change
+  to `@earendil-works/pi-coding-agent`; tracked at vstack#9 / #10.
+- **Dashboard suppression in child panes** depends on either
+  `PI_SUBAGENT_CHILD_AGENT` (pi-agents-tmux subagent panes) or
+  `FLIGHTDECK_CHILD_PANE` (flightdeck `open-terminal`-launched
+  panes). If you spawn a pi pane through a different mechanism
+  that should also suppress the dashboard, set
+  `FLIGHTDECK_CHILD_PANE=1` in the spawned process env.
 
 ## Out of scope
 

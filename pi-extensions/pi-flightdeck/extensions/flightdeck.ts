@@ -942,11 +942,16 @@ export default function flightdeck(pi: ExtensionAPI): void {
 			return;
 		}
 		const snapshot = cache.lastSnapshot;
-		// Child subagent panes (spawned via pi-agents-tmux) read the same
-		// project state as the master coordinator pane, so the dashboard would
-		// otherwise render inside every child. Suppress it there; keep the
-		// pause banner since a parent pause is still actionable context.
-		const inChildPane = Boolean(process.env.PI_SUBAGENT_CHILD_AGENT);
+		// Child panes (spawned via pi-agents-tmux as subagents OR via
+		// flightdeck's open-terminal as orchestrated workers) read the
+		// same project state as the master coordinator pane, so the
+		// dashboard would otherwise render inside every child. Suppress
+		// it there; keep the pause banner since a parent pause is still
+		// actionable context. (issue #8)
+		const inChildPane = Boolean(
+			process.env.PI_SUBAGENT_CHILD_AGENT ||
+			process.env.FLIGHTDECK_CHILD_PANE,
+		);
 		const showBanner = settingBoolean("pauseBanner", true, ctx.cwd) && Boolean(snapshot?.master?.paused_for_user);
 		const dashboardEnabled = !inChildPane && settingBoolean("dashboard", true, ctx.cwd) && cache.state !== "hidden";
 		const staleAfterMin = Math.max(0, Math.floor(settingNumber("dashboardStaleAfterMin", 5, ctx.cwd)));
@@ -1215,8 +1220,34 @@ export default function flightdeck(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("flightdeck", {
-		description: "Open the flightdeck mission-control popup.",
-		handler: async (_args, ctx) => openPopup(pi, ctx),
+		description: "Open the flightdeck mission-control popup. With 'watch [args...]', dispatch the flightdeck watch workflow (used by the daemon wake; routes through pasteToEditor for skill expansion).",
+		handler: async (args, ctx) => {
+			const trimmed = (args ?? "").trim();
+			if (!trimmed) {
+				await openPopup(pi, ctx);
+				return;
+			}
+			const firstSpace = trimmed.search(/\s/);
+			const verb = firstSpace === -1 ? trimmed : trimmed.slice(0, firstSpace);
+			const rest = firstSpace === -1 ? "" : trimmed.slice(firstSpace + 1).trim();
+			if (verb === "watch") {
+				// Issue #9 + #10 workaround: pi-bridge's sendUserMessage
+				// bypasses _expandSkillCommand, so /skill:flightdeck arrives
+				// as raw text. The flightdeck daemon's wake_payload sends
+				// '/flightdeck watch --from-daemon' instead, which lands
+				// here (pi.on("input") branch fires even when prompt
+				// expansion is off). Re-dispatch through the interactive
+				// editor's full slash resolver so the skill is loaded.
+				const skillCmd = rest ? `/skill:flightdeck watch ${rest}\n` : "/skill:flightdeck watch\n";
+				ctx.ui.pasteToEditor(skillCmd);
+				return;
+			}
+			// Unknown subcommand — fall back to opening the popup so
+			// operators get a visible response rather than silent
+			// failure. ctx.ui.notify isn't always intercepted; popup is
+			// the most discoverable path.
+			await openPopup(pi, ctx);
+		},
 	});
 	pi.registerCommand("flightdeck:toggle", {
 		description: "Cycle the persistent flightdeck dashboard widget hidden → compact → expanded.",

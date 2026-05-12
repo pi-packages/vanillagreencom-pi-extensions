@@ -811,7 +811,10 @@ spawn_pi_bridge_tmux() {
   local cmd launch_args=() bridge_args=()
   add_launch_args pi launch_args
   if [[ -n "$ext_path" ]]; then bridge_args=(-e "$ext_path"); fi
-  cmd=$(shell_join "$pi_bin" "${launch_args[@]}" "${bridge_args[@]}" "/skill:orchestration start $issue")
+  # Mark this pane as a flightdeck-launched child so the pi-flightdeck
+  # dashboard extension suppresses its persistent widget here (issue
+  # #8). Same shape as pi-agents-tmux's PI_SUBAGENT_CHILD_AGENT.
+  cmd=$(shell_join env "FLIGHTDECK_CHILD_PANE=1" "$pi_bin" "${launch_args[@]}" "${bridge_args[@]}" "/skill:orchestration start $issue")
 
   # Snapshot existing pi-bridge pids BEFORE spawning so discovery can
   # exclude already-running pi processes in the same worktree (bugs

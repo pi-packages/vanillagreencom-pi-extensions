@@ -1,0 +1,198 @@
+#!/usr/bin/env bun
+// CLI parity port of skills/flightdeck/scripts/flightdeck-state.
+//
+// Subcommands: init | get | set | append | increment | path | phase | archive | master-busy
+
+import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+	archiveState,
+	getField,
+	initState,
+	normalizePath,
+	resolveSession,
+	statePath,
+	updateState,
+} from "../state/master-state.ts";
+import { resolveProjectRoot } from "../shared/project.ts";
+import {
+	fdBusyFile,
+	fdResolveStateDir,
+	fdSessionKeyFromId,
+	fdSessionLock,
+	fdWakePending,
+} from "../paths/daemon.ts";
+import { lockedAtomicWriteAndUnlink, lockedUnlink } from "../state/locking.ts";
+
+function die(msg: string, code = 2): never {
+	process.stderr.write(`${msg}\n`);
+	process.exit(code);
+}
+
+function parseGlobalAndArgs(): { action: string; session: string; rest: string[] } {
+	const args = process.argv.slice(2);
+	const action = args.shift();
+	if (!action) die("Usage: flightdeck-state <action> [args]");
+	let session = "";
+	const rest: string[] = [];
+	for (let i = 0; i < args.length; i += 1) {
+		const a = args[i]!;
+		if (a === "--session") { session = args[++i] ?? ""; continue; }
+		if (a.startsWith("--session=")) { session = a.slice("--session=".length); continue; }
+		rest.push(a);
+	}
+	return { action: action!, rest, session };
+}
+
+const { action, session: rawSession, rest } = parseGlobalAndArgs();
+const session = resolveSession(rawSession);
+const file = statePath(session);
+
+switch (action) {
+	case "path": {
+		process.stdout.write(`${file}\n`);
+		break;
+	}
+	case "init": {
+		initState(file);
+		break;
+	}
+	case "get": {
+		if (rest.length < 1) die("Usage: get <jq-path>");
+		if (!existsSync(file)) process.exit(1);
+		process.stdout.write(getField(file, rest[0]!));
+		break;
+	}
+	case "set": {
+		if (rest.length < 2) die("Usage: set <field> <json-value>");
+		const field = normalizePath(rest[0]!);
+		updateState(file, `${field} = (${rest[1]})`);
+		break;
+	}
+	case "append": {
+		if (rest.length < 2) die("Usage: append <field> <json-value>");
+		const field = normalizePath(rest[0]!);
+		updateState(file, `${field} += [(${rest[1]})]`);
+		break;
+	}
+	case "increment": {
+		if (rest.length < 1) die("Usage: increment <field>");
+		const field = normalizePath(rest[0]!);
+		updateState(file, `${field} = ((${field} // 0) + 1)`);
+		break;
+	}
+	case "archive": {
+		const ap = archiveState(file);
+		if (ap) process.stdout.write(`${ap}\n`);
+		break;
+	}
+	case "phase": {
+		if (rest.length < 1) die("Usage: phase <ISSUE_ID>");
+		runPhase(rest[0]!);
+		break;
+	}
+	case "master-busy": {
+		if (rest.length < 1) die("Usage: master-busy <lock|unlock|check> [--master-pane <%N>] [--owner-pid <PID>]");
+		runMasterBusy(rest);
+		break;
+	}
+	default:
+		die(`Unknown action: ${action}\nActions: init | get | set | append | increment | archive | master-busy | path | phase`);
+}
+
+function runPhase(issue: string): void {
+	const root = resolveProjectRoot();
+	const orchDir = process.env.ORCH_STATE_DIR && process.env.ORCH_STATE_DIR.trim() ? process.env.ORCH_STATE_DIR.trim() : "tmp";
+	const orchFile = join(root, orchDir, `workflow-state-${issue}.json`);
+	if (existsSync(orchFile)) {
+		let obj: Record<string, unknown> = {};
+		try { obj = JSON.parse(readFileSync(orchFile, "utf8")); } catch { /* fall through */ }
+		const cycles = toInt(obj.cycles, 0);
+		const reviewers = Array.isArray(obj.review_agents) ? obj.review_agents.length : 0;
+		const escalated = Array.isArray(obj.escalated_items) ? obj.escalated_items.length : 0;
+		const prReview = toInt((obj.pr_comment_review as { iterations?: unknown } | undefined)?.iterations, 0);
+		const childCount = obj.child_sessions && typeof obj.child_sessions === "object" ? Object.keys(obj.child_sessions as Record<string, unknown>).length : 0;
+		const parts: string[] = [];
+		if (cycles > 0) parts.push(`cycle=${cycles}`);
+		if (reviewers > 0) parts.push(`reviewers=${reviewers}`);
+		if (prReview > 0) parts.push(`pr-review=${prReview}`);
+		if (childCount > 0) parts.push(`children=${childCount}`);
+		if (escalated > 0) parts.push(`escalated=${escalated}`);
+		process.stdout.write(`${parts.length === 0 ? "pre-cycle" : parts.join(" ")}\n`);
+		return;
+	}
+	if (existsSync(file)) {
+		const fd = getField(file, `.issues["${issue}"].state // empty`).trim();
+		if (fd) {
+			process.stdout.write(`fd:${fd}\n`);
+			return;
+		}
+	}
+	process.stdout.write("unknown\n");
+}
+
+function toInt(v: unknown, fallback: number): number {
+	if (typeof v === "number" && Number.isFinite(v)) return Math.floor(v);
+	if (typeof v === "string" && /^-?\d+$/.test(v)) return Number.parseInt(v, 10);
+	return fallback;
+}
+
+function runMasterBusy(args: string[]): void {
+	const sub = args[0]!;
+	const sidRes = spawnSync("tmux", ["display-message", "-p", "-t", session, "#{session_id}"], { encoding: "utf8" });
+	const sid = (sidRes.stdout ?? "").trim();
+	if (!sid) die(`Error: cannot resolve session_id for ${session}`);
+	const fdDir = fdResolveStateDir();
+	const sidKey = fdSessionKeyFromId(sid);
+	const busyFile = fdBusyFile(fdDir, sidKey);
+	const sessionLock = fdSessionLock(fdDir, sidKey);
+	switch (sub) {
+		case "lock": {
+			let masterPane = "";
+			let ownerPid = "";
+			for (let i = 1; i < args.length; i += 1) {
+				if (args[i] === "--master-pane") masterPane = args[++i] ?? "";
+				else if (args[i] === "--owner-pid") ownerPid = args[++i] ?? "";
+			}
+			if (!masterPane) {
+				const r = spawnSync("tmux", ["display-message", "-p", "#{pane_id}"], { encoding: "utf8" });
+				masterPane = (r.stdout ?? "").trim();
+			}
+			if (!masterPane) die("Error: cannot resolve master pane id");
+			const startedAt = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+			const wakePending = fdWakePending(fdDir, sidKey);
+			const payload = ownerPid && /^[1-9][0-9]*$/.test(ownerPid)
+				? { pid: Number.parseInt(ownerPid, 10), master_pane_id: masterPane, started_at: startedAt }
+				: { master_pane_id: masterPane, started_at: startedAt };
+			// Hold the daemon SESSION_LOCK across the busy-file publish AND
+			// the WAKE_PENDING clear. This matches the bash contract that
+			// keeps the daemon's append_event / wake_master paths from
+			// racing master's turn-start handoff.
+			const r = lockedAtomicWriteAndUnlink(sessionLock, busyFile, JSON.stringify(payload), wakePending);
+			if (r.status !== 0) {
+				process.stderr.write(r.stderr || "");
+				process.exit(r.status ?? 1);
+			}
+			break;
+		}
+		case "unlock": {
+			// Release matching the bash `rm -f $BUSY_FILE` under session lock.
+			const r = lockedUnlink(sessionLock, busyFile);
+			if (r.status !== 0) {
+				process.stderr.write(r.stderr || "");
+				process.exit(r.status ?? 1);
+			}
+			break;
+		}
+		case "check": {
+			if (existsSync(busyFile)) {
+				process.stdout.write(readFileSync(busyFile, "utf8"));
+				break;
+			}
+			process.exit(1);
+		}
+		default:
+			die("Usage: master-busy <lock|unlock|check>");
+	}
+}

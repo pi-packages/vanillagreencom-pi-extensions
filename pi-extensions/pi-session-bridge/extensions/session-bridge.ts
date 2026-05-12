@@ -437,6 +437,16 @@ export default function sessionBridge(pi: ExtensionAPI) {
 		const idle = currentCtx?.isIdle?.() ?? true;
 		const deliverAs = requested === "auto" ? (idle ? undefined : "steer") : requested === "now" ? undefined : requested;
 		const options = deliverAs ? { deliverAs } : undefined;
+		// vstack#10: pi.sendUserMessage hardcodes expandPromptTemplates:
+		// false in @earendil-works/pi-coding-agent. That skips
+		// _expandSkillCommand and prompt-template expansion. Bare
+		// extension commands like /flightdeck and /bridge:ping STILL
+		// dispatch because pi.on('input') fires upstream of the gate.
+		// Skill commands (/skill:foo) and prompt templates (/clear-ai
+		// etc.) arrive as raw user text — callers should send the bare
+		// extension command form when one exists. Fix requires an
+		// upstream change to pi-coding-agent accepting an
+		// expandPromptTemplates option.
 		pi.sendUserMessage(content as never, options as never);
 		sendResponse(client, id, commandName, true, { deliveredAs: deliverAs ?? "now", idleBeforeSend: idle });
 	}

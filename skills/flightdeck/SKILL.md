@@ -105,6 +105,23 @@ Decision rules grouped by domain. Each pattern doc under `patterns/` has the ful
 .agents/skills/flightdeck/scripts/<script> [args]
 ```
 
+**Implementation status:** Default is the TypeScript port under
+`skills/flightdeck/lib/flightdeck-core/`. Each ported script ships as a
+trampoline that execs `bun .../src/bin/<script>.ts` unless the operator
+opts out to the canonical bash sibling via `FLIGHTDECK_USE_TS_<SCRIPT>=0`
+(per-script) or `FLIGHTDECK_USE_TS=0` (global). `bun` is therefore a
+hard runtime dependency. Currently ported: `prompt-classify`,
+`flightdeck-state`, `parallel-groups`, `pane-registry`, `pane-poll`,
+`pane-respond`, `flightdeck-daemon` (CLI surface — `status`/`events`/
+`ack`/`find-window`/`health`/`stop` are TS by default). The daemon
+`start` sub-action has a complete TS run-loop + subscriber lifecycle
+port that is parity-tested, but its runtime default still forwards to
+the bash sibling; opt in with `FLIGHTDECK_USE_TS_DAEMON_START=1` (or
+`FLIGHTDECK_USE_TS=1`). The `.bash` siblings remain in place as the
+opt-out target until one full production cycle on TS defaults is
+complete. Parity tests for every port live under
+`lib/flightdeck-core/tests/parity/`.
+
 | Script | Purpose |
 |--------|---------|
 | `open-terminal` | Spawn issue worktree(s) with selected harness + optional `--model`/`--effort`. **Never hand-roll tmux/terminal commands — use this for every spawn.** |
@@ -181,7 +198,22 @@ Master-loop env vars consulted by workflows:
 | `FLIGHTDECK_LAUNCH_MODEL` | unset | Default `open-terminal --model` override when the workflow/user does not pass `--model`. |
 | `FLIGHTDECK_LAUNCH_EFFORT` | unset | Default `open-terminal --effort` / thinking override when the workflow/user does not pass `--effort`. |
 
-Daemon tuning (`FD_*`) is in README.md — not consulted during master operation.
+Daemon tuning (`FD_*`) is in README.md. Most `FD_*` knobs run inside the
+daemon and do not affect master operation directly, but two are
+consulted on the master poll path through the TS `pane-poll`:
+`FD_ADAPTER_READ_TIMEOUT_SEC` (default `2`, fractional values honored)
+caps each adapter read subprocess so one stale adapter cannot dominate
+a tick, and `FD_ADAPTER_FRESHNESS_TTL` (default `5`) gates freshness
+probe caching.
+
+TS-port toggles:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `FLIGHTDECK_USE_TS` | unset (treated as `1`) | Global opt-out switch. Set to `0` to route every trampolined script back to its `.bash` sibling. Per-script flags below override. |
+| `FLIGHTDECK_USE_TS_<SCRIPT>` | unset (treated as `1`) | Per-script opt-out (e.g. `FLIGHTDECK_USE_TS_PROMPT_CLASSIFY=0`). Useful for isolating a regression to one script while keeping the rest on TS. |
+| `FLIGHTDECK_USE_TS_DAEMON_START` | unset (treated as `0`) | Opt-in for the TS daemon `start` run-loop. The TS port is complete and parity-tested, but `start` still defaults to the bash sibling until one full production cycle on TS. |
+| `FD_ADAPTER_READ_TIMEOUT_SEC` | `2` | Bounds per-adapter read subprocesses in TS `pane-poll` (fractional values honored). Stale adapters fall through to tmux capture rather than wedging the tick. |
 
 ## Workflows
 

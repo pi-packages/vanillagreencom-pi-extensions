@@ -2,6 +2,33 @@
 
 Cross-harness distribution system for AI coding skills, agents, hooks, and Pi extensions. Installs into Claude Code, Cursor, OpenCode, Codex, and Pi via a Rust CLI.
 
+## Active worktree: `flightdeck-ts-port`
+
+This worktree is the in-progress TypeScript port of the flightdeck skill
+scripts (`skills/flightdeck/lib/flightdeck-core/`). Context lives in
+`docs/work-in-progress/flightdeck-ts-port.md` and the review reports
+(`review-{perf,bugs,xharness,docs}.md`, `review-triage.md`,
+`CONTINUATION-HANDOFF.md`) under the same folder.
+
+Rules for any agent landing here:
+
+- **Default remains bash.** Every ported script ships behind
+  `FLIGHTDECK_USE_TS=1` (global) or `FLIGHTDECK_USE_TS_<SCRIPT>=1`
+  (per-script). Do NOT flip per-script defaults to TS without live
+  `tests/live-wake.sh` green under the same gate.
+- **`flightdeck-daemon start` always forwards to bash** until the
+  run-loop + subscriber lifecycle port lands.
+- **Parity tests are mandatory** for every TS port. Before any commit
+  that touches `lib/flightdeck-core/`, run
+  `cd skills/flightdeck/lib/flightdeck-core && bun test && bun run typecheck`.
+- **Do not delete the `.bash` siblings.** They are the canonical bodies
+  while the port stabilizes. Removal happens after one full production
+  cycle on TS defaults.
+- **flock semantics.** Use the helpers in
+  `lib/flightdeck-core/src/state/locking.ts`. The naive
+  `spawnSync("flock", ["-x", String(fd), "true"])` pattern is a no-op;
+  read the file header before adding new locked critical sections.
+
 ## Repo Layout
 
 ```

@@ -37,7 +37,7 @@ Master mode entry point. Polls every spawned issue pane, classifies their prompt
      .agents/skills/flightdeck/scripts/pane-registry init <ISSUE_ID> \
        --window <window-name> --harness <h> --worktree <path> --pane-index <N>
      ```
-5. **Spawn or attach the daemon**. If no daemon is running for this session, spawn one. Pass the master pane and the comma-separated list of inner orchestrator panes:
+5. **Spawn or attach the daemon**. If no daemon is running for this session, spawn one. Pass the master pane and the comma-separated list of inner orchestrator panes. The TS port of the run-loop + subscriber lifecycle is complete and parity-tested, but until one full production cycle on TS, `flightdeck-daemon start` keeps an opt-in gate (`FLIGHTDECK_USE_TS_DAEMON_START=1` or `FLIGHTDECK_USE_TS=1`); without it the trampoline still delegates `start` to `flightdeck-daemon.bash`. Other daemon CLI actions (`status`/`events`/`ack`/`health`/`stop`/`find-window`) run on TS by default.
    ```
    MASTER_PANE="$SESSION:1.<base-pane-index>"  # the pane this watch.md runs in
    INNER_PANES="$(.agents/skills/flightdeck/scripts/pane-registry list --format inner-panes)"
@@ -89,6 +89,13 @@ POLL_INPUT=$(jq '[.[]
 ]' <<< "$REGISTRY_JSON")
 POLL_JSONL=$(printf '%s' "$POLL_INPUT" | .agents/skills/flightdeck/scripts/pane-poll --batch -)
 ```
+
+Adapter reads through the default TS `pane-poll` are capped by
+`FD_ADAPTER_READ_TIMEOUT_SEC` (default 2s, fractional values honored;
+see `README.md` daemon tuning table). Panes are still polled
+sequentially — async parallelism is a later iteration; if a tick feels
+slow, drop the timeout or check `patterns/tmux-monitoring.md` for the
+adapter freshness probe details.
 
 For each tracked issue currently in a non-terminal state (`waiting | prompting | submitting | merge-ready`):
 
@@ -238,7 +245,7 @@ End-of-turn handoff to the daemon:
    ```
    Order matters: clearing wake-pending FIRST then releasing busy means the daemon's next tick sees a clean state. Reversing the order leaves a window where daemon could create a new wake before master cleared pending.
 
-3. **End the turn**. The daemon will send the per-harness wake payload to this pane when the next attention-ready event arrives. Wake delivery uses `pi-bridge send --pid <master_pid>` for Pi masters and `tmux load-buffer + paste-buffer + send-keys Enter` for everyone else; payload is `/flightdeck watch --from-daemon` for Claude/OpenCode/default, `$flightdeck watch --from-daemon` for Codex, `/skill:flightdeck watch --from-daemon` for Pi (see `wake_payload_for_harness` in `flightdeck-daemon`). Do NOT use `sleep` (blocks the turn) and do NOT use `ScheduleWakeup`-equivalent (no longer needed; daemon owns wake). On Claude Code specifically, you MAY arm a defensive `ScheduleWakeup({delaySeconds: 1800})` as a "if daemon is dead, wake me anyway" safety net — but this is optional, not load-bearing.
+3. **End the turn**. The daemon will send the per-harness wake payload to this pane when the next attention-ready event arrives. Wake delivery uses `pi-bridge send --pid <master_pid>` for Pi masters and `tmux load-buffer + paste-buffer + send-keys Enter` for everyone else; payload is `/flightdeck watch --from-daemon` for Claude/OpenCode/default/Pi, `$flightdeck watch --from-daemon` for Codex (see `wake_payload_for_harness` in `flightdeck-daemon`). Pi uses the bare `/flightdeck` extension command instead of `/skill:flightdeck` because `pi-bridge send` bypasses pi's `_expandSkillCommand` resolver (vstack#10); the `pi-flightdeck` extension's `/flightdeck watch` handler then re-dispatches into the skill via `ctx.ui.pasteToEditor`. Do NOT use `sleep` (blocks the turn) and do NOT use `ScheduleWakeup`-equivalent (no longer needed; daemon owns wake). On Claude Code specifically, you MAY arm a defensive `ScheduleWakeup({delaySeconds: 1800})` as a "if daemon is dead, wake me anyway" safety net — but this is optional, not load-bearing.
 
 If `paused_for_user` is set, do NOT release the busy lock or end the turn. Wait for user to re-invoke `watch` after addressing the pause.
 
