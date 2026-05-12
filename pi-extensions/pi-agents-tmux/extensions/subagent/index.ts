@@ -73,6 +73,7 @@ import {
 	inboxDir,
 	processingDir,
 } from "./paths.js";
+import { MINI_DASHBOARD_RANK, setMiniDashboardWidget } from "./stacked-widget.js";
 import {
 	formatTaskRecordResult,
 	formatTraceView,
@@ -367,16 +368,16 @@ export default function (pi: ExtensionAPI) {
 
 	const syncDashboard = (ctx = dashboardCtx) => {
 		if (!ctx?.hasUI || childAgentName || !dashboardEnabled(ctx.cwd) || !dashboardState.visible) {
-			ctx?.ui.setWidget(SUBAGENT_WIDGET_KEY, undefined);
+			if (ctx) setMiniDashboardWidget(ctx, SUBAGENT_WIDGET_KEY, MINI_DASHBOARD_RANK.AGENTS, undefined);
 			return;
 		}
 		dashboardCtx = ctx;
 		const hasItems = Object.keys(dashboardState.items).length > 0;
 		if (!hasItems) {
-			ctx.ui.setWidget(SUBAGENT_WIDGET_KEY, undefined);
+			setMiniDashboardWidget(ctx, SUBAGENT_WIDGET_KEY, MINI_DASHBOARD_RANK.AGENTS, undefined);
 			return;
 		}
-		ctx.ui.setWidget(SUBAGENT_WIDGET_KEY, (tui, theme) => ({
+		setMiniDashboardWidget(ctx, SUBAGENT_WIDGET_KEY, MINI_DASHBOARD_RANK.AGENTS, (tui, theme) => ({
 			invalidate() {},
 			render(width: number): string[] {
 				return clampAboveEditorWidget(renderDashboardWidgetLines(dashboardState, theme, ctx.cwd, width), tui.terminal.rows, theme);
@@ -960,7 +961,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_shutdown", () => {
 		if (completionPoller) clearInterval(completionPoller);
 		if (childInboxPoller) clearInterval(childInboxPoller);
-		dashboardCtx?.ui.setWidget(SUBAGENT_WIDGET_KEY, undefined);
+		if (dashboardCtx) setMiniDashboardWidget(dashboardCtx, SUBAGENT_WIDGET_KEY, MINI_DASHBOARD_RANK.AGENTS, undefined);
 		completionPoller = undefined;
 		childInboxPoller = undefined;
 		dashboardCtx = undefined;

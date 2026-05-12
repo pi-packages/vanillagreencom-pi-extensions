@@ -10,6 +10,7 @@ Delegate work to specialized agents from a running Pi session. Agents run either
 - Agents with `pane: true` open a visible tmux pane that persists across turns. Other agents run in the background.
 - `/agents` browser lists project and user agents with search, preview, and one-key launch.
 - Dashboard widget shows live state, model, turns, tokens, and cost for every spawned agent.
+- Dashboard participates in vstack's stable mini-dashboard stack order: Flightdeck → Tasks → Agents → BG tasks.
 - Grouped completion notifications batch multiple agents finishing together.
 - `taskId` retrieval, mid-run steering, and pane stop without losing memory.
 - Stop kills the tmux process but preserves the session — next launch resumes it.

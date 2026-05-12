@@ -65,6 +65,7 @@ import {
 	type TreeStyle,
 	wrapLine,
 } from "./render.js";
+import { MINI_DASHBOARD_RANK, setMiniDashboardWidget } from "./stacked-widget.js";
 
 const INSTALL_SYMBOL = Symbol.for("vstack.pi-flightdeck.installed");
 const CONFIG_ID = "@vanillagreen/pi-flightdeck";
@@ -937,7 +938,7 @@ export default function flightdeck(pi: ExtensionAPI): void {
 	const syncWidget = (ctx: ExtensionContext) => {
 		activeCtx = ctx;
 		if (!ctx.hasUI) {
-			ctx.ui.setWidget(WIDGET_KEY, undefined);
+			setMiniDashboardWidget(ctx, WIDGET_KEY, MINI_DASHBOARD_RANK.FLIGHTDECK, undefined);
 			cache.lastSyncKey = "__off__";
 			return;
 		}
@@ -958,7 +959,7 @@ export default function flightdeck(pi: ExtensionAPI): void {
 		const status = flightdeckSessionStatus(snapshot, { staleAfterMin });
 		if (status === "inactive" && !showBanner) {
 			if (cache.lastSyncKey !== "__off__") {
-				ctx.ui.setWidget(WIDGET_KEY, undefined);
+				setMiniDashboardWidget(ctx, WIDGET_KEY, MINI_DASHBOARD_RANK.FLIGHTDECK, undefined);
 				cache.lastSyncKey = "__off__";
 			}
 			return;
@@ -981,7 +982,7 @@ export default function flightdeck(pi: ExtensionAPI): void {
 		});
 		if (cache.lastSyncKey === syncKey) return;
 		cache.lastSyncKey = syncKey;
-		ctx.ui.setWidget(WIDGET_KEY, (tui, theme) => ({
+		setMiniDashboardWidget(ctx, WIDGET_KEY, MINI_DASHBOARD_RANK.FLIGHTDECK, (tui, theme) => ({
 			invalidate() { /* no-op; we drive renders via setInterval+setWidget */ },
 			render(width: number): string[] {
 				const lines: string[] = [];
@@ -1206,7 +1207,7 @@ export default function flightdeck(pi: ExtensionAPI): void {
 	});
 	pi.on("session_shutdown", (_event, ctx) => {
 		stopPoller();
-		ctx.ui.setWidget(WIDGET_KEY, undefined);
+		setMiniDashboardWidget(ctx, WIDGET_KEY, MINI_DASHBOARD_RANK.FLIGHTDECK, undefined);
 	});
 
 	// React to settings changes — clear cache so next tick reflects new values.

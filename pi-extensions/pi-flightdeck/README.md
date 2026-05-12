@@ -10,6 +10,7 @@ Read-only mission-control dashboard for the [`flightdeck`](../../skills/flightde
 - **Persistent dashboard widget** — compact tree of tracked issues with state badges, harness, model, PR number, last decision, age, and per-pane cost/turns/tokens.
 - **`/flightdeck` popup** (F6) — mission-control view with six tabs: Overview, Live feed, Conversations, Conflicts & merges, Decisions, Daemon.
 - Dashboard suppresses in child panes so the same state doesn't echo inside every agent.
+- Participates in vstack's stable mini-dashboard stack order: Flightdeck → Tasks → Agents → BG tasks.
 - Optional terminal bell and auto-popup when master pauses.
 
 ## Read-only by design

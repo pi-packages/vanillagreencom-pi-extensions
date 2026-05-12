@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { Type } from "typebox";
+import { MINI_DASHBOARD_RANK, setMiniDashboardWidget } from "./stacked-widget.js";
 
 const INSTALL_SYMBOL = Symbol.for("vstack.pi-task-panel.installed");
 const CONFIG_ID = "@vanillagreen/pi-task-panel";
@@ -780,10 +781,10 @@ export default function taskPanel(pi: ExtensionAPI): void {
 	const syncWidget = (ctx: ExtensionContext) => {
 		activeCtx = ctx;
 		if (!ctx.hasUI || state.tasks.length === 0 || state.panel === "hidden") {
-			ctx.ui.setWidget(WIDGET_KEY, undefined);
+			setMiniDashboardWidget(ctx, WIDGET_KEY, MINI_DASHBOARD_RANK.TASKS, undefined);
 			return;
 		}
-		ctx.ui.setWidget(WIDGET_KEY, (tui, theme) => ({
+		setMiniDashboardWidget(ctx, WIDGET_KEY, MINI_DASHBOARD_RANK.TASKS, (tui, theme) => ({
 			invalidate() {},
 			render(width: number): string[] {
 				return clampAboveEditorWidget(renderPanelWidgetLines(state, theme, ctx.cwd, width), tui.terminal.rows, theme);
@@ -1116,7 +1117,7 @@ export default function taskPanel(pi: ExtensionAPI): void {
 			ctx.ui.notify(`${remainingCount(state)} task(s) still incomplete. ${workflowReminder(state)}`, "info");
 		}
 	});
-	pi.on("session_shutdown", (_event, ctx) => ctx.ui.setWidget(WIDGET_KEY, undefined));
+	pi.on("session_shutdown", (_event, ctx) => setMiniDashboardWidget(ctx, WIDGET_KEY, MINI_DASHBOARD_RANK.TASKS, undefined));
 
 	const toggle = async (ctx: ExtensionContext) => {
 		state.panel = state.panel === "hidden" ? "compact" : state.panel === "compact" ? "expanded" : "hidden";

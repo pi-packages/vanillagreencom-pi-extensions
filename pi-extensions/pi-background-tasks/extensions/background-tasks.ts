@@ -73,6 +73,7 @@ import {
 	resolveTaskByToken,
 	taskSnapshot,
 } from "./snapshot.js";
+import { MINI_DASHBOARD_RANK, setMiniDashboardWidget } from "./stacked-widget.js";
 import type {
 	BackgroundTaskEventDetails,
 	BackgroundTaskSnapshot,
@@ -222,7 +223,7 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 	};
 
 	const clearWidget = () => {
-		activeCtx?.ui.setWidget(BG_WIDGET_KEY, undefined);
+		if (activeCtx) setMiniDashboardWidget(activeCtx, BG_WIDGET_KEY, MINI_DASHBOARD_RANK.BACKGROUND_TASKS, undefined);
 		requestWidgetRender = null;
 	};
 
@@ -268,8 +269,10 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 			return;
 		}
 
-		ctx.ui.setWidget(
+		setMiniDashboardWidget(
+			ctx,
 			BG_WIDGET_KEY,
+			MINI_DASHBOARD_RANK.BACKGROUND_TASKS,
 			(tui, theme) => {
 				requestWidgetRender = () => tui.requestRender();
 				// Previously: setInterval(() => tui.requestRender(), 1_000) to refresh
