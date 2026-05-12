@@ -403,10 +403,12 @@ interface PopupUiState {
 	showHelp: boolean;
 	decisionDetail?: DecisionEntry;
 	decisionDetailScroll: number;
+	liveDetail?: LiveEvent;
+	liveDetailScroll: number;
 }
 
 function makeInitialPopupState(): PopupUiState {
-	return { decisionDetailScroll: 0, scroll: 0, search: "", selected: 0, showHelp: false, tab: TAB_OVERVIEW };
+	return { decisionDetailScroll: 0, liveDetailScroll: 0, scroll: 0, search: "", selected: 0, showHelp: false, tab: TAB_OVERVIEW };
 }
 
 function renderTabBar(active: Tab, width: number, theme: Theme): string {
@@ -535,12 +537,12 @@ interface LiveEvent {
 	count?: number;
 }
 
-function renderLiveFeedTab(snapshot: FlightdeckSnapshot, ui: PopupUiState, width: number, theme: Theme, viewportRows: number, cwd: string): string[] {
+function buildLiveFeedEvents(snapshot: FlightdeckSnapshot, cwd: string): LiveEvent[] {
 	const max = Math.max(20, Math.floor(settingNumber("liveFeedLines", 200, cwd)));
 	const raw: LiveEvent[] = [];
 	for (const line of (snapshot.daemon.logTail ?? []).slice(-max)) {
 		const isoTs = line.match(/^[^ ]+/)?.[0] ?? "";
-		raw.push({ kind: classifyDaemonLogLine(line) === "heartbeat" ? "daemon" : "daemon", line, ts: isoTs.slice(11, 19), isoTs });
+		raw.push({ kind: "daemon", line, ts: isoTs.slice(11, 19), isoTs });
 	}
 	const decisions = flatDecisionsLog(snapshot.master, max);
 	for (const d of decisions) {
@@ -562,16 +564,118 @@ function renderLiveFeedTab(snapshot: FlightdeckSnapshot, ui: PopupUiState, width
 	// Chronological order — the prior `localeCompare(line)` sort mixed daemon
 	// timestamps with adapter timestamps and obscured causality.
 	raw.sort((a, b) => a.isoTs.localeCompare(b.isoTs));
-	const events = foldHeartbeats(raw);
-	const filtered = ui.search.trim() ? events.filter((e) => e.line.toLowerCase().includes(ui.search.trim().toLowerCase())) : events;
+	return foldHeartbeats(raw);
+}
+
+function filterLiveFeedEvents(events: LiveEvent[], ui: PopupUiState): LiveEvent[] {
+	const query = ui.search.trim().toLowerCase();
+	return query ? events.filter((event) => liveEventSearchText(event).includes(query)) : events;
+}
+
+function selectedLiveEvent(snapshot: FlightdeckSnapshot, ui: PopupUiState, cwd: string): LiveEvent | undefined {
+	const filtered = filterLiveFeedEvents(buildLiveFeedEvents(snapshot, cwd), ui);
+	if (filtered.length === 0) return undefined;
+	ui.selected = Math.max(0, Math.min(ui.selected, filtered.length - 1));
+	return filtered[ui.selected];
+}
+
+function liveEventSearchText(ev: LiveEvent): string {
+	return `${ev.ts} ${ev.kind} ${ev.line}`.toLowerCase();
+}
+
+function liveEventKindText(ev: LiveEvent): string {
+	switch (ev.kind) {
+		case "daemon": return classifyDaemonLogLine(ev.line);
+		case "decision": return "decision";
+		case "event-pending": return "pending";
+		case "event-wake": return "wake";
+		case "heartbeat-fold": return "heartbeat";
+	}
+}
+
+function liveEventKindChip(ev: LiveEvent, theme: Theme): string {
+	const text = liveEventKindText(ev);
+	switch (ev.kind) {
+		case "decision": return theme.fg("accent", text);
+		case "event-wake": return theme.fg("success", text);
+		case "event-pending": return theme.fg("warning", text);
+		case "heartbeat-fold": return theme.fg("dim", text);
+		case "daemon": {
+			const kind = classifyDaemonLogLine(ev.line);
+			if (kind === "warn") return theme.fg("warning", kind);
+			if (kind === "error") return theme.fg("error", kind);
+			if (kind === "wake") return theme.fg("success", kind);
+			if (kind === "classify") return theme.fg("accent", kind);
+			return theme.fg("dim", kind);
+		}
+	}
+}
+
+function liveEventSummary(ev: LiveEvent): string {
+	if (ev.kind === "heartbeat-fold") return ev.line;
+	return ev.line
+		.replace(/^\S+\s+\[decision\]\s+/, "")
+		.replace(/^\S+\s+\[adapter:([^\]]+)\]\s+/, "adapter:$1 ")
+		.replace(/^\S+\s+/, "");
+}
+
+function renderLiveEventRow(ev: LiveEvent, theme: Theme, width: number): string {
+	const time = pad(theme.fg("dim", ev.ts || "--:--:--"), 10);
+	const kind = pad(liveEventKindChip(ev, theme), 12);
+	const summary = theme.fg(ev.kind === "heartbeat-fold" ? "dim" : "text", liveEventSummary(ev));
+	return truncateToWidth(`${time} ${kind} ${summary}`, width, "");
+}
+
+function renderLiveEventInlineDetail(ev: LiveEvent, theme: Theme, width: number, maxRows: number): string[] {
+	const budget = Math.max(2, maxRows);
+	const header = `${label(theme, "selected:")} ${liveEventKindChip(ev, theme)} ${theme.fg("dim", "·")} ${theme.fg("text", ev.ts || ev.isoTs || "--:--:--")}`;
+	const wrapped = wrapLine(ev.line, width).map((row) => theme.fg("text", row));
+	const bodyBudget = Math.max(1, budget - 1);
+	const out = [truncateToWidth(header, width, "")];
+	if (wrapped.length <= bodyBudget) {
+		out.push(...wrapped);
+		return out;
+	}
+	out.push(...wrapped.slice(0, Math.max(1, bodyBudget - 1)));
+	out.push(theme.fg("dim", `↓ ${wrapped.length - out.length + 1} more wrapped line(s) · press enter for full event`));
+	return out;
+}
+
+function renderLiveEventDetailView(ev: LiveEvent, ui: PopupUiState, width: number, theme: Theme, innerRows: number): string[] {
+	const header = [
+		`${theme.fg("customMessageLabel", theme.bold("Live event"))} ${theme.fg("dim", "·")} ${liveEventKindChip(ev, theme)}`,
+		`${label(theme, "time:")} ${theme.fg("text", ev.isoTs || ev.ts || "—")} ${theme.fg("dim", "·")} ${label(theme, "raw chars:")} ${theme.fg("text", String(ev.line.length))}`,
+		divider(width, theme),
+		label(theme, "raw event"),
+	];
+	const footerRows = 2;
+	const eventRows = wrapLine(ev.line, width).map((row) => theme.fg("text", row));
+	const windowRows = Math.max(1, innerRows - header.length - footerRows);
+	const maxScroll = Math.max(0, eventRows.length - windowRows);
+	ui.liveDetailScroll = Math.max(0, Math.min(ui.liveDetailScroll, maxScroll));
+	const start = ui.liveDetailScroll;
+	const end = Math.min(eventRows.length, start + windowRows);
+	const lines = [...header, ...eventRows.slice(start, end)];
+	while (lines.length < innerRows - footerRows) lines.push("");
+	const lineInfo = eventRows.length > windowRows ? `${start + 1}-${end}/${eventRows.length}` : `${eventRows.length}/${eventRows.length}`;
+	const footer = `${ansiYellow("↑/↓")} ${theme.fg("dim", "scroll · ")}${ansiYellow("-/=")} ${theme.fg("dim", "page · ")}${ansiYellow("home/end")} ${theme.fg("dim", "ends · ")}${ansiYellow("esc/backspace")} ${theme.fg("dim", "back · ")}${theme.fg("dim", `lines ${lineInfo}`)}`;
+	lines.push(divider(width, theme));
+	lines.push(truncateToWidth(footer, width, ""));
+	return lines.slice(0, innerRows);
+}
+
+function renderLiveFeedTab(snapshot: FlightdeckSnapshot, ui: PopupUiState, width: number, theme: Theme, viewportRows: number, cwd: string): string[] {
+	const events = buildLiveFeedEvents(snapshot, cwd);
+	const filtered = filterLiveFeedEvents(events, ui);
 	const lines: string[] = [];
 	lines.push(searchRow(theme, ui.search, width));
 	lines.push("");
 	if (filtered.length === 0) {
-		lines.push(theme.fg("dim", "No live events. Daemon may be quiet or not running."));
+		lines.push(theme.fg("dim", events.length === 0 ? "No live events. Daemon may be quiet or not running." : "No live events match current search."));
 		return lines;
 	}
-	const rows = Math.max(1, viewportRows - lines.length - 1);
+	const detailRows = Math.min(7, Math.max(4, Math.floor(viewportRows * 0.32)));
+	const rows = Math.max(3, viewportRows - lines.length - detailRows - 3);
 	clampSelection(ui, filtered.length, rows);
 	const start = Math.max(0, Math.min(ui.scroll, Math.max(0, filtered.length - rows)));
 	const end = Math.min(filtered.length, start + rows);
@@ -579,12 +683,17 @@ function renderLiveFeedTab(snapshot: FlightdeckSnapshot, ui: PopupUiState, width
 	for (const [vi, ev] of filtered.slice(start, end).entries()) {
 		const idx = start + vi;
 		const selected = idx === ui.selected;
-		const colored = colorizeLiveEvent(ev, theme);
-		const rowText = truncateToWidth(colored, width, "");
+		const rowText = renderLiveEventRow(ev, theme, width);
 		lines.push(selected ? selectedRow(theme, rowText, width) : rowText);
 	}
 	const tail = Math.max(0, filtered.length - end);
 	if (tail > 0) lines.push(theme.fg("dim", `↓ ${tail} more`));
+	const selected = filtered[ui.selected];
+	if (selected) {
+		lines.push("");
+		lines.push(divider(width, theme));
+		lines.push(...renderLiveEventInlineDetail(selected, theme, width, detailRows));
+	}
 	return lines;
 }
 
@@ -1165,6 +1274,48 @@ export default function flightdeck(pi: ExtensionAPI): void {
 				popupTui = tui;
 				return {
 					handleInput(data: string) {
+						if (ui.liveDetail) {
+							if (matchesKey(data, "ctrl+c")) {
+								done(undefined);
+								return;
+							}
+							if (matchesKey(data, "escape") || matchesKey(data, "backspace")) {
+								ui.liveDetail = undefined;
+								ui.liveDetailScroll = 0;
+								tui.requestRender();
+								return;
+							}
+							if (matchesKey(data, "up")) {
+								ui.liveDetailScroll = Math.max(0, ui.liveDetailScroll - 1);
+								tui.requestRender();
+								return;
+							}
+							if (matchesKey(data, "down")) {
+								ui.liveDetailScroll += 1;
+								tui.requestRender();
+								return;
+							}
+							if (matchesKey(data, "pageUp") || matchesKey(data, "-")) {
+								ui.liveDetailScroll = Math.max(0, ui.liveDetailScroll - 10);
+								tui.requestRender();
+								return;
+							}
+							if (matchesKey(data, "pageDown") || matchesKey(data, "=")) {
+								ui.liveDetailScroll += 10;
+								tui.requestRender();
+								return;
+							}
+							if (matchesKey(data, "home")) {
+								ui.liveDetailScroll = 0;
+								tui.requestRender();
+								return;
+							}
+							if (matchesKey(data, "end")) {
+								ui.liveDetailScroll = Number.MAX_SAFE_INTEGER;
+								tui.requestRender();
+							}
+							return;
+						}
 						if (ui.decisionDetail) {
 							if (matchesKey(data, "ctrl+c")) {
 								done(undefined);
@@ -1260,6 +1411,16 @@ export default function flightdeck(pi: ExtensionAPI): void {
 							tui.requestRender();
 							return;
 						}
+						if ((matchesKey(data, "enter") || matchesKey(data, "return")) && ui.tab === TAB_LIVE) {
+							const snapshot = cache.lastSnapshot ?? refreshSnapshot(activePopupCwd(ctx));
+							const event = snapshot ? selectedLiveEvent(snapshot, ui, activePopupCwd(ctx)) : undefined;
+							if (event) {
+								ui.liveDetail = event;
+								ui.liveDetailScroll = 0;
+								tui.requestRender();
+							}
+							return;
+						}
 						if ((matchesKey(data, "enter") || matchesKey(data, "return")) && ui.tab === TAB_DECISIONS) {
 							const snapshot = cache.lastSnapshot ?? refreshSnapshot(activePopupCwd(ctx));
 							const decision = snapshot ? selectedDecision(snapshot, ui, activePopupCwd(ctx)) : undefined;
@@ -1308,6 +1469,9 @@ export default function flightdeck(pi: ExtensionAPI): void {
 							lines.push(theme.fg("warning", "Not running inside a tmux session — flightdeck has nothing to show."));
 							lines.push(theme.fg("dim", "Run pi from inside the tmux session that hosts flightdeck."));
 							return framePopup(lines, safeWidth, theme, "Flightdeck", innerRows);
+						}
+						if (ui.liveDetail) {
+							return framePopup(renderLiveEventDetailView(ui.liveDetail, ui, innerWidth, theme, innerRows), safeWidth, theme, " Flightdeck · Live event ", innerRows);
 						}
 						if (ui.decisionDetail) {
 							return framePopup(renderDecisionDetailView(ui.decisionDetail, ui, innerWidth, theme, innerRows), safeWidth, theme, " Flightdeck · Decision ", innerRows);
@@ -1367,7 +1531,7 @@ export default function flightdeck(pi: ExtensionAPI): void {
 
 	function renderPopupFooter(theme: Theme, _width: number, ui: PopupUiState): string {
 		const tabHint = `${ansiYellow("tab")} ${theme.fg("dim", "next tab · ")}${ansiYellow("shift+tab")} ${theme.fg("dim", "prev")}`;
-		const viewHint = ui.tab === TAB_DECISIONS ? `${theme.fg("dim", " · ")}${ansiYellow("enter")} ${theme.fg("dim", "view")}` : "";
+		const viewHint = ui.tab === TAB_DECISIONS || ui.tab === TAB_LIVE ? `${theme.fg("dim", " · ")}${ansiYellow("enter")} ${theme.fg("dim", "details")}` : "";
 		const navVerb = ui.tab === TAB_DAEMON ? "scroll" : "select";
 		const navHint = `${ansiYellow("↑/↓")} ${theme.fg("dim", `${navVerb} · `)}${ansiYellow("-/=")} ${theme.fg("dim", "page · ")}${ansiYellow("home/end")} ${theme.fg("dim", "ends")}${viewHint}`;
 		const searchHint = ui.search ? `${ansiYellow("ctrl+u")} ${theme.fg("dim", "clear search")}` : `${theme.fg("dim", "type to filter")}`;
