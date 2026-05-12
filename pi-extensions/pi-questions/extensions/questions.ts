@@ -10,7 +10,7 @@ import {
 	type TruncationResult,
 	withFileMutationQueue,
 } from "@earendil-works/pi-coding-agent";
-import { Editor, type EditorTheme, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { Input, matchesKey, truncateToWidth, visibleWidth, type Focusable } from "@earendil-works/pi-tui";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
@@ -348,11 +348,15 @@ function framePopup(lines: string[], width: number, theme: Theme, title = "", ri
 }
 
 function selectedLine(theme: Theme, content: string, width: number): string {
-	return theme.bg("selectedBg", padAnsi(theme.fg("text", content), width));
+	return theme.bg("selectedBg", padAnsi(content, width));
 }
 
 function panelLine(content: string, width: number): string {
 	return padAnsi(content, width);
+}
+
+function footerHint(theme: Theme, entries: Array<[string, string]>): string {
+	return entries.map(([key, label]) => `${theme.fg("text", key)} ${theme.fg("dim", label)}`).join("  ");
 }
 
 class CompactLines {
@@ -705,6 +709,7 @@ async function openQuestionUi(ctx: ExtensionContext, pending: PendingQuestion): 
 		}
 	}
 	const releaseModalLock = acquireVstackModalLock();
+	let restoreHardwareCursor: (() => void) | undefined;
 	try {
 	const request = pending.request;
 	const optionRows = Math.max(1, Math.floor(settingNumber("optionRows", OPTION_ROWS, ctx.cwd)));
@@ -713,6 +718,8 @@ async function openQuestionUi(ctx: ExtensionContext, pending: PendingQuestion): 
 	const selectedRows = request.questions.map(() => 0);
 	const scrollOffsets = request.questions.map(() => 0);
 	const useOverlay = questionRenderMode(ctx.cwd) === "overlay";
+	const hasConfirmTab = request.questions.length > 1 || request.questions.some((question) => question.multiple);
+	const tabCount = request.questions.length + (hasConfirmTab ? 1 : 0);
 	let activeTab = 0;
 	let startCustomInput: (() => void) | undefined;
 
@@ -724,7 +731,8 @@ async function openQuestionUi(ctx: ExtensionContext, pending: PendingQuestion): 
 	const isCustomRow = (question: QuestionTab, index: number): boolean => question.allowCustom && index === question.options.length;
 
 	const clamp = () => {
-		activeTab = Math.max(0, Math.min(activeTab, request.questions.length - 1));
+		activeTab = Math.max(0, Math.min(activeTab, tabCount - 1));
+		if (activeTab >= request.questions.length) return;
 		const optionCount = rowCount(request.questions[activeTab]);
 		const visibleRows = visibleRowsFor(activeTab);
 		selectedRows[activeTab] = Math.max(0, Math.min(selectedRows[activeTab] ?? 0, Math.max(0, optionCount - 1)));
@@ -743,11 +751,11 @@ async function openQuestionUi(ctx: ExtensionContext, pending: PendingQuestion): 
 	});
 	const submit = () => pending.complete({ answers: answers(), requestId: request.id }, "ui");
 	const advanceOrSubmit = () => {
-		if (activeTab >= request.questions.length - 1) {
+		if (!hasConfirmTab && activeTab >= request.questions.length - 1) {
 			submit();
 			return;
 		}
-		activeTab += 1;
+		activeTab = Math.min(activeTab + 1, tabCount - 1);
 		clamp();
 		pending.requestRender?.();
 	};
@@ -783,38 +791,32 @@ async function openQuestionUi(ctx: ExtensionContext, pending: PendingQuestion): 
 			pending.uiDone = done;
 			pending.requestRender = () => tui.requestRender();
 			let inputMode = false;
+			const previousHardwareCursor = tui.getShowHardwareCursor();
+			tui.setShowHardwareCursor(true);
+			restoreHardwareCursor = () => tui.setShowHardwareCursor(previousHardwareCursor);
 
-			const editorTheme: EditorTheme = {
-				borderColor: (s) => theme.fg("accent", s),
-				selectList: {
-					selectedPrefix: (t) => theme.fg("accent", t),
-					selectedText: (t) => theme.bg("selectedBg", theme.fg("text", t)),
-					description: (t) => theme.fg("muted", t),
-					scrollInfo: (t) => theme.fg("dim", t),
-					noMatch: (t) => theme.fg("warning", t),
-				},
-			};
-			const editor = new Editor(tui, editorTheme);
+			const input = new Input();
 			const refresh = () => tui.requestRender();
+			const isConfirmTab = () => hasConfirmTab && activeTab === request.questions.length;
 
 			startCustomInput = () => {
 				inputMode = true;
-				editor.setText(customAnswers[activeTab]);
+				input.setValue(customAnswers[activeTab]);
 				refresh();
 			};
 
-			editor.onSubmit = (value) => {
+			input.onSubmit = (value) => {
 				const trimmed = value.trim();
 				if (!trimmed) {
 					customAnswers[activeTab] = "";
 					inputMode = false;
-					editor.setText("");
+					input.setValue("");
 					refresh();
 					return;
 				}
 				customAnswers[activeTab] = trimmed;
 				inputMode = false;
-				editor.setText("");
+				input.setValue("");
 				if (request.questions[activeTab].multiple) {
 					refresh();
 					return;
@@ -823,16 +825,21 @@ async function openQuestionUi(ctx: ExtensionContext, pending: PendingQuestion): 
 				advanceOrSubmit();
 			};
 
+			input.onEscape = () => {
+				inputMode = false;
+				input.setValue("");
+				refresh();
+			};
+
 			const renderTabs = (width: number): string => {
-				const currentAnswers = answers();
-				const parts = request.questions.map((question, index) => {
-					const doneMark = currentAnswers[index].length > 0 ? `${ICONS.check} ` : "";
-					const label = ` ${doneMark}${index + 1}. ${question.header} `;
+				const labels = request.questions.map((question) => question.header);
+				if (hasConfirmTab) labels.push("Confirm");
+				const parts = labels.map((labelText, index) => {
+					const label = ` ${labelText} `;
 					if (index === activeTab) return theme.fg("accent", theme.inverse(theme.bold(label)));
-					const color = currentAnswers[index].length > 0 ? "success" : "accent";
-					return theme.bg("selectedBg", theme.fg(color, label));
+					return theme.fg("muted", label);
 				});
-				return truncateToWidth(parts.join(" "), width, "");
+				return truncateToWidth(parts.join("  "), width, "");
 			};
 
 			const renderOption = (question: QuestionTab, index: number, width: number): string[] => {
@@ -842,143 +849,163 @@ async function openQuestionUi(ctx: ExtensionContext, pending: PendingQuestion): 
 				const isCursor = index === selectedRows[activeTab];
 				const customValue = customAnswers[activeTab].trim();
 				const isChecked = custom ? customValue.length > 0 : selections[activeTab].has(option!.label);
-				const marker = " ";
-				const checkbox = question.multiple ? (isChecked ? ICONS.checkSquare : ICONS.square) : isChecked ? ICONS.circleFilled : ICONS.circleOpen;
-				const prefix = `${marker}${theme.fg(isChecked || isCursor ? "text" : "muted", checkbox)} `;
-				const prefixWidth = visibleWidth(` ${ICONS.square} `);
+				const prefixText = question.multiple
+					? `${index + 1}. ${isChecked ? "[x]" : "[ ]"} `
+					: `${index + 1}. `;
+				const prefix = theme.fg(isCursor ? "accent" : isChecked ? "success" : "muted", prefixText);
+				const prefixWidth = visibleWidth(prefixText);
 				const rawLabel = custom && customValue ? `${question.customLabel}: ${customValue}` : custom ? question.customLabel : option!.label;
 				const rawDesc = custom
-					? customValue ? "edit custom response" : question.customPlaceholder
+					? inputMode && isCursor ? "" : customValue ? "edit custom response" : question.customPlaceholder
 					: option!.description;
-				const styleLabel = (text: string) => (isCursor ? theme.bold(text) : text);
-				const styleDesc = (text: string) => theme.fg(isCursor ? "text" : "dim", text);
-				const wrapRow = (content: string) => (isCursor ? selectedLine(theme, content, width) : panelLine(content, width));
-				const inlineSpace = Math.max(0, width - prefixWidth - visibleWidth(rawLabel) - 1);
-				if (rawDesc && inlineSpace >= visibleWidth(rawDesc) && inlineSpace > 0) {
-					const row = `${prefix}${styleLabel(rawLabel)} ${styleDesc(rawDesc)}`;
-					return [wrapRow(row)];
-				}
-				if (!rawDesc) {
-					const labelWidth = Math.max(1, width - prefixWidth);
-					const row = `${prefix}${styleLabel(truncateToWidth(rawLabel, labelWidth, ""))}`;
-					return [wrapRow(row)];
-				}
+				const styleLabel = (text: string) => theme.fg(isCursor ? "accent" : isChecked ? "success" : "text", text);
 				const labelWidth = Math.max(1, width - prefixWidth);
 				const labelLines = wrapPlain(rawLabel, labelWidth, 4);
 				const descIndent = " ".repeat(prefixWidth);
 				const descWidth = Math.max(1, width - prefixWidth);
-				const descLines = wrapPlain(rawDesc, descWidth, 8);
+				const descLines = rawDesc ? wrapPlain(rawDesc, descWidth, 8) : [];
 				const out: string[] = [];
+
 				labelLines.forEach((line, i) => {
 					const content = i === 0 ? `${prefix}${styleLabel(line)}` : `${descIndent}${styleLabel(line)}`;
-					out.push(wrapRow(content));
+					out.push(i === 0 && isCursor ? selectedLine(theme, content, width) : panelLine(content, width));
 				});
 				for (const line of descLines) {
-					out.push(wrapRow(`${descIndent}${styleDesc(line)}`));
+					out.push(panelLine(`${descIndent}${theme.fg("dim", line)}`, width));
+				}
+				if (custom && inputMode && isCursor) {
+					for (const line of input.render(Math.max(1, width - prefixWidth))) {
+						out.push(panelLine(`${descIndent}${line}`, width));
+					}
 				}
 				return out;
+			};
+
+			const renderConfirm = (width: number): string[] => {
+				const currentAnswers = answers();
+				const lines = [panelLine(theme.fg("text", "Review answers, then press enter to submit."), width), panelLine("", width)];
+				for (const [index, question] of request.questions.entries()) {
+					const answerText = formatAnswers(currentAnswers[index]);
+					const label = `  ${theme.fg("muted", "•")} ${theme.fg("accent", `${question.header}: `)}`;
+					lines.push(...wrapStyled(label, theme.fg("text", answerText), width, 4).map((line) => panelLine(line, width)));
+				}
+				return lines;
+			};
+
+			const renderFooter = (question: QuestionTab | undefined): string => {
+				if (!question) return footerHint(theme, [["⇆", "tab"], ["enter", "submit"], ["esc", "dismiss"]]);
+				return footerHint(theme, [["⇆", "tab"], ["↑↓", "select"], ["enter", question.multiple ? "toggle" : "confirm"], ["esc", "dismiss"]]);
 			};
 
 			const render = (width: number): string[] => {
 				clamp();
 				const innerWidth = popupContentWidth(width);
-				const question = request.questions[activeTab];
+				const question = isConfirmTab() ? undefined : request.questions[activeTab];
 				const lines: string[] = [];
 
-				if (request.questions.length > 1) {
+				if (tabCount > 1) {
 					lines.push(panelLine("", innerWidth));
 				}
 				lines.push(panelLine(renderTabs(innerWidth), innerWidth));
 				lines.push(panelLine("", innerWidth));
-				for (const line of wrapPlain(question.question, innerWidth, 3)) {
-					lines.push(panelLine(theme.fg("text", line), innerWidth));
-				}
-				lines.push(panelLine("", innerWidth));
 
-				const start = scrollOffsets[activeTab];
-				const visibleRows = visibleRowsFor(activeTab);
-				const totalRows = rowCount(question);
-				const end = Math.min(totalRows, start + visibleRows);
-				let renderedRowLines = 0;
-				for (let index = start; index < end; index += 1) {
-					const rowLines = renderOption(question, index, innerWidth);
-					for (const line of rowLines) lines.push(line);
-					renderedRowLines += rowLines.length;
-				}
-				if (useOverlay) {
-					for (let i = renderedRowLines; i < visibleRows; i += 1) lines.push(panelLine("", innerWidth));
-				}
-
-				if (inputMode) {
+				if (!question) {
+					lines.push(...renderConfirm(innerWidth));
+				} else {
+					for (const line of wrapPlain(question.question, innerWidth, 4)) {
+						lines.push(panelLine(theme.fg("text", line), innerWidth));
+					}
 					lines.push(panelLine("", innerWidth));
-					lines.push(panelLine(theme.fg("muted", "Your answer:"), innerWidth));
-					for (const line of editor.render(Math.max(1, innerWidth - 2))) {
-						lines.push(panelLine(` ${line}`, innerWidth));
+
+					const start = scrollOffsets[activeTab];
+					const visibleRows = visibleRowsFor(activeTab);
+					const totalRows = rowCount(question);
+					const end = Math.min(totalRows, start + visibleRows);
+					let renderedRowLines = 0;
+					for (let index = start; index < end; index += 1) {
+						const rowLines = renderOption(question, index, innerWidth);
+						for (const line of rowLines) lines.push(line);
+						renderedRowLines += rowLines.length;
+					}
+					if (useOverlay) {
+						for (let i = renderedRowLines; i < visibleRows; i += 1) lines.push(panelLine("", innerWidth));
 					}
 				}
+
+				lines.push(panelLine("", innerWidth));
+				lines.push(panelLine(renderFooter(question), innerWidth));
 
 				return framePopup(lines, width, theme, request.header, "");
 			};
 
-			return {
+			const component: Focusable & { handleInput(data: string): void; invalidate(): void; render(width: number): string[] } = {
+				get focused() {
+					return input.focused;
+				},
+				set focused(value: boolean) {
+					input.focused = value;
+				},
 				handleInput(data: string) {
-					const question = request.questions[activeTab];
 					if (inputMode) {
 						if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
 							inputMode = false;
-							editor.setText("");
-							tui.requestRender();
+							input.setValue("");
+							refresh();
 							return;
 						}
-						editor.handleInput(data);
-						tui.requestRender();
+						input.handleInput(data);
+						refresh();
 						return;
 					}
 					if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
 						pending.complete({ cancelled: true, requestId: request.id }, "ui");
 						return;
 					}
-					if (matchesKey(data, "left")) {
-						activeTab -= 1;
+					if (matchesKey(data, "left") || matchesKey(data, "shift+tab")) {
+						activeTab = (activeTab - 1 + tabCount) % tabCount;
 						clamp();
-						tui.requestRender();
+						refresh();
 						return;
 					}
 					if (matchesKey(data, "right") || matchesKey(data, "tab")) {
-						activeTab += 1;
+						activeTab = (activeTab + 1) % tabCount;
 						clamp();
-						tui.requestRender();
+						refresh();
 						return;
 					}
+					if (isConfirmTab()) {
+						if (matchesKey(data, "return") || matchesKey(data, "enter")) submit();
+						return;
+					}
+
+					const question = request.questions[activeTab];
 					if (matchesKey(data, "up")) {
 						selectedRows[activeTab] -= 1;
 						clamp();
-						tui.requestRender();
+						refresh();
 						return;
 					}
 					if (matchesKey(data, "down")) {
 						selectedRows[activeTab] += 1;
 						clamp();
-						tui.requestRender();
+						refresh();
 						return;
 					}
 					if (matchesKey(data, "-") || matchesKey(data, "pageup")) {
 						selectedRows[activeTab] -= visibleRowsFor(activeTab);
 						clamp();
-						tui.requestRender();
+						refresh();
 						return;
 					}
 					if (matchesKey(data, "=") || matchesKey(data, "pagedown")) {
 						selectedRows[activeTab] += visibleRowsFor(activeTab);
 						clamp();
-						tui.requestRender();
+						refresh();
 						return;
 					}
 					if (matchesKey(data, "return") || matchesKey(data, "enter")) {
-						if (question.multiple) {
-							if (isCustomRow(question, selectedRows[activeTab])) toggleMulti();
-							else advanceOrSubmit();
-						} else chooseSingle();
+						if (question.multiple) toggleMulti();
+						else chooseSingle();
 						return;
 					}
 					if (data === " " && (question.multiple || isCustomRow(question, selectedRows[activeTab]))) {
@@ -988,6 +1015,8 @@ async function openQuestionUi(ctx: ExtensionContext, pending: PendingQuestion): 
 				invalidate() {},
 				render,
 			};
+
+			return component;
 		},
 		useOverlay
 			? {
@@ -1001,6 +1030,7 @@ async function openQuestionUi(ctx: ExtensionContext, pending: PendingQuestion): 
 			: undefined,
 	);
 	} finally {
+		restoreHardwareCursor?.();
 		releaseModalLock();
 	}
 }
