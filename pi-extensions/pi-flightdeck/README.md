@@ -8,7 +8,7 @@ Read-only mission-control dashboard for the [`flightdeck`](../../skills/flightde
 
 - **Pause banner** — high-contrast yellow frame above the editor when flightdeck master pauses for the user. Clears automatically on resume.
 - **Persistent dashboard widget** — compact tree of tracked issues with state badges, harness, model, PR number, last decision, age, and per-pane cost/turns/tokens.
-- **`/flightdeck` popup** (F6) — mission-control view with six tabs: Overview, Live feed, Conversations, Conflicts & merges, Decisions, Daemon.
+- **`/flightdeck` popup** (F6) — mission-control view with six tabs: Overview, Live feed, Conversations, Conflicts & merges, Decisions, Daemon. Conversations are grouped by issue first, keep raw pane ids as muted metadata, and collapse Pi streaming partials into one finalized turn.
 - Dashboard suppresses in child panes so the same state doesn't echo inside every agent.
 - Participates in vstack's stable mini-dashboard stack order: Flightdeck → Tasks → Agents → BG tasks.
 - Optional terminal bell and auto-popup when master pauses.
@@ -75,8 +75,8 @@ All settings live in the extension manager under **Flightdeck Dashboard**.
 | Setting | What it does |
 | --- | --- |
 | Live feed lines | Daemon log + decisions retained in Live feed. |
-| Conversation excerpt chars | Max chars of last assistant text per pane. |
-| Conversations turns kept | Recent assistant turns retained per pane. |
+| Conversation excerpt chars | Max chars of last assistant text per pane after duplicate streaming partials are collapsed. |
+| Conversations turns kept | Recent assistant turns retained per pane; each pane renders as an issue-first mini timeline. |
 
 ### Refresh
 

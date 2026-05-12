@@ -634,6 +634,40 @@ function foldHeartbeats(events: LiveEvent[]): LiveEvent[] {
 	return out;
 }
 
+function conversationSearchHaystack(pane: string, issue: IssueRecord | undefined, turns: ConversationTurn[]): string {
+	return `${pane} ${issue?.issue ?? ""} ${issue?.state ?? ""} ${issue?.harness ?? ""} ${turns.map((t) => `${t.harness ?? ""} ${t.tag ?? ""} ${t.excerpt}`).join(" ")}`.toLowerCase();
+}
+
+function renderConversationPaneHeader(pane: string, issue: IssueRecord | undefined, turns: ConversationTurn[], theme: Theme, width: number): string {
+	const title = issue?.issue ?? "Unmapped pane";
+	const meta: string[] = [];
+	if (issue?.state) meta.push(stateBadge(theme, issue.state));
+	if (issue?.harness) meta.push(harnessChip(theme, issue.harness));
+	meta.push(theme.fg("muted", `${turns.length} turn${turns.length === 1 ? "" : "s"}`));
+	meta.push(`${theme.fg("dim", "pane")} ${theme.fg("dim", pane)}`);
+	return truncateToWidth(`${theme.fg("customMessageLabel", theme.bold(title))} ${theme.fg("dim", "·")} ${meta.join(theme.fg("dim", " · "))}`, width, "");
+}
+
+function formatConversationTime(ts: string): string {
+	const match = ts.match(/\d\d:\d\d:\d\d/)?.[0];
+	const fallback = ts.slice(11, 19);
+	return match ?? (fallback || "--:--:--");
+}
+
+function renderConversationTurnRows(turn: ConversationTurn, isLast: boolean, width: number, theme: Theme, excerptChars: number): string[] {
+	const connector = isLast ? "╰─" : "├─";
+	const stem = isLast ? "  " : "│ ";
+	const meta = `${theme.fg("dim", formatConversationTime(turn.ts))} ${harnessChip(theme, turn.harness)} ${theme.fg("dim", "·")} ${tagBadge(theme, turn.tag)}`;
+	const lines = [truncateToWidth(`${theme.fg("dim", connector)} ${meta}`, width, "")];
+	const prefix = `${theme.fg("dim", stem)} `;
+	const textWidth = Math.max(1, width - visibleWidth(prefix));
+	const excerpt = turn.excerpt.slice(0, excerptChars);
+	for (const row of wrapLine(excerpt, textWidth).slice(0, 4)) {
+		lines.push(truncateToWidth(`${prefix}${theme.fg("text", row)}`, width, ""));
+	}
+	return lines;
+}
+
 function renderConversationsTab(snapshot: FlightdeckSnapshot, conversations: Map<string, ConversationTurn[]>, ui: PopupUiState, width: number, theme: Theme, viewportRows: number, cwd: string): string[] {
 	const issues = sortedIssues(snapshot.master);
 	// Build a pane-id → issue map so the rendered rows show the issue id
@@ -657,24 +691,33 @@ function renderConversationsTab(snapshot: FlightdeckSnapshot, conversations: Map
 		return lines;
 	}
 	const entries = [...conversations.entries()].sort();
+	const issueFor = (pane: string): IssueRecord | undefined => issueByPane.get(pane);
 	const filtered = ui.search.trim()
-		? entries.filter(([pane, turns]) => `${pane} ${turns.map((t) => t.excerpt).join(" ")}`.toLowerCase().includes(ui.search.trim().toLowerCase()))
+		? entries.filter(([pane, turns]) => conversationSearchHaystack(pane, issueFor(pane), turns).includes(ui.search.trim().toLowerCase()))
 		: entries;
-	for (const [pane, turns] of filtered) {
-		const issue = issueByPane.get(pane);
-		const issueLabel = issue ? ` ${theme.fg("accent", issue.issue)}` : "";
-		lines.push(`${theme.fg("customMessageLabel", theme.bold(pane))}${issueLabel} ${theme.fg("dim", `(${turns.length} turn${turns.length === 1 ? "" : "s"})`)}`);
-		for (const turn of turns.slice(-3)) {
-			const ts = turn.ts.slice(11, 19);
-			lines.push(`  ${theme.fg("dim", ts)} ${harnessChip(theme, turn.harness)} ${theme.fg("dim", "·")} ${tagBadge(theme, turn.tag)}`);
-			const wrapped = wrapLine(theme.fg("text", turn.excerpt.slice(0, excerptChars)), width - 4);
-			for (const row of wrapped.slice(0, 4)) lines.push(`    ${row}`);
-		}
-		lines.push("");
+	if (filtered.length === 0) {
+		lines.push(theme.fg("dim", "No conversations match current search."));
+		return lines;
 	}
-	const limited = lines.slice(0, viewportRows);
-	if (lines.length > viewportRows) limited.push(theme.fg("dim", `↓ ${lines.length - viewportRows} more lines`));
-	return limited;
+	const body: string[] = [];
+	for (const [entryIndex, [pane, turns]] of filtered.entries()) {
+		const issue = issueFor(pane);
+		body.push(renderConversationPaneHeader(pane, issue, turns, theme, width));
+		const recent = turns.slice(-3);
+		for (const [turnIndex, turn] of recent.entries()) {
+			body.push(...renderConversationTurnRows(turn, turnIndex === recent.length - 1, width, theme, excerptChars));
+		}
+		if (entryIndex < filtered.length - 1) body.push("");
+	}
+	const rows = Math.max(1, viewportRows - lines.length - 1);
+	clampSelection(ui, body.length, rows);
+	const start = Math.max(0, Math.min(ui.scroll, Math.max(0, body.length - rows)));
+	const end = Math.min(body.length, start + rows);
+	if (start > 0) lines.push(theme.fg("dim", `↑ ${start} earlier`));
+	lines.push(...body.slice(start, end));
+	const tail = Math.max(0, body.length - end);
+	if (tail > 0) lines.push(theme.fg("dim", `↓ ${tail} more`));
+	return lines;
 }
 
 function renderConflictsTab(snapshot: FlightdeckSnapshot, _ui: PopupUiState, width: number, theme: Theme): string[] {

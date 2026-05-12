@@ -636,6 +636,55 @@ export interface ConversationTurn {
 	excerpt: string;
 }
 
+function normalizeConversationExcerpt(text: string): string {
+	return text
+		.replace(/\s+/g, " ")
+		.replace(/[\s`'"“”‘’.,;:!?…]+$/g, "")
+		.trim();
+}
+
+function turnTimeMs(turn: ConversationTurn): number {
+	const parsed = Date.parse(turn.ts);
+	return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function nearSameTurn(a: ConversationTurn, b: ConversationTurn): boolean {
+	const diff = Math.abs(turnTimeMs(a) - turnTimeMs(b));
+	return diff <= 5 * 60 * 1000;
+}
+
+function shouldMergeConversationTurn(previous: ConversationTurn, next: ConversationTurn): "replace" | "keep" | "append" {
+	if (previous.hash && next.hash && previous.hash === next.hash) return "keep";
+	if (!nearSameTurn(previous, next)) return "append";
+
+	const before = normalizeConversationExcerpt(previous.excerpt);
+	const after = normalizeConversationExcerpt(next.excerpt);
+	if (!before || !after) return "append";
+
+	if (before === after) return next.excerpt.length > previous.excerpt.length ? "replace" : "keep";
+	// Pi bridge streams message_update events before message_end. Those partials
+	// share the same pane and timestamp window but have different hashes as the
+	// assistant text grows. Collapse prefix/suffix variants so Conversations show
+	// one finalized turn instead of a stack of near-identical partials.
+	if (after.startsWith(before) && before.length >= 32) return "replace";
+	if (before.startsWith(after) && after.length >= 32) return "keep";
+	return "append";
+}
+
+function pushConversationTurn(list: ConversationTurn[], turn: ConversationTurn, maxPerPane: number): void {
+	const last = list[list.length - 1];
+	if (last) {
+		const action = shouldMergeConversationTurn(last, turn);
+		if (action === "keep") return;
+		if (action === "replace") {
+			list[list.length - 1] = turn;
+			return;
+		}
+	}
+	list.push(turn);
+	while (list.length > maxPerPane) list.shift();
+}
+
 /**
  * Fold the latest wake events into a per-pane conversation history.
  * Best-effort — events get drained by the master ack, so this represents
@@ -649,24 +698,25 @@ export function foldWakeEventsIntoConversations(
 	maxChars: number,
 ): Map<string, ConversationTurn[]> {
 	const next = new Map<string, ConversationTurn[]>();
-	for (const [k, v] of previous) next.set(k, [...v]);
+	for (const [k, v] of previous) {
+		const compacted: ConversationTurn[] = [];
+		for (const turn of v) pushConversationTurn(compacted, turn, maxPerPane);
+		next.set(k, compacted);
+	}
 	for (const ev of events) {
 		const pane = ev.pane_id;
 		if (!pane) continue;
 		const text = typeof ev.last_assistant_text === "string" ? ev.last_assistant_text.trim() : "";
 		if (!text) continue;
 		const list = next.get(pane) ?? [];
-		const last = list[list.length - 1];
-		if (last && last.hash === ev.hash) continue;
-		list.push({
+		pushConversationTurn(list, {
 			excerpt: text.length > maxChars ? `${text.slice(0, maxChars)}…` : text,
 			harness: ev.harness,
 			hash: ev.hash,
 			pane_id: pane,
 			tag: ev.classifier_tag,
 			ts: ev.ts ?? new Date().toISOString(),
-		});
-		while (list.length > maxPerPane) list.shift();
+		}, maxPerPane);
 		next.set(pane, list);
 	}
 	return next;
