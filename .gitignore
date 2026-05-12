@@ -33,3 +33,24 @@ Thumbs.db
 
 # Generated OpenAI Codex images
 .pi/openai-codex-images/
+
+# Installed harness mirrors; edit canonical source under agents/, skills/, hooks/, pi-extensions/
+.agents/
+.claude/agents/
+.claude/hooks/
+.claude/skills/
+.cursor/rules/
+.codex/agents/
+.codex/hooks/
+.codex/skills/
+.opencode/agents/
+.opencode/commands/
+.opencode/instructions/
+.opencode/modes/
+.opencode/plugins/
+.opencode/skills/
+.opencode/themes/
+.pi/agents/
+.pi/extensions/
+.pi/packages/
+.pi/prompts/

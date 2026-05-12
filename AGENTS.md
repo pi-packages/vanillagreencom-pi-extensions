@@ -24,6 +24,10 @@ Rules for any agent landing here:
 - **Do not delete the `.bash` siblings.** They are the canonical bodies
   while the port stabilizes. Removal happens after one full production
   cycle on TS defaults.
+- **Never touch harness mirrors.** Never search, read, or modify files in
+  `.agents/`, `.claude/`, `.opencode/`, or `.pi/`; they are installed
+  harness directories for repo use, not canonical packages. Work in
+  `agents/`, `skills/`, `hooks/`, and `pi-extensions/` only.
 - **flock semantics.** Use the helpers in
   `lib/flightdeck-core/src/state/locking.ts`. The naive
   `spawnSync("flock", ["-x", String(fd), "true"])` pattern is a no-op;

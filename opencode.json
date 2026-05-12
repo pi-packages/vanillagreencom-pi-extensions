@@ -1,0 +1,12 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    ".opencode/instructions/vstack-hook-post-edit-lint.md",
+    ".opencode/instructions/vstack-hook-pre-commit-check.md"
+  ],
+  "permission": {
+    "bash": {
+      "*": "ask"
+    }
+  }
+}
