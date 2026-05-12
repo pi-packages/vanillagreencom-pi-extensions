@@ -617,8 +617,8 @@ function renderAgentList(agents: AgentConfig[], statuses: Map<string, AgentPaneS
 		const marker = " ";
 		const name = ansiMagenta(selected ? theme.bold(agent.name) : agent.name);
 		const icon = active ? dashboardStatusIcon(active.status, theme) : agentStatusIcon(status, theme);
-		const meta = active ? dashboardStatusText(active, theme) : agentStatusLabel(agent, statuses.get(agent.name), theme);
-		const row = truncateToWidth(`${marker}${icon} ${name} ${theme.fg("dim", "·")} ${meta}`, width, "…");
+		const meta = active ? `${theme.fg("dim", " · ")}${dashboardStatusText(active, theme)}` : "";
+		const row = truncateToWidth(`${marker}${icon} ${name}${meta}`, width, "…");
 		lines.push(selected ? theme.bg("selectedBg", agentPad(row, width)) : row);
 	}
 	const hidden = Math.max(0, agents.length - (ui.scroll + listRows));
@@ -828,7 +828,11 @@ function renderActiveAgentDetail(item: SubagentDashboardItem | undefined, displa
 	const titleLine = `${agentPaneTitle(theme, "Detail", ui.pane === "inspector")} ${ansiMagenta(theme.bold(nameForTitle))} ${dashboardStatusText(item, theme)} ${theme.fg("dim", dashboardKindLabel(item.kind))}`;
 	const body: string[] = [];
 	body.push(...wrap(`${theme.fg("muted", "Task ID")}: ${theme.fg("dim", item.taskId)}`));
-	if (item.task) body.push(...wrap(`${theme.fg("muted", "Task")}: ${item.task}`));
+	body.push("");
+	if (item.task) {
+		body.push(...wrap(theme.fg("accent", theme.bold("Task:"))));
+		for (const raw of item.task.split(/\r?\n/)) body.push(...renderTraceContentLine(raw, "task", safeWidth, theme));
+	}
 	if (item.transcriptPath) body.push(...wrapPlainNoEllipsis(`Transcript: ${compactPath(item.transcriptPath, { maxChars: Number.POSITIVE_INFINITY })}`, safeWidth).map((line) => theme.fg("dim", line)));
 	if (item.usage) {
 		const usageLine = formatUsageStatsForDashboard(item.usage).join(" \u00b7 ");
@@ -836,17 +840,17 @@ function renderActiveAgentDetail(item: SubagentDashboardItem | undefined, displa
 	}
 	if (item.message) {
 		body.push("");
-		body.push(...wrap(theme.fg("muted", theme.bold("Latest Message"))));
-		const wrapped = wrapTextWithAnsi(item.message, safeWidth);
+		body.push(...wrap(theme.fg("accent", theme.bold("Latest Message"))));
+		const wrapped = item.message.split(/\r?\n/).flatMap((line) => renderTraceContentLine(line, "summary", safeWidth, theme));
 		body.push(...wrapped.slice(0, 8));
 	}
 	body.push("");
-	body.push(...wrap(theme.fg("muted", theme.bold("Transcript Tail"))));
+	body.push(...wrap(theme.fg("accent", theme.bold("Transcript Tail"))));
 	const tail = readTranscriptTail(item.transcriptPath, 400);
 	if (tail.length === 0) {
 		body.push(...wrap(theme.fg("dim", "(transcript empty or unavailable)")));
 	} else {
-		for (const line of tail) body.push(...wrap(theme.fg("toolOutput", line)));
+		for (const line of tail) body.push(...renderTraceContentLine(line, "transcript", safeWidth, theme));
 	}
 	const allLines: string[] = [titleLine, ""];
 	const visibleBodyRows = Math.max(1, rows - 2);
@@ -859,7 +863,7 @@ function renderActiveAgentDetail(item: SubagentDashboardItem | undefined, displa
 		const hint = `${offset > 0 ? `\u2191 ${offset} earlier` : ""}${offset > 0 && offset < maxOffset ? "  " : ""}${offset < maxOffset ? `\u2193 ${maxOffset - offset} more` : ""}`.trim();
 		if (hint && allLines.length < rows) {
 			const lastIndex = allLines.length - 1;
-			allLines[lastIndex] = `${allLines[lastIndex]} ${theme.fg("dim", hint)}`;
+			allLines[lastIndex] = `${allLines[lastIndex]} ${ansiYellow(hint)}`;
 		}
 	}
 	return allLines.slice(0, rows);
@@ -952,6 +956,36 @@ function wrapPlainNoEllipsis(text: string, width: number): string[] {
 	return out;
 }
 
+function colorTraceValue(label: string, value: string, theme: Theme): string {
+	let renderedValue = theme.fg("text", value);
+	if (label.toLowerCase() === "status") {
+		renderedValue = theme.fg(value === "completed" ? "success" : value === "failed" ? "error" : "warning", value);
+	}
+	return `${theme.fg("muted", `${label}: `.padEnd(12))}${renderedValue}`;
+}
+
+function renderTraceContentLine(raw: string, type: TraceViewerItem["type"] | undefined, width: number, theme: Theme): string[] {
+	const line = raw.replace(/\t/g, "  ");
+	const trimmed = line.trim();
+	if (!trimmed) return [""];
+	if (/^-{3,}$/.test(trimmed)) return [];
+	if (/^(Overview|Summary|Files changed|Validation|Notes|Task|Artifacts)$/i.test(trimmed)) {
+		return wrapTextWithAnsi(theme.fg("accent", theme.bold(trimmed)), width);
+	}
+	const labelMatch = line.match(/^(Ref|Agent|Status|Task ID|Created|Done|Transcript)\s{2,}(.+)$/);
+	if (labelMatch) return wrapTextWithAnsi(colorTraceValue(labelMatch[1], labelMatch[2], theme), width);
+	if (type === "completion") {
+		const jsonKey = line.match(/^(\s*)"([^"]+)"(\s*:\s*)(.*)$/);
+		if (jsonKey) return wrapTextWithAnsi(`${jsonKey[1]}${theme.fg("accent", `"${jsonKey[2]}"`)}${theme.fg("dim", jsonKey[3])}${theme.fg("toolOutput", jsonKey[4])}`, width);
+	}
+	const bullet = line.match(/^(\s*)([-*]|\d+\.)\s+(.*)$/);
+	if (bullet) return wrapTextWithAnsi(`${bullet[1]}${theme.fg("accent", bullet[2])} ${theme.fg("toolOutput", bullet[3])}`, width);
+	const markdownHeading = line.match(/^(#{1,6})\s+(.*)$/);
+	if (markdownHeading) return wrapTextWithAnsi(`${theme.fg("accent", markdownHeading[1])} ${theme.fg("accent", theme.bold(markdownHeading[2]))}`, width);
+	const backtick = line.replace(/`([^`]+)`/g, (_m: string, code: string) => theme.fg("accent", code));
+	return wrapTextWithAnsi(theme.fg(type === "summary" ? "text" : "toolOutput", backtick), width);
+}
+
 function renderHistoryDetail(
 	record: PaneTaskRecord | undefined,
 	cache: Map<string, HistoryDetailEntry>,
@@ -975,14 +1009,15 @@ function renderHistoryDetail(
 	const subtabLine = renderTraceTabBar(subtabs, subtabIndex, safeWidth, theme);
 	const item = subtabs[subtabIndex];
 	const fileLines = item?.path
-		? wrapPlainNoEllipsis(`file ${compactPath(item.path, { maxChars: Number.POSITIVE_INFINITY })}`, safeWidth).map((line) => theme.fg("dim", line))
-		: item?.type === "summary"
-			? [theme.fg("dim", "metadata view")]
+		? [
+			...wrapPlainNoEllipsis(`file ${compactPath(item.path, { maxChars: Number.POSITIVE_INFINITY })}`, safeWidth).map((line) => theme.fg("dim", line)),
+			agentDivider(safeWidth, theme),
+		]
 			: [];
 	const rawLines = (item?.text || "(empty)").split(/\r?\n/);
 	const wrapped: string[] = [];
 	for (const raw of rawLines) {
-		const chunk = wrapPlainNoEllipsis(raw, safeWidth);
+		const chunk = renderTraceContentLine(raw, item?.type, safeWidth, theme);
 		wrapped.push(...(chunk.length > 0 ? chunk : [""]));
 	}
 	const header: string[] = [titleLine, "", subtabLine, "", ...fileLines];
@@ -998,7 +1033,7 @@ function renderHistoryDetail(
 	const scrollHint = [before, after].filter(Boolean).join(" · ");
 	const out: string[] = [...header];
 	out.push(...slice);
-	if (scrollHint) out.push(theme.fg("dim", scrollHint));
+	if (scrollHint) out.push(ansiYellow(scrollHint));
 	else out.push("");
 	return out.slice(0, rows);
 }
@@ -1291,8 +1326,7 @@ function renderHistoryTabBody(
 	const left = renderHistoryList(records, ui, leftWidth, theme, layout.listRows);
 	const record = records[ui.historySelected];
 	const right = renderHistoryDetail(record, cache, ui, rightWidth, bodyRows, theme);
-	const headerLine = `${theme.fg("muted", "View")}: ${theme.fg("text", "history")}  ${theme.fg("muted", "Tasks")}: ${records.length}`;
-	const lines: string[] = [...wrapTextWithAnsi(headerLine, width), agentDivider(width, theme)];
+	const lines: string[] = [agentDivider(width, theme)];
 	for (let i = 0; i < bodyRows; i += 1) {
 		lines.push(`${agentPad(left[i] ?? "", leftWidth)} ${theme.fg("dim", "│")} ${truncateToWidth(right[i] ?? "", rightWidth, "")}`);
 	}
@@ -1307,6 +1341,8 @@ function renderUnifiedAgentDetail(
 	activeItem: SubagentDashboardItem | undefined,
 	displayLabel: string | undefined,
 	statuses: Map<string, AgentPaneStatus>,
+	activeItems: SubagentDashboardItem[],
+	runtimeRoot: string,
 	ui: AgentBrowserUiState,
 	width: number,
 	rows: number,
@@ -1318,14 +1354,17 @@ function renderUnifiedAgentDetail(
 	}
 	const tabs: TraceViewerItem[] = [
 		{ label: "Live", text: "", type: "transcript" },
+		{ label: "Chat", text: "", type: "summary" },
 		{ label: "Inspector", text: "", type: "summary" },
 	];
 	ui.agentSubtab = Math.max(0, Math.min(ui.agentSubtab, tabs.length - 1));
 	const base = ui.agentSubtab === 0
 		? renderActiveAgentDetail(activeItem, displayLabel, ui, width, rows, theme)
-		: renderAgentInspector(agent, statuses, ui, width, rows, theme);
+		: ui.agentSubtab === 1
+			? renderChatRoomDetail(runtimeRoot, activeItems, ui, width, rows, theme)
+			: renderAgentInspector(agent, statuses, ui, width, rows, theme);
 	const tabLine = renderTraceTabBar(tabs, ui.agentSubtab, Math.max(8, width), theme);
-	return [base[0] ?? "", tabLine, "", ...base.slice(2)].slice(0, rows);
+	return [base[0] ?? "", "", tabLine, "", ...base.slice(2)].slice(0, rows);
 }
 
 function renderAgentsBody(
@@ -1333,6 +1372,7 @@ function renderAgentsBody(
 	agents: AgentConfig[],
 	statuses: Map<string, AgentPaneStatus>,
 	activeItems: SubagentDashboardItem[],
+	runtimeRoot: string,
 	ui: AgentBrowserUiState,
 	width: number,
 	theme: Theme,
@@ -1350,11 +1390,11 @@ function renderAgentsBody(
 	const liveCount = [...statuses.values()].filter((status) => status.live).length;
 	const paneCount = discovery.agents.filter((agent) => agent.pane).length;
 	const left = renderAgentList(agents, statuses, activeByAgent, ui, leftWidth, theme, layout.listRows);
-	const right = renderUnifiedAgentDetail(selected, activeItem, activeItem ? labels.get(activeItem.taskId) : undefined, statuses, ui, rightWidth, bodyRows, theme);
+	const right = renderUnifiedAgentDetail(selected, activeItem, activeItem ? labels.get(activeItem.taskId) : undefined, statuses, activeItems, runtimeRoot, ui, rightWidth, bodyRows, theme);
 	const rows = bodyRows;
 	const searchLine = theme.bg("toolPendingBg", agentPad(` > ${ui.search}${theme.inverse(" ")}`, width));
 	const workingCount = activeItems.filter((item) => isDashboardWorkingStatus(item.status)).length;
-	const filterLine = `${theme.fg("muted", "View")}: ${theme.fg("text", "agents")}  ${theme.fg("muted", "Filters")}: all scopes · ${agents.length}/${discovery.agents.length} shown · ${workingCount} working · ${paneCount} pane · ${liveCount} live`;
+	const filterLine = `${theme.fg("muted", "all scopes")}: ${agents.length}/${discovery.agents.length} shown · ${workingCount} working · ${paneCount} pane · ${liveCount} live`;
 	const filterLines = wrapTextWithAnsi(filterLine, width);
 	const lines = [searchLine, ...filterLines, agentDivider(width, theme)];
 	for (let i = 0; i < rows; i += 1) {
@@ -1521,7 +1561,7 @@ function createAgentsBrowserComponent(
 					requestRender();
 					return;
 				}
-				if (activeItemForAgent(selectedAgent(), getActiveItems()) && ui.agentSubtab < 1) {
+				if (activeItemForAgent(selectedAgent(), getActiveItems()) && ui.agentSubtab < 2) {
 					ui.agentSubtab += 1;
 					ui.inspectorScroll = 0;
 					requestRender();
@@ -1706,7 +1746,7 @@ function createAgentsBrowserComponent(
 		const lines = [
 			tabLine,
 			"",
-			...renderAgentsBody(discovery, filtered(), statuses, activeItems, ui, bodyWidth, theme, layout),
+			...renderAgentsBody(discovery, filtered(), statuses, activeItems, runtimeRoot, ui, bodyWidth, theme, layout),
 			agentDivider(bodyWidth, theme),
 			...wrapTextWithAnsi(footer, bodyWidth),
 		];
@@ -1832,9 +1872,9 @@ function traceViewerLines(state: TraceViewerState, width: number, rows: number, 
 		item?.status ? theme.fg(item.status === "completed" ? "success" : item.status === "failed" ? "error" : "warning", item.status) : "",
 		item?.createdAt ? theme.fg("dim", item.createdAt) : "",
 	].filter(Boolean).join(theme.fg("dim", " · "));
-	const file = item?.path ? theme.fg("dim", `file ${compactPath(item.path, { maxChars: Math.max(24, innerWidth - 8) })}`) : theme.fg("dim", "metadata view");
+	const file = item?.path ? theme.fg("dim", `file ${compactPath(item.path, { maxChars: Math.max(24, innerWidth - 8) })}`) : "";
 	const rawContent = (item?.text || "(empty)").split(/\r?\n/);
-	const content = rawContent.map((line) => truncateToWidth(line, innerWidth, ""));
+	const content = rawContent.flatMap((line) => renderTraceContentLine(line, item?.type, innerWidth, theme)).map((line) => truncateToWidth(line, innerWidth, ""));
 	const fixedRowsInsideFrame = 8;
 	const bodyRows = Math.max(1, frameRows - 2 - fixedRowsInsideFrame);
 	const maxScroll = Math.max(0, content.length - bodyRows);
@@ -1842,13 +1882,14 @@ function traceViewerLines(state: TraceViewerState, width: number, rows: number, 
 	const visible = content.slice(state.scroll, state.scroll + bodyRows);
 	const footer = item?.path
 		? theme.fg("dim", `${state.scroll + 1}-${Math.min(content.length, state.scroll + bodyRows)}/${content.length} · file`)
-		: theme.fg("dim", `${state.scroll + 1}-${Math.min(content.length, state.scroll + bodyRows)}/${content.length} · metadata`);
+		: theme.fg("dim", `${state.scroll + 1}-${Math.min(content.length, state.scroll + bodyRows)}/${content.length}`);
+	const fileBlock = file ? [file, divider(innerWidth, theme)] : [];
 	const innerLines = [
 		tabs,
 		"",
-		meta || file,
-		meta ? file : "",
-		divider(innerWidth, theme),
+		meta,
+		...fileBlock,
+		...(file ? [] : [divider(innerWidth, theme)]),
 		...visible,
 		divider(innerWidth, theme),
 		footer,
@@ -1988,6 +2029,7 @@ export async function traceViewerItems(record: PaneTaskRecord): Promise<TraceVie
 		`Agent    ${record.agent}`,
 		`Status   ${record.status}`,
 		`Task ID  ${record.taskId}`,
+		record.transcriptPath ? `Transcript  ${record.transcriptPath}` : "",
 		`Created  ${record.createdAt}`,
 		record.completedAt ? `Done     ${record.completedAt}` : "",
 		"",
@@ -2004,12 +2046,10 @@ export async function traceViewerItems(record: PaneTaskRecord): Promise<TraceVie
 		record.validation?.length ? record.validation.map((item) => `- ${item}`).join("\n") : "None reported",
 		record.notes ? `\nNotes\n-----\n${record.notes}` : "",
 	].filter(Boolean).join("\n");
-	const transcript = await readTextFileIfExists(record.transcriptPath, 80_000);
 	const completion = await readTextFileIfExists(record.completionArchivePath ?? record.completionSourcePath, 24_000);
 	const common = { agent: record.agent, createdAt: record.completedAt ?? record.createdAt, ref, status: record.status, summary: record.summary || record.task };
 	return [
 		{ ...common, label: "Summary", text: metadata, type: "summary" },
-		{ ...common, label: "Transcript", path: record.transcriptPath, text: transcript || "Transcript unavailable.", type: "transcript" },
 		{ ...common, label: "Completion", path: record.completionArchivePath ?? record.completionSourcePath, text: completion || "Completion JSON unavailable.", type: "completion" },
 		{ ...common, label: "Task", path: record.inboxFile, text: record.task || "Task unavailable.", type: "task" },
 	];

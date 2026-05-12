@@ -8,7 +8,7 @@ Delegate work to specialized agents from a running Pi session. Agents run either
 
 - `subagent` tool delegates one task, parallel tasks, or sequential chains.
 - Agents with `pane: true` open a visible tmux pane that persists across turns. Other agents run in the background.
-- `/agents` browser lists project and user agents with search, preview, and one-key launch.
+- `/agents` browser lists project and user agents with search, live detail, chat, history, and one-key launch.
 - Dashboard widget shows live state, model, turns, tokens, and cost for every spawned agent.
 - Dashboard participates in vstack's stable mini-dashboard stack order: Flightdeck → Tasks → Agents → BG tasks.
 - Grouped completion notifications batch multiple agents finishing together.
@@ -90,7 +90,7 @@ Arguments support autocomplete, including known agent names.
 
 - Type to search by name, description, source, path, model, denied tools, or pane status.
 - `Tab` / `Shift+Tab` switches between **Agents** and **History**.
-- `↑/↓`, `-/=`, `Home/End` navigate. `←/→` switches list/inspector focus and cycles right-pane subtabs.
+- `↑/↓`, `-/=`, `Home/End` navigate. `←/→` switches list/detail focus and cycles right-pane subtabs.
 - `Enter` inserts `Use agent <name> to: ` into the editor.
 - `Alt+M` edits the selected agent's frontmatter.
 - For pane agents: `Ctrl+P` starts/reuses, `Ctrl+O` attaches, `Ctrl+X` stops.
@@ -106,7 +106,7 @@ Each row shows agent name, kind (`pane` or `bg`), turn count, input/output token
 
 Rows are bucketed for stability: queued/running/waiting agents stay above attention states, and all of those stay above completed agents. Within each bucket, rows keep start-time order so token/usage updates do not reshuffle the list. The header always shows completed and working counts, even when either count is zero. Missing pane artifacts render as `stale` attention rows; stale bg-only records are dropped because bg agents do not use pane handoff files.
 
-The popup has two top-level tabs: **Agents** (unified project/user/active list, sorted by current status, with Live/Inspector subtabs on the right) and **History** (completed task traces). Running agents use an animated spinner in both mini-dashboard and popup views.
+The popup has two top-level tabs: **Agents** (unified project/user/active list, sorted by current status, with Live/Chat/Inspector subtabs on the right) and **History** (completed task traces with Summary/Completion/Task subtabs; transcript paths appear in Summary). Running agents use an animated spinner in both mini-dashboard and popup views.
 
 When the dashboard is on, inline tool output stays quiet — pane calls render as launch breadcrumbs, bg/one-shot calls show a result preview.
 

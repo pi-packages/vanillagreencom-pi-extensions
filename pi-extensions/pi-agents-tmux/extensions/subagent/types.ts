@@ -90,7 +90,7 @@ export const AGENT_SCOPE_TABS: Array<{ id: AgentScope; label: string }> = [
 	{ id: "user", label: "User" },
 	{ id: "both", label: "Both" },
 ];
-export const HISTORY_SUBTAB_LABELS = ["Summary", "Transcript", "Completion", "Task"] as const;
+export const HISTORY_SUBTAB_LABELS = ["Summary", "Completion", "Task"] as const;
 
 export type AgentBrowserAction =
 	| { type: "attach"; agentName: string }
