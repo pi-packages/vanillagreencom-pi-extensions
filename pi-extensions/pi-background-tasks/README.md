@@ -16,6 +16,7 @@ Run shell commands in the background without blocking the conversation.
 - Wakeups when a task exits, with optional wakeups on matching output.
 - Inline mini-dashboard above the editor; full dashboard on `Alt+Shift+H` or `F5`.
 - Persistent log files keep full output even when tool output is truncated.
+- Per-session sidecar state keeps `/bg` task history resumable for both tool-spawned and slash-command-spawned tasks.
 
 ## Install
 

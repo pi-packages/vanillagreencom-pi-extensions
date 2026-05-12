@@ -16,7 +16,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { spawn } from "node:child_process";
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 
 import {
 	autoBackgroundDecision,
@@ -28,6 +29,7 @@ import {
 	BG_COMMAND,
 	BG_INSTALL_SYMBOL,
 	BG_MESSAGE_TYPE,
+	BG_STATE_TYPE,
 	BG_WIDGET_KEY,
 	DEFAULT_BACKGROUND_BASH_SHORTCUT,
 	DEFAULT_BG_SHORTCUT,
@@ -113,6 +115,90 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 	let taskCounter = 0;
 	let shuttingDown = false;
 	const tasks = new Map<string, ManagedTask>();
+
+	const piUserDir = (): string => resolve(process.env.PI_CODING_AGENT_DIR?.trim() || `${process.env.HOME ?? ""}/.pi/agent`);
+	const safeFileName = (value: string): string => value.replace(/[^\w.-]+/g, "_");
+	const sessionIdForContext = (ctx: ExtensionContext): string => {
+		const id = ctx.sessionManager.getSessionId();
+		if (id && id.trim()) return id;
+		const file = ctx.sessionManager.getSessionFile();
+		if (file) return file.split(/[\\/]/).pop()?.replace(/\.jsonl$/, "") ?? `ephemeral-${process.pid}`;
+		return `ephemeral-${process.pid}`;
+	};
+	const sidecarStatePath = (ctx: ExtensionContext): string => join(piUserDir(), "vstack", "sessions", safeFileName(sessionIdForContext(ctx)), "pi-background-tasks", "state.json");
+
+	const numericTaskId = (id: string): number => {
+		const match = id.match(/^bg-(\d+)$/);
+		return match ? Number(match[1]) : 0;
+	};
+
+	const restoredTaskFromSnapshot = (snapshot: BackgroundTaskSnapshot): ManagedTask => ({
+		...snapshot,
+		child: null,
+		closed: true,
+		forceKillTimer: null,
+		lastAnnouncedLength: snapshot.outputBytes,
+		matcher: parseOutputMatcher(snapshot.notifyPattern),
+		output: "",
+		outputTimer: null,
+		status: snapshot.status === "running" ? "stopped" : snapshot.status,
+		stopReason: snapshot.status === "running" ? "shutdown" : null,
+		timeoutTimer: null,
+		restored: true,
+		updatedAt: snapshot.status === "running" ? Date.now() : snapshot.updatedAt,
+	});
+
+	const rememberRestoredSnapshot = (snapshot: BackgroundTaskSnapshot) => {
+		if (!snapshot?.id || !snapshot.command) return;
+		const existing = tasks.get(snapshot.id);
+		if (existing && existing.updatedAt >= snapshot.updatedAt) return;
+		const restored = restoredTaskFromSnapshot(snapshot);
+		tasks.set(restored.id, restored);
+		taskCounter = Math.max(taskCounter, numericTaskId(restored.id));
+		rememberSnapshot(restored);
+	};
+
+	const persistSnapshots = () => {
+		try {
+			const snapshot = sortedTasks().map((task) => rememberSnapshot(task));
+			pi.appendEntry(BG_STATE_TYPE, { version: 1, tasks: snapshot, updatedAt: Date.now() });
+			if (activeCtx) {
+				const file = sidecarStatePath(activeCtx);
+				mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+				writeFileSync(file, `${JSON.stringify({ version: 1, tasks: snapshot, updatedAt: Date.now() }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+			}
+		} catch {
+			// Tool results and log files remain available even if session state persistence fails.
+		}
+	};
+
+	const restoreSnapshots = (ctx: ExtensionContext) => {
+		tasks.clear();
+		taskCounter = 0;
+		try {
+			const file = sidecarStatePath(ctx);
+			if (existsSync(file)) {
+				const data = JSON.parse(readFileSync(file, "utf8")) as { tasks?: unknown };
+				if (Array.isArray(data?.tasks)) for (const snapshot of data.tasks) rememberRestoredSnapshot(snapshot as BackgroundTaskSnapshot);
+			}
+		} catch {
+			// Fall back to session entries below.
+		}
+		for (const entry of ctx.sessionManager.getBranch()) {
+			if (entry.type === "custom" && entry.customType === BG_STATE_TYPE) {
+				const data = entry.data as { tasks?: unknown } | undefined;
+				tasks.clear();
+				taskCounter = 0;
+				if (Array.isArray(data?.tasks)) for (const snapshot of data.tasks) rememberRestoredSnapshot(snapshot as BackgroundTaskSnapshot);
+			}
+			if (entry.type === "message" && entry.message.role === "toolResult" && (entry.message.toolName === "bg_task" || entry.message.toolName === "bg_status")) {
+				const details = entry.message.details as { task?: unknown; tasks?: unknown } | undefined;
+				if (details?.task) rememberRestoredSnapshot(details.task as BackgroundTaskSnapshot);
+				if (Array.isArray(details?.tasks)) for (const snapshot of details.tasks) rememberRestoredSnapshot(snapshot as BackgroundTaskSnapshot);
+			}
+		}
+		if (tasks.size > 0) persistSnapshots();
+	};
 
 	const sortedTasks = (): ManagedTask[] => [...tasks.values()].sort((a, b) => b.startedAt - a.startedAt);
 
@@ -284,6 +370,7 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 			task.status = exitCode === 0 ? "completed" : "failed";
 		}
 		rememberSnapshot(task);
+		persistSnapshots();
 
 		sendTaskEvent("exit", task);
 		refreshUi();
@@ -329,6 +416,7 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 		rememberSnapshot(task);
 		if (task.outputTimer) clearTimeout(task.outputTimer);
 		task.outputTimer = null;
+		persistSnapshots();
 
 		const sent = killTaskProcess(task, "SIGTERM");
 		if (!sent) {
@@ -397,6 +485,7 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 		};
 		tasks.set(task.id, task);
 		rememberSnapshot(task);
+		persistSnapshots();
 
 		const handleChunk = (chunk: Buffer) => {
 			const text = chunk.toString();
@@ -442,6 +531,7 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 			forgetSnapshot(id);
 			removed += 1;
 		}
+		persistSnapshots();
 		refreshUi();
 		return removed;
 	};
@@ -499,6 +589,7 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 	pi.on("session_start", (_event, ctx) => {
 		shuttingDown = false;
 		activeCtx = ctx;
+		restoreSnapshots(ctx);
 		syncWidget(ctx);
 	});
 	pi.on("before_agent_start", (_event, ctx) => {
@@ -518,11 +609,15 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 		for (const task of tasks.values()) {
 			if (task.status === "running") {
 				task.stopReason = "shutdown";
+				task.status = "stopped";
+				task.updatedAt = Date.now();
 				killTaskProcess(task, "SIGTERM");
 				killTaskProcess(task, "SIGKILL");
+				rememberSnapshot(task);
 			}
 			clearTaskTimers(task);
 		}
+		persistSnapshots();
 		clearWidget();
 		activeCtx = null;
 	});

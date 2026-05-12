@@ -4,6 +4,7 @@ export const DEFAULT_BG_SHORTCUT = "alt+shift+h";
 export const DEFAULT_WIDGET_TOGGLE_SHORTCUT = "alt+h";
 export const CONFIG_ID = "@vanillagreen/pi-background-tasks";
 export const BG_MESSAGE_TYPE = "vstack-background-tasks:event";
+export const BG_STATE_TYPE = "vstack-background-tasks:state";
 export const BG_WIDGET_KEY = "vstack-background-tasks";
 export const BG_INSTALL_SYMBOL = Symbol.for("vstack.background-tasks.installed");
 export const VSTACK_MODAL_LOCK_SYMBOL = Symbol.for("vstack.pi.modal-lock");

@@ -81,6 +81,26 @@ function piSettingsPaths(cwd = process.cwd()): string[] {
 	return [join(userDir, "settings.json"), projectSettingsPath(cwd)];
 }
 
+function piUserDir(): string {
+	return resolve(expandHome(process.env.PI_CODING_AGENT_DIR?.trim() || "~/.pi/agent"));
+}
+
+function safeFileName(value: string): string {
+	return value.replace(/[^\w.-]+/g, "_");
+}
+
+function sessionIdForContext(ctx: ExtensionContext): string {
+	const id = ctx.sessionManager.getSessionId();
+	if (id && id.trim()) return id;
+	const file = ctx.sessionManager.getSessionFile();
+	if (file) return file.split(/[\\/]/).pop()?.replace(/\.jsonl$/, "") ?? `ephemeral-${process.pid}`;
+	return `ephemeral-${process.pid}`;
+}
+
+function sidecarStatePath(ctx: ExtensionContext): string {
+	return join(piUserDir(), "vstack", "sessions", safeFileName(sessionIdForContext(ctx)), "pi-task-panel", "state.json");
+}
+
 function readVstackConfig(cwd?: string): VstackConfig {
 	const merged: VstackConfig = {};
 	for (const path of piSettingsPaths(cwd)) {
@@ -716,14 +736,36 @@ export default function taskPanel(pi: ExtensionAPI): void {
 	let lastReminderAt = 0;
 	let pendingCompletionMessage: { action: string; summary: string } | undefined;
 
+	const writeSidecar = (ctx: ExtensionContext | undefined) => {
+		if (!ctx) return;
+		try {
+			const file = sidecarStatePath(ctx);
+			mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+			writeFileSync(file, `${JSON.stringify(cloneState(state), null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+		} catch {
+			// Session entries and tool-result details remain the primary restore path.
+		}
+	};
+
+	const readSidecar = (ctx: ExtensionContext): TaskPanelState | undefined => {
+		try {
+			const file = sidecarStatePath(ctx);
+			if (!existsSync(file)) return undefined;
+			return normalizeState(JSON.parse(readFileSync(file, "utf8")), ctx.cwd);
+		} catch {
+			return undefined;
+		}
+	};
+
 	const persist = () => {
 		state.updatedAt = new Date().toISOString();
 		pi.appendEntry<TaskPanelState>(STATE_TYPE, cloneState(state));
+		writeSidecar(activeCtx);
 	};
 
 	const restore = (ctx: ExtensionContext) => {
 		activeCtx = ctx;
-		state = emptyState(ctx.cwd);
+		state = readSidecar(ctx) ?? emptyState(ctx.cwd);
 		for (const entry of ctx.sessionManager.getBranch()) {
 			if (entry.type === "custom" && entry.customType === STATE_TYPE) state = normalizeState(entry.data, ctx.cwd);
 			if (entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "tasks_write") {
@@ -750,6 +792,7 @@ export default function taskPanel(pi: ExtensionAPI): void {
 	};
 
 	const mutate = (ctx: ExtensionContext | ExtensionCommandContext, fn: () => string): string => {
+		activeCtx = ctx as ExtensionContext;
 		const message = fn();
 		persist();
 		syncWidget(ctx as ExtensionContext);

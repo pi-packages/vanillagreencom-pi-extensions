@@ -119,6 +119,8 @@ import {
 	refreshTaskDiagnostics,
 	updateTaskRegistry,
 	upsertTaskRecord,
+	writePaneRegistry,
+	writeTaskRegistry,
 } from "./tasks.js";
 import {
 	CompleteSubagentParams,
@@ -139,12 +141,15 @@ import {
 	MAX_CONCURRENCY,
 	MAX_PARALLEL_TASKS,
 	type PaneCompletionMessageDetails,
+	type PaneRegistry,
+	type PaneTaskRegistry,
 	type PaneTaskRecord,
 	type PaneTaskStatus,
 	type SingleResult,
 	type SteerSubagentDetails,
 	STATS_BRIDGE_SYMBOL,
 	STATUSLINE_SYMBOL,
+	SUBAGENT_STATE_TYPE,
 	type SubagentDashboardItem,
 	type SubagentDashboardState,
 	type SubagentDetails,
@@ -162,6 +167,25 @@ function bridgeTargetArgs(metadata: { socket?: string; pid?: string }): string[]
 }
 
 type FollowUpTask = { taskId: string; outboxFile: string; taskFile?: string };
+
+interface PersistedSubagentRuntimeState {
+	version: 1;
+	panes: PaneRegistry;
+	tasks: PaneTaskRegistry;
+	updatedAt: string;
+}
+
+function latestRecordTimestamp(record: PaneTaskRecord | undefined): string {
+	return record?.updatedAt ?? record?.completedAt ?? record?.createdAt ?? "";
+}
+
+function isPersistedSubagentRuntimeState(value: unknown): value is PersistedSubagentRuntimeState {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+	const candidate = value as Partial<PersistedSubagentRuntimeState>;
+	return candidate.version === 1
+		&& Boolean(candidate.panes && typeof candidate.panes === "object" && !Array.isArray(candidate.panes))
+		&& Boolean(candidate.tasks && typeof candidate.tasks === "object" && !Array.isArray(candidate.tasks));
+}
 
 function isFollowUpDelivery(deliverAs: string): boolean {
 	return deliverAs === "follow-up" || deliverAs === "send";
@@ -285,6 +309,62 @@ export default function (pi: ExtensionAPI) {
 	};
 	(globalThis as unknown as Record<PropertyKey, unknown>)[STATS_BRIDGE_SYMBOL] = statsBridge;
 
+	const persistRuntimeSnapshot = async (runtimeRoot: string) => {
+		if (childAgentName) return;
+		try {
+			const [panes, tasks] = await Promise.all([readPaneRegistry(runtimeRoot), readTaskRegistry(runtimeRoot)]);
+			pi.appendEntry<PersistedSubagentRuntimeState>(SUBAGENT_STATE_TYPE, { version: 1, panes, tasks, updatedAt: new Date().toISOString() });
+		} catch {
+			// Session-backed persistence is best-effort; file registries remain canonical at runtime.
+		}
+	};
+
+	const restoreRuntimeSnapshot = async (ctx: ExtensionContext, runtimeRoot: string) => {
+		let snapshot: PersistedSubagentRuntimeState | undefined;
+		for (const entry of ctx.sessionManager.getBranch()) {
+			if (entry.type !== "custom" || entry.customType !== SUBAGENT_STATE_TYPE) continue;
+			if (isPersistedSubagentRuntimeState(entry.data)) snapshot = entry.data;
+		}
+		if (!snapshot) return;
+		try {
+			const [diskPanes, diskTasks] = await Promise.all([readPaneRegistry(runtimeRoot), readTaskRegistry(runtimeRoot)]);
+			const mergedPanes: PaneRegistry = { ...snapshot.panes, ...diskPanes };
+			const mergedTasks: PaneTaskRegistry = { ...diskTasks };
+			for (const [taskId, task] of Object.entries(snapshot.tasks)) {
+				const existing = mergedTasks[taskId];
+				if (!existing || latestRecordTimestamp(task) > latestRecordTimestamp(existing)) mergedTasks[taskId] = task;
+			}
+			if (JSON.stringify(mergedPanes) !== JSON.stringify(diskPanes)) await writePaneRegistry(runtimeRoot, mergedPanes);
+			if (JSON.stringify(mergedTasks) !== JSON.stringify(diskTasks)) await writeTaskRegistry(runtimeRoot, mergedTasks);
+		} catch {
+			// Dashboard restore is best-effort; an unreadable sidecar should not block Pi startup.
+		}
+	};
+
+	const persistTaskEvent = (event: Record<string, unknown>, status: PaneTaskStatus) => {
+		const runtimeRoot = typeof event.runtimeRoot === "string" ? event.runtimeRoot : undefined;
+		const taskId = typeof event.taskId === "string" ? event.taskId : undefined;
+		const agent = typeof event.agent === "string" ? event.agent : undefined;
+		if (!runtimeRoot || !taskId || !agent) return;
+		void updateTaskRegistry(runtimeRoot, (records) => {
+			const existing = records[taskId];
+			const now = new Date().toISOString();
+			records[taskId] = {
+				...existing,
+				taskId,
+				agent,
+				task: typeof event.task === "string" ? event.task : existing?.task ?? "",
+				status,
+				paneId: typeof event.paneId === "string" ? event.paneId : existing?.paneId,
+				transcriptPath: typeof event.transcriptPath === "string" ? event.transcriptPath : existing?.transcriptPath,
+				summary: typeof event.summary === "string" ? event.summary : existing?.summary,
+				createdAt: existing?.createdAt ?? (typeof event.timestamp === "string" ? event.timestamp : now),
+				updatedAt: now,
+				...(isTerminalTaskStatus(status) ? { completedAt: now } : {}),
+			};
+		}).then(() => persistRuntimeSnapshot(runtimeRoot)).catch(() => undefined);
+	};
+
 	const syncDashboard = (ctx = dashboardCtx) => {
 		if (!ctx?.hasUI || childAgentName || !dashboardEnabled(ctx.cwd) || !dashboardState.visible) {
 			ctx?.ui.setWidget(SUBAGENT_WIDGET_KEY, undefined);
@@ -385,6 +465,7 @@ export default function (pi: ExtensionAPI) {
 			if (refreshed.record.status === "needs_completion") dashboardState.visible = true;
 			updateDashboardFromTaskRecord(refreshed.record);
 		}
+		await persistRuntimeSnapshot(runtimeRoot);
 	};
 
 	const refreshAgentCommandCompletions = (ctx: ExtensionContext) => {
@@ -480,6 +561,7 @@ export default function (pi: ExtensionAPI) {
 		const taskId = typeof event.taskId === "string" ? event.taskId : undefined;
 		const agent = typeof event.agent === "string" ? event.agent : undefined;
 		if (!taskId || !agent) return;
+		persistTaskEvent(event, "queued");
 		dashboardState.visible = true;
 		updateDashboard({
 			agent,
@@ -502,6 +584,7 @@ export default function (pi: ExtensionAPI) {
 		const taskId = typeof event.taskId === "string" ? event.taskId : undefined;
 		const agent = typeof event.agent === "string" ? event.agent : undefined;
 		if (!taskId || !agent) return;
+		persistTaskEvent(event, "running");
 		dashboardState.visible = true;
 		updateDashboard({
 			agent,
@@ -539,6 +622,7 @@ export default function (pi: ExtensionAPI) {
 		})();
 		const eventStatus = payloadStatus === "unknown" ? status : payloadStatus;
 		const effectiveStatus = dashboardStatusFor(eventStatus, kind);
+		persistTaskEvent(event, eventStatus);
 		updateDashboard({
 			agent,
 			artifacts: true,
@@ -743,6 +827,7 @@ export default function (pi: ExtensionAPI) {
 		ctx.ui.setStatus("agent", undefined);
 		await migrateLegacyPackageRuntime(runtimeSessionId(ctx), runtimeRoot);
 		await migrateLegacyProjectRuntime(ctx.cwd, runtimeRoot);
+		await restoreRuntimeSnapshot(ctx, runtimeRoot);
 		try {
 			const records = await readTaskRegistry(runtimeRoot);
 			const sortedRecords = Object.values(records).sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""));
@@ -930,6 +1015,7 @@ export default function (pi: ExtensionAPI) {
 				const startLabel = command === "new" ? "Started new" : command === "resume" ? "Resumed archived" : hadLivePane ? "Reused live" : hadSavedSessionFlag ? "Resumed saved" : "Started new";
 				content = `${startLabel} ${agent.name} (${pane.windowName}).\nSession: ${pane.sessionFile}`;
 				messageDetails = { action: "start", agent: agent.name, sessionFile: pane.sessionFile, windowName: pane.windowName, status: startLabel };
+				await persistRuntimeSnapshot(runtimeRoot);
 			} else if (command === "send") {
 				const agent = findAgent(parts[1]);
 				if (!agent) throw new Error(`Unknown agent: ${parts[1] ?? "(missing)"}`);
@@ -940,6 +1026,7 @@ export default function (pi: ExtensionAPI) {
 				const sessionText = queued.sessionMode === "live" ? "reused live pane" : queued.sessionMode === "resumed" ? "resumed saved pane session" : "started new pane session";
 				content = `Queued task for ${agent.name} (${sessionText}).\nArtifacts: inbox=${compactPath(queued.taskFile)} completion=${compactPath(queued.outboxFile)} transcript=${compactPath(queued.pane.sessionFile)}`;
 				messageDetails = { action: "send", agent: agent.name, inboxFile: queued.taskFile, outboxFile: queued.outboxFile, taskId: queued.taskId, transcriptPath: queued.pane.sessionFile, status: sessionText };
+				await persistRuntimeSnapshot(runtimeRoot);
 			} else if (command === "attach") {
 				const registry = await readPaneRegistry(runtimeRoot);
 				const entry = registry[parts[1] ?? ""];
@@ -954,10 +1041,12 @@ export default function (pi: ExtensionAPI) {
 				removeDashboardAgent(stoppedAgent);
 				content = `Stopped ${stoppedAgent}.`;
 				messageDetails = { action: "stop", agent: stoppedAgent };
+				await persistRuntimeSnapshot(runtimeRoot);
 			} else if (command === "collect") {
 				const collected = await pollPaneCompletions(runtimeRoot, pi, false);
 				content = `Collected ${collected} agent completion file${collected === 1 ? "" : "s"}.`;
 				messageDetails = { action: "collect", count: collected };
+				await persistRuntimeSnapshot(runtimeRoot);
 			} else if (command === "status") {
 				const registry = await readPaneRegistry(runtimeRoot);
 				const lines = await Promise.all(
@@ -1192,6 +1281,7 @@ export default function (pi: ExtensionAPI) {
 				return { content: [{ type: "text", text: `No persistent agent task record found for ${selector}.` }], details: { agent: params.agent, taskId: params.taskId } satisfies GetSubagentResultDetails, isError: true };
 			}
 			updateDashboardFromTaskRecord({ ...record, updatedAt: new Date().toISOString() });
+			await persistRuntimeSnapshot(runtimeRoot);
 			const diagnosticBlock = params.verbose && diagnostics.length > 0 ? `\n\n### Artifact diagnostics\n${diagnostics.map((line) => `- ${line}`).join("\n")}` : "";
 			return {
 				content: [{ type: "text", text: `${formatTaskRecordResult(record, params.verbose ?? false)}${diagnosticBlock}` }],
@@ -1291,6 +1381,7 @@ export default function (pi: ExtensionAPI) {
 						runtimeRoot,
 						transcriptPath: entry.sessionFile,
 					});
+					await persistRuntimeSnapshot(runtimeRoot);
 					return {
 						content: [{ type: "text", text: [`Steered ${agentName} via bridge (${deliverAs}).`, ...steerDiagnostics(baseDetails)].join("\n") }],
 						details: baseDetails,
@@ -1309,6 +1400,7 @@ export default function (pi: ExtensionAPI) {
 					runtimeRoot,
 					transcriptPath: entry.sessionFile,
 				});
+				await persistRuntimeSnapshot(runtimeRoot);
 				return {
 					content: [{ type: "text", text: [`Bridge for ${agentName} found, but pi-bridge ${command} failed (exit ${result.code}); queued inbox fallback instead.`, result.stderr || result.stdout ? `Bridge output: ${(result.stderr || result.stdout).trim()}` : "", ...steerDiagnostics(details)].filter(Boolean).join("\n") }],
 					details,
@@ -1328,6 +1420,7 @@ export default function (pi: ExtensionAPI) {
 				runtimeRoot,
 				transcriptPath: entry.sessionFile,
 			});
+			await persistRuntimeSnapshot(runtimeRoot);
 			return {
 				content: [
 					{
@@ -1377,6 +1470,7 @@ export default function (pi: ExtensionAPI) {
 			const runtimeRoot = sessionRuntimeDir(runtimeSessionId(ctx));
 			const stopped = await stopPersistentPane(runtimeRoot, params.agent);
 			removeDashboardAgent(stopped.agent);
+			await persistRuntimeSnapshot(runtimeRoot);
 			return {
 				content: [{ type: "text", text: `Stopped ${stopped.agent}. Pane ${stopped.paneId} was killed and removed from the active registry. Session preserved at ${stopped.sessionFile}; default start/subagent will resume it. Use forceSpawn or /agents new for a fresh session.` }],
 				details: { agent: stopped.agent, paneId: stopped.paneId, sessionFile: stopped.sessionFile },

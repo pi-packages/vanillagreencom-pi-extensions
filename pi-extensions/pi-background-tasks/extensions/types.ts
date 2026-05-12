@@ -29,7 +29,7 @@ export interface BackgroundTaskSnapshot {
 }
 
 export type ManagedTask = BackgroundTaskSnapshot & {
-	child: ChildProcess;
+	child: ChildProcess | null;
 	closed: boolean;
 	forceKillTimer: ReturnType<typeof setTimeout> | null;
 	lastAnnouncedLength: number;
@@ -38,6 +38,7 @@ export type ManagedTask = BackgroundTaskSnapshot & {
 	outputTimer: ReturnType<typeof setTimeout> | null;
 	stopReason: "user" | "timeout" | "shutdown" | null;
 	timeoutTimer: ReturnType<typeof setTimeout> | null;
+	restored?: boolean;
 };
 
 export interface BackgroundTaskEventDetails {

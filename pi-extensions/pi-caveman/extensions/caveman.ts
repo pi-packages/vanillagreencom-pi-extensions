@@ -1,4 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import {
 	CONFIG_ID,
 	bridgeCavemanHookEnabled,
@@ -19,6 +22,32 @@ const BRIDGE_SYMBOL = Symbol.for("vstack.pi.caveman");
 const STATE_TYPE = "vstack-caveman:state";
 const STATUS_KEY = "caveman";
 const SETTINGS_EVENT = "vstack:extension-settings-changed";
+
+function expandHome(input: string): string {
+	if (input === "~") return homedir();
+	if (input.startsWith("~/")) return join(homedir(), input.slice(2));
+	return input;
+}
+
+function piUserDir(): string {
+	return resolve(expandHome(process.env.PI_CODING_AGENT_DIR?.trim() || "~/.pi/agent"));
+}
+
+function safeFileName(value: string): string {
+	return value.replace(/[^\w.-]+/g, "_");
+}
+
+function sessionIdForContext(ctx: ExtensionContext): string {
+	const id = ctx.sessionManager.getSessionId();
+	if (id && id.trim()) return id;
+	const file = ctx.sessionManager.getSessionFile();
+	if (file) return file.split(/[\\/]/).pop()?.replace(/\.jsonl$/, "") ?? `ephemeral-${process.pid}`;
+	return `ephemeral-${process.pid}`;
+}
+
+function sidecarStatePath(ctx: ExtensionContext): string {
+	return join(piUserDir(), "vstack", "sessions", safeFileName(sessionIdForContext(ctx)), "pi-caveman", "state.json");
+}
 
 interface CavemanBridge {
 	isActive(): boolean;
@@ -121,6 +150,20 @@ function statusLabel(mode: Mode): string | undefined {
 
 function restoreState(ctx: ExtensionContext): CavemanState {
 	let state = initialState(ctx.cwd);
+	try {
+		const file = sidecarStatePath(ctx);
+		if (existsSync(file)) {
+			const data = JSON.parse(readFileSync(file, "utf8")) as PersistedState;
+			const override = data.override === null ? null : typeof data.override === "string" ? normalizeMode(data.override) ?? null : null;
+			state = {
+				override,
+				lastActiveMode: normalizeActiveMode(data.lastActiveMode) ?? (override && override !== "off" ? override : state.lastActiveMode),
+				updatedAt: data.updatedAt ?? new Date().toISOString(),
+			};
+		}
+	} catch {
+		// Fall back to session entries below.
+	}
 	for (const entry of ctx.sessionManager.getBranch()) {
 		if (entry.type !== "custom" || entry.customType !== STATE_TYPE) continue;
 		const data = entry.data as PersistedState | undefined;
@@ -145,6 +188,15 @@ function restoreState(ctx: ExtensionContext): CavemanState {
 		};
 	}
 	return state;
+}
+
+function hasPersistedState(ctx: ExtensionContext): boolean {
+	if (ctx.sessionManager.getBranch().some((entry) => entry.type === "custom" && entry.customType === STATE_TYPE)) return true;
+	try {
+		return existsSync(sidecarStatePath(ctx));
+	} catch {
+		return false;
+	}
 }
 
 function statusText(state: CavemanState, cwd?: string): string {
@@ -203,7 +255,18 @@ export default function caveman(pi: ExtensionAPI): void {
 	};
 	host[BRIDGE_SYMBOL] = bridge;
 
-	const persist = () => pi.appendEntry<CavemanState>(STATE_TYPE, { ...state, updatedAt: new Date().toISOString() });
+	const persist = () => {
+		const snapshot: CavemanState = { ...state, updatedAt: new Date().toISOString() };
+		pi.appendEntry<CavemanState>(STATE_TYPE, snapshot);
+		if (!activeCtx) return;
+		try {
+			const file = sidecarStatePath(activeCtx);
+			mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+			writeFileSync(file, `${JSON.stringify(snapshot, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+		} catch {
+			// Session custom entries remain the primary restore path.
+		}
+	};
 	const syncStatus = (ctx?: ExtensionContext) => {
 		const runCtx = ctx ?? activeCtx;
 		if (!runCtx?.hasUI) return;
@@ -213,7 +276,15 @@ export default function caveman(pi: ExtensionAPI): void {
 
 	pi.on("session_start", (_event, ctx) => {
 		activeCtx = ctx;
+		const hadSessionState = hasPersistedState(ctx);
 		state = restoreState(ctx);
+		if (!hadSessionState) {
+			const configured = configuredMode(ctx.cwd);
+			if (configured !== "off") {
+				state = { override: configured, lastActiveMode: configured, updatedAt: new Date().toISOString() };
+				persist();
+			}
+		}
 		syncStatus(ctx);
 		notifyListeners();
 		const legacy = configurationSource(ctx.cwd).legacyKeys;
