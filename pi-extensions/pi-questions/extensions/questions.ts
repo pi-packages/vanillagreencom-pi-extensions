@@ -435,7 +435,7 @@ function renderExpandedOptionLines(tab: QuestionTab | undefined, selectedAnswers
 	const selected = new Set(selectedAnswers ?? []);
 	const optionLabels = new Set(tab.options.map((option) => option.label));
 	const customAnswers = (selectedAnswers ?? []).filter((answer) => !optionLabels.has(answer));
-	const lines = [`${stem}${theme.fg("muted", "Options:")}`];
+	const lines = [`${stem}${theme.fg("muted", "Answer:")}`];
 
 	for (const option of tab.options) {
 		const isSelected = selected.has(option.label);
@@ -472,7 +472,6 @@ function renderExpandedAnswerLines(request: QuestionRequest | undefined, answers
 		if (tab?.question) {
 			lines.push(...wrapStyled(`${stem}${theme.fg("muted", "Question: ")}`, theme.fg("text", tab.question), width, 10));
 		}
-		lines.push(...wrapStyled(`${stem}${theme.fg("muted", "Answer: ")}`, theme.fg("success", formatAnswers(answers[index])), width, 10));
 		lines.push(...renderExpandedOptionLines(tab, answers[index], stem, width, theme));
 	}
 	return lines;
