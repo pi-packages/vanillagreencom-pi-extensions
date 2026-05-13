@@ -123,6 +123,10 @@ All settings live in the extension manager under **Background Tasks**.
 
 Tasks are scoped to the current Pi runtime and stopped on session shutdown. Shells start in their own process group so `/bg:stop` and shutdown terminate children. Tasks inherit Pi's environment and working directory.
 
+Exit wakeups are durable across session restarts. Each task carries an `exitNotified` flag in its persisted snapshot; if a task hits a terminal state without ever firing its `notifyOnExit` event (session shutdown, mid-session restore that coerced `running` → `stopped`), the next `session_start` replays the missed `exit` wakeup so the agent never silently stalls on a finished background task.
+
+Orphan-running tasks (Pi died while the detached child kept running) are detected on restore via an identity probe combining `kill -0 <pid>` with the process start time (`/proc/<pid>/stat` field 22 on Linux, `ps -o lstart=` elsewhere). The kernel comm name is captured at spawn and persisted alongside as a diagnostic but is NOT part of identity equality, because `bash -c "exec sleep N"`-style workloads rotate `/proc/<pid>/comm` from `bash` to `sleep` via `execve(2)` without changing the pid or start time. Orphans are rehydrated as `running` rather than synthetically stopped, and a periodic liveness watcher (default 30s) polls until the (pid + startToken) tuple disappears or stops matching, then finalizes the task and fires the canonical exit wake. This protects against both the kill -9 / OOM scenario (Pi gone, orphan still alive) and PID reuse: if the kernel hands the same PID to an unrelated process after the original orphan exits, the start-time mismatch is treated as `pid-reused` and the canonical exit wake fires anyway.
+
 ## Attribution
 
 Locally owned by vstack, based on the MIT-licensed `@ifi/pi-background-tasks` from `ifiokjr/oh-pi`. See `THIRD_PARTY_NOTICES.md`.

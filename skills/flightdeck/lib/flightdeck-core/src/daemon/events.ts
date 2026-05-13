@@ -17,6 +17,8 @@
 
 import { spawnSync } from "node:child_process";
 
+import { BG_TASK_EXIT_CLASSIFIER_TAG } from "../events/bg-task-exit.ts";
+
 export interface AppendEventOpts {
 	paneId: string;
 	hash: string;
@@ -119,6 +121,7 @@ const CANONICAL_TAGS = new Set<string>([
 	"oc-question",
 	"pi-question",
 	"pi-subagent-completion",
+	BG_TASK_EXIT_CLASSIFIER_TAG,
 ]);
 
 export function isCanonicalTag(tag: string): boolean {

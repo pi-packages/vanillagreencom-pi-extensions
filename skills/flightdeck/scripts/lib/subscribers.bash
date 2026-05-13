@@ -36,6 +36,8 @@ source "$_lib_dir/cc-channel-paths.sh"
 source "$_lib_dir/pi-bridge-paths.sh"
 # shellcheck source=codex-paths.sh
 source "$_lib_dir/codex-paths.sh"
+# shellcheck source=daemon-bg-task-events.sh
+source "$_lib_dir/daemon-bg-task-events.sh"
 
 OC_POLL_SEC="${OC_POLL_SEC:-2}"
 OC_BACKOFF_MAX_SEC="${OC_BACKOFF_MAX_SEC:-16}"
@@ -271,6 +273,8 @@ pi_subscriber_loop() {
         or
         (.type == "event" and .event == "message_end" and ((.data.message.customType // "") == "subagent-completion"))
         or
+        (.type == "event" and .event == "message_end" and ((.data.message.customType // "") == "vstack-background-tasks:event") and ((.data.message.details.eventType // "") == "exit"))
+        or
         (.type == "event" and .data.message.role == "assistant" and (.data.message.stopReason // "") != "")
       )' \
     | while IFS= read -r line; do
@@ -310,6 +314,13 @@ pi_subscriber_loop() {
 
       local custom_type
       custom_type=$(jq -r '.data.message.customType // ""' <<< "$line" 2>/dev/null)
+      if [[ "$custom_type" == "$BG_TASK_EVENT_CUSTOM_TYPE" ]]; then
+        # vstack#15: dispatch the new branch via the shared
+        # daemon-bg-task-events.sh helper. Returns 0 on emit, 1 on
+        # dedup (caller `continue`s either way), 2 on malformed input.
+        emit_pi_bg_task_exit_event "$pane_id" "$line" last_hash "$sub_log"
+        continue
+      fi
       if [[ "$custom_type" == "subagent-completion" ]]; then
         local details hash has_bad
         details=$(jq -c '.data.message.details // {}' <<< "$line" 2>/dev/null)

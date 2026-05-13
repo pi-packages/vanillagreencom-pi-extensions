@@ -86,6 +86,10 @@ source "$_daemon_script_dir/lib/cc-channel-paths.sh"
 source "$_daemon_script_dir/lib/pi-bridge-paths.sh"
 # shellcheck source=lib/codex-paths.sh
 source "$_daemon_script_dir/lib/codex-paths.sh"
+# vstack#15: canonical pi-bg-task-exit emit helper, kept in its own
+# file so this script does not grow on new event classes.
+# shellcheck source=lib/daemon-bg-task-events.sh
+source "$_daemon_script_dir/lib/daemon-bg-task-events.sh"
 STATE_DIR=$(fd_resolve_state_dir)
 POLL_SEC="${FD_POLL_SEC:-2}"
 STABILITY_SEC="${FD_STABILITY:-3}"
@@ -135,6 +139,7 @@ CANONICAL_TAGS=(
   oc-question
   pi-question
   pi-subagent-completion
+  pi-bg-task-exit
 )
 
 is_canonical_tag() {
@@ -1305,15 +1310,20 @@ pi_subscriber_loop() {
     pi_target_args=(--pid "$pi_pid")
   fi
 
-  # Stream bridge events. We emit three classes:
+  # Stream bridge events. We emit four classes:
   #   - pi-question: structured pi-questions prompts opened by the child pane.
   #   - pi-subagent-completion: blocked/failed/needs-completion inner persistent-subagent completions.
+  #   - pi-bg-task-exit: vstack-background-tasks 'exit' events; daemon wakes master
+  #     directly so a bg_task terminal state lands even if the agent's follow-up
+  #     turn never fires (vstack#15).
   #   - normal assistant turn-end text events, classified through prompt-classify.
   "$pi_bin" stream "${pi_target_args[@]}" 2>/dev/null \
     | jq --unbuffered -c 'select(
         (.type == "event" and .event == "question" and (.data.action // "") == "opened")
         or
         (.type == "event" and .event == "message_end" and ((.data.message.customType // "") == "subagent-completion"))
+        or
+        (.type == "event" and .event == "message_end" and ((.data.message.customType // "") == "vstack-background-tasks:event") and ((.data.message.details.eventType // "") == "exit"))
         or
         (.type == "event" and .data.message.role == "assistant" and (.data.message.stopReason // "") != "")
       )' \
@@ -1354,6 +1364,13 @@ pi_subscriber_loop() {
 
       local custom_type
       custom_type=$(jq -r '.data.message.customType // ""' <<< "$line" 2>/dev/null)
+      if [[ "$custom_type" == "$BG_TASK_EVENT_CUSTOM_TYPE" ]]; then
+        # vstack#15: dispatch through the shared helper in
+        # lib/daemon-bg-task-events.sh so this file does not grow on
+        # new event classes.
+        emit_pi_bg_task_exit_event "$pane_id" "$line" last_hash "$sub_log"
+        continue
+      fi
       if [[ "$custom_type" == "subagent-completion" ]]; then
         local details hash has_bad
         details=$(jq -c '.data.message.details // {}' <<< "$line" 2>/dev/null)
@@ -1925,6 +1942,8 @@ run_loop() {
           _src="pi-question-event"
         elif [[ "$ev_tag" == "pi-subagent-completion" ]]; then
           _src="pi-subagent-completion-event"
+        elif [[ "$ev_tag" == "pi-bg-task-exit" ]]; then
+          _src="pi-bg-task-exit-event"
         else
           _src="adapter-event"
         fi
@@ -1939,6 +1958,8 @@ run_loop() {
             _extra=$(jq -c '{event_type, request_id, question, harness}' <<< "$_line" 2>/dev/null || echo 'null')
           elif [[ "$ev_tag" == "pi-subagent-completion" ]]; then
             _extra=$(jq -c '{event_type, completion, harness}' <<< "$_line" 2>/dev/null || echo 'null')
+          elif [[ "$ev_tag" == "pi-bg-task-exit" ]]; then
+            _extra=$(jq -c '{event_type, task, harness}' <<< "$_line" 2>/dev/null || echo 'null')
           fi
           append_event "$ev_pid" "$ev_hash" "$ev_tag" "$_src" 0 false "$_extra"
         else
