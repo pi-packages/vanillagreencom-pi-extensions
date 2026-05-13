@@ -21,7 +21,7 @@ Run from the main checkout of a git repo with an `origin` remote. Optionally add
 ./scripts/worktree remove PROJ-123
 ```
 
-Defaults: detects branch from `origin/HEAD` (fallback: `main`), creates worktrees under sibling `trees/`, symlinks `.env.local` automatically.
+Defaults: detects branch from `origin/HEAD` (fallback: `main`), creates worktrees under sibling `trees/`, then applies configured symlinks and copies.
 
 `remove` deletes the worktree first, then tries `git branch -d` for the associated local branch. If Git refuses the safe branch delete (for example, the branch is not merged into the current main checkout), the command exits non-zero and prints a diagnostic naming the remaining branch plus the manual `git branch -D` recovery command.
 
@@ -33,7 +33,18 @@ Set in `.env.local` — all optional:
 |----------|---------|
 | `WORKTREE_DEFAULT_BRANCH` | Override default branch detection |
 | `WORKTREE_SYMLINKS` | Space-separated paths to symlink into worktrees |
+| `WORKTREE_RELATIVE_SYMLINKS` | Space-separated `path=target` symlinks created inside each worktree |
 | `WORKTREE_COPIES` | Space-separated files to copy into worktrees |
 | `BOT_NAME` / `BOT_EMAIL` | Git identity for worktree commits |
 | `BOT_SIGNING_KEY` | SSH signing key for commits |
 | `BOT_REMOTE_NAME` / `BOT_REMOTE_URL` | Remote for bot pushes |
+
+Include `.env.local` in `WORKTREE_SYMLINKS` when worktree sessions should share the main checkout's local environment/config.
+
+Example for sharing local env plus generated Claude assets while keeping `.claude/CLAUDE.md`
+pointed at each worktree's own `AGENTS.md`:
+
+```bash
+WORKTREE_SYMLINKS=".env.local .claude/agents .claude/hooks .claude/skills"
+WORKTREE_RELATIVE_SYMLINKS=".claude/CLAUDE.md=../AGENTS.md"
+```

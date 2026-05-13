@@ -43,6 +43,19 @@ assert_path_absent() {
   fi
 }
 
+assert_symlink_target() {
+  local path="$1" want="$2" name="$3"
+  if [[ -L "$path" && "$(readlink "$path")" == "$want" ]]; then
+    PASS=$((PASS + 1))
+    printf '  ok    %s\n' "$name"
+  else
+    FAIL=$((FAIL + 1))
+    local got="<missing>"
+    [[ -e "$path" || -L "$path" ]] && got="$(readlink "$path" 2>/dev/null || printf '<not symlink>')"
+    printf '  FAIL  %s\n        expected symlink target: %s\n        got:                     %s\n' "$name" "$want" "$got"
+  fi
+}
+
 assert_branch_exists() {
   local repo="$1" branch="$2" name="$3"
   if git -C "$repo" show-ref --verify --quiet "refs/heads/$branch"; then
@@ -104,6 +117,37 @@ assert_path_absent "$UNMERGED_ROOT/trees/issue-unmerged" "unmerged branch worktr
 assert_branch_exists "$UNMERGED_ROOT/main" "issue-unmerged" "unmerged branch retained"
 assert_contains "$(cat "$UNMERGED_ROOT/unmerged.err")" "could not delete local branch 'issue-unmerged'" "unmerged branch diagnostic names failed cleanup step"
 assert_contains "$(cat "$UNMERGED_ROOT/unmerged.err")" "branch -D \"issue-unmerged\"" "unmerged branch diagnostic gives manual recovery command"
+
+# Relative symlinks: create link inside worktree with target resolved from the
+# worktree path, not from the main checkout.
+LINK_ROOT="$TMP_ROOT/links"
+make_repo "$LINK_ROOT/main"
+printf 'agents\n' > "$LINK_ROOT/main/AGENTS.md"
+git -C "$LINK_ROOT/main" add AGENTS.md
+git -C "$LINK_ROOT/main" commit -q -m agents
+mkdir -p "$LINK_ROOT/main/.claude/agents"
+cat > "$LINK_ROOT/main/.env.local" <<'ENV'
+WORKTREE_SYMLINKS=".env.local .claude/agents"
+WORKTREE_RELATIVE_SYMLINKS=".claude/CLAUDE.md=../AGENTS.md"
+ENV
+git -C "$LINK_ROOT/main" worktree add -q -b issue-links "$LINK_ROOT/trees/issue-links" main
+links_out=$(cd "$LINK_ROOT/main" && "$WORKTREE_SCRIPT" fix-links "$LINK_ROOT/trees/issue-links")
+assert_eq "$links_out" "Restored symlinks in $LINK_ROOT/trees/issue-links" "fix-links reports restored symlinks"
+assert_symlink_target "$LINK_ROOT/trees/issue-links/.env.local" "$LINK_ROOT/main/.env.local" ".env.local symlink points to main checkout"
+assert_symlink_target "$LINK_ROOT/trees/issue-links/.claude/agents" "$LINK_ROOT/main/.claude/agents" "configured dir symlink points to main checkout"
+assert_symlink_target "$LINK_ROOT/trees/issue-links/.claude/CLAUDE.md" "../AGENTS.md" "relative symlink keeps worktree-local AGENTS target"
+
+# .env.local is not special-cased. It is only linked when listed in
+# WORKTREE_SYMLINKS.
+NOENV_ROOT="$TMP_ROOT/noenv"
+make_repo "$NOENV_ROOT/main"
+cat > "$NOENV_ROOT/main/.env.local" <<'ENV'
+WORKTREE_SYMLINKS=""
+ENV
+git -C "$NOENV_ROOT/main" worktree add -q -b issue-noenv "$NOENV_ROOT/trees/issue-noenv" main
+noenv_out=$(cd "$NOENV_ROOT/main" && "$WORKTREE_SCRIPT" fix-links "$NOENV_ROOT/trees/issue-noenv")
+assert_eq "$noenv_out" "Restored symlinks in $NOENV_ROOT/trees/issue-noenv" "fix-links works without .env.local symlink"
+assert_path_absent "$NOENV_ROOT/trees/issue-noenv/.env.local" ".env.local not linked unless configured"
 
 echo
 printf 'pass: %d   fail: %d\n' "$PASS" "$FAIL"

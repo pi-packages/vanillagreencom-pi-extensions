@@ -41,3 +41,20 @@ Resolves project root via `git rev-parse`, detects default branch automatically,
 | `--base BRANCH` | Checkout an existing remote branch into the worktree |
 | `--from REF` | Create a new branch (named after ID) starting from REF (branch, tag, or commit) |
 | `--pr NUMBER` | Look up the branch from a GitHub PR number (implies `--base`) |
+
+## Configuration
+
+Set in `.env.local`:
+
+| Variable | Effect |
+|----------|--------|
+| `WORKTREE_SYMLINKS` | Space-separated paths symlinked from main checkout into each worktree; include `.env.local` if worktrees should share local env/config |
+| `WORKTREE_RELATIVE_SYMLINKS` | Space-separated `path=target` symlinks created inside each worktree, with relative targets resolving from the link location |
+| `WORKTREE_COPIES` | Space-separated files copied from main checkout into each worktree |
+
+Example: share local env plus generated Claude assets, but keep `.claude/CLAUDE.md` pointed at each worktree's own `AGENTS.md`:
+
+```bash
+WORKTREE_SYMLINKS=".env.local .claude/agents .claude/hooks .claude/skills"
+WORKTREE_RELATIVE_SYMLINKS=".claude/CLAUDE.md=../AGENTS.md"
+```

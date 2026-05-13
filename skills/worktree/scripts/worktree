@@ -12,6 +12,7 @@
 # .env.local config vars:
 #   WORKTREE_DEFAULT_BRANCH  - default branch name (auto-detected if unset, fallback: main)
 #   WORKTREE_SYMLINKS        - space-separated paths to symlink from main into worktrees
+#   WORKTREE_RELATIVE_SYMLINKS - space-separated path=target symlinks created inside worktrees
 #   WORKTREE_COPIES          - space-separated paths to copy from main into worktrees
 #   BOT_NAME                 - git user.name for worktree commits
 #   BOT_EMAIL                - git user.email for worktree commits
@@ -95,10 +96,21 @@ symlink_into_worktree() {
 # Remove symlinks created by 'create' from a worktree
 remove_symlinks() {
   local wt="$1"
-  # Always clean .env.local
-  rm -f "$wt/.env.local" 2>/dev/null
   # Clean configured symlinks
   for path in ${WORKTREE_SYMLINKS:-}; do
+    rm -f "$wt/$path" 2>/dev/null
+    # Try to clean empty parent dirs
+    local parent="$(dirname "$wt/$path")"
+    while [[ "$parent" != "$wt" && "$parent" != "/" ]]; do
+      rmdir "$parent" 2>/dev/null || break
+      parent="$(dirname "$parent")"
+    done
+  done
+  # Clean configured relative/internal symlinks
+  for spec in ${WORKTREE_RELATIVE_SYMLINKS:-}; do
+    [[ "$spec" == *=* ]] || continue
+    local path="${spec%%=*}"
+    [[ -n "$path" ]] || continue
     rm -f "$wt/$path" 2>/dev/null
     # Try to clean empty parent dirs
     local parent="$(dirname "$wt/$path")"
@@ -113,9 +125,6 @@ remove_symlinks() {
 setup_worktree_links() {
   local wt="$1"
 
-  # .env.local is always symlinked (fundamental — contains config for this tool)
-  [[ -f "$PROJECT_ROOT/.env.local" ]] && ln -sf "$PROJECT_ROOT/.env.local" "$wt/.env.local"
-
   # Project-configured symlinks
   for path in ${WORKTREE_SYMLINKS:-}; do
     [[ -e "$PROJECT_ROOT/$path" ]] && symlink_into_worktree "$path" "$wt"
@@ -127,6 +136,25 @@ setup_worktree_links() {
       mkdir -p "$(dirname "$wt/$path")"
       cp "$PROJECT_ROOT/$path" "$wt/$path"
     fi
+  done
+
+  # Project-configured symlinks whose targets should resolve from inside the
+  # worktree, not from the main checkout. Useful for harness pointers like
+  # .claude/CLAUDE.md -> ../AGENTS.md.
+  for spec in ${WORKTREE_RELATIVE_SYMLINKS:-}; do
+    if [[ "$spec" != *=* ]]; then
+      echo "Warning: Ignoring invalid WORKTREE_RELATIVE_SYMLINKS entry '$spec' (expected path=target)" >&2
+      continue
+    fi
+    local path="${spec%%=*}"
+    local target="${spec#*=}"
+    if [[ -z "$path" || -z "$target" ]]; then
+      echo "Warning: Ignoring invalid WORKTREE_RELATIVE_SYMLINKS entry '$spec' (expected path=target)" >&2
+      continue
+    fi
+    mkdir -p "$(dirname "$wt/$path")"
+    rm -rf "$wt/$path" 2>/dev/null
+    ln -sfn "$target" "$wt/$path"
   done
 }
 

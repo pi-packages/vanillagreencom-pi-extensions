@@ -2,12 +2,19 @@ working/
 HT-AGENTS.md
 .env.local
 .env.npm
-.claude/settings.local.json
-.claude/scheduled_tasks.lock
 .cache/
 ht/
 cli/target/
 tmp/
+docs/work-in-progress/
+
+# Harness install/runtime mirrors; canonical source lives elsewhere.
+.agents/
+.claude/
+.cursor/
+.codex/
+.opencode/
+.pi/
 
 # npm artifacts (pi-extensions are published to npm)
 node_modules/
@@ -30,30 +37,6 @@ pi-extensions/*/extensions/**/*.d.ts
 Thumbs.db
 *.swp
 *.swo
-
-# Generated OpenAI Codex images
-.pi/openai-codex-images/
-
-# Installed harness mirrors; edit canonical source under agents/, skills/, hooks/, pi-extensions/
-.agents/
-.claude/agents/
-.claude/hooks/
-.claude/skills/
-.cursor/rules/
-.codex/agents/
-.codex/hooks/
-.codex/skills/
-.opencode/agents/
-.opencode/commands/
-.opencode/instructions/
-.opencode/modes/
-.opencode/plugins/
-.opencode/skills/
-.opencode/themes/
-.pi/agents/
-.pi/extensions/
-.pi/packages/
-.pi/prompts/
 
 # Local vstack install state (per-checkout absolute paths; do not commit)
 .vstack-lock.json
