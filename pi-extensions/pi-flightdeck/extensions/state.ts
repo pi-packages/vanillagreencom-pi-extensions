@@ -10,6 +10,10 @@ import { spawnSync } from "node:child_process";
 import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { findNewestTerminatedArchive, listTerminatedArchives } from "./state-archive.js";
+import { normalizeConflictGraph, normalizeDecisionsLog } from "./state-normalizers.js";
+
+export { findNewestTerminatedArchive, listTerminatedArchives } from "./state-archive.js";
 
 export type IssueState = "waiting" | "prompting" | "submitting" | "merge-ready" | "merged" | "aborted" | "dead";
 
@@ -36,6 +40,10 @@ export interface IssueRecord {
 	scope_files_declared?: number | null;
 	scope_files_actual?: number | null;
 	decisions_log?: Array<{ ts: string; prompt_tag: string; answer: string }>;
+	// Captured by close-issue.md § 3 / merge-plan.md § 3 when a PR lands; the
+	// post-completion dashboard surfaces it in Overview and the merge-history
+	// pane of the Conflicts & merges tab.
+	merge_commit?: string | null;
 	[key: string]: unknown;
 }
 
@@ -51,6 +59,10 @@ export interface MasterState {
 	started_at?: string;
 	terminated?: boolean;
 	terminated_at?: string;
+	// `terminate.md § 5` writes the absolute or project-relative path to the
+	// session summary markdown. Used by the dashboard to point users at the
+	// post-mortem file without re-reading the disk.
+	summary_path?: string;
 	issues: Record<string, IssueRecord>;
 	merge_queue: string[];
 	conflict_graph?: { edges?: Array<[string, string]>; computed_at?: string | null };
@@ -127,6 +139,14 @@ export interface FlightdeckSnapshot {
 	masterStatePath?: string;
 	master?: MasterState;
 	masterError?: string;
+	// Set when the archive-fallback path produced the masterError
+	// (every candidate archive failed strict validation, or the master-
+	// state directory itself was unreadable). Drives the `archive-error`
+	// status arm. Always implies `masterError` is set and `master` is
+	// unset; the distinct flag avoids brittle string-matching in the
+	// status predicate and lets non-archive failures (live read errors)
+	// stay in their own bucket.
+	masterArchiveError?: boolean;
 	daemon: DaemonHealth;
 	wakeEvents: WakeEvent[];
 	pendingEvents: DaemonEvent[];
@@ -246,6 +266,13 @@ export function masterStatePath(projectRoot: string, settings: SettingsLike, ses
 	return join(projectRoot, dir, `flightdeck-state-${sessionName}.json`);
 }
 
+export function masterStateDir(projectRoot: string, settings: SettingsLike): string {
+	const dir = nonEmpty(settings.flightdeckStateDir) ?? "tmp";
+	return join(projectRoot, dir);
+}
+
+
+
 export interface DaemonPaths {
 	pid: string;
 	lock: string;
@@ -286,24 +313,31 @@ export function readMasterState(path: string): { state?: MasterState; error?: st
 		const text = readFileSync(path, "utf8");
 		if (!text.trim()) return { state: emptyState() };
 		const parsed = JSON.parse(text);
-		if (!parsed || typeof parsed !== "object") return { error: "master state JSON is not an object" };
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { error: "master state JSON is not an object" };
 		const raw = parsed as Partial<MasterState>;
 		const issues: Record<string, IssueRecord> = {};
 		if (raw.issues && typeof raw.issues === "object" && !Array.isArray(raw.issues)) {
 			for (const [issue, value] of Object.entries(raw.issues as Record<string, unknown>)) {
 				if (value && typeof value === "object" && !Array.isArray(value)) {
-					issues[issue] = { issue, ...(value as Record<string, unknown>) } as IssueRecord;
+					const record = { issue, ...(value as Record<string, unknown>) } as IssueRecord;
+					// Malformed `decisions_log` (non-array or wrong-shape items)
+					// would otherwise throw inside the Decisions tab / dashboard
+					// child-row renderer. Normalize defensively so a corrupt
+					// archive renders as empty-but-stable, not as a popup crash.
+					record.decisions_log = normalizeDecisionsLog(record.decisions_log);
+					issues[issue] = record;
 				}
 			}
 		}
 		return {
 			state: {
-				conflict_graph: raw.conflict_graph ?? { edges: [], computed_at: null },
+				conflict_graph: normalizeConflictGraph(raw.conflict_graph),
 				issues,
 				merge_queue: Array.isArray(raw.merge_queue) ? raw.merge_queue.filter((v): v is string => typeof v === "string") : [],
 				paused_for_user: raw.paused_for_user ?? null,
 				session_id: raw.session_id,
 				started_at: raw.started_at,
+				summary_path: typeof raw.summary_path === "string" ? raw.summary_path : undefined,
 				terminated: raw.terminated ?? false,
 				terminated_at: raw.terminated_at,
 			},
@@ -312,6 +346,8 @@ export function readMasterState(path: string): { state?: MasterState; error?: st
 		return { error: error instanceof Error ? error.message : String(error) };
 	}
 }
+
+
 
 function emptyState(): MasterState {
 	return {
@@ -512,13 +548,83 @@ export function readPendingEvents(stateDir: string, sessionKey: string, maxLines
 	return readJsonLines(paths.events, maxLines) as DaemonEvent[];
 }
 
-export function buildSnapshot(cwd: string, settings: SettingsLike, options?: { logTailLines?: number; wakeEventsLines?: number }): FlightdeckSnapshot | undefined {
-	const tmux = resolveTmuxContext();
-	if (!tmux) return undefined;
-	const stateDir = resolveStateDir(settings);
-	const projectRoot = resolveProjectRoot(cwd);
-	const statePath = masterStatePath(projectRoot, settings, tmux.sessionName);
-	const { state, error } = readMasterState(statePath);
+// Strict archive read for the post-terminate fallback. Distinguishes:
+//   * blank file (0 bytes / whitespace-only) — partial-write corruption
+//   * non-object root (`[]`, scalar) — rejected by `readMasterState`
+//   * non-terminated payload — readable but not the post-mortem record
+//   * malformed JSON — rejected by `readMasterState`
+//   * IO error — propagated
+// Without these, a blank or non-terminated archive collapsed silently
+// to `inactive` and hid corruption from the user (BLOCK round 4).
+type ReadArchiveResult = { kind: "ok"; state: MasterState } | { kind: "error"; message: string };
+
+function readArchiveStrict(path: string): ReadArchiveResult {
+	let text: string;
+	try {
+		text = readFileSync(path, "utf8");
+	} catch (e) {
+		return { kind: "error", message: `read failed: ${(e as Error).message ?? String(e)}` };
+	}
+	if (!text.trim()) return { kind: "error", message: "blank archive" };
+	const read = readMasterState(path);
+	if (read.error) return { kind: "error", message: read.error };
+	if (!read.state) return { kind: "error", message: "archive yielded no state" };
+	if (!read.state.terminated) return { kind: "error", message: "archive missing terminated:true" };
+	return { kind: "ok", state: read.state };
+}
+
+// Test seam — production code calls `buildSnapshot`. Tests inject a
+// fully resolved (projectRoot, stateDir, tmux) so they don't have to
+// stand up a real tmux session or git worktree just to exercise the
+// post-terminate read path (issue #17 BLOCKER #2).
+export interface BuildSnapshotInputs {
+	projectRoot: string;
+	stateDir: string;
+	tmux: TmuxContext;
+}
+
+export function buildSnapshotFromInputs(inputs: BuildSnapshotInputs, settings: SettingsLike, options?: { logTailLines?: number; wakeEventsLines?: number }): FlightdeckSnapshot {
+	const { projectRoot, stateDir, tmux } = inputs;
+	const liveStatePath = masterStatePath(projectRoot, settings, tmux.sessionName);
+	let resolvedStatePath = liveStatePath;
+	let archiveError = false;
+	let { state, error } = readMasterState(liveStatePath);
+	// Archive fallback (issue #17 BLOCKER #1, refined in rounds 3 and 4).
+	// When the live file is missing, walk the master-state directory's
+	// terminated archives newest-first and serve the first VALID
+	// `terminated: true` snapshot. STRICT validation: blank archives,
+	// readable-but-non-terminated archives, malformed JSON, and IO
+	// failures all count as failures with their own reason strings.
+	// A non-ENOENT readdir error (permission denied / IO) also surfaces
+	// as a diagnostic so the user sees "state was lost" instead of
+	// silently falling back to inactive. Live state always wins when
+	// present, so the fallback never shadows an in-flight session.
+	if (!state && !error) {
+		const dir = masterStateDir(projectRoot, settings);
+		const listing = listTerminatedArchives(dir, tmux.sessionName);
+		const failures: Array<{ path: string; reason: string }> = [];
+		for (const candidate of listing.archives) {
+			const reason = readArchiveStrict(candidate);
+			if (reason.kind === "ok") {
+				state = reason.state;
+				resolvedStatePath = candidate;
+				break;
+			}
+			failures.push({ path: candidate, reason: reason.message });
+		}
+		if (!state) {
+			if (failures.length > 0) {
+				const latest = failures[0]!;
+				error = `no readable terminated archive: ${failures.length} candidate${failures.length === 1 ? "" : "s"} failed (latest ${latest.path}: ${latest.reason})`;
+				resolvedStatePath = latest.path;
+				archiveError = true;
+			} else if (listing.error) {
+				error = `archive directory unreadable: ${listing.error.code} ${listing.error.path}: ${listing.error.message}`;
+				resolvedStatePath = listing.error.path;
+				archiveError = true;
+			}
+		}
+	}
 	const daemon = readDaemonHealth(
 		stateDir,
 		tmux.sessionKey,
@@ -529,13 +635,30 @@ export function buildSnapshot(cwd: string, settings: SettingsLike, options?: { l
 	return {
 		daemon,
 		master: state,
+		masterArchiveError: archiveError || undefined,
 		masterError: error,
-		masterStatePath: statePath,
+		masterStatePath: resolvedStatePath,
 		pendingEvents,
 		stateDir,
 		tmux,
 		wakeEvents: daemon.wakeEventsRecent ?? [],
 	};
+}
+
+export function buildSnapshot(cwd: string, settings: SettingsLike, options?: { logTailLines?: number; wakeEventsLines?: number }): FlightdeckSnapshot | undefined {
+	const tmux = resolveTmuxContext();
+	if (!tmux) return undefined;
+	const stateDir = resolveStateDir(settings);
+	const projectRoot = resolveProjectRoot(cwd);
+	return buildSnapshotFromInputs({ projectRoot, stateDir, tmux }, settings, options);
+}
+
+// Normalization seam (BLOCKER #4 from review). The dashboard / render
+// code reads tracked issues via this helper instead of touching
+// `.issues` directly. When the registry-reframe lands (`.entries` /
+// `.tracked`), the migration changes only this seam, not the renderer.
+export function readTrackedEntries(state: MasterState | undefined): IssueRecord[] {
+	return sortedIssues(state);
 }
 
 export function isFlightdeckActive(snapshot: FlightdeckSnapshot | undefined): boolean {
@@ -545,7 +668,17 @@ export function isFlightdeckActive(snapshot: FlightdeckSnapshot | undefined): bo
 	return false;
 }
 
-export type FlightdeckSessionStatus = "live" | "stale" | "inactive";
+// `terminated`: master flagged the session complete via `terminate.md § 5`
+// and `.issues` is still populated. The dashboard keeps rendering the
+// completed session (Overview / Decisions / Conflicts & merges all read
+// the preserved history) until the user dismisses the widget. Without
+// this third arm, terminated sessions fell into `inactive` and the
+// post-completion summary was hidden from the user (issue #17).
+// `archive-error`: a terminated archive was selected but every candidate
+// failed to parse. Renders an error banner with the diagnostic so the
+// user sees "state was lost" instead of a blank "no session" view
+// (BLOCK round 3).
+export type FlightdeckSessionStatus = "live" | "stale" | "inactive" | "terminated" | "archive-error";
 
 const TERMINAL_ISSUE_STATES = new Set<IssueState>(["merged", "aborted", "dead"]);
 
@@ -576,10 +709,21 @@ export function flightdeckSessionStatus(
 	options?: { staleAfterMin?: number; now?: number },
 ): FlightdeckSessionStatus {
 	if (!snapshot) return "inactive";
+	// Archive lookup tried but every candidate was malformed (or the
+	// master-state directory itself was unreadable). Render the
+	// diagnostic banner instead of falling through to `inactive` — the
+	// user otherwise can't tell a corrupted archive from a missing one.
+	if (snapshot.masterArchiveError) return "archive-error";
 	const master = snapshot.master;
-	const hasIssues = !!master && !master.terminated && Object.keys(master.issues).length > 0;
+	const hasAnyIssues = !!master && Object.keys(master.issues).length > 0;
+	// terminated + issues preserved → read-only completion view. Issue #17
+	// was the regression where `pane-registry remove-merged` ran inside
+	// `terminate.md § 5` and left `.issues == {}` on a terminated file, so
+	// this branch was unreachable and the dashboard collapsed.
+	if (master?.terminated && hasAnyIssues) return "terminated";
+	const hasLiveIssues = !!master && !master.terminated && hasAnyIssues;
 	const daemonAlive = snapshot.daemon.pidAlive;
-	if (!hasIssues && !daemonAlive) return "inactive";
+	if (!hasLiveIssues && !daemonAlive) return "inactive";
 	if (daemonAlive) return "live";
 	const staleAfterMin = options?.staleAfterMin ?? 5;
 	if (staleAfterMin <= 0) return "live";
@@ -588,6 +732,21 @@ export function flightdeckSessionStatus(
 	if (latest === undefined) return "stale";
 	const ageSec = Math.max(0, Math.floor((now - latest) / 1000));
 	return ageSec > staleAfterMin * 60 ? "stale" : "live";
+}
+
+// Merged issues, newest-merge-first by `last_polled_at`, used by the
+// Conflicts & merges tab to render a stable "Merge history" panel that
+// outlives the live `merge_queue` (which drains as items land).
+export function mergedIssueHistory(state: MasterState | undefined): IssueRecord[] {
+	if (!state) return [];
+	const merged = Object.values(state.issues).filter((issue) => issue.state === "merged");
+	merged.sort((a, b) => {
+		const at = Date.parse(a.last_polled_at ?? a.spawned_at ?? "");
+		const bt = Date.parse(b.last_polled_at ?? b.spawned_at ?? "");
+		if (Number.isFinite(at) && Number.isFinite(bt) && at !== bt) return bt - at;
+		return a.issue.localeCompare(b.issue);
+	});
+	return merged;
 }
 
 export function sortedIssues(state: MasterState | undefined): IssueRecord[] {

@@ -32,8 +32,8 @@ import {
 	foldWakeEventsIntoConversations,
 	formatAge,
 	mostRecentPollMs,
+	readTrackedEntries,
 	type SettingsLike,
-	sortedIssues,
 } from "./state.js";
 import {
 	buildPaneTargetToIdMap,
@@ -65,6 +65,7 @@ import {
 	type TreeStyle,
 	wrapLine,
 } from "./render.js";
+import { headerChipForSnapshot, renderArchiveErrorBanner, renderIssueMergeCommitLine, renderTerminatedConflictsSection, renderTerminatedOverviewBanner } from "./render-terminated.js";
 import { MINI_DASHBOARD_RANK, setMiniDashboardWidget } from "./stacked-widget.js";
 
 const INSTALL_SYMBOL = Symbol.for("vstack.pi-flightdeck.installed");
@@ -75,7 +76,7 @@ const WIDGET_KEY = "vstack-flightdeck-widget";
 const POPUP_WIDTH_PERCENT = "92%";
 const POPUP_MAX_HEIGHT = "85%";
 
-type DashboardState = "hidden" | "compact" | "expanded";
+export type DashboardState = "hidden" | "compact" | "expanded";
 
 interface VstackModalLock { depth: number }
 
@@ -280,9 +281,9 @@ function renderStaleHintLine(snapshot: FlightdeckSnapshot, theme: Theme, width: 
 	return [truncateToWidth(line, Math.max(1, width), "…")];
 }
 
-function renderDashboardLines(snapshot: FlightdeckSnapshot, theme: Theme, width: number, state: DashboardState, cwd: string, paneMap: Map<string, string>): string[] {
+export function renderDashboardLines(snapshot: FlightdeckSnapshot, theme: Theme, width: number, state: DashboardState, cwd: string, paneMap: Map<string, string>): string[] {
 	if (state === "hidden") return [];
-	const issues = sortedIssues(snapshot.master);
+	const issues = readTrackedEntries(snapshot.master);
 	const max = Math.max(1, Math.floor(settingNumber("dashboardMaxItems", 8, cwd)));
 	const treeStyle = (settingString("treeStyle", "unicode", cwd) === "ascii" ? "ascii" : "unicode") as TreeStyle;
 	const totalIssues = issues.length;
@@ -294,7 +295,8 @@ function renderDashboardLines(snapshot: FlightdeckSnapshot, theme: Theme, width:
 	// already shows the same state badge — avoids "✱ 1 · CC-511 · ✱ waiting".
 	const showStateCounts = totalIssues > 1;
 	if (showStateCounts) for (const s of order) if (counts[s]) summaryParts.push(theme.fg(stateColor(s), `${stateGlyph(s)} ${counts[s]}`));
-	const daemonHealth = daemonHealthChip(theme, snapshot.daemon.pidAlive, snapshot.daemon.heartbeatAgeSec);
+	const terminated = !!snapshot.master?.terminated;
+	const headerRight = headerChipForSnapshot(snapshot, theme);
 	const queueLen = snapshot.master?.merge_queue?.length ?? 0;
 	const queueBadge = queueLen > 0 ? ` ${theme.fg("muted", "·")} ${theme.fg("accent", `merge-queue ${queueLen}`)}` : "";
 	// Keyhints — same pattern as pi-agents-tmux dashboard header:
@@ -302,11 +304,11 @@ function renderDashboardLines(snapshot: FlightdeckSnapshot, theme: Theme, width:
 	// shortcuts read from extension settings so user overrides are reflected.
 	const toggleShortcut = settingString("dashboardShortcut", "alt+m", cwd);
 	const popupShortcut = settingString("popupShortcut", "f6", cwd);
-	const toggleHint = toggleShortcut === "none" ? "" : theme.fg("dim", ` · ${formatShortcutHint(toggleShortcut)} toggle`);
+	const toggleHint = toggleShortcut === "none" ? "" : theme.fg("dim", ` · ${formatShortcutHint(toggleShortcut)} ${terminated ? "dismiss" : "toggle"}`);
 	const popupHint = popupShortcut === "none" ? "" : theme.fg("dim", ` · ${formatShortcutHint(popupShortcut)} popup`);
 	const hints = `${toggleHint}${popupHint}`;
 	const headerLeft = `${theme.fg("customMessageLabel", theme.bold("Flightdeck"))} ${theme.fg("muted", `${totalIssues} issue${totalIssues === 1 ? "" : "s"}`)}${summaryParts.length > 0 ? ` ${theme.fg("muted", "·")} ${summaryParts.join(theme.fg("dim", " "))}` : ""}${queueBadge}${hints}`;
-	const header = `${headerLeft}  ${theme.fg("dim", "·")}  ${daemonHealth}`;
+	const header = `${headerLeft}  ${theme.fg("dim", "·")}  ${headerRight}`;
 	const bridge = getAgentsBridge();
 	if (state === "compact") {
 		const lines = [header];
@@ -432,9 +434,10 @@ interface PopupUiState {
 	liveShowNoisy: boolean;
 }
 
-function makeInitialPopupState(): PopupUiState {
+export function makeInitialPopupState(): PopupUiState {
 	return { conversationDetailScroll: 0, decisionDetailScroll: 0, liveDetailScroll: 0, liveShowNoisy: false, scroll: 0, search: "", selected: 0, showHelp: false, tab: TAB_OVERVIEW };
 }
+export type { PopupUiState };
 
 function renderTabBar(active: Tab, width: number, theme: Theme): string {
 	const cells = TABS.map((tab) => {
@@ -455,8 +458,8 @@ function activePopupCwd(ctx: ExtensionContext | ExtensionCommandContext): string
 
 // ----- Tab renderers --------------------------------------------------------
 
-function renderOverviewTab(snapshot: FlightdeckSnapshot, ui: PopupUiState, width: number, theme: Theme, viewportRows: number, paneMap: Map<string, string>): string[] {
-	const issues = sortedIssues(snapshot.master);
+export function renderOverviewTab(snapshot: FlightdeckSnapshot, ui: PopupUiState, width: number, theme: Theme, viewportRows: number, paneMap: Map<string, string>): string[] {
+	const issues = readTrackedEntries(snapshot.master);
 	const filtered = ui.search.trim()
 		? issues.filter((issue) => {
 			const hay = `${issue.issue} ${issue.window ?? ""} ${issue.harness ?? ""} ${issue.state ?? ""} ${issue.substate ?? ""}`.toLowerCase();
@@ -466,6 +469,7 @@ function renderOverviewTab(snapshot: FlightdeckSnapshot, ui: PopupUiState, width
 	clampSelection(ui, filtered.length, viewportRows);
 	const lines: string[] = [];
 	lines.push(searchRow(theme, ui.search, width));
+	lines.push(...renderTerminatedOverviewBanner(snapshot, theme, width));
 	lines.push("");
 	if (filtered.length === 0) {
 		if (issues.length === 0) {
@@ -530,6 +534,7 @@ function renderIssueDetailBlock(issue: IssueRecord, theme: Theme, width: number,
 	if (issue.launch?.model || issue.launch?.effort) lines.push(`${label(theme, "run:")}  ${theme.fg("text", formatLaunchProfile(issue))}`);
 	if (issue.worktree) lines.push(`${label(theme, "wt:")}   ${theme.fg("text", compactPath(issue.worktree))}`);
 	if (issue.pr_number) lines.push(`${label(theme, "PR:")}   ${theme.fg("accent", `#${issue.pr_number}`)}`);
+	lines.push(...renderIssueMergeCommitLine(issue.merge_commit, theme));
 	if (issue.substate) lines.push(`${label(theme, "tag:")}  ${tagBadge(theme, issue.substate)}`);
 	const usageText = formatUsageCompact(stats?.usage);
 	if (usageText) {
@@ -844,7 +849,7 @@ function issuePaneTargetLabel(issue: IssueRecord | undefined): string | undefine
 
 function issueByConversationPane(snapshot: FlightdeckSnapshot): Map<string, IssueRecord> {
 	const issueByPane = new Map<string, IssueRecord>();
-	for (const issue of sortedIssues(snapshot.master)) {
+	for (const issue of readTrackedEntries(snapshot.master)) {
 		if (issue.pane_id) issueByPane.set(issue.pane_id, issue);
 		if (issue.pane_target) issueByPane.set(issue.pane_target, issue);
 	}
@@ -1000,7 +1005,7 @@ function renderConversationsTab(snapshot: FlightdeckSnapshot, conversations: Map
 	return lines;
 }
 
-function renderConflictsTab(snapshot: FlightdeckSnapshot, _ui: PopupUiState, width: number, theme: Theme): string[] {
+export function renderConflictsTab(snapshot: FlightdeckSnapshot, _ui: PopupUiState, width: number, theme: Theme): string[] {
 	const lines: string[] = [];
 	const queue = snapshot.master?.merge_queue ?? [];
 	const edges = snapshot.master?.conflict_graph?.edges ?? [];
@@ -1013,7 +1018,7 @@ function renderConflictsTab(snapshot: FlightdeckSnapshot, _ui: PopupUiState, wid
 		const pr = issue?.pr_number ? theme.fg("accent", `PR#${issue.pr_number}`) : theme.fg("dim", "no-PR");
 		lines.push(`  ${theme.fg("muted", `${i + 1}.`)} ${theme.bold(theme.fg("text", id))} ${theme.fg("dim", "·")} ${state} ${theme.fg("dim", "·")} ${pr}`);
 	}
-	lines.push("");
+	lines.push(...renderTerminatedConflictsSection(snapshot, theme));
 	lines.push(`${theme.fg("customMessageLabel", theme.bold("Conflict graph"))} ${theme.fg("dim", `(${edges.length} edge${edges.length === 1 ? "" : "s"}${computed ? `, ${formatAge(ageSecondsSince(computed))} ago` : ""})`)}`);
 	if (edges.length === 0) lines.push(theme.fg("dim", "  (no detected file overlap)"));
 	else for (const [a, b] of edges) {
@@ -1041,7 +1046,7 @@ function selectedDecision(snapshot: FlightdeckSnapshot, ui: PopupUiState, cwd: s
 	return decisions[ui.selected];
 }
 
-function renderDecisionsTab(snapshot: FlightdeckSnapshot, ui: PopupUiState, width: number, theme: Theme, viewportRows: number, cwd: string): string[] {
+export function renderDecisionsTab(snapshot: FlightdeckSnapshot, ui: PopupUiState, width: number, theme: Theme, viewportRows: number, cwd: string): string[] {
 	const all = flatDecisionsLog(snapshot.master, Math.max(50, Math.floor(settingNumber("liveFeedLines", 200, cwd))));
 	const filtered = filteredDecisions(snapshot, ui, cwd);
 	const lines: string[] = [];
@@ -1377,12 +1382,15 @@ export default function flightdeck(pi: ExtensionAPI): void {
 				const lines: string[] = [];
 				if (showBanner && snapshot) lines.push(...renderPauseBannerLines(snapshot, theme, width));
 				if (dashboardEnabled && snapshot) {
-					if (status === "live") {
+					if (status === "live" || status === "terminated") {
 						if (lines.length > 0) lines.push("");
 						lines.push(...renderDashboardLines(snapshot, theme, width, cache.state, ctx.cwd, cache.paneTargetToId));
 					} else if (status === "stale") {
 						if (lines.length > 0) lines.push("");
 						lines.push(...renderStaleHintLine(snapshot, theme, width));
+					} else if (status === "archive-error") {
+						if (lines.length > 0) lines.push("");
+						lines.push(...renderArchiveErrorBanner(snapshot, theme, width));
 					}
 				}
 				return clampAboveEditorWidget(lines, tui.terminal.rows, theme);
@@ -1727,7 +1735,7 @@ export default function flightdeck(pi: ExtensionAPI): void {
 	}
 
 	function renderPopupHeader(snapshot: FlightdeckSnapshot, theme: Theme, width: number): string {
-		const issues = sortedIssues(snapshot.master);
+		const issues = readTrackedEntries(snapshot.master);
 		const counts: Record<string, number> = {};
 		for (const issue of issues) counts[issue.state ?? "?"] = (counts[issue.state ?? "?"] ?? 0) + 1;
 		const order: IssueState[] = ["prompting", "merge-ready", "submitting", "waiting", "merged", "aborted", "dead"];
@@ -1739,7 +1747,7 @@ export default function flightdeck(pi: ExtensionAPI): void {
 			: "";
 		const queue = snapshot.master?.merge_queue?.length ?? 0;
 		const queuePart = queue > 0 ? ` ${theme.fg("dim", "·")} ${theme.fg("accent", `merge-queue ${queue}`)}` : "";
-		const headerRight = daemonHealthChip(theme, snapshot.daemon.pidAlive, snapshot.daemon.heartbeatAgeSec);
+		const headerRight = headerChipForSnapshot(snapshot, theme);
 		// tmux session_id ($N) is dropped here — it never changes for the life
 		// of the session and visually collides with USD cost strings; the
 		// Daemon tab still shows it for diagnostics.
