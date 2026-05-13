@@ -10,6 +10,9 @@
 #   prompt-classify --buffer-file <path>
 #   tmux capture-pane -t HT:cc-463.0 -p -S -200 | prompt-classify
 #   prompt-classify --buffer-file /tmp/buf.txt --dry-run    # print tag + matched line
+#   prompt-classify --entry-kind adhoc                      # guard issue-only tags
+#   prompt-classify --entry-kind-unknown                    # fail closed on lookup miss
+#   prompt-classify --allow-missing-kind                    # legacy issue caller opt-in
 #
 # Tags (in match-priority order):
 #   rendering                  - prompt isn't fully painted yet
@@ -32,6 +35,7 @@
 #   multi-select-tabbed        - tabbed checkbox UI; needs --option-multi (NOT --option)
 #   awaiting-direction         - recoverable post-cancel / no-prompt idle state
 #   generic-multi-choice       - has option list but no specific match
+#   domain-mismatch            - issue-only tag appeared on a non-issue entry
 #   idle                       - no prompt detected
 #
 # Exit code: 0 (always; tag goes to stdout)
@@ -40,11 +44,19 @@ set -euo pipefail
 DRY_RUN=0
 BUFFER_FILE=""
 NO_FOOTER_GATE=0
+ENTRY_KIND=""
+ENTRY_KIND_PROVIDED=0
+ALLOW_MISSING_KIND=0
+MISSING_KIND_WARNING_EMITTED=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --buffer-file) BUFFER_FILE="$2"; shift 2 ;;
     --buffer-file=*) BUFFER_FILE="${1#--buffer-file=}"; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
+    --entry-kind|--kind) ENTRY_KIND="$2"; ENTRY_KIND_PROVIDED=1; shift 2 ;;
+    --entry-kind=*|--kind=*) ENTRY_KIND="${1#*=}"; ENTRY_KIND_PROVIDED=1; shift ;;
+    --entry-kind-unknown) ENTRY_KIND="unknown"; ENTRY_KIND_PROVIDED=1; shift ;;
+    --allow-missing-kind) ALLOW_MISSING_KIND=1; shift ;;
     # Skip the TUI-footer gate. Use this when the input is a structured
     # assistant-text blob from a harness adapter (HTTP /message, MCP
     # channel, WS events) — no rendered terminal chrome to look for.
@@ -64,12 +76,40 @@ fi
 
 emit() {
   local tag="$1" matched="${2:-}"
+  if is_issue_only_tag "$tag" && [[ "$ENTRY_KIND_PROVIDED" -eq 0 && "$ALLOW_MISSING_KIND" -eq 0 ]]; then
+    printf 'Warning: issue-only prompt tag %s classified without --entry-kind; routing as domain-mismatch. Pass --entry-kind issue for issue entries or --allow-missing-kind only for legacy issue callers.\n' "$tag" >&2
+    matched="issue-only $tag without entry kind"
+    tag="domain-mismatch"
+  elif is_issue_only_tag "$tag" && [[ "$ENTRY_KIND_PROVIDED" -eq 0 && "$ALLOW_MISSING_KIND" -eq 1 && "$MISSING_KIND_WARNING_EMITTED" -eq 0 ]]; then
+    MISSING_KIND_WARNING_EMITTED=1
+    printf 'Warning: issue-only prompt tag %s classified without --entry-kind because --allow-missing-kind was set; returning %s for legacy issue callers. Migrate to --entry-kind issue or --entry-kind-unknown.\n' "$tag" "$tag" >&2
+  elif domain_guard_should_escalate "$tag"; then
+    printf 'Warning: issue-only prompt tag %s appeared on %s entry; routing as domain-mismatch.\n' "$tag" "${ENTRY_KIND:-unknown}" >&2
+    matched="issue-only $tag on ${ENTRY_KIND:-unknown} entry"
+    tag="domain-mismatch"
+  fi
   if [[ $DRY_RUN -eq 1 && -n "$matched" ]]; then
     printf '%s\t%s\n' "$tag" "$matched"
   else
     printf '%s\n' "$tag"
   fi
   exit 0
+}
+
+is_issue_only_tag() {
+  local tag="$1"
+  case "$tag" in
+    force-merge-confirm|merge-ready-but-unknown|merge-now|bot-review-wait-stuck|rebase-multi-choice|force-push-prompt|stale-no-pr-branch|stale-orphan-worktree|cleanup-prompt|audit-relation-prompt|descope-related|external-fix-suggestions|cycle-fix-suggestions|scope-creep-detected|multi-select-tabbed)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+domain_guard_should_escalate() {
+  local tag="$1" kind="${ENTRY_KIND,,}"
+  [[ -n "$kind" && "$kind" != "issue" ]] || return 1
+  is_issue_only_tag "$tag"
 }
 
 # awaiting-direction — recoverable post-cancel / post-decline state where
