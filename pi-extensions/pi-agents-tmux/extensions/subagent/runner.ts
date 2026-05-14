@@ -418,6 +418,7 @@ export async function runSingleAgent(
 			stderr: errorMessage,
 			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: budgetGuard.estimate.tokens, turns: 0 },
 			model: selectedModel,
+			sessionMode: "resumed",
 			sessionKey: firstSession.key,
 			sessionKeyExplicit: true,
 			sessionPath: firstSession.path,
@@ -547,6 +548,7 @@ async function runSingleAgentAttempt(
 		agent: agentName,
 		agentSource: agent.source,
 		task,
+		sessionMode: session.explicit ? "resumed" : "fresh",
 		// -1 = still running. Real exit code is set after proc.close; streaming
 		// partials must not look completed to callers that key on exitCode.
 		exitCode: -1,
@@ -590,12 +592,13 @@ async function runSingleAgentAttempt(
 			runtimeRoot,
 			transcriptPath,
 			model: selectedModel,
-			sessionKey: session.key,
+			sessionMode: currentResult.sessionMode,
+			sessionKey: session.explicit ? session.key : undefined,
 			sessionPath: session.path,
 			ephemeralSession: session.ephemeral,
 			attempt,
 		});
-		appendTranscript({ type: "start", agent: agent.name, taskId: oneShotTaskId, task, cwd: cwd ?? defaultCwd, sessionKey: session.key, sessionPath: session.path, ephemeralSession: session.ephemeral, attempt });
+		appendTranscript({ type: "start", agent: agent.name, taskId: oneShotTaskId, task, cwd: cwd ?? defaultCwd, sessionMode: currentResult.sessionMode, sessionKey: session.explicit ? session.key : undefined, sessionPath: session.path, ephemeralSession: session.ephemeral, attempt });
 
 		if (agent.systemPrompt.trim()) {
 			const tmp = await writePromptToTempFile(agent.name, agent.systemPrompt);
@@ -738,7 +741,8 @@ async function runSingleAgentAttempt(
 				model: currentResult.model,
 				usage: currentResult.usage,
 				error: currentResult.errorMessage || "Agent was aborted",
-				sessionKey: session.key,
+				sessionMode: currentResult.sessionMode,
+				sessionKey: session.explicit ? session.key : undefined,
 				sessionPath: session.path,
 				ephemeralSession: session.ephemeral,
 				attempt,
@@ -767,7 +771,8 @@ async function runSingleAgentAttempt(
 				transcriptPath,
 				model: currentResult.model,
 				usage: currentResult.usage,
-				sessionKey: session.key,
+				sessionMode: currentResult.sessionMode,
+				sessionKey: session.explicit ? session.key : undefined,
 				sessionPath: session.path,
 				ephemeralSession: session.ephemeral,
 				attempt,
@@ -796,7 +801,8 @@ async function runSingleAgentAttempt(
 			model: currentResult.model,
 			usage: currentResult.usage,
 			error: failed ? currentResult.errorMessage || currentResult.stderr || undefined : undefined,
-			sessionKey: session.key,
+			sessionMode: currentResult.sessionMode,
+			sessionKey: session.explicit ? session.key : undefined,
 			sessionPath: session.path,
 			ephemeralSession: session.ephemeral,
 			attempt,
