@@ -457,7 +457,14 @@ case "$ACTION" in
     # pane); kept alive via codex-app-server-spawn idempotency until
     # terminate.md § 5 calls codex-app-server-stop.
     rm -f "$(cx_spawn_file "$ISSUE")" 2>/dev/null || true
+    # Issue #37(C): drop both the legacy .issues row AND the generic
+    # .entries row. Pre-fix, adhoc entries written only to .entries
+    # survived `remove` forever and required a manual
+    # `flightdeck-state set .entries '(.entries | del(...))'` chase.
+    # Each `del` is idempotent on missing keys, so calling both in
+    # sequence is safe regardless of which map the id lives in.
     "$FD_STATE" set ".issues" "(.issues | del(.[\"$ISSUE\"]))"
+    "$FD_STATE" set ".entries" "(.entries | del(.[\"$ISSUE\"]))"
     ;;
 
   oc-attach-args)
@@ -828,10 +835,14 @@ case "$ACTION" in
     fi
     if (( pane_alive == 1 )); then
       case "$state" in
-        merged|aborted|dead) ;;
+        # Issue #37(B): accept legacy issue-flow terminal states
+        # (merged|aborted|dead) and the generic session-lifecycle
+        # terminal states (complete|cancelled) so adhoc entries can
+        # clean up without --force.
+        merged|aborted|dead|complete|cancelled) ;;
         *)
           if (( FORCE != 1 )); then
-            echo "teardown-window: policy refusal — pane_id '$pane_id' is alive but state is '$state' (not merged|aborted|dead); set a terminal state first or rerun with --force" >&2
+            echo "teardown-window: policy refusal — pane_id '$pane_id' is alive but state is '$state' (not merged|aborted|dead|complete|cancelled); set a terminal state first or rerun with --force" >&2
             exit 4
           fi
           ;;
@@ -867,13 +878,14 @@ case "$ACTION" in
       exit 0
     fi
     # pane_id missing or already dead — gate teardown on terminal state.
+    # Issue #37(B): accept legacy + generic terminal vocabularies.
     case "$state" in
-      merged|aborted|dead)
+      merged|aborted|dead|complete|cancelled)
         printf 'teardown-window: window already closed (pane_id=%s gone, state=%s)\n' "${pane_id:-<none>}" "$state"
         exit 0
         ;;
       *)
-        echo "teardown-window: registry drift — pane_id '${pane_id:-<none>}' is gone but state is '${state}' (not merged|aborted|dead); refusing to derive kill target from pane_target (#16)" >&2
+        echo "teardown-window: registry drift — pane_id '${pane_id:-<none>}' is gone but state is '${state}' (not merged|aborted|dead|complete|cancelled); refusing to derive kill target from pane_target (#16)" >&2
         exit 3
         ;;
     esac
