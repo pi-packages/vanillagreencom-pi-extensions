@@ -223,11 +223,26 @@ export function dotIndicator(theme: Theme, alive: boolean): string {
 	return alive ? theme.fg("success", "●") : theme.fg("error", "●");
 }
 
-// Combined daemon health: dot + "daemon" label, optionally followed by a
-// staleness suffix when the heartbeat is older than ~30s. Replaces the
-// two-token `● daemon  ·  hb Xs` rendering so the header has one canonical
-// daemon-health object instead of two stating the same fact.
-export function daemonHealthChip(theme: Theme, alive: boolean, heartbeatAgeSec: number | undefined): string {
+// Combined daemon health chip. Five visual states, matching the
+// real daemon lifecycle so the dashboard never lies:
+//   standby — !alive AND no pid file AND no heartbeat file: daemon
+//             has never started for this session. Common between
+//             `session start` and `session watch`. Dim, not alarming.
+//   no-pulse — alive but no heartbeat seen yet (just spawned).
+//   stale (warn) — alive, heartbeat 30..120s old.
+//   stale (err)  — alive, heartbeat >=120s old.
+//   dead — !alive but pid or heartbeat file exists (daemon ran and
+//          died). This is the genuinely alarming case.
+//   ok — alive, heartbeat <30s.
+export interface DaemonChipInput {
+	alive: boolean;
+	heartbeatAgeSec: number | undefined;
+	everStarted: boolean;
+}
+
+export function daemonHealthChip(theme: Theme, input: DaemonChipInput): string {
+	const { alive, heartbeatAgeSec, everStarted } = input;
+	if (!alive && !everStarted) return `${theme.fg("dim", "●")} ${theme.fg("dim", "daemon standby")}`;
 	if (!alive) return `${theme.fg("error", "●")} ${theme.fg("error", "daemon dead")}`;
 	if (heartbeatAgeSec === undefined) return `${theme.fg("warning", "●")} ${theme.fg("warning", "daemon no-pulse")}`;
 	if (heartbeatAgeSec >= 120) return `${theme.fg("error", "●")} ${theme.fg("error", `daemon stale ${formatAgeShort(heartbeatAgeSec)}`)}`;

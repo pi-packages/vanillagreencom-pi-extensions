@@ -261,9 +261,14 @@ test("owner pane renders dashboard while peer pane gets observer popup header", 
 });
 
 test("stale daemon renders stale session-state copy", () => {
+	// Daemon WAS started (heartbeat file exists, pid recorded) but is
+	// now dead and stale — distinguishes from a never-started daemon
+	// (`awaiting-watch`).
 	const snap = snapshot([adhoc({ last_polled_at: "2026-05-13T00:00:00Z" })], {
 		daemon: {
-			heartbeatExists: false,
+			heartbeatExists: true,
+			heartbeatAgeSec: 1800,
+			pid: 9999,
 			pidAlive: false,
 			stateDir: "/tmp/pi-flightdeck-daemon",
 			subscriberCounts: { claude: 0, codex: 0, opencode: 0, pi: 0 },
@@ -272,6 +277,21 @@ test("stale daemon renders stale session-state copy", () => {
 	});
 	assert.equal(flightdeckSessionStatus(snap, { now: Date.parse("2026-05-13T00:30:00Z") }), "stale");
 	const text = joinRendered(renderStaleHintLine(snap, plainTheme() as never, 120));
-	assert.match(text, /stale session state/);
+	assert.match(text, /session state from/);
+	assert.match(text, /daemon stopped/);
 	assert.doesNotMatch(text, /issue tree/);
+});
+
+test("never-started daemon classifies as awaiting-watch, not stale", () => {
+	const snap = snapshot([adhoc({ last_polled_at: "2026-05-13T00:00:00Z" })], {
+		daemon: {
+			heartbeatExists: false,
+			pid: undefined,
+			pidAlive: false,
+			stateDir: "/tmp/pi-flightdeck-daemon",
+			subscriberCounts: { claude: 0, codex: 0, opencode: 0, pi: 0 },
+			subscribers: [],
+		},
+	});
+	assert.equal(flightdeckSessionStatus(snap, { now: Date.parse("2026-05-13T00:30:00Z") }), "awaiting-watch");
 });

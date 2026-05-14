@@ -321,7 +321,7 @@ cmd_init_entry() {
        last_capture_hash: null,
        last_response_at: null,
        spawned_at: $now,
-       last_polled_at: $now,
+       last_polled_at: null,
        decisions_log: [],
        unknown_since: null
      }')

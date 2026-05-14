@@ -179,6 +179,50 @@ export function resolveOwnerMetadata(): FlightdeckOwner {
 	};
 }
 
+// Returns true when the existing state file is safe to auto-archive
+// before a fresh session begins. Predicate:
+//   1. `terminated == true` — prior session ran `terminate`; rolling
+//      forward is always safe.
+//   2. file has tracked entries but ZERO have a pane_id that's currently
+//      alive in tmux — prior session's windows were all closed without
+//      `terminate` or `session stop`. No live work to preserve.
+// Designed to be called only from session-entry callers
+// (`flightdeck-session start`), NOT from every `initState` invocation.
+export function shouldAutoArchiveAtSessionStart(file: string): { archive: boolean; reason: string | null } {
+	if (!existsSync(file)) return { archive: false, reason: null };
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(readFileSync(file, "utf8"));
+	} catch {
+		return { archive: false, reason: null };
+	}
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { archive: false, reason: null };
+	const raw = parsed as Record<string, unknown>;
+	if (raw.terminated === true) return { archive: true, reason: "terminated" };
+	const entries = isRecord(raw.entries) ? raw.entries : {};
+	const issues = isRecord(raw.issues) ? raw.issues : {};
+	const paneIds: string[] = [];
+	for (const e of Object.values(entries)) if (isRecord(e) && typeof e.pane_id === "string" && e.pane_id) paneIds.push(e.pane_id);
+	for (const i of Object.values(issues)) if (isRecord(i) && typeof i.pane_id === "string" && i.pane_id) paneIds.push(i.pane_id);
+	if (paneIds.length === 0) return { archive: false, reason: null };
+	const alive = livePaneIds();
+	for (const pid of paneIds) if (alive.has(pid)) return { archive: false, reason: null };
+	return { archive: true, reason: "no-live-panes" };
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+	return !!v && typeof v === "object" && !Array.isArray(v);
+}
+
+function livePaneIds(): Set<string> {
+	if (!process.env.TMUX) return new Set();
+	const r = spawnSync("tmux", ["list-panes", "-a", "-F", "#{pane_id}"], { encoding: "utf8" });
+	const out = new Set<string>();
+	if (r.status !== 0) return out;
+	for (const line of (r.stdout ?? "").split("\n")) if (line) out.add(line);
+	return out;
+}
+
 export function initState(file: string): void {
 	gcTmpOrphans(file);
 	const lock = `${file}.lock`;
@@ -212,8 +256,8 @@ export function initState(file: string): void {
 				if (raw.owner !== null && raw.owner !== undefined && raw.schema_version !== null && raw.schema_version !== undefined && raw.entries !== null && raw.entries !== undefined) return;
 			}
 		} catch {
-			// Preserve legacy idempotence for corrupt/partial existing files:
-			// init must not clobber them.
+			// Preserve idempotence for corrupt/partial existing files: init
+			// must not clobber them.
 			return;
 		}
 		const backfillFilter = `if ((. // {}) | type == "object") then (if .owner? == null then . + {owner: ${ownerJson}} else . end) | (if .schema_version? == null then . + {schema_version: ${schemaVersionJson}} else . end) | (if .entries? == null then . + {entries: {}} else . end) else . end`;

@@ -23,6 +23,7 @@ import {
 	findTrackedEntry,
 	flatDecisionsLog,
 	flightdeckSessionStatus,
+	daemonEverStarted,
 	foldWakeEventsIntoConversations,
 	formatAge,
 	mostRecentPollMs,
@@ -264,8 +265,28 @@ export function renderStaleHintLine(snapshot: FlightdeckSnapshot, theme: Theme, 
 	const latest = mostRecentPollMs(snapshot);
 	const ageSec = latest === undefined ? undefined : Math.max(0, Math.floor((Date.now() - latest) / 1000));
 	const ageText = ageSec === undefined ? "unknown age" : `${formatAge(ageSec)} ago`;
-	const daemon = daemonHealthChip(theme, snapshot.daemon.pidAlive, snapshot.daemon.heartbeatAgeSec);
-	const line = `${daemon} ${theme.fg("dim", "·")} ${theme.fg("dim", `Flightdeck · stale session state from ${ageText} — restart with /skill:flightdeck session watch, or archive state file to dismiss`)}`;
+	const daemon = daemonHealthChip(theme, {
+		alive: snapshot.daemon.pidAlive,
+		everStarted: daemonEverStarted(snapshot),
+		heartbeatAgeSec: snapshot.daemon.heartbeatAgeSec,
+	});
+	const line = `${daemon} ${theme.fg("dim", "·")} ${theme.fg("dim", `Flightdeck · session state from ${ageText} — daemon stopped. Resume with /skill:flightdeck session watch, or run terminate to archive.`)}`;
+	return [truncateToWidth(line, Math.max(1, width), "…")];
+}
+
+// Awaiting-watch: tracked sessions exist but the daemon has never started
+// for this tmux session. This is the normal state between `session start`
+// and `session watch`. Friendly, non-alarming copy.
+export function renderAwaitingWatchHintLine(snapshot: FlightdeckSnapshot, theme: Theme, width: number): string[] {
+	const daemon = daemonHealthChip(theme, {
+		alive: snapshot.daemon.pidAlive,
+		everStarted: daemonEverStarted(snapshot),
+		heartbeatAgeSec: snapshot.daemon.heartbeatAgeSec,
+	});
+	const sessions = readTrackedEntries(snapshot.master);
+	const count = sessions.length;
+	const noun = count === 1 ? "session" : "sessions";
+	const line = `${daemon} ${theme.fg("dim", "·")} ${theme.fg("dim", `${count} tracked ${noun} — run /skill:flightdeck session watch to start supervising.`)}`;
 	return [truncateToWidth(line, Math.max(1, width), "…")];
 }
 
@@ -1280,6 +1301,9 @@ export default function flightdeck(pi: ExtensionAPI): void {
 					if (status === "live" || status === "terminated") {
 						if (lines.length > 0) lines.push("");
 						lines.push(...renderDashboardLines(snapshot, theme, width, cache.state, ctx.cwd, cache.paneTargetToId));
+					} else if (status === "awaiting-watch") {
+						if (lines.length > 0) lines.push("");
+						lines.push(...renderAwaitingWatchHintLine(snapshot, theme, width));
 					} else if (status === "stale") {
 						if (lines.length > 0) lines.push("");
 						lines.push(...renderStaleHintLine(snapshot, theme, width));

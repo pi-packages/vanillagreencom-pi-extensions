@@ -304,7 +304,12 @@ function cmdInitEntry(entryId: string, args: string[], mode: "entry" | "issue" =
 		id: entryId,
 		kind: fields.kind,
 		last_capture_hash: null,
-		last_polled_at: ts,
+		// Stays null until the daemon actually polls the pane. Seeding
+		// this with `ts` (spawn time) made fresh sessions look like
+		// they'd been polled, which caused the dashboard's stale-state
+		// detector to start the age clock from spawn-time and surface
+		// alarming "stale from Xm ago" copy before any polling occurred.
+		last_polled_at: null,
 		last_response_at: null,
 		launch,
 		pane_id: paneId || null,

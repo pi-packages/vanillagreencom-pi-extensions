@@ -904,7 +904,25 @@ export function isFlightdeckActive(snapshot: FlightdeckSnapshot | undefined): bo
 // failed to parse. Renders an error banner with the diagnostic so the
 // user sees "state was lost" instead of a blank "no session" view
 // (BLOCK round 3).
-export type FlightdeckSessionStatus = "live" | "stale" | "inactive" | "terminated" | "archive-error";
+// `awaiting-watch`: tracked sessions exist but the daemon has never
+// been started for this tmux session (no pid file, no heartbeat file).
+// Normal state between `session start` and `session watch`. Distinct
+// from `stale` so the dashboard can show a friendly hint instead of a
+// red "daemon dead" + "restart" framing that implies something broke.
+export type FlightdeckSessionStatus = "live" | "awaiting-watch" | "stale" | "inactive" | "terminated" | "archive-error";
+
+// True when the daemon has ever been started for this tmux session
+// (pid file exists OR heartbeat file exists). Used by the daemon-health
+// chip and the session-status predicate to distinguish "never started"
+// from "started and died".
+export function daemonEverStarted(snapshot: FlightdeckSnapshot | undefined): boolean {
+	const d = snapshot?.daemon;
+	if (!d) return false;
+	if (d.pidAlive) return true;
+	if (d.pid !== undefined && d.pid !== null) return true;
+	if (d.heartbeatExists) return true;
+	return false;
+}
 
 const TERMINAL_TRACKED_STATES = new Set<TrackedState>(["merged", "aborted", "dead", "complete", "cancelled"]);
 
@@ -949,6 +967,10 @@ export function flightdeckSessionStatus(
 	const daemonAlive = snapshot.daemon.pidAlive;
 	if (!hasLiveSessions && !daemonAlive) return "inactive";
 	if (daemonAlive) return "live";
+	// Daemon never started for this tmux session — normal state between
+	// `session start` and `session watch`. Don't flag as stale; the user
+	// hasn't tried to supervise yet.
+	if (!daemonEverStarted(snapshot)) return "awaiting-watch";
 	const staleAfterMin = options?.staleAfterMin ?? 5;
 	if (staleAfterMin <= 0) return "live";
 	const now = options?.now ?? Date.now();

@@ -13,7 +13,7 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 import { daemonHealthChip, divider, framePanel, label, sessionCompleteChip } from "./render.js";
 import { issueDomain, sessionLabel } from "./session-ui.js";
-import { ageSecondsSince, type FlightdeckSnapshot, formatAge, mergedIssueHistory } from "./state.js";
+import { ageSecondsSince, daemonEverStarted, type FlightdeckSnapshot, formatAge, mergedIssueHistory } from "./state.js";
 
 // Header chip for the dashboard / popup. Terminated sessions show a
 // green "session complete"; otherwise the normal daemon-health chip.
@@ -21,7 +21,11 @@ import { ageSecondsSince, type FlightdeckSnapshot, formatAge, mergedIssueHistory
 // `renderArchiveErrorBanner` alongside the regular daemon chip.
 export function headerChipForSnapshot(snapshot: FlightdeckSnapshot, theme: Theme): string {
 	if (snapshot.master?.terminated) return sessionCompleteChip(theme);
-	return daemonHealthChip(theme, snapshot.daemon.pidAlive, snapshot.daemon.heartbeatAgeSec);
+	return daemonHealthChip(theme, {
+		alive: snapshot.daemon.pidAlive,
+		everStarted: daemonEverStarted(snapshot),
+		heartbeatAgeSec: snapshot.daemon.heartbeatAgeSec,
+	});
 }
 
 // Overview-tab banner. Renders `✔ session complete · at <ts>` + the
