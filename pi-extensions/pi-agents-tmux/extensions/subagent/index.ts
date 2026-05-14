@@ -463,7 +463,7 @@ export default function (pi: ExtensionAPI) {
 				},
 				invalidate() {},
 				render(width: number): string[] {
-					return clampAboveEditorWidget(renderDashboardWidgetLines(dashboardState, theme, ctx.cwd, width), tui.terminal.rows, theme);
+					return clampAboveEditorWidget(renderDashboardWidgetLines(dashboardState, theme, ctx.cwd, width, runtimeRoot), tui.terminal.rows, theme);
 				},
 			};
 		}, { placement: "aboveEditor" });

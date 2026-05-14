@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { type Theme } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { loadTaskRegistrySync, taskNumberById } from "./browser.js";
 import {
 	ansiMagenta,
 	formatUsageStatsForDashboard,
@@ -227,7 +228,13 @@ export function dashboardTranscriptLabel(items: SubagentDashboardItem[], cwd: st
 // renders as "reviewer-arch 2" so two rows with the same agent name aren't
 // indistinguishable. Uses taskId for identity and start-time for occurrence
 // order; mirrors browser.ts dashboardDisplayLabels.
-function dashboardLabelsForItems(items: SubagentDashboardItem[]): Map<string, string> {
+function dashboardLabelsForItems(items: SubagentDashboardItem[], persistentTaskNumbers?: Map<string, number>): Map<string, string> {
+	// Mirror browser.ts dashboardDisplayLabels: when a persistent #N is
+	// available from the task registry, use it so the same task reads as
+	// the same `<agent> #N` in the mini widget, the /agents popup's
+	// active-list, its task-children rows, and the Inspector header.
+	// Fall back to in-memory occurrence count for items that haven't been
+	// persisted yet (rare; mid-dispatch).
 	const total = new Map<string, number>();
 	for (const item of items) total.set(item.agent, (total.get(item.agent) ?? 0) + 1);
 	const occurrence = new Map<string, number>();
@@ -241,17 +248,25 @@ function dashboardLabelsForItems(items: SubagentDashboardItem[]): Map<string, st
 	for (const item of stable) {
 		const next = (occurrence.get(item.agent) ?? 0) + 1;
 		occurrence.set(item.agent, next);
-		// Match the popup's `<agent> #N` task-numbering convention so a
-		// row reads the same in the mini widget and the full /agents popup.
-		const label = (total.get(item.agent) ?? 1) > 1 ? `${item.agent} #${next}` : item.agent;
+		const persistentN = persistentTaskNumbers?.get(item.taskId);
+		const n = persistentN ?? next;
+		const showNumber = persistentN !== undefined || (total.get(item.agent) ?? 1) > 1;
+		const label = showNumber ? `${item.agent} #${n}` : item.agent;
 		labels.set(item.taskId, label);
 	}
 	return labels;
 }
 
-export function renderDashboardWidgetLines(state: SubagentDashboardState, theme: Theme, cwd: string, width: number): string[] {
+export function renderDashboardWidgetLines(state: SubagentDashboardState, theme: Theme, cwd: string, width: number, runtimeRoot?: string): string[] {
 	const items = sortDashboardItems(Object.values(state.items));
-	const displayLabels = dashboardLabelsForItems(items);
+	// Cheap sync read of the persisted task registry once per widget render
+	// gives the mini widget the same `<agent> #N` numbers as the popup, so
+	// a task reads identically across surfaces. Skipped when runtimeRoot is
+	// missing (legacy call sites); labels fall back to local counter.
+	const persistentTaskNumbers = runtimeRoot
+		? taskNumberById(Object.values(loadTaskRegistrySync(runtimeRoot)))
+		: undefined;
+	const displayLabels = dashboardLabelsForItems(items, persistentTaskNumbers);
 	if (!dashboardEnabled(cwd) || !state.visible || items.length === 0) return [];
 	const working = items.filter((item) => isDashboardWorkingStatus(item.status)).length;
 	const done = items.filter((item) => item.status === "completed").length;

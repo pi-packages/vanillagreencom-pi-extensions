@@ -891,7 +891,16 @@ export function readTranscriptTail(transcriptPath: string | undefined, maxLines:
 // (keyed by taskId). Disambiguate the rendered label with a 1-based occurrence
 // suffix in start-time order: "reviewer-arch", "reviewer-arch 2", ... Pane
 // agents collapse to a single row per name so they never collide here.
-export function dashboardDisplayLabels(items: SubagentDashboardItem[]): Map<string, string> {
+export function dashboardDisplayLabels(items: SubagentDashboardItem[], persistentTaskNumbers?: Map<string, number>): Map<string, string> {
+	// Numbering source order:
+	//   1. persistent taskNumberById (from tasks.json) when supplied. This is
+	//      the canonical per-agent #N the popup's nested task-children and
+	//      Detail header already use, so a task reads identically across
+	//      every surface (mini widget, popup left-list, task-children,
+	//      Detail header, Chat attribution).
+	//   2. In-memory occurrence counter as a fallback for items dispatched
+	//      in this turn that haven't been persisted yet, AND so callers
+	//      that can't cheaply load the registry still get stable labels.
 	const occurrence = new Map<string, number>();
 	const total = new Map<string, number>();
 	for (const item of items) total.set(item.agent, (total.get(item.agent) ?? 0) + 1);
@@ -905,20 +914,20 @@ export function dashboardDisplayLabels(items: SubagentDashboardItem[]): Map<stri
 	for (const item of sorted) {
 		const next = (occurrence.get(item.agent) ?? 0) + 1;
 		occurrence.set(item.agent, next);
-		// Use the same `<agent> #N` form the popup's nested task-children
-		// and Detail header use, so the same task reads identically across
-		// the mini widget, the popup active-list, and the Inspector.
-		const label = (total.get(item.agent) ?? 1) > 1 ? `${item.agent} #${next}` : item.agent;
+		const persistentN = persistentTaskNumbers?.get(item.taskId);
+		const n = persistentN ?? next;
+		const showNumber = persistentN !== undefined || (total.get(item.agent) ?? 1) > 1;
+		const label = showNumber ? `${item.agent} #${n}` : item.agent;
 		labels.set(item.taskId, label);
 	}
 	return labels;
 }
 
-function renderActiveAgentList(items: SubagentDashboardItem[], ui: AgentBrowserUiState, width: number, theme: Theme, listRows: number): string[] {
+function renderActiveAgentList(items: SubagentDashboardItem[], ui: AgentBrowserUiState, width: number, theme: Theme, listRows: number, persistentTaskNumbers?: Map<string, number>): string[] {
 	const lines = [`${agentPaneTitle(theme, "Active", ui.pane === "list")} ${theme.fg("dim", `(${items.length})`)}`, ""];
 	if (ui.activeScroll > 0) lines.push(theme.fg("dim", `\u2191 ${ui.activeScroll} earlier`));
 	const visible = items.slice(ui.activeScroll, ui.activeScroll + listRows);
-	const labels = dashboardDisplayLabels(items);
+	const labels = dashboardDisplayLabels(items, persistentTaskNumbers);
 	for (const [index, item] of visible.entries()) {
 		const absoluteIndex = ui.activeScroll + index;
 		const selected = absoluteIndex === ui.activeSelected;
@@ -1212,7 +1221,7 @@ function normalizeTaskRegistryShape(parsed: unknown): PaneTaskRegistry {
 	return parsed && typeof parsed === "object" ? parsed as PaneTaskRegistry : {};
 }
 
-function loadTaskRegistrySync(runtimeRoot: string): PaneTaskRegistry {
+export function loadTaskRegistrySync(runtimeRoot: string): PaneTaskRegistry {
 	try {
 		return normalizeTaskRegistryShape(JSON.parse(fs.readFileSync(taskRegistryPath(runtimeRoot), "utf-8")));
 	} catch {
@@ -1263,7 +1272,10 @@ export function appendBgChatMessages(messages: ChatMessage[], items: SubagentDas
 	// Bg/oneshot agents skip the file bus (no inbox/outbox/.md/.json), so the
 	// file-based scan never sees them. Synthesize delegation+completion records
 	// from the dashboard item itself; the data we need is already on it.
-	const labels = dashboardDisplayLabels(items);
+	// Use the persistent task registry's #N so chat row attribution matches
+	// the popup task-children and Detail header (not the in-memory counter).
+	const persistentTaskNumbers = taskNumberById(Object.values(taskRegistry));
+	const labels = dashboardDisplayLabels(items, persistentTaskNumbers);
 	for (const item of items) {
 		if (item.kind !== "oneshot") continue;
 		const label = labels.get(item.taskId) ?? item.agent;
@@ -1472,9 +1484,15 @@ function renderActiveTabBody(items: SubagentDashboardItem[], runtimeRoot: string
 	const leftWidth = Math.max(10, Math.min(maxLeftWidth, Math.max(Math.min(AGENTS_LEFT_MIN_WIDTH, maxLeftWidth), desiredLeftWidth)));
 	const rightWidth = Math.max(1, width - leftWidth - 3);
 	const bodyRows = layout.bodyRows;
-	const left = renderActiveAgentList(items, ui, leftWidth, theme, layout.listRows);
+	// Numbering for active-list, Detail header, and Chat must match the
+	// popup task-children + Inspector header (`<agent> #N`) by reading
+	// the persisted task registry, not the in-memory counter. Small
+	// JSON; the per-render read is cheap and removes the worst
+	// inconsistency (same task showing as #2 here and #6 there).
+	const persistentTaskNumbers = taskNumberById(Object.values(loadTaskRegistrySync(runtimeRoot)));
+	const left = renderActiveAgentList(items, ui, leftWidth, theme, layout.listRows, persistentTaskNumbers);
 	const detailItem = items[ui.activeSelected];
-	const labels = dashboardDisplayLabels(items);
+	const labels = dashboardDisplayLabels(items, persistentTaskNumbers);
 	const right = renderActiveAgentDetail(detailItem, detailItem ? labels.get(detailItem.taskId) : undefined, ui, rightWidth, bodyRows, theme);
 	const lines: string[] = [];
 	const headerLine = `${theme.fg("muted", "View")}: ${theme.fg("text", "active")}  ${theme.fg("muted", "Items")}: ${items.length}`;
