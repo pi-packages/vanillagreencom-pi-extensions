@@ -101,6 +101,7 @@ export interface InventoryItem {
 	sourceName: string;
 	packageName?: string;
 	packageDir?: string;
+	packageSourceName?: string;
 	entrypoint?: string;
 	trigger?: string;
 	shadowedBy?: string;

@@ -2,12 +2,12 @@
 
 ![Extension Manager browser and settings editor](https://raw.githubusercontent.com/vanillagreencom/vstack/main/pi-extensions/pi-extension-manager/assets/extension-manager.gif)
 
-Package manager and settings editor for vstack-installed Pi packages.
+Package manager and settings editor for Pi packages installed by vstack, npm, git, or local path.
 
 ## Highlights
 
 - Browse, enable, disable, update, and uninstall packages from one popup.
-- Separate settings editor with one tab per package that exposes vstack settings.
+- Separate settings editor with one tab per package that exposes vstack settings from user/global and project scopes.
 - Diagnostics view shows status, source, install method, versions, and update state.
 - Optional notification at session start when newer versions are available.
 

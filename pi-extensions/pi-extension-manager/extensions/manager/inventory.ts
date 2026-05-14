@@ -1,13 +1,15 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { stringifyError } from "./format.js";
 import { expandHome } from "./paths.js";
 import { asRecord, loadSettingsFiles, mergedManagerState } from "./settings.js";
 import {
+	gitPackageDirCandidates,
 	isNewer,
 	loadNpmCache,
 	loadSourceIndex,
+	npmPackageDirCandidates,
 	npmInstalledVersion,
 	npmPackageNameFromSource,
 	readPackageVersionFromDir,
@@ -34,9 +36,25 @@ function readPackageManifest(dir: string): { manifest?: PackageManifest; error?:
 	}
 }
 
+function readFirstPackageManifest(dirs: string[]): { dir?: string; manifest?: PackageManifest; error?: string } {
+	const attempted: string[] = [];
+	for (const dir of dirs) {
+		attempted.push(dir);
+		if (!existsSync(dir)) continue;
+		try {
+			if (!statSync(dir).isDirectory()) continue;
+		} catch {
+			continue;
+		}
+		const read = readPackageManifest(dir);
+		return { dir, ...read };
+	}
+	return attempted.length > 0 ? { error: `package source not found: ${attempted.join(", ")}` } : { error: "package source not found" };
+}
+
 function resolveSource(source: string, baseDir: string): string {
 	const expanded = expandHome(source);
-	if (expanded.startsWith("npm:") || expanded.startsWith("git:") || expanded.startsWith("http://") || expanded.startsWith("https://")) {
+	if (expanded.startsWith("npm:") || expanded.startsWith("git:") || expanded.startsWith("http://") || expanded.startsWith("https://") || expanded.startsWith("ssh://") || expanded.startsWith("git://")) {
 		return expanded;
 	}
 	return resolve(baseDir, expanded);
@@ -183,6 +201,18 @@ function resetUpdateMetadata(item: InventoryItem): void {
 	delete item.sourceRepo;
 }
 
+function shellQuote(value: string): string {
+	return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function npmUpdateCommand(item: InventoryItem, npmName: string): string {
+	if (item.scope !== "project" || !item.packageDir) return `npm install -g ${npmName}@latest`;
+	const marker = `${sep}node_modules${sep}`;
+	const idx = item.packageDir.indexOf(marker);
+	const npmDir = idx >= 0 ? item.packageDir.slice(0, idx) : undefined;
+	return npmDir ? `(cd ${shellQuote(npmDir)} && npm install ${npmName}@latest)` : `npm install ${npmName}@latest`;
+}
+
 export function applyUpdateMetadata(items: InventoryItem[], settingsFiles: SettingsFile[], cwd: string): void {
 	const sourceIndex = loadSourceIndex(settingsFiles);
 	const npmCache = loadNpmCache();
@@ -195,13 +225,13 @@ export function applyUpdateMetadata(items: InventoryItem[], settingsFiles: Setti
 		if (npmName) {
 			item.installSource = "npm";
 			item.npmName = npmName;
-			item.installedVersion = npmInstalledVersion(npmName, cwd) ?? item.installedVersion;
+			item.installedVersion = item.installedVersion ?? npmInstalledVersion(npmName, cwd);
 			const latest = npmCache[npmName]?.version;
 			if (latest) {
 				item.latestVersion = latest;
 				item.updateSource = "npm";
 				item.updateAvailable = isNewer(latest, item.installedVersion);
-				item.updateCommand = `npm install -g ${npmName}@latest`;
+				item.updateCommand = npmUpdateCommand(item, npmName);
 			}
 			continue;
 		}
@@ -235,15 +265,25 @@ export function buildInventory(_pi: ExtensionAPI, ctx: ExtensionContext): Invent
 		for (const rawEntry of packages) {
 			const normalized = normalizePackageEntry(rawEntry, file.baseDir);
 			if (!normalized) continue;
-			const fallbackName = normalized.source.split("/").filter(Boolean).pop() ?? normalized.source;
+			const npmName = npmPackageNameFromSource(normalized.source);
+			const fallbackName = npmName ?? normalized.source.split("/").filter(Boolean).pop()?.replace(/\.git$/, "") ?? normalized.source;
 			let manifest: PackageManifest | undefined;
 			let brokenError: string | undefined;
+			let packageDir = normalized.resolved;
 			if (existsSync(normalized.resolved) && statSync(normalized.resolved).isDirectory()) {
 				const read = readPackageManifest(normalized.resolved);
 				manifest = read.manifest;
 				brokenError = read.error;
-			} else if (normalized.resolved.startsWith("npm:") || normalized.resolved.startsWith("git:") || normalized.resolved.startsWith("http")) {
-				manifest = { name: fallbackName, description: "External package source" };
+			} else if (npmName) {
+				const read = readFirstPackageManifest(npmPackageDirCandidates(npmName, file.scope, file.baseDir, ctx.cwd));
+				packageDir = read.dir ?? normalized.resolved;
+				manifest = read.manifest ?? { name: npmName, description: "External npm package source" };
+				brokenError = read.error;
+			} else if (normalized.resolved.startsWith("git:") || normalized.resolved.startsWith("http") || normalized.resolved.startsWith("ssh://") || normalized.resolved.startsWith("git://")) {
+				const read = readFirstPackageManifest(gitPackageDirCandidates(normalized.resolved, file.scope, file.baseDir));
+				packageDir = read.dir ?? normalized.resolved;
+				manifest = read.manifest ?? { name: fallbackName, description: "External git package source" };
+				brokenError = read.error;
 			} else {
 				brokenError = `package source not found: ${normalized.resolved}`;
 			}
@@ -256,13 +296,14 @@ export function buildInventory(_pi: ExtensionAPI, ctx: ExtensionContext): Invent
 				displayName: packageDisplayName(manifest ?? {}, packageName),
 				id: pkgId,
 				kind: "package",
-				packageDir: normalized.resolved,
+				packageDir,
 				packageName,
+				packageSourceName: normalized.source,
 				provider: `${file.scope}:packages`,
 				scope: file.scope,
 				settingsSchema: manifest ? settingSchema(manifest) : [],
 				sourceName: normalized.source,
-				sourcePath: normalized.resolved,
+				sourcePath: packageDir,
 				state: brokenError ? "broken" : normalized.disabledByFilter ? "disabled" : "active",
 				stateReason: brokenError ?? (normalized.disabledByFilter ? "package entry filters extensions: []" : "package listed in settings.json"),
 			};
@@ -280,15 +321,16 @@ export function buildInventory(_pi: ExtensionAPI, ctx: ExtensionContext): Invent
 			if (manifest) {
 				auditLines.push(formatPackageAudit(packageItem, manifest));
 				for (const extPath of manifest.pi?.extensions ?? []) {
-					const fullPath = resolve(normalized.resolved, extPath);
+					const fullPath = resolve(packageDir, extPath);
 					items.push({
 						description: `Entrypoint from ${packageName}`,
 						displayName: extPath,
 						entrypoint: extPath,
 						id: `extension:${packageName}:${extPath}`,
 						kind: "extension module",
-						packageDir: normalized.resolved,
+						packageDir,
 						packageName,
+						packageSourceName: normalized.source,
 						provider: `${file.scope}:packages`,
 						scope: file.scope,
 						sourceName: packageName,

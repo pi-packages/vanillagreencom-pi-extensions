@@ -412,7 +412,7 @@ export async function openManager(pi: ExtensionAPI, ctx: ExtensionCommandContext
 			if (action.type === "update-package") {
 				const item = inventory.items.find((candidate) => candidate.id === action.itemId);
 				if (!item) continue;
-				const plan = planUpdate(item, ctx);
+				const plan = planUpdate(item, inventory, ctx);
 				if (!plan) {
 					ctx.ui.notify(`${item.displayName} does not have an available update.`, "info");
 					continue;

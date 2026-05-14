@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { npmCachePath } from "./paths.js";
-import { NPM_CACHE_TTL_MS, type NpmCache, type SettingsFile, type SourceIndex, type SourceIndexEntry } from "./types.js";
+import { NPM_CACHE_TTL_MS, type NpmCache, type Scope, type SettingsFile, type SourceIndex, type SourceIndexEntry } from "./types.js";
 
 let npmCheckInFlight = false;
 
@@ -90,8 +90,69 @@ function npmRoot(args: string[], cwd?: string): string | undefined {
 	return (result.stdout ?? "").trim() || undefined;
 }
 
-function npmPackageDir(root: string, npmName: string): string {
+function npmPrefixRoot(): string | undefined {
+	const prefix = process.env.NPM_CONFIG_PREFIX || process.env.npm_config_prefix;
+	return prefix ? join(prefix, "lib", "node_modules") : undefined;
+}
+
+export function npmPackageDir(root: string, npmName: string): string {
 	return join(root, ...npmName.split("/"));
+}
+
+export function npmPackageDirCandidates(npmName: string, scope: Scope, baseDir: string, cwd: string): string[] {
+	const roots = new Set<string>();
+	if (scope === "project") {
+		roots.add(join(baseDir, "npm", "node_modules"));
+		const projectRoot = npmRoot(["--prefix", join(baseDir, "npm")], cwd);
+		if (projectRoot) roots.add(projectRoot);
+		const cwdRoot = npmRoot([], cwd);
+		if (cwdRoot) roots.add(cwdRoot);
+	} else if (scope === "user") {
+		const prefixRoot = npmPrefixRoot();
+		if (prefixRoot) roots.add(prefixRoot);
+		const globalRoot = npmRoot(["-g"], cwd);
+		if (globalRoot) roots.add(globalRoot);
+		roots.add(join(baseDir, "npm", "node_modules"));
+	} else {
+		const localRoot = npmRoot([], cwd);
+		if (localRoot) roots.add(localRoot);
+		const globalRoot = npmRoot(["-g"], cwd);
+		if (globalRoot) roots.add(globalRoot);
+	}
+	return [...roots].map((root) => npmPackageDir(root, npmName));
+}
+
+export function gitPackageDirCandidates(source: string, scope: Scope, baseDir: string): string[] {
+	if (!(source.startsWith("git:") || source.startsWith("http://") || source.startsWith("https://") || source.startsWith("ssh://") || source.startsWith("git://"))) return [];
+	let spec = source.startsWith("git:") ? source.slice("git:".length) : source;
+	const lastRef = spec.lastIndexOf("@");
+	const lastPathSeparator = Math.max(spec.lastIndexOf("/"), spec.lastIndexOf(":"));
+	if (lastRef > lastPathSeparator) spec = spec.slice(0, lastRef);
+
+	let host = "";
+	let repoPath = "";
+	try {
+		if (/^[a-z][a-z0-9+.-]*:\/\//i.test(spec)) {
+			const parsed = new URL(spec);
+			host = parsed.hostname;
+			repoPath = parsed.pathname.replace(/^\/+/, "");
+		} else {
+			const ssh = spec.match(/^[^@]+@([^:]+):(.+)$/);
+			if (ssh) {
+				host = ssh[1] ?? "";
+				repoPath = ssh[2] ?? "";
+			} else {
+				const parts = spec.split("/").filter(Boolean);
+				host = parts.shift() ?? "";
+				repoPath = parts.join("/");
+			}
+		}
+	} catch {
+		return [];
+	}
+	if (!host || !repoPath) return [];
+	repoPath = repoPath.replace(/\.git$/, "");
+	return [join(baseDir, "git", host, ...repoPath.split("/").filter(Boolean))];
 }
 
 export function npmInstalledVersion(npmName: string, cwd: string): string | undefined {

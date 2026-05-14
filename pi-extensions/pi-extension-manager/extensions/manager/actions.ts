@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { spawnSync } from "node:child_process";
+import { join } from "node:path";
 import { removeAppendSystemBlockForUninstall, syncAppendSystemForPackage } from "./append-system.js";
 import { stringifyError } from "./format.js";
 import { normalizePackageEntry } from "./inventory.js";
@@ -13,6 +14,15 @@ import {
 	type UninstallPlan,
 	type UpdatePlan,
 } from "./types.js";
+
+function npmWorkingDir(item: InventoryItem, inventory: Inventory, ctx: ExtensionCommandContext | ExtensionContext): string {
+	const file = findSettingsFile(inventory.settingsFiles, item.scope);
+	return item.scope === "project" ? join(file.baseDir, "npm") : ctx.cwd;
+}
+
+function shellQuote(value: string): string {
+	return `'${value.replace(/'/g, "'\\''")}'`;
+}
 
 export function planUninstall(item: InventoryItem, inventory: Inventory, ctx: ExtensionCommandContext | ExtensionContext): UninstallPlan | undefined {
 	if (item.kind !== "package" || !item.packageName) return undefined;
@@ -29,10 +39,11 @@ export function planUninstall(item: InventoryItem, inventory: Inventory, ctx: Ex
 	const npmName = npmPackageNameFromSource(item.sourceName);
 	if (npmName) {
 		const gFlag = item.scope === "user" ? " -g" : "";
+		const cwd = npmWorkingDir(item, inventory, ctx);
 		return {
 			item,
-			method: { kind: "npm", npmName, scope: item.scope, cwd: ctx.cwd },
-			command: `npm uninstall${gFlag} ${npmName}`,
+			method: { kind: "npm", npmName, scope: item.scope, cwd },
+			command: item.scope === "project" ? `(cd ${shellQuote(cwd)} && npm uninstall ${npmName})` : `npm uninstall${gFlag} ${npmName}`,
 			description: "Installed via npm — runs npm uninstall, then strips the npm: entry from Pi settings.json.",
 		};
 	}
@@ -51,15 +62,20 @@ function removePackageEntryFromSettings(item: InventoryItem, files: SettingsFile
 	const next = file.json.packages.filter((entry) => {
 		const normalized = normalizePackageEntry(entry, file.baseDir);
 		if (!normalized) return true;
-		if (normalized.resolved === item.sourcePath) return false;
-		if (normalized.source === item.sourceName) return false;
-		return true;
+		return !packageEntryMatches(item, normalized);
 	});
 	if (next.length === before) return false;
 	if (next.length === 0) delete file.json.packages;
 	else file.json.packages = next;
 	writeSettingsFile(file);
 	return true;
+}
+
+function packageEntryMatches(item: InventoryItem, normalized: { source: string; resolved: string }): boolean {
+	return normalized.resolved === item.sourcePath
+		|| normalized.resolved === item.packageDir
+		|| normalized.source === item.sourceName
+		|| normalized.source === item.packageSourceName;
 }
 
 export function runUninstall(plan: UninstallPlan, inventory: Inventory): { ok: boolean; message: string } {
@@ -101,7 +117,7 @@ export function runUninstall(plan: UninstallPlan, inventory: Inventory): { ok: b
 		: { ok: false, message: `Could not find a matching entry for ${plan.item.sourceName} in ${plan.item.scope} settings.json.` };
 }
 
-export function planUpdate(item: InventoryItem, ctx: ExtensionCommandContext | ExtensionContext): UpdatePlan | undefined {
+export function planUpdate(item: InventoryItem, inventory: Inventory, ctx: ExtensionCommandContext | ExtensionContext): UpdatePlan | undefined {
 	if (item.kind !== "package" || !item.packageName || !item.updateAvailable) return undefined;
 	if (item.updateSource === "vstack" && item.sourceRepo) {
 		const scopeFlag = item.scope === "user" ? " --global" : "";
@@ -113,10 +129,11 @@ export function planUpdate(item: InventoryItem, ctx: ExtensionCommandContext | E
 		};
 	}
 	if (item.updateSource === "npm" && item.npmName) {
+		const cwd = npmWorkingDir(item, inventory, ctx);
 		return {
 			item,
-			method: { kind: "npm", npmName: item.npmName, scope: item.scope, cwd: ctx.cwd },
-			command: `npm install -g ${item.npmName}@latest`,
+			method: { kind: "npm", npmName: item.npmName, scope: item.scope, cwd },
+			command: item.scope === "project" ? `(cd ${shellQuote(cwd)} && npm install ${item.npmName}@latest)` : `npm install -g ${item.npmName}@latest`,
 			description: "Installed via npm — installs the latest published package version, then Pi can load it after /reload or restart.",
 		};
 	}
@@ -136,7 +153,8 @@ export function runUpdate(plan: UpdatePlan): { ok: boolean; message: string } {
 		}
 		return { ok: true, message: `Updated via vstack: ${plan.item.displayName}.` };
 	}
-	const result = spawnSync("npm", ["install", "-g", `${plan.method.npmName}@latest`], { encoding: "utf8", cwd: plan.method.cwd });
+	const args = plan.method.scope === "user" ? ["install", "-g", `${plan.method.npmName}@latest`] : ["install", `${plan.method.npmName}@latest`];
+	const result = spawnSync("npm", args, { encoding: "utf8", cwd: plan.method.cwd });
 	if (result.error) return { ok: false, message: `Failed to launch npm: ${stringifyError(result.error)}` };
 	if ((result.status ?? 1) !== 0) {
 		const stderr = (result.stderr ?? "").trim() || (result.stdout ?? "").trim() || `exit ${result.status}`;
@@ -151,7 +169,7 @@ function setPackageFiltered(item: InventoryItem, files: SettingsFile[], disabled
 	let changed = false;
 	const next = packages.map((entry) => {
 		const normalized = normalizePackageEntry(entry, file.baseDir);
-		if (!normalized || normalized.resolved !== item.sourcePath) return entry;
+		if (!normalized || !packageEntryMatches(item, normalized)) return entry;
 		changed = true;
 		const record = asRecord(entry);
 		if (disabled) {
@@ -179,7 +197,7 @@ function setPackageExtensionFiltered(item: InventoryItem, files: SettingsFile[],
 	let changed = false;
 	const next = packages.map((entry) => {
 		const normalized = normalizePackageEntry(entry, file.baseDir);
-		if (!normalized || normalized.resolved !== item.packageDir) return entry;
+		if (!normalized || !packageEntryMatches(item, normalized)) return entry;
 		changed = true;
 		const record = asRecord(entry);
 		const filters = Array.isArray(record?.extensions) ? record!.extensions.filter((value): value is string => typeof value === "string") : [];
