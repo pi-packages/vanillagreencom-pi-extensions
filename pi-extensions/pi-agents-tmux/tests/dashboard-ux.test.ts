@@ -1,0 +1,251 @@
+import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import test from "node:test";
+import type { AgentConfig } from "../extensions/subagent/agents.js";
+import {
+	appendBgChatMessages,
+	buildAgentRows,
+	historyRecordLabel,
+	readTranscriptTail,
+	taskNumberById,
+	traceViewerItems,
+} from "../extensions/subagent/browser.js";
+import { COMPLETION_SUMMARY_UNAVAILABLE, extractLastAssistantTextFromTranscriptContent, oneLinePreview } from "../extensions/subagent/format.js";
+import { oneShotTranscriptPath } from "../extensions/subagent/paths.js";
+import { formatTaskRecordResult } from "../extensions/subagent/renderers.js";
+import {
+	backfillTaskSummaryFromTranscript,
+	readTaskRegistry,
+	updateTaskRegistry,
+} from "../extensions/subagent/tasks.js";
+import type { ChatMessage, PaneTaskRecord, SubagentDashboardItem } from "../extensions/subagent/types.js";
+
+function tempRuntime(): string {
+	return mkdtempSync(join(tmpdir(), "pi-agents-dashboard-ux-"));
+}
+
+function record(agent: string, taskId: string, createdAt: string, patch: Partial<PaneTaskRecord> = {}): PaneTaskRecord {
+	return {
+		taskId,
+		agent,
+		task: `Task for ${agent}`,
+		status: "completed",
+		createdAt,
+		completedAt: createdAt,
+		updatedAt: createdAt,
+		...patch,
+	};
+}
+
+function agent(name: string, pane = false): AgentConfig {
+	return { name, pane, description: `${name} agent`, systemPrompt: "", source: "project", filePath: `${name}.md` };
+}
+
+test("completed one-shot record backfills summary from transcript final assistant text", async () => {
+	const runtimeRoot = tempRuntime();
+	const taskId = "reviewer-arch-1700000000-77abfc41";
+	const transcriptPath = oneShotTranscriptPath(runtimeRoot, "reviewer-arch", taskId);
+	mkdirSync(dirname(transcriptPath), { recursive: true });
+	writeFileSync(transcriptPath, [
+		JSON.stringify({ type: "message", message: { role: "assistant", content: [{ type: "text", text: "Early output" }] } }),
+		JSON.stringify({ ts: "2026-05-14T05:02:00.000Z", event: { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Final summary\nwith details" }] } } }),
+	].join("\n"));
+	await updateTaskRegistry(runtimeRoot, (records) => {
+		records[taskId] = record("reviewer-arch", taskId, "2026-05-14T05:00:00.000Z", { transcriptPath });
+	});
+
+	const result = await backfillTaskSummaryFromTranscript(runtimeRoot, (await readTaskRegistry(runtimeRoot))[taskId]!);
+	assert.equal(result.updated, true);
+	assert.equal(result.record.summary, "Final summary\nwith details");
+	assert.equal((await readTaskRegistry(runtimeRoot))[taskId]?.summary, "Final summary\nwith details");
+});
+
+test("summary backfill skips corrupt transcript without changing record", async () => {
+	const runtimeRoot = tempRuntime();
+	const taskId = "reviewer-arch-corrupt";
+	const transcriptPath = join(runtimeRoot, "corrupt.jsonl");
+	writeFileSync(transcriptPath, "{not json\n");
+	const taskRecord = record("reviewer-arch", taskId, "2026-05-14T05:00:00.000Z", { transcriptPath });
+	await updateTaskRegistry(runtimeRoot, (records) => { records[taskId] = taskRecord; });
+
+	const result = await backfillTaskSummaryFromTranscript(runtimeRoot, taskRecord);
+	assert.equal(result.updated, false);
+	assert.deepEqual(result.record, taskRecord);
+	assert.deepEqual((await readTaskRegistry(runtimeRoot))[taskId], taskRecord);
+});
+
+test("summary backfill skips missing transcript without changing record", async () => {
+	const runtimeRoot = tempRuntime();
+	const taskId = "reviewer-arch-missing";
+	const taskRecord = record("reviewer-arch", taskId, "2026-05-14T05:00:00.000Z", { transcriptPath: join(runtimeRoot, "missing.jsonl") });
+	await updateTaskRegistry(runtimeRoot, (records) => { records[taskId] = taskRecord; });
+
+	const result = await backfillTaskSummaryFromTranscript(runtimeRoot, taskRecord);
+	assert.equal(result.updated, false);
+	assert.deepEqual(result.record, taskRecord);
+	assert.deepEqual((await readTaskRegistry(runtimeRoot))[taskId], taskRecord);
+});
+
+test("blank summary with valid transcript but no assistant text is removed", async () => {
+	const runtimeRoot = tempRuntime();
+	const taskId = "reviewer-arch-blank";
+	const transcriptPath = join(runtimeRoot, "no-assistant.jsonl");
+	writeFileSync(transcriptPath, JSON.stringify({ type: "message", message: { role: "user", content: "hello" } }));
+	const taskRecord = record("reviewer-arch", taskId, "2026-05-14T05:00:00.000Z", { summary: "   ", transcriptPath });
+	await updateTaskRegistry(runtimeRoot, (records) => { records[taskId] = taskRecord; });
+
+	const result = await backfillTaskSummaryFromTranscript(runtimeRoot, taskRecord);
+	assert.equal(result.updated, true);
+	assert.equal(Object.prototype.hasOwnProperty.call(result.record, "summary"), false);
+	assert.equal(Object.prototype.hasOwnProperty.call((await readTaskRegistry(runtimeRoot))[taskId]!, "summary"), false);
+});
+
+test("existing nonblank summary is not overwritten by transcript backfill", async () => {
+	const runtimeRoot = tempRuntime();
+	const taskId = "reviewer-arch-existing";
+	const transcriptPath = join(runtimeRoot, "assistant.jsonl");
+	writeFileSync(transcriptPath, JSON.stringify({ type: "message", message: { role: "assistant", content: [{ type: "text", text: "transcript text" }] } }));
+	const taskRecord = record("reviewer-arch", taskId, "2026-05-14T05:00:00.000Z", { summary: "some text", transcriptPath });
+	await updateTaskRegistry(runtimeRoot, (records) => { records[taskId] = taskRecord; });
+
+	const result = await backfillTaskSummaryFromTranscript(runtimeRoot, taskRecord);
+	assert.equal(result.updated, false);
+	assert.equal(result.record.summary, "some text");
+	assert.equal((await readTaskRegistry(runtimeRoot))[taskId]?.summary, "some text");
+});
+
+test("chat completion synthesis never echoes delegation prompt and annotates task id data", () => {
+	const taskId = "reviewer-test-1700000000-77abfc41";
+	const item: SubagentDashboardItem = {
+		agent: "reviewer-test",
+		kind: "oneshot",
+		message: "Check test coverage",
+		status: "completed",
+		task: "Check test coverage",
+		taskId,
+		startedAt: "2026-05-14T05:00:00.000Z",
+		completedAt: "2026-05-14T05:02:00.000Z",
+		updatedAt: "2026-05-14T05:02:00.000Z",
+	};
+	const messages: ChatMessage[] = [];
+	appendBgChatMessages(messages, [item]);
+
+	const completion = messages.find((message) => message.kind === "completion");
+	assert.equal(completion?.body, COMPLETION_SUMMARY_UNAVAILABLE);
+	assert.equal(completion?.taskId, taskId);
+});
+
+test("full persisted one-shot summary feeds chat history and result formatting", async () => {
+	const taskId = "reviewer-arch-1700000000-77abfc41";
+	const longSummary = Array.from({ length: 80 }, (_, index) => `finding-${index}`).join(" ");
+	assert.ok(longSummary.length > 600);
+	const taskRecord = record("reviewer-arch", taskId, "2026-05-14T05:00:00.000Z", {
+		summary: longSummary,
+		transcriptPath: "/tmp/reviewer-arch.jsonl",
+	});
+	const item: SubagentDashboardItem = {
+		agent: "reviewer-arch",
+		kind: "oneshot",
+		message: oneLinePreview(longSummary, 120),
+		status: "completed",
+		task: taskRecord.task,
+		taskId,
+		startedAt: taskRecord.createdAt,
+		completedAt: taskRecord.completedAt,
+		updatedAt: taskRecord.updatedAt!,
+	};
+	const messages: ChatMessage[] = [];
+	appendBgChatMessages(messages, [item], { [taskId]: taskRecord });
+
+	assert.equal(messages.find((message) => message.kind === "completion")?.body, longSummary);
+	assert.match((await traceViewerItems(taskRecord))[0]!.text, new RegExp(longSummary.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+	assert.match(formatTaskRecordResult(taskRecord), new RegExp(longSummary.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("persisted summary equal to task text is not suppressed", () => {
+	const taskId = "reviewer-arch-echo";
+	const task = "repeat this exact sentence";
+	const taskRecord = record("reviewer-arch", taskId, "2026-05-14T05:00:00.000Z", { task, summary: task });
+	const item: SubagentDashboardItem = {
+		agent: "reviewer-arch",
+		kind: "oneshot",
+		message: task,
+		messageProvenance: "persisted",
+		status: "completed",
+		task,
+		taskId,
+		startedAt: taskRecord.createdAt,
+		completedAt: taskRecord.completedAt,
+		updatedAt: taskRecord.updatedAt!,
+	};
+	const messages: ChatMessage[] = [];
+	appendBgChatMessages(messages, [item], { [taskId]: taskRecord });
+
+	assert.equal(messages.find((message) => message.kind === "completion")?.body, task);
+});
+
+test("task echo fallback is suppressed but different fallback renders", () => {
+	const taskId = "reviewer-arch-fallback";
+	const task = "review this exact text";
+	const echoItem: SubagentDashboardItem = {
+		agent: "reviewer-arch",
+		kind: "oneshot",
+		message: task,
+		messageProvenance: "task-echo-fallback",
+		status: "completed",
+		task,
+		taskId,
+		startedAt: "2026-05-14T05:00:00.000Z",
+		completedAt: "2026-05-14T05:01:00.000Z",
+		updatedAt: "2026-05-14T05:01:00.000Z",
+	};
+	const differentItem = { ...echoItem, taskId: "reviewer-arch-different", message: "actual completion body" };
+	const messages: ChatMessage[] = [];
+	appendBgChatMessages(messages, [echoItem, differentItem]);
+
+	assert.equal(messages.find((message) => message.taskId === echoItem.taskId && message.kind === "completion")?.body, COMPLETION_SUMMARY_UNAVAILABLE);
+	assert.equal(messages.find((message) => message.taskId === differentItem.taskId && message.kind === "completion")?.body, "actual completion body");
+});
+
+test("history labels number repeated same-agent tasks latest-first friendly", () => {
+	const first = record("reviewer-arch", "reviewer-arch-1700000000-11111111", "2026-05-14T05:00:00.000Z");
+	const second = record("reviewer-arch", "reviewer-arch-1700000120-77abfc41", "2026-05-14T05:02:00.000Z");
+	const numbers = taskNumberById([second, first]);
+
+	assert.equal(numbers.get(first.taskId), 1);
+	assert.equal(numbers.get(second.taskId), 2);
+	assert.match(historyRecordLabel(second, numbers), /reviewer-arch #2 · \d{2}:\d{2} · 77abfc41/);
+});
+
+test("agent rows include pane task children sharing one transcript", () => {
+	const sessionFile = join(tempRuntime(), "sessions", "planner.jsonl");
+	const first = record("planner", "planner-1700000000-aaaaaaaa", "2026-05-14T05:00:00.000Z", { kind: "pane", paneId: "%1", transcriptPath: sessionFile });
+	const second = record("planner", "planner-1700000120-bbbbbbbb", "2026-05-14T05:02:00.000Z", { kind: "pane", paneId: "%1", transcriptPath: sessionFile });
+	const rows = buildAgentRows([agent("planner", true)], "", new Map(), [], { [first.taskId]: first, [second.taskId]: second });
+
+	assert.equal(rows[0]?.rowType, "agent");
+	const taskRows = rows.filter((row) => row.rowType === "task");
+	assert.equal(taskRows.length, 2);
+	assert.deepEqual(taskRows.map((row) => row.item?.transcriptPath), [sessionFile, sessionFile]);
+	assert.match(taskRows[0]!.label, /#2/);
+	assert.match(taskRows[1]!.label, /#1/);
+});
+
+test("transcript tail preserves multiline assistant text and tool JSON structure", () => {
+	const runtimeRoot = tempRuntime();
+	const transcriptPath = join(runtimeRoot, "transcript.jsonl");
+	writeFileSync(transcriptPath, [
+		JSON.stringify({ ts: "2026-05-14T05:00:00.000Z", event: { type: "turn_start" } }),
+		JSON.stringify({ ts: "2026-05-14T05:00:01.000Z", event: { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "line one\nline two" }] } } }),
+		JSON.stringify({ ts: "2026-05-14T05:00:02.000Z", event: { type: "message_end", message: { role: "assistant", content: [{ type: "toolCall", name: "bash", arguments: { command: "echo hi" } }] } } }),
+	].join("\n"));
+
+	const tail = readTranscriptTail(transcriptPath, 40).join("\n");
+	assert.match(tail, /assistant/);
+	assert.match(tail, /line one\nline two/);
+	assert.match(tail, /tool call bash/);
+	assert.match(tail, /"command": "echo hi"/);
+	assert.equal(extractLastAssistantTextFromTranscriptContent(tail), undefined);
+});

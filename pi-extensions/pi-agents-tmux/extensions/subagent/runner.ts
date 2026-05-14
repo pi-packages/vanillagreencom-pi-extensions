@@ -725,16 +725,19 @@ async function runSingleAgentAttempt(
 		if (wasAborted) {
 			currentResult.stopReason = "aborted";
 			currentResult.errorMessage = "Agent was aborted";
+			const summary = "Agent was aborted before completion.";
 			emitSubagentEvent(pi, "subagents:failed", {
 				mode: "oneshot",
 				agent: agent.name,
 				taskId: oneShotTaskId,
 				task,
 				status: "aborted",
+				summary,
 				runtimeRoot,
 				transcriptPath,
 				model: currentResult.model,
 				usage: currentResult.usage,
+				error: currentResult.errorMessage || "Agent was aborted",
 				sessionKey: session.key,
 				sessionPath: session.path,
 				ephemeralSession: session.ephemeral,
@@ -780,12 +783,14 @@ async function runSingleAgentAttempt(
 			return currentResult;
 		}
 		const failed = exitCode !== 0 || currentResult.stopReason === "error" || currentResult.stopReason === "aborted";
+		const finalOutput = getFinalOutput(currentResult.messages);
 		emitSubagentEvent(pi, failed ? "subagents:failed" : "subagents:completed", {
 			mode: "oneshot",
 			agent: agent.name,
 			taskId: oneShotTaskId,
 			task,
 			status: failed ? "failed" : "completed",
+			...(finalOutput ? { summary: finalOutput, finalOutput } : {}),
 			runtimeRoot,
 			transcriptPath,
 			model: currentResult.model,

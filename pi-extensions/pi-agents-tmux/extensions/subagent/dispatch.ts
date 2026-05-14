@@ -1,6 +1,6 @@
 import type { AgentToolResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { AgentConfig, AgentScope } from "./agents.js";
-import { getFinalOutput, oneLinePreview } from "./format.js";
+import { COMPLETION_SUMMARY_UNAVAILABLE, getFinalOutput, normalizeSummaryText } from "./format.js";
 import { runPersistentPaneAgent } from "./pane.js";
 import {
 	cloneMessagesForDetails,
@@ -12,6 +12,7 @@ import {
 } from "./runner.js";
 import { createOneShotSessionKey } from "./sessions.js";
 import { settingNumber } from "./settings.js";
+import { readTaskRegistry } from "./tasks.js";
 import {
 	DEFAULT_RESULT_MAX_BYTES,
 	DEFAULT_RESULT_MAX_LINES,
@@ -152,6 +153,32 @@ function singleResultNeedsCompletion(result: SingleResult): boolean {
 	return singleResultStatus(result) === "needs_completion";
 }
 
+function dashboardMessageForOneShotResult(result: SingleResult, persistedSummary?: string): string {
+	const persisted = normalizeSummaryText(persistedSummary);
+	if (persisted) return persisted;
+	const finalOutput = getFinalOutput(result.messages);
+	if (finalOutput.trim()) return finalOutput;
+	return singleResultStatus(result) === "running" ? result.task : COMPLETION_SUMMARY_UNAVAILABLE;
+}
+
+function dashboardMessageProvenanceForOneShotResult(result: SingleResult, persistedSummary?: string): SubagentDashboardItem["messageProvenance"] {
+	if (normalizeSummaryText(persistedSummary) || getFinalOutput(result.messages).trim()) return "persisted";
+	return singleResultStatus(result) === "running" ? "task-echo-fallback" : "placeholder";
+}
+
+async function persistedSummaryForOneShotResult(runtimeRoot: string, result: SingleResult): Promise<string | undefined> {
+	if (!result.taskId) return undefined;
+	try {
+		return (await readTaskRegistry(runtimeRoot))[result.taskId]?.summary;
+	} catch {
+		return undefined;
+	}
+}
+
+async function dashboardMessageForCompletedOneShotResult(runtimeRoot: string, result: SingleResult): Promise<string> {
+	return dashboardMessageForOneShotResult(result, await persistedSummaryForOneShotResult(runtimeRoot, result));
+}
+
 function needsCompletionMessage(result: SingleResult): string {
 	const reason = result.needsCompletionReason ? ` (${result.needsCompletionReason})` : "";
 	return result.errorMessage || `Agent needs completion${reason}; inspect result details and worker cwd state.`;
@@ -230,7 +257,8 @@ export async function runChainDispatch(
 			flow.updateDashboard({
 				agent: result.agent,
 				kind: "oneshot",
-				message: oneLinePreview(getFinalOutput(result.messages), 120) || result.task,
+				message: await dashboardMessageForCompletedOneShotResult(flow.runtimeRoot, result),
+				messageProvenance: dashboardMessageProvenanceForOneShotResult(result, await persistedSummaryForOneShotResult(flow.runtimeRoot, result)),
 				model: result.model,
 				status: singleResultStatus(result),
 				task: result.task,
@@ -343,11 +371,13 @@ export async function runParallelDispatch(
 
 	const maxConcurrency = Math.max(1, Math.floor(settingNumber("maxConcurrency", MAX_CONCURRENCY, flow.cwd)));
 	const results = await mapInBatchesWithConcurrencyLimit(parallelTasks, parallelBatchSize, maxConcurrency, async (t, index) => {
-		const updateOneshotDashboard = (item: SingleResult) => {
+		const updateOneshotDashboard = async (item: SingleResult, usePersistedSummary = false) => {
+			const persistedSummary = usePersistedSummary ? await persistedSummaryForOneShotResult(flow.runtimeRoot, item) : undefined;
 			flow.updateDashboard({
 				agent: item.agent,
 				kind: "oneshot",
-				message: oneLinePreview(getFinalOutput(item.messages), 120) || item.task,
+				message: dashboardMessageForOneShotResult(item, persistedSummary),
+				messageProvenance: dashboardMessageProvenanceForOneShotResult(item, persistedSummary),
 				model: item.model,
 				status: singleResultStatus(item),
 				task: item.task,
@@ -390,7 +420,7 @@ export async function runParallelDispatch(
 					(partial) => {
 						if (partial.details?.results[0]) {
 							allResults[index] = partial.details.results[0];
-							updateOneshotDashboard(partial.details.results[0]);
+							void updateOneshotDashboard(partial.details.results[0]);
 							emitParallelUpdate();
 						}
 					},
@@ -398,7 +428,7 @@ export async function runParallelDispatch(
 					t.sessionKey,
 				);
 		allResults[index] = result;
-		if (!taskAgent?.pane) updateOneshotDashboard(result);
+		if (!taskAgent?.pane) await updateOneshotDashboard(result, true);
 		emitParallelUpdate();
 		return result;
 	});
@@ -476,7 +506,8 @@ export async function runSingleDispatch(
 		flow.updateDashboard({
 			agent: result.agent,
 			kind: "oneshot",
-			message: oneLinePreview(getFinalOutput(result.messages), 120) || result.task,
+			message: await dashboardMessageForCompletedOneShotResult(flow.runtimeRoot, result),
+			messageProvenance: dashboardMessageProvenanceForOneShotResult(result, await persistedSummaryForOneShotResult(flow.runtimeRoot, result)),
 			model: result.model,
 			status: singleResultStatus(result),
 			task: result.task,

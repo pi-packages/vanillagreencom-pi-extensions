@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { atomicWriteFile, withCrossProcessFileLock } from "./file-lock.js";
-import { stringifyError } from "./format.js";
+import { readLastAssistantTextFromTranscript, stringifyError } from "./format.js";
 import { safeFileName } from "./names.js";
 import {
 	completionArchiveDir,
@@ -180,6 +180,64 @@ export function appendUniqueDiagnostic(existing: string[] | undefined, diagnosti
 	const diagnostics = [...(existing ?? [])];
 	if (!diagnostics.includes(compact)) diagnostics.push(compact);
 	return diagnostics.slice(-8);
+}
+
+export function taskNeedsSummaryBackfill(record: PaneTaskRecord): boolean {
+	return isTerminalTaskStatus(record.status) && !record.summary?.trim() && Boolean(record.transcriptPath);
+}
+
+function hasBlankSummaryField(record: PaneTaskRecord): boolean {
+	if (!Object.prototype.hasOwnProperty.call(record, "summary")) return false;
+	const value = (record as { summary?: unknown }).summary;
+	return value === null || value === undefined || (typeof value === "string" && value.trim() === "");
+}
+
+function omitSummary(record: PaneTaskRecord): PaneTaskRecord {
+	const { summary: _summary, ...rest } = record;
+	return rest;
+}
+
+export async function backfillTaskSummaryFromTranscript(
+	runtimeRoot: string,
+	record: PaneTaskRecord,
+	options: { timeoutMs?: number; maxBytes?: number } = {},
+): Promise<{ diagnostic?: string; record: PaneTaskRecord; updated: boolean }> {
+	if (!taskNeedsSummaryBackfill(record)) return { record, updated: false };
+	let summary: string | undefined;
+	try {
+		summary = await readLastAssistantTextFromTranscript(record.transcriptPath, { timeoutMs: options.timeoutMs ?? 5_000, maxBytes: options.maxBytes });
+	} catch {
+		return { record, updated: false };
+	}
+	if (!summary) {
+		if (!hasBlankSummaryField(record)) return { record, updated: false };
+		let updated = omitSummary(record);
+		await updateTaskRegistry(runtimeRoot, (records) => {
+			const existing = records[record.taskId] ?? record;
+			if (!hasBlankSummaryField(existing)) {
+				updated = existing;
+				return;
+			}
+			updated = { ...omitSummary(existing), updatedAt: new Date().toISOString() };
+			records[record.taskId] = updated;
+		});
+		return { record: updated, updated: updated.summary === undefined };
+	}
+	let updated = record;
+	await updateTaskRegistry(runtimeRoot, (records) => {
+		const existing = records[record.taskId] ?? record;
+		if (existing.summary?.trim()) {
+			updated = existing;
+			return;
+		}
+		updated = {
+			...existing,
+			summary,
+			updatedAt: new Date().toISOString(),
+		};
+		records[record.taskId] = updated;
+	});
+	return { record: updated, updated: updated.summary === summary };
 }
 
 export function completionParseErrorMessage(filePath: string, error: unknown): string {
