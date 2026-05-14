@@ -954,15 +954,22 @@ function renderActiveAgentDetail(item: SubagentDashboardItem | undefined, displa
 	const titleLine = `${agentPaneTitle(theme, "Detail", ui.pane === "inspector")} ${ansiMagenta(theme.bold(nameForTitle))} ${dashboardStatusText(item, theme)} ${theme.fg("dim", dashboardKindLabel(item.kind))}`;
 	const body: string[] = [];
 	body.push(...wrap(`${theme.fg("muted", "Task ID")}: ${theme.fg("dim", item.taskId)}`));
-	if (item.kind === "pane" && item.transcriptPath) {
-		body.push(...wrap(`${theme.fg("muted", "Transcript")}: ${theme.fg("dim", "shared transcript for pane tasks")}`));
+	// Show the full transcript file path at the top so users always have
+	// a one-line pointer to inspect the raw session record themselves.
+	// Pane agents share one transcript across multiple tasks; flag that
+	// explicitly so the path isn't misread as task-scoped.
+	if (item.transcriptPath) {
+		const sharedTag = item.kind === "pane" ? theme.fg("dim", " (shared by pane tasks)") : "";
+		const path = compactPath(item.transcriptPath, { maxChars: Number.POSITIVE_INFINITY });
+		body.push(...wrapPlainNoEllipsis(`Transcript: ${path}`, safeWidth).map((line, idx) =>
+			idx === 0 ? `${theme.fg("muted", "Transcript")}: ${theme.fg("dim", line.replace(/^Transcript:\s*/, ""))}${sharedTag}` : theme.fg("dim", line),
+		));
 	}
 	body.push("");
 	if (item.task) {
 		body.push(...wrap(theme.fg("accent", theme.bold("Task:"))));
 		for (const raw of item.task.split(/\r?\n/)) body.push(...renderTraceContentLine(raw, "task", safeWidth, theme));
 	}
-	if (item.transcriptPath) body.push(...wrapPlainNoEllipsis(`Transcript: ${compactPath(item.transcriptPath, { maxChars: Number.POSITIVE_INFINITY })}`, safeWidth).map((line) => theme.fg("dim", line)));
 	if (item.usage) {
 		const usageLine = formatUsageStatsForDashboard(item.usage).join(" \u00b7 ");
 		if (usageLine) body.push(...wrap(`${theme.fg("muted", "Usage")}: ${theme.fg("dim", usageLine)}`));
@@ -972,14 +979,6 @@ function renderActiveAgentDetail(item: SubagentDashboardItem | undefined, displa
 		body.push(...wrap(theme.fg("accent", theme.bold("Latest Message"))));
 		const wrapped = item.message.split(/\r?\n/).flatMap((line) => renderTraceContentLine(line, "summary", safeWidth, theme));
 		body.push(...wrapped.slice(0, 8));
-	}
-	body.push("");
-	body.push(...wrap(theme.fg("accent", theme.bold("Transcript Tail"))));
-	const tail = readTranscriptTail(item.transcriptPath, 400);
-	if (tail.length === 0) {
-		body.push(...wrap(theme.fg("dim", "(transcript empty or unavailable)")));
-	} else {
-		for (const line of tail) body.push(...renderTraceContentLine(line, "transcript", safeWidth, theme));
 	}
 	const allLines: string[] = [titleLine, ""];
 	const visibleBodyRows = Math.max(1, rows - 2);
