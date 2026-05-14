@@ -160,15 +160,35 @@ export interface UsageStats {
 	turns: number;
 }
 
+export interface AttemptSummary {
+	attempt: number;
+	errorEnvelope?: string;
+	errorMessage?: string;
+	exitCode: number;
+	sessionKey?: string;
+	sessionPath?: string;
+	stderr?: string;
+	stopReason?: string;
+	taskId?: string;
+	transcriptPath?: string;
+}
+
 export interface SingleResult {
 	agent: string;
 	agentSource: "user" | "project" | "unknown";
 	task: string;
 	exitCode: number;
+	attempt?: number;
+	attempts?: AttemptSummary[];
+	errorEnvelope?: string;
 	messages: Message[];
 	stderr: string;
 	usage: UsageStats;
 	model?: string;
+	sessionKey?: string;
+	sessionKeyExplicit?: boolean;
+	sessionPath?: string;
+	ephemeralSession?: boolean;
 	taskId?: string;
 	paneId?: string;
 	queuedTaskFile?: string;
@@ -189,6 +209,15 @@ export interface SubagentDetails {
 	agentScope: AgentScope;
 	projectAgentsDir: string | null;
 	results: SingleResult[];
+	inventoryError?: {
+		available: {
+			allowed: string[];
+			project: string[];
+			user: string[];
+		};
+		missing: string[];
+		scope: AgentScope;
+	};
 	fullOutputError?: string;
 	fullOutputPath?: string;
 	truncation?: TruncationResult;
@@ -364,6 +393,22 @@ export interface GetSubagentResultDetails {
 	notes?: string;
 	diagnostics?: string[];
 	completionMessageEmitted?: boolean;
+	waitFor?: "completion" | "idle";
+	waitTimedOut?: boolean;
+}
+
+export interface WaitForSubagentIdleDetails {
+	agent: string;
+	bridgePid?: string;
+	bridgeSocket?: string;
+	isIdle?: boolean;
+	paneId?: string;
+	runtimeRoot: string;
+	samples: number;
+	sessionFile?: string;
+	status: "idle-after-busy" | "never-busy" | "timeout";
+	timedOut: boolean;
+	transitioned: boolean;
 }
 
 export interface SteerSubagentDetails {
