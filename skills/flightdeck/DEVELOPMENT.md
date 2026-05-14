@@ -50,6 +50,39 @@ skills/flightdeck/scripts/flightdeck-session attach \
 
 `pane-registry list --format json` returns normalized entries for both ad-hoc sessions and legacy issue rows. `session watch` uses the generic session loop; issue `watch` layers merge/PR workflow logic on top. Issue-only prompt tags on ad-hoc sessions trigger a `domain-mismatch` guard; lookups that cannot determine `kind` must pass `--entry-kind-unknown` or the legacy `--allow-missing-kind` flag.
 
+## Daemon tuning (`FD_*` env vars)
+
+The background daemon (`flightdeck-daemon`) is configurable but defaults are fine for normal use. Listed for advanced setups:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `FD_POLL_SEC` | `2` | Inner-pane poll cadence. |
+| `FD_OC_POLL_SEC` | `2` | OpenCode subscriber base poll cadence. |
+| `FD_OC_BACKOFF_MAX_SEC` | `16` | Maximum OpenCode subscriber exponential backoff after unchanged polls; resets on new question ids, response hash change, or daemon bell marker. |
+| `FD_GRACE_SEC` | `30` | Cold-start grace per pane; bells suppressed during this window. |
+| `FD_WAKE_PENDING_TTL` | `300` | Wake-pending revert threshold when master crashes mid-turn. |
+| `FD_MASTER_TURN_TTL` | `3600` | Maximum master turn duration before the busy lock is treated as stale. |
+| `FD_ADAPTER_FRESHNESS_TTL` | `5` | Adapter freshness probe cache. Set `0` to disable during debugging. |
+| `FD_ADAPTER_READ_TIMEOUT_SEC` | `2` | Per-adapter read subprocess timeout. Fractional seconds honored. |
+| `FD_SPAWN_MODE` | `detach` | `detach` (setsid+nohup) or `tmux-window` (visible daemon window). Use `tmux-window` for codex/opencode/pi masters where backgrounding is unreliable. |
+| `FD_MAX_LIFETIME` | `14400` | Seconds before daemon restarts itself for a fresh process (`0` disables). |
+| `FD_STATE_DIR` | `$XDG_RUNTIME_DIR/flightdeck` (or `/tmp/flightdeck-$UID`) | Daemon-private state directory. Must be user-owned, mode `0700`. |
+
+## Top-level scripts
+
+Not run by hand in normal use — the skill calls them.
+
+- `open-terminal` — launches issue worktree tmux windows with the chosen harness.
+- `flightdeck-session` — launches or attaches generic tracked tmux sessions without fake issue ids.
+- `flightdeck-state` — reads/writes the session's master state file, including schema `1.1` tracked-entry normalization (`tracked-entries`, `write-entry`).
+- `flightdeck-daemon` — background poller; wakes the master.
+- `pane-registry`, `pane-poll`, `pane-respond` — pane tracking and IO.
+- `prompt-classify` — pattern-matches agent output against known prompt shapes; guards issue-only tags on non-issue entries as `domain-mismatch`.
+- `pr-conflict-graph`, `parallel-groups` — issue-mode merge-order planning.
+- `codex-app-server-spawn` / `-stop` — Codex bridge server lifecycle.
+
+Full per-script descriptions follow in the [Scripts](#scripts) section below.
+
 ## Tests
 
 ### Bun parity suite

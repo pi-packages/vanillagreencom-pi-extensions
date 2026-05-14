@@ -41,27 +41,7 @@ Ask the agent to track an ad-hoc tmux window (a scratch Pi pane, a log tail, an 
 
 ## Issue workflows
 
-Issue orchestration remains first-class when the session is tied to a Linear/GitHub/worktree domain. It uses the same tracked-session underlay, then adds issue selection, worktree launch, PR prompt handling, merge planning, and recommendation summaries.
-
-Start one issue session:
-
-```bash
-flightdeck start CC-123
-```
-
-Check and launch a safe parallel issue group:
-
-```bash
-flightdeck parallel-check CC-123 CC-456 CC-789
-flightdeck start CC-123 CC-456 CC-789
-```
-
-Resume issue supervision or recompute merge order:
-
-```bash
-flightdeck watch
-flightdeck merge-plan
-```
+Issue orchestration remains first-class when the session is tied to a Linear/GitHub/worktree domain. Ask the agent to start an issue, check a parallel group for safety, launch the group, watch the session, recompute merge order, or close out the session — it routes to the right flightdeck command for you.
 
 ## Install
 
@@ -97,23 +77,7 @@ Most users never touch these. The ones that occasionally matter:
 
 Daemon-private files live outside your project under `$XDG_RUNTIME_DIR/flightdeck` (fallback `/tmp/flightdeck-$UID`) so they don't show up in commits.
 
-## Daemon tuning (`FD_*` env vars)
-
-The background daemon (`flightdeck-daemon`) is configurable but defaults are fine for normal use. Listed for advanced setups:
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `FD_POLL_SEC` | `2` | Inner-pane poll cadence. |
-| `FD_OC_POLL_SEC` | `2` | OpenCode subscriber base poll cadence. |
-| `FD_OC_BACKOFF_MAX_SEC` | `16` | Maximum OpenCode subscriber exponential backoff after unchanged polls; resets on new question ids, response hash change, or daemon bell marker. |
-| `FD_GRACE_SEC` | `30` | Cold-start grace per pane; bells suppressed during this window. |
-| `FD_WAKE_PENDING_TTL` | `300` | Wake-pending revert threshold when master crashes mid-turn. |
-| `FD_MASTER_TURN_TTL` | `3600` | Maximum master turn duration before the busy lock is treated as stale. |
-| `FD_ADAPTER_FRESHNESS_TTL` | `5` | Adapter freshness probe cache. Set `0` to disable during debugging. |
-| `FD_ADAPTER_READ_TIMEOUT_SEC` | `2` | Per-adapter read subprocess timeout. Fractional seconds honored. |
-| `FD_SPAWN_MODE` | `detach` | `detach` (setsid+nohup) or `tmux-window` (visible daemon window). Use `tmux-window` for codex/opencode/pi masters where backgrounding is unreliable. |
-| `FD_MAX_LIFETIME` | `14400` | Seconds before daemon restarts itself for a fresh process (`0` disables). |
-| `FD_STATE_DIR` | `$XDG_RUNTIME_DIR/flightdeck` (or `/tmp/flightdeck-$UID`) | Daemon-private state directory. Must be user-owned, mode `0700`. |
+Daemon tuning (`FD_*` env vars) is documented in [`DEVELOPMENT.md`](./DEVELOPMENT.md). Defaults work for normal use.
 
 ## Patterns
 
@@ -128,21 +92,6 @@ The `patterns/` directory documents the decisions the master agent makes — *wh
 | `claude-channels.md` | Claude Code's MCP channel adapter. |
 | `opencode-questions.md` | OpenCode's structured question API. |
 | `pi-questions.md` | Pi's structured question API. |
-
-## Scripts
-
-You don't run any of these by hand in normal use — the skill calls them.
-
-- `open-terminal` — launches issue worktree tmux windows with the chosen harness.
-- `flightdeck-session` — launches or attaches generic tracked tmux sessions.
-- `flightdeck-state` — reads/writes the session's master state file.
-- `flightdeck-daemon` — background poller; wakes the master.
-- `pane-registry`, `pane-poll`, `pane-respond` — pane tracking and IO.
-- `prompt-classify` — pattern-matches agent output against known prompt shapes.
-- `pr-conflict-graph`, `parallel-groups` — issue-mode merge-order planning.
-- `codex-app-server-spawn` / `-stop` — Codex bridge server lifecycle.
-
-See [`DEVELOPMENT.md`](./DEVELOPMENT.md) for the full script list with descriptions.
 
 ## Out of scope
 

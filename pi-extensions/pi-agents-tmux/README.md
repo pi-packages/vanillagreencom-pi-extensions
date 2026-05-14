@@ -37,40 +37,6 @@ Restart Pi after installation.
 
 Persistent panes require running Pi inside tmux.
 
-## Tool
-
-Single task:
-
-```json
-{ "agent": "rust", "task": "Inspect error handling and summarize findings." }
-```
-
-Parallel:
-
-```json
-{ "tasks": [
-  { "agent": "iced", "task": "Review the widget layout." },
-  { "agent": "reviewer-test", "task": "Check test coverage gaps." }
-] }
-```
-
-Chain (with `{previous}` placeholder):
-
-```json
-{ "chain": [
-  { "agent": "scout", "task": "Map the relevant files." },
-  { "agent": "planner", "task": "Turn this into a plan: {previous}" }
-] }
-```
-
-Useful options: `agentScope` (`project` default, `user`, `both`), `cwd` per task, `confirmProjectAgents` to prompt before running project agents.
-
-Persistent panes return a `taskId`. Keep it to retrieve or steer the task later.
-
-Bg agents run in a fresh one-shot session by default. Pass `sessionKey: "<stable-id>"` to share a named memory lane across calls. Pane agents persist via their own session file and ignore `sessionKey`. Reused lanes get a context-budget preflight — see Settings.
-
-Unknown agent names fail with a structured error listing missing and available agents in the selected `agentScope`. No similar-name redirect is attempted.
-
 ## Commands
 
 | Command | Action |
@@ -91,29 +57,7 @@ Unknown agent names fail with a structured error listing missing and available a
 
 Arguments support autocomplete, including known agent names.
 
-## Browser keys
-
-- Type to search by name, description, source, path, model, denied tools, or pane status.
-- `Tab` / `Shift+Tab` switches between **Agents** and **History**.
-- `↑/↓`, `-/=`, `Home/End` navigate. `←/→` switches list/detail focus and cycles right-pane subtabs.
-- `Enter` inserts `Use agent <name> to: ` into the editor.
-- `Alt+M` edits the selected agent's frontmatter.
-- For pane agents: `Alt+P`/`Ctrl+P` starts or reuses, `Alt+O`/`Ctrl+O` attaches, `Alt+X`/`Ctrl+X` stops.
-- `Esc` clears search or closes.
-
-Status legend: ` ` live pane, ` ` startable, ` ` stale, `·` background. Dashboard rows: ` ` queued, ` ` working, ` ` completed, ` ` needs completion, ` ` failed/blocked.
-
-## Dashboard widget
-
-Alt+A cycles the widget hidden → compact → expanded. Alt+Shift+A or F3 opens the full `/agents` popup.
-
-Each row shows agent name, kind (`pane` or `bg`), turn count, input/output tokens, cost, and for working agents a one-line live activity tail from the transcript (latest tool/message), truncated to the card width.
-
-Rows are bucketed for stability: queued/running/waiting agents stay above attention states, and all of those stay above completed agents. Within each bucket, rows keep start-time order so token/usage updates do not reshuffle the list. The header always shows completed and working counts, even when either count is zero. Missing pane artifacts render as `stale` attention rows; stale bg-only records are dropped because bg agents do not use pane handoff files.
-
-The popup has two top-level tabs: **Agents** (unified project/user/active list, sorted by current status, with Live/Chat/Inspector subtabs on the right) and **History** (completed task traces with Summary/Completion/Task subtabs; transcript paths appear in Summary). Chat is scoped to the selected dashboard row, usually `@orch` ↔ the selected agent. Running agents use an animated spinner in both mini-dashboard and popup views. Repeated launches of the same agent render as stable session rows (`agent`, `agent 2`, ...); resumed pane work in the same transcript stays on one row.
-
-When the dashboard is on, inline tool output stays quiet — pane calls render as launch breadcrumbs, bg calls show a result preview.
+Keyboard shortcuts inside the browser/dashboard popup are documented in the popup's own footer.
 
 ## Persistent pane agents
 
@@ -143,31 +87,9 @@ Frontmatter fields:
 
 Everything after the frontmatter is the agent's system prompt.
 
-Pane tasks move through `queued → running → completed | blocked | failed`. If a child ends a turn without a valid completion record, the task is marked `needs_completion` and the child shows a warning.
+Pane tasks move through queued → running → completed | blocked | failed. Stop kills the tmux process; the session file is preserved so the next launch resumes memory.
 
-## Result retrieval and steering
-
-Dispatch and end your turn — the extension wakes the parent on completion. Use `get_subagent_result` only as a fallback if you suspect a missed wake event. Pass `wait: true` to block the current turn (use sparingly).
-
-```json
-{ "taskId": "iced-..." }
-```
-
-Wait for a pane agent to become idle without shell polling via the `wait_for_subagent_idle` tool:
-
-```json
-{ "agent": "iced", "timeoutMs": 30000 }
-```
-
-`get_subagent_result` also accepts `waitFor: "idle"` for the same effect.
-
-Use `steer_subagent` for mid-run correction. It targets `pi-session-bridge` when available; otherwise it queues a steering note for the pane to read when idle.
-
-```json
-{ "taskId": "iced-...", "message": "Prioritize the failing layout test.", "deliverAs": "steer" }
-```
-
-Use `stop_subagent` to kill a persistent pane. The session file is preserved; the next launch resumes memory.
+See [`DEVELOPMENT.md`](./DEVELOPMENT.md) for the underlying tool surface (`subagent`, `get_subagent_result`, `steer_subagent`, `stop_subagent`, `wait_for_subagent_idle`).
 
 ## Settings
 
