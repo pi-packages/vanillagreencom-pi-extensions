@@ -22,10 +22,7 @@ import {
 	type AgentScope,
 } from "./agents.js";
 import {
-	dashboardKindLabel,
 	dashboardStatusIcon,
-	dashboardStatusText,
-	isDashboardAttentionStatus,
 	isDashboardWorkingStatus,
 	sortDashboardItems,
 } from "./dashboard.js";
@@ -39,11 +36,7 @@ import {
 	completionBodyWithoutPromptEcho,
 	divider,
 	formatUsageStats,
-	formatUsageStatsForDashboard,
 	inactivePill,
-	oneLinePreview,
-	sessionModeChipLabel,
-	sessionModeChipSuffix,
 	sessionModeDetailLabel,
 	shortTaskSuffix,
 	simpleFrame,
@@ -94,7 +87,6 @@ import {
 	type TraceViewerState,
 	type VstackModalLock,
 } from "./types.js";
-import { safeFileName } from "./names.js";
 
 export function acquireVstackModalLock(): () => void {
 	const host = globalThis as unknown as Record<PropertyKey, unknown>;
@@ -347,20 +339,6 @@ function renderTomlInlineTable(fields: Map<string, string>): string {
 	return `{ ${keys.map((key) => `${key} = ${fields.get(key)}`).join(", ")} }`;
 }
 
-function removeAgentFrontmatterKeys(content: string, agentName: string, section: string, keys: string[]): string {
-	const lines = content.split(/\r?\n/);
-	const span = tomlSectionSpan(lines, section);
-	if (!span) return content;
-	const absoluteIndex = agentTomlLineIndex(lines, span.start, span.end, agentName);
-	if (absoluteIndex < 0) return content;
-	const existingValue = lines[absoluteIndex].split(/=(.*)/s)[1] ?? "";
-	const fields = parseInlineTomlTable(existingValue.trim());
-	for (const key of keys) fields.delete(key);
-	if (fields.size === 0) lines.splice(absoluteIndex, 1);
-	else lines[absoluteIndex] = `${tomlAgentKey(agentName)} = ${renderTomlInlineTable(fields)}`;
-	return lines.join("\n");
-}
-
 function upsertAgentFrontmatterToml(content: string, agentName: string, edit: AgentFrontmatterEdit): string {
 	const section = "[agent-frontmatter.pi]";
 	const lines = content.split(/\r?\n/);
@@ -451,12 +429,6 @@ function agentSearchText(agent: AgentConfig, status?: AgentPaneStatus): string {
 		agent.pane ? "pane persistent tmux" : "bg background one-shot oneshot",
 		status?.live ? "live running" : status?.entry ? "dead stopped" : "",
 	].join(" ").toLowerCase();
-}
-
-function filterAgentsForBrowser(agents: AgentConfig[], query: string, statuses: Map<string, AgentPaneStatus>): AgentConfig[] {
-	const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-	if (tokens.length === 0) return agents;
-	return agents.filter((agent) => tokens.every((token) => agentSearchText(agent, statuses.get(agent.name)).includes(token)));
 }
 
 function tabNext(current: AgentBrowserTabId, _hasActive: boolean, delta: number): AgentBrowserTabId {
@@ -553,158 +525,59 @@ function agentStatus(agent: AgentConfig, status: AgentPaneStatus | undefined): "
 	return "pane";
 }
 
-function agentStatusColor(status: ReturnType<typeof agentStatus>): "success" | "warning" | "muted" | "dim" {
-	if (status === "live") return "success";
-	if (status === "dead") return "warning";
-	if (status === "pane") return "muted";
-	return "dim";
-}
-
-function agentStatusIcon(status: ReturnType<typeof agentStatus>, theme: Theme): string {
-	if (status === "live") return theme.fg("success", ICONS.circleFilled);
-	if (status === "dead") return theme.fg("warning", ICONS.times);
-	if (status === "pane") return theme.fg("warning", ICONS.circleOpen);
-	return theme.fg("dim", "·");
-}
-
-function agentStatusLabel(agent: AgentConfig, status: AgentPaneStatus | undefined, theme: Theme): string {
-	const state = agentStatus(agent, status);
-	if (state === "live") return theme.fg("success", "live");
-	if (state === "dead") return theme.fg("warning", "dead");
-	if (state === "pane") return theme.fg("muted", "startable");
-	return theme.fg("dim", "bg");
-}
-
 interface AgentBrowserRow {
 	agent: AgentConfig;
-	item?: SubagentDashboardItem;
 	label: string;
-	record?: PaneTaskRecord;
-	rowType: "agent" | "task";
-	taskNumber?: number;
 }
 
-const RECENT_TASK_CHILD_LIMIT = 5;
-
-function dashboardItemSearchText(item: SubagentDashboardItem, label: string): string {
-	return [
-		label,
-		item.agent,
-		item.kind,
-		item.status,
-		item.taskId,
-		item.task ?? "",
-		item.message ?? "",
-		item.sessionMode ?? "",
-		item.sessionKey ?? "",
-		item.transcriptPath ?? "",
-	].join(" ").toLowerCase();
-}
-
-function dashboardItemFromTaskRecord(record: PaneTaskRecord): SubagentDashboardItem {
-	const terminal = record.status === "completed" || record.status === "failed" || record.status === "blocked" || record.status === "needs_completion";
-	const hasSummary = Boolean(record.summary?.trim());
-	const message = record.summary?.trim()
-		? record.summary
-		: terminal
-			? COMPLETION_SUMMARY_UNAVAILABLE
-			: record.task || record.diagnostics?.at(-1);
-	const messageProvenance: CompletionMessageProvenance = hasSummary ? "persisted" : terminal ? "placeholder" : record.task ? "task-echo-fallback" : "diagnostic";
-	return {
-		agent: record.agent,
-		artifacts: Boolean(record.transcriptPath || record.completionArchivePath || record.outboxFile || record.doneFile),
-		completedAt: record.completedAt,
-		kind: record.kind ?? (record.paneId || record.inboxFile || record.outboxFile || record.doneFile ? "pane" : "oneshot"),
-		message,
-		messageProvenance,
-		model: record.model,
-		paneId: record.paneId,
-		sessionMode: record.sessionMode,
-		sessionKey: record.sessionKey,
-		startedAt: record.createdAt,
-		status: record.status,
-		task: record.task,
-		taskId: record.taskId,
-		transcriptPath: record.transcriptPath,
-		updatedAt: record.updatedAt ?? record.completedAt ?? record.createdAt,
-		usage: record.usage,
-	};
-}
-
-function taskRecordsByAgent(taskRegistry: PaneTaskRegistry): Map<string, PaneTaskRecord[]> {
-	const out = new Map<string, PaneTaskRecord[]>();
-	for (const record of sortedHistoryRecords(taskRegistry)) {
-		const list = out.get(record.agent) ?? [];
-		list.push(record);
-		out.set(record.agent, list);
-	}
-	return out;
-}
-
-export function buildAgentRows(agents: AgentConfig[], query: string, statuses: Map<string, AgentPaneStatus>, activeItems: SubagentDashboardItem[], taskRegistry: PaneTaskRegistry = {}): AgentBrowserRow[] {
+export function buildAgentRows(agents: AgentConfig[], query: string, statuses: Map<string, AgentPaneStatus>): AgentBrowserRow[] {
 	const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-	const activeByTask = new Map(activeItems.map((item) => [item.taskId, item]));
-	const activeByAgent = activeItemsByAgent(activeItems);
-	const recordsByAgent = taskRecordsByAgent(taskRegistry);
-	const taskNumbers = taskNumberById(Object.values(taskRegistry));
 	const rows: AgentBrowserRow[] = [];
-	const catalogAgents = sortAgentsForUnifiedView(agents, statuses, activeItems);
+	const catalogAgents = sortAgentsForUnifiedView(agents, statuses);
 	for (const agent of catalogAgents) {
-		const records = recordsByAgent.get(agent.name) ?? [];
-		const latestRecord = records[0];
-		const activeItem = activeByAgent.get(agent.name);
-		const agentItem = activeItem ?? (latestRecord ? dashboardItemFromTaskRecord(latestRecord) : undefined);
-		const childRows = records.slice(0, RECENT_TASK_CHILD_LIMIT).map((record): AgentBrowserRow => ({
-			agent,
-			item: activeByTask.get(record.taskId) ?? dashboardItemFromTaskRecord(record),
-			label: `#${taskNumbers.get(record.taskId) ?? "?"} · ${recordClockTime(record)} · ${shortTaskSuffix(record.taskId)}`,
-			record,
-			rowType: "task",
-			taskNumber: taskNumbers.get(record.taskId),
-		}));
-		const agentSearch = `${agentSearchText(agent, statuses.get(agent.name))} ${agentItem ? dashboardItemSearchText(agentItem, agent.name) : ""}`.toLowerCase();
-		const matchingChildren = childRows.filter((row) => {
-			const text = `${row.label} ${row.record?.task ?? ""} ${row.record?.summary ?? ""} ${row.record?.taskId ?? ""} ${row.record?.transcriptPath ?? ""}`.toLowerCase();
-			return tokens.length === 0 || tokens.every((token) => text.includes(token) || agentSearch.includes(token));
-		});
-		const includeAgent = tokens.length === 0 || tokens.every((token) => agentSearch.includes(token)) || matchingChildren.length > 0;
+		const agentSearch = agentSearchText(agent, statuses.get(agent.name));
+		const includeAgent = tokens.length === 0 || tokens.every((token) => agentSearch.includes(token));
 		if (!includeAgent) continue;
-		rows.push({ agent, item: agentItem, label: agent.name, record: latestRecord, rowType: "agent", taskNumber: latestRecord ? taskNumbers.get(latestRecord.taskId) : undefined });
-		rows.push(...matchingChildren);
+		rows.push({ agent, label: agent.name });
 	}
 	return rows;
 }
 
-function activeItemsByAgent(items: SubagentDashboardItem[]): Map<string, SubagentDashboardItem> {
-	const out = new Map<string, SubagentDashboardItem>();
-	for (const item of sortDashboardItems(items)) {
-		if (!out.has(item.agent)) out.set(item.agent, item);
-	}
-	return out;
-}
-
-function unifiedAgentRank(agent: AgentConfig, status: AgentPaneStatus | undefined, activeItem: SubagentDashboardItem | undefined): number {
-	if (activeItem && isDashboardWorkingStatus(activeItem.status)) return 0;
-	if (activeItem && isDashboardAttentionStatus(activeItem.status)) return 1;
-	if (activeItem?.status === "completed") return 2;
+function unifiedAgentRank(agent: AgentConfig, status: AgentPaneStatus | undefined): number {
 	const state = agentStatus(agent, status);
-	if (state === "live") return 3;
-	if (state === "dead") return 4;
-	if (state === "pane") return 5;
-	return 6;
+	if (state === "live") return 0;
+	if (state === "dead") return 1;
+	if (state === "pane") return 2;
+	return 3;
 }
 
-function sortAgentsForUnifiedView(agents: AgentConfig[], statuses: Map<string, AgentPaneStatus>, activeItems: SubagentDashboardItem[]): AgentConfig[] {
-	const activeByAgent = activeItemsByAgent(activeItems);
+function sortAgentsForUnifiedView(agents: AgentConfig[], statuses: Map<string, AgentPaneStatus>): AgentConfig[] {
 	return [...agents].sort((a, b) => {
-		const rank = unifiedAgentRank(a, statuses.get(a.name), activeByAgent.get(a.name)) - unifiedAgentRank(b, statuses.get(b.name), activeByAgent.get(b.name));
+		const rank = unifiedAgentRank(a, statuses.get(a.name)) - unifiedAgentRank(b, statuses.get(b.name));
 		if (rank !== 0) return rank;
 		return a.name.localeCompare(b.name);
 	});
 }
 
 function agentLegend(theme: Theme): string {
-	return `${theme.fg("muted", "Legend")}: ${theme.fg("success", ICONS.circleFilled)} live · ${theme.fg("warning", ICONS.circleOpen)} startable · ${theme.fg("warning", ICONS.times)} stale`;
+	return `${theme.fg("muted", "Legend")}: ${theme.fg("success", ICONS.circleFilled)} live pane · ${theme.fg("dim", ICONS.circleOpen)} idle/static · ${theme.fg("muted", "P/U")} project/user`;
+}
+
+function agentKindChip(agent: AgentConfig, theme: Theme): string {
+	return theme.fg("muted", agent.pane ? "pane" : "bg");
+}
+
+function agentScopeChip(agent: AgentConfig, theme: Theme): string {
+	return theme.fg("muted", agent.source === "project" ? "P" : "U");
+}
+
+function agentLiveBadge(agent: AgentConfig, status: AgentPaneStatus | undefined, theme: Theme): string {
+	if (agent.pane && status?.live) return `${theme.fg("success", ICONS.circleFilled)} ${theme.fg("success", "live")}`;
+	return theme.fg("dim", ICONS.circleOpen);
+}
+
+function displayAgentModel(agent: AgentConfig): string {
+	return agent.model ?? "default";
 }
 
 function renderAgentList(rows: AgentBrowserRow[], statuses: Map<string, AgentPaneStatus>, ui: AgentBrowserUiState, width: number, theme: Theme, listRows: number): string[] {
@@ -718,16 +591,12 @@ function renderAgentList(rows: AgentBrowserRow[], statuses: Map<string, AgentPan
 		const index = ui.scroll + visibleIndex;
 		const selected = index === ui.selected;
 		const agent = rowInfo.agent;
-		const status = agentStatus(agent, statuses.get(agent.name));
-		const marker = rowInfo.rowType === "task" ? theme.fg("dim", "  └ ") : " ";
-		const name = rowInfo.rowType === "task"
-			? theme.fg("muted", selected ? theme.bold(rowInfo.label) : rowInfo.label)
-			: ansiMagenta(selected ? theme.bold(rowInfo.label) : rowInfo.label);
-		const icon = rowInfo.item ? dashboardStatusIcon(rowInfo.item.status, theme) : agentStatusIcon(status, theme);
-		const meta = rowInfo.rowType === "task"
-			? rowInfo.item ? `${theme.fg("dim", ` · ${dashboardKindLabel(rowInfo.item.kind)}`)}${sessionModeChipSuffix(theme, rowInfo.item)}${rowInfo.item.kind === "pane" && rowInfo.item.transcriptPath ? theme.fg("dim", " · shared transcript") : ""}` : ""
-			: rowInfo.item ? `${theme.fg("dim", " · ")}${dashboardStatusText(rowInfo.item, theme)}` : "";
-		const row = truncateToWidth(`${marker}${icon} ${name}${meta}`, width, "…");
+		const status = statuses.get(agent.name);
+		const marker = " ";
+		const name = ansiMagenta(selected ? theme.bold(rowInfo.label) : rowInfo.label);
+		const model = `${theme.fg("dim", " · ")}${theme.fg("muted", displayAgentModel(agent))}`;
+		const meta = `${theme.fg("dim", " · ")}${agentKindChip(agent, theme)}${model}${theme.fg("dim", " · ")}${agentScopeChip(agent, theme)}`;
+		const row = truncateToWidth(`${marker}${agentLiveBadge(agent, status, theme)} ${name}${meta}`, width, "…");
 		lines.push(selected ? theme.bg("selectedBg", agentPad(row, width)) : row);
 	}
 	const hidden = Math.max(0, rows.length - (ui.scroll + listRows));
@@ -737,7 +606,8 @@ function renderAgentList(rows: AgentBrowserRow[], statuses: Map<string, AgentPan
 
 function renderAgentPromptViewport(agent: AgentConfig, ui: AgentBrowserUiState, width: number, rows: number, theme: Theme): string[] {
 	const prompt = agent.systemPrompt.trim() || theme.fg("dim", "(empty prompt)");
-	const promptLines = new Markdown(prompt, 0, 0, getMarkdownTheme()).render(width);
+	const renderedPrompt = new Markdown(prompt, 0, 0, getMarkdownTheme()).render(width);
+	const promptLines = renderedPrompt.length > 0 ? renderedPrompt : wrapTextWithAnsi(prompt, width);
 	const visibleRows = Math.max(1, rows - 1);
 	const maxScroll = Math.max(0, promptLines.length - visibleRows);
 	ui.inspectorScroll = Math.max(0, Math.min(ui.inspectorScroll, maxScroll));
@@ -749,7 +619,24 @@ function renderAgentPromptViewport(agent: AgentConfig, ui: AgentBrowserUiState, 
 	return scroll ? [...visible, theme.fg("dim", scroll)] : visible;
 }
 
-function renderAgentInspector(agent: AgentConfig | undefined, statuses: Map<string, AgentPaneStatus>, ui: AgentBrowserUiState, width: number, rows: number, theme: Theme): string[] {
+function clockTime(raw: string | undefined): string | undefined {
+	if (!raw) return undefined;
+	const date = new Date(raw);
+	if (!Number.isFinite(date.getTime())) return undefined;
+	return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+function paneStaticStatus(agent: AgentConfig, status: AgentPaneStatus | undefined): string | undefined {
+	if (!agent.pane) return undefined;
+	if (status?.live) {
+		const started = clockTime(status.entry?.startedAt);
+		return `running${started ? ` (started ${started})` : ""}`;
+	}
+	if (status?.entry) return "stopped";
+	return "not started";
+}
+
+export function renderAgentInspector(agent: AgentConfig | undefined, statuses: Map<string, AgentPaneStatus>, ui: AgentBrowserUiState, width: number, rows: number, theme: Theme): string[] {
 	if (!agent) return [`${agentPaneTitle(theme, "Inspector", ui.pane === "inspector")} ${theme.fg("dim", "Select an agent to inspect it.")}`];
 	const status = statuses.get(agent.name);
 	const safeWidth = Math.max(8, width);
@@ -760,7 +647,7 @@ function renderAgentInspector(agent: AgentConfig | undefined, statuses: Map<stri
 	const lines: string[] = [];
 	pushWrapped(
 		lines,
-		`${agentPaneTitle(theme, "Inspector", ui.pane === "inspector")} ${agentEntityTitle(theme, agent.name)} ${theme.fg(agentStatusColor(agentStatus(agent, status)), agentStatus(agent, status))}`,
+		`${agentPaneTitle(theme, "Inspector", ui.pane === "inspector")} ${agentEntityTitle(theme, agent.name)} ${theme.fg("dim", `[${agent.pane ? "pane" : "bg"}]`)} ${theme.fg("dim", `[${agent.source === "project" ? "P" : "U"}]`)}`,
 	);
 	lines.push("");
 	lines.push(...wrapTextWithAnsi(agent.description || "No description.", safeWidth).slice(0, 3));
@@ -769,14 +656,12 @@ function renderAgentInspector(agent: AgentConfig | undefined, statuses: Map<stri
 		lines,
 		`${theme.fg("muted", "Kind")}: ${agent.pane ? "persistent pane" : "bg"}    ${theme.fg("muted", "Scope")}: ${agent.source}`,
 	);
-	pushWrapped(lines, `${theme.fg("muted", "Model")}: ${agent.model ?? "default"}`);
+	pushWrapped(lines, `${theme.fg("muted", "Model")}: ${displayAgentModel(agent)}    ${theme.fg("muted", "Effort")}: ${agent.effort ?? "default"}`);
 	pushWrapped(lines, `${theme.fg("muted", "Deny tools")}: ${agent.denyTools && agent.denyTools.length > 0 ? agent.denyTools.join(", ") : "none"}`);
-	pushWrapped(lines, `${theme.fg("muted", "Path")}: ${compactAgentPath(agent.filePath)}`);
-	pushWrapped(lines, `${theme.fg("muted", "State")}: ${agentStatusLabel(agent, status, theme)}`);
-	if (status?.entry) {
-		pushWrapped(lines, `${theme.fg("muted", "Pane")}: ${status.entry.windowName}`);
-		pushWrapped(lines, `${theme.fg("muted", "Last task")}: ${status.entry.lastTaskAt ?? "never"}`);
-	}
+	pushWrapped(lines, `${theme.fg("muted", "Color")}: ${agent.color ?? "default"}`);
+	pushWrapped(lines, `${theme.fg("muted", "Source path")}: ${compactPath(agent.filePath, { baseDir: process.cwd(), maxChars: Number.POSITIVE_INFINITY }) || compactAgentPath(agent.filePath)}`);
+	const paneLine = paneStaticStatus(agent, status);
+	if (paneLine) pushWrapped(lines, `${theme.fg("muted", "Pane")}: ${paneLine}`);
 	lines.push("", theme.fg("muted", theme.bold("System Prompt")));
 	const promptRows = Math.max(1, rows - lines.length);
 	lines.push(...renderAgentPromptViewport(agent, ui, safeWidth, promptRows, theme));
@@ -901,10 +786,9 @@ export function readTranscriptTail(transcriptPath: string | undefined, maxLines:
 export function dashboardDisplayLabels(items: SubagentDashboardItem[], persistentTaskNumbers?: Map<string, number>): Map<string, string> {
 	// Numbering source order:
 	//   1. persistent taskNumberById (from tasks.json) when supplied. This is
-	//      the canonical per-agent #N the popup's nested task-children and
-	//      Detail header already use, so a task reads identically across
-	//      every surface (mini widget, popup left-list, task-children,
-	//      Detail header, Chat attribution).
+	//      the canonical per-agent #N the History tab and Detail header use,
+	//      so a task reads identically across task-centric surfaces (mini
+	//      widget, active-list, Detail header, Chat attribution).
 	//   2. In-memory occurrence counter as a fallback for items dispatched
 	//      in this turn that haven't been persisted yet, AND so callers
 	//      that can't cheaply load the registry still get stable labels.
@@ -928,82 +812,6 @@ export function dashboardDisplayLabels(items: SubagentDashboardItem[], persisten
 		labels.set(item.taskId, label);
 	}
 	return labels;
-}
-
-function renderActiveAgentList(items: SubagentDashboardItem[], ui: AgentBrowserUiState, width: number, theme: Theme, listRows: number, persistentTaskNumbers?: Map<string, number>): string[] {
-	const lines = [`${agentPaneTitle(theme, "Active", ui.pane === "list")} ${theme.fg("dim", `(${items.length})`)}`, ""];
-	if (ui.activeScroll > 0) lines.push(theme.fg("dim", `\u2191 ${ui.activeScroll} earlier`));
-	const visible = items.slice(ui.activeScroll, ui.activeScroll + listRows);
-	const labels = dashboardDisplayLabels(items, persistentTaskNumbers);
-	for (const [index, item] of visible.entries()) {
-		const absoluteIndex = ui.activeScroll + index;
-		const selected = absoluteIndex === ui.activeSelected;
-		const icon = dashboardStatusIcon(item.status, theme);
-		const displayName = labels.get(item.taskId) ?? item.agent;
-		const name = selected ? ansiMagenta(theme.bold(displayName)) : ansiMagenta(displayName);
-		const sessionChip = sessionModeChipLabel(item);
-		const meta = `${theme.fg("dim", ` · ${dashboardKindLabel(item.kind)}`)}${sessionChip ? theme.fg("dim", ` · ${sessionChip}`) : ""}`;
-		const row = `${icon} ${name}${meta}`;
-		const prefix = selected ? theme.fg("accent", "> ") : "  ";
-		lines.push(truncateToWidth(`${prefix}${row}`, width, ""));
-	}
-	const after = items.length - (ui.activeScroll + visible.length);
-	if (after > 0) lines.push(theme.fg("dim", `\u2193 ${after} more`));
-	return lines;
-}
-
-function renderActiveAgentDetail(item: SubagentDashboardItem | undefined, displayLabel: string | undefined, ui: AgentBrowserUiState, width: number, rows: number, theme: Theme): string[] {
-	if (!item) return [`${agentPaneTitle(theme, "Detail", ui.pane === "inspector")} ${theme.fg("dim", "Select an agent to inspect.")}`];
-	const safeWidth = Math.max(8, width);
-	const wrap = (text: string): string[] => {
-		const wrapped = wrapTextWithAnsi(text, safeWidth);
-		return wrapped.length > 0 ? wrapped : [""];
-	};
-	const nameForTitle = displayLabel ?? item.agent;
-	const titleLine = `${agentPaneTitle(theme, "Detail", ui.pane === "inspector")} ${ansiMagenta(theme.bold(nameForTitle))} ${dashboardStatusText(item, theme)} ${theme.fg("dim", `· ${dashboardKindLabel(item.kind)}`)}${sessionModeChipSuffix(theme, item)}`;
-	const body: string[] = [];
-	body.push(...wrap(`${theme.fg("muted", "Task ID")}: ${theme.fg("dim", item.taskId)}`));
-	// Show the full transcript file path at the top so users always have
-	// a one-line pointer to inspect the raw session record themselves.
-	// Pane agents share one transcript across multiple tasks; flag that
-	// explicitly so the path isn't misread as task-scoped.
-	if (item.transcriptPath) {
-		const sharedTag = item.kind === "pane" ? theme.fg("dim", " (shared by pane tasks)") : "";
-		const path = compactPath(item.transcriptPath, { maxChars: Number.POSITIVE_INFINITY });
-		body.push(...wrapPlainNoEllipsis(`Transcript: ${path}`, safeWidth).map((line, idx) =>
-			idx === 0 ? `${theme.fg("muted", "Transcript")}: ${theme.fg("dim", line.replace(/^Transcript:\s*/, ""))}${sharedTag}` : theme.fg("dim", line),
-		));
-	}
-	body.push("");
-	if (item.task) {
-		body.push(...wrap(theme.fg("accent", theme.bold("Task:"))));
-		for (const raw of item.task.split(/\r?\n/)) body.push(...renderTraceContentLine(raw, "task", safeWidth, theme));
-	}
-	if (item.usage) {
-		const usageLine = formatUsageStatsForDashboard(item.usage).join(" \u00b7 ");
-		if (usageLine) body.push(...wrap(`${theme.fg("muted", "Usage")}: ${theme.fg("dim", usageLine)}`));
-	}
-	if (item.message) {
-		body.push("");
-		body.push(...wrap(theme.fg("accent", theme.bold("Latest Message"))));
-		const wrapped = item.message.split(/\r?\n/).flatMap((line) => renderTraceContentLine(line, "summary", safeWidth, theme));
-		body.push(...wrapped.slice(0, 8));
-	}
-	const allLines: string[] = [titleLine, ""];
-	const visibleBodyRows = Math.max(1, rows - 2);
-	const maxOffset = Math.max(0, body.length - visibleBodyRows);
-	const offset = Math.max(0, Math.min(ui.inspectorScroll, maxOffset));
-	ui.inspectorScroll = offset;
-	const slice = body.slice(offset, offset + visibleBodyRows);
-	allLines.push(...slice);
-	if (offset > 0 || maxOffset > 0) {
-		const hint = `${offset > 0 ? `\u2191 ${offset} earlier` : ""}${offset > 0 && offset < maxOffset ? "  " : ""}${offset < maxOffset ? `\u2193 ${maxOffset - offset} more` : ""}`.trim();
-		if (hint && allLines.length < rows) {
-			const lastIndex = allLines.length - 1;
-			allLines[lastIndex] = `${allLines[lastIndex]} ${ansiYellow(hint)}`;
-		}
-	}
-	return allLines.slice(0, rows);
 }
 
 export function formatRelativeTime(iso: string | undefined): string {
@@ -1212,18 +1020,6 @@ function renderHistoryDetail(
 	return out.slice(0, rows);
 }
 
-function deriveTaskIdFromFile(file: string): string | undefined {
-	const base = path.basename(file, path.extname(file));
-	const stripped = base.replace(/^\d{10,}-/, "");
-	return stripped || base || undefined;
-}
-
-function trimChatBody(text: string, max = 4_000): string {
-	const compact = text.trim();
-	if (compact.length <= max) return compact;
-	return `${compact.slice(0, max)}\n\u2026(truncated)`;
-}
-
 function normalizeTaskRegistryShape(parsed: unknown): PaneTaskRegistry {
 	if (Array.isArray(parsed)) return Object.fromEntries(parsed.filter((record) => record?.taskId).map((record) => [record.taskId, record])) as PaneTaskRegistry;
 	return parsed && typeof parsed === "object" ? parsed as PaneTaskRegistry : {};
@@ -1242,46 +1038,12 @@ function completionBodyFromRecord(record: PaneTaskRecord | undefined, fallback: 
 	return completionBodyWithoutPromptEcho(fallback, record?.task ?? task, fallbackProvenance);
 }
 
-function extractDelegationBody(raw: string): string {
-	const lines = raw.split(/\r?\n/);
-	const out: string[] = [];
-	let started = false;
-	for (const line of lines) {
-		if (!started) {
-			if (/^Task for /.test(line) || /^Task ID:/.test(line)) continue;
-			if (line.trim() === "") continue;
-			started = true;
-		}
-		if (/^When done, /.test(line)) break;
-		if (/^If complete_subagent is unavailable/.test(line)) break;
-		if (/^Do not complete before the work is actually done/.test(line)) break;
-		out.push(line);
-	}
-	while (out.length > 0 && out[out.length - 1].trim() === "") out.pop();
-	return out.join("\n").trim();
-}
-
-function extractSteeringBody(raw: string): string {
-	const lines = raw.split(/\r?\n/);
-	const out: string[] = [];
-	let started = false;
-	for (const line of lines) {
-		if (!started) {
-			if (/^Steering update for /.test(line)) continue;
-			if (line.trim() === "") continue;
-			started = true;
-		}
-		out.push(line);
-	}
-	return out.join("\n").trim();
-}
-
 export function appendBgChatMessages(messages: ChatMessage[], items: SubagentDashboardItem[], taskRegistry: PaneTaskRegistry = {}): void {
 	// Bg/oneshot agents skip the file bus (no inbox/outbox/.md/.json), so the
 	// file-based scan never sees them. Synthesize delegation+completion records
 	// from the dashboard item itself; the data we need is already on it.
 	// Use the persistent task registry's #N so chat row attribution matches
-	// the popup task-children and Detail header (not the in-memory counter).
+	// the History tab and Detail header (not the in-memory counter).
 	const persistentTaskNumbers = taskNumberById(Object.values(taskRegistry));
 	const labels = dashboardDisplayLabels(items, persistentTaskNumbers);
 	for (const item of items) {
@@ -1316,205 +1078,6 @@ export function appendBgChatMessages(messages: ChatMessage[], items: SubagentDas
 	}
 }
 
-function loadChatMessages(runtimeRoot: string, agentNames: string[], taskRegistry: PaneTaskRegistry): ChatMessage[] {
-	const messages: ChatMessage[] = [];
-	const seen = new Set<string>();
-	const pushMd = (filePath: string, agent: string): void => {
-		const key = `md:${filePath}`;
-		if (seen.has(key)) return;
-		seen.add(key);
-		let stat: fs.Stats;
-		try { stat = fs.statSync(filePath); } catch { return; }
-		let raw: string;
-		try { raw = fs.readFileSync(filePath, "utf-8"); } catch { return; }
-		const isSteer = /^Steering update for /m.test(raw) || /^STEER:/im.test(raw);
-		const body = trimChatBody(isSteer ? extractSteeringBody(raw) : extractDelegationBody(raw));
-		if (!body) return;
-		messages.push({
-			timestamp: stat.mtimeMs,
-			agent,
-			taskId: deriveTaskIdFromFile(filePath),
-			kind: isSteer ? "steering" : "delegation",
-			from: "@orch",
-			to: `@${agent}`,
-			body,
-		});
-	};
-	const pushJson = (filePath: string, agent: string): void => {
-		const key = `json:${filePath}`;
-		if (seen.has(key)) return;
-		seen.add(key);
-		let stat: fs.Stats;
-		try { stat = fs.statSync(filePath); } catch { return; }
-		let parsed: Record<string, unknown> | undefined;
-		try { parsed = JSON.parse(fs.readFileSync(filePath, "utf-8")) as Record<string, unknown>; } catch { return; }
-		const taskId = deriveTaskIdFromFile(filePath);
-		const record = taskId ? taskRegistry[taskId] : undefined;
-		const summary = completionBodyFromRecord(record, typeof parsed?.summary === "string" ? parsed.summary : undefined, record?.task, "fallback");
-		const status = typeof parsed?.status === "string" ? parsed.status : undefined;
-		const notes = typeof parsed?.notes === "string" ? parsed.notes : undefined;
-		const filesChanged = Array.isArray(parsed?.filesChanged)
-			? (parsed.filesChanged as unknown[]).filter((entry): entry is string => typeof entry === "string")
-			: undefined;
-		messages.push({
-			timestamp: stat.mtimeMs,
-			agent,
-			taskId,
-			kind: "completion",
-			from: `@${agent}`,
-			to: "@orch",
-			body: summary,
-			status,
-			filesChanged,
-			notes,
-		});
-	};
-	const mdDirs = ["inbox", "processing", "done"];
-	const jsonDirs = ["outbox", "processed"];
-	for (const agent of agentNames) {
-		for (const rel of mdDirs) {
-			const dir = path.join(runtimeRoot, rel, safeFileName(agent));
-			let entries: string[];
-			try { entries = fs.readdirSync(dir); } catch { continue; }
-			for (const name of entries) if (name.endsWith(".md")) pushMd(path.join(dir, name), agent);
-		}
-		for (const rel of jsonDirs) {
-			const dir = path.join(runtimeRoot, rel, safeFileName(agent));
-			let entries: string[];
-			try { entries = fs.readdirSync(dir); } catch { continue; }
-			for (const name of entries) if (name.endsWith(".json")) pushJson(path.join(dir, name), agent);
-		}
-	}
-	messages.sort((a, b) => a.timestamp - b.timestamp);
-	return messages;
-}
-
-function chatTimestamp(ms: number): string {
-	const d = new Date(ms);
-	const hh = String(d.getHours()).padStart(2, "0");
-	const mm = String(d.getMinutes()).padStart(2, "0");
-	const ss = String(d.getSeconds()).padStart(2, "0");
-	return `${hh}:${mm}:${ss}`;
-}
-
-function chatRoleColor(name: string, theme: Theme): string {
-	if (name === "@orch") return theme.fg("accent", theme.bold(name));
-	return ansiMagenta(theme.bold(name));
-}
-
-function chatKindBadge(kind: ChatMessage["kind"], theme: Theme): string {
-	if (kind === "completion") return theme.fg("success", "completion");
-	if (kind === "steering") return theme.fg("warning", "steer");
-	return theme.fg("muted", "delegation");
-}
-
-function chatStatusIcon(status: string | undefined, theme: Theme): string | undefined {
-	if (!status) return undefined;
-	if (status === "completed") return theme.fg("success", ICONS.check);
-	if (status === "failed") return theme.fg("error", ICONS.times);
-	if (status === "blocked") return theme.fg("error", ICONS.times);
-	return theme.fg("warning", ICONS.warning);
-}
-
-function wrapWithHangingIndent(text: string, indent: string, width: number): string[] {
-	const innerWidth = Math.max(1, width - visibleWidth(indent));
-	const out: string[] = [];
-	for (const line of text.split(/\r?\n/)) {
-		const wrapped = wrapTextWithAnsi(line, innerWidth);
-		if (wrapped.length === 0) {
-			out.push(indent);
-			continue;
-		}
-		for (const sub of wrapped) out.push(`${indent}${sub}`);
-	}
-	return out;
-}
-
-function renderChatRoomDetail(runtimeRoot: string, items: SubagentDashboardItem[], ui: AgentBrowserUiState, width: number, rows: number, theme: Theme): string[] {
-	const safeWidth = Math.max(8, width);
-	const agentNames = [...new Set(items.map((item) => item.agent))];
-	const taskIds = new Set(items.map((item) => item.taskId).filter(Boolean));
-	const scopeLabel = items.length === 1 ? `@${items[0]!.agent}` : `${agentNames.length} agent${agentNames.length === 1 ? "" : "s"}`;
-	const titleLine = `${agentPaneTitle(theme, "Chat", ui.pane === "inspector")} ${theme.fg("dim", `(${scopeLabel})`)}`;
-	const taskRegistry = loadTaskRegistrySync(runtimeRoot);
-	const messages = loadChatMessages(runtimeRoot, agentNames, taskRegistry).filter((message) => taskIds.size === 0 || !message.taskId || taskIds.has(message.taskId));
-	appendBgChatMessages(messages, items, taskRegistry);
-	messages.sort((a, b) => a.timestamp - b.timestamp);
-	const body: string[] = [];
-	if (messages.length === 0) {
-		body.push(...wrapTextWithAnsi(theme.fg("dim", "No messages yet. Delegations and completions will appear here as agents work."), safeWidth));
-	} else {
-		for (let i = 0; i < messages.length; i += 1) {
-			const msg = messages[i];
-			const time = theme.fg("dim", chatTimestamp(msg.timestamp));
-			const arrow = theme.fg("dim", "\u2192");
-			const fromLabel = chatRoleColor(msg.from, theme);
-			const toLabel = chatRoleColor(msg.to, theme);
-			const sep = theme.fg("dim", "\u00b7");
-			const kindBadge = chatKindBadge(msg.kind, theme);
-			const statusIcon = chatStatusIcon(msg.status, theme);
-			const taskBadge = msg.taskId ? theme.fg("muted", `#${shortTaskSuffix(msg.taskId)}`) : undefined;
-			const headerParts = [time, fromLabel, arrow, toLabel, sep, kindBadge];
-			if (statusIcon) headerParts.push(sep, statusIcon);
-			if (taskBadge) headerParts.push(sep, taskBadge);
-			body.push(...wrapTextWithAnsi(headerParts.join(" "), safeWidth));
-			const indent = theme.fg("dim", "\u2502 ");
-			const bodyText = msg.body || theme.fg("dim", "(empty)");
-			body.push(...wrapWithHangingIndent(theme.fg("toolOutput", bodyText), indent, safeWidth));
-			if (msg.filesChanged && msg.filesChanged.length > 0) {
-				body.push(...wrapWithHangingIndent(theme.fg("muted", `files: ${msg.filesChanged.join(", ")}`), indent, safeWidth));
-			}
-			if (msg.notes) {
-				body.push(...wrapWithHangingIndent(theme.fg("muted", `notes: ${msg.notes}`), indent, safeWidth));
-			}
-			if (i < messages.length - 1) body.push("");
-		}
-	}
-	const allLines: string[] = [titleLine, ""];
-	const visibleBodyRows = Math.max(1, rows - 2);
-	const maxOffset = Math.max(0, body.length - visibleBodyRows);
-	const offset = Math.max(0, Math.min(ui.inspectorScroll, maxOffset));
-	ui.inspectorScroll = offset;
-	allLines.push(...body.slice(offset, offset + visibleBodyRows));
-	if (offset > 0 || maxOffset > 0) {
-		const hint = `${offset > 0 ? `\u2191 ${offset} earlier` : ""}${offset > 0 && offset < maxOffset ? "  " : ""}${offset < maxOffset ? `\u2193 ${maxOffset - offset} more` : ""}`.trim();
-		if (hint && allLines.length < rows) {
-			const lastIndex = allLines.length - 1;
-			allLines[lastIndex] = `${allLines[lastIndex]} ${theme.fg("dim", hint)}`;
-		}
-	}
-	return allLines.slice(0, rows);
-}
-
-function renderActiveTabBody(items: SubagentDashboardItem[], runtimeRoot: string, ui: AgentBrowserUiState, width: number, theme: Theme, layout: AgentBrowserLayout): string[] {
-	const maxLeftWidth = Math.max(10, width - 13);
-	const desiredLeftWidth = Math.min(AGENTS_LEFT_MAX_WIDTH, Math.floor(width * 0.32), maxLeftWidth);
-	const leftWidth = Math.max(10, Math.min(maxLeftWidth, Math.max(Math.min(AGENTS_LEFT_MIN_WIDTH, maxLeftWidth), desiredLeftWidth)));
-	const rightWidth = Math.max(1, width - leftWidth - 3);
-	const bodyRows = layout.bodyRows;
-	// Numbering for active-list, Detail header, and Chat must match the
-	// popup task-children + Inspector header (`<agent> #N`) by reading
-	// the persisted task registry, not the in-memory counter. Small
-	// JSON; the per-render read is cheap and removes the worst
-	// inconsistency (same task showing as #2 here and #6 there).
-	const persistentTaskNumbers = taskNumberById(Object.values(loadTaskRegistrySync(runtimeRoot)));
-	const left = renderActiveAgentList(items, ui, leftWidth, theme, layout.listRows, persistentTaskNumbers);
-	const detailItem = items[ui.activeSelected];
-	const labels = dashboardDisplayLabels(items, persistentTaskNumbers);
-	const right = renderActiveAgentDetail(detailItem, detailItem ? labels.get(detailItem.taskId) : undefined, ui, rightWidth, bodyRows, theme);
-	const lines: string[] = [];
-	const headerLine = `${theme.fg("muted", "View")}: ${theme.fg("text", "active")}  ${theme.fg("muted", "Items")}: ${items.length}`;
-	lines.push(...wrapTextWithAnsi(headerLine, width));
-	lines.push(agentDivider(width, theme));
-	for (let i = 0; i < bodyRows; i += 1) {
-		lines.push(`${agentPad(left[i] ?? "", leftWidth)} ${theme.fg("dim", "\u2502")} ${truncateToWidth(right[i] ?? "", rightWidth, "")}`);
-	}
-	const legend = `${theme.fg("muted", "Active")}: ${theme.fg("warning", "running/waiting")} \u00b7 ${theme.fg("success", "completed")} \u00b7 ${theme.fg("error", "failed")}`;
-	lines.push("");
-	lines.push(...wrapTextWithAnsi(legend, width));
-	return lines;
-}
-
 function renderHistoryTabBody(
 	records: PaneTaskRecord[],
 	cache: Map<string, HistoryDetailEntry>,
@@ -1544,43 +1107,19 @@ function renderHistoryTabBody(
 function renderUnifiedAgentDetail(
 	row: AgentBrowserRow | undefined,
 	statuses: Map<string, AgentPaneStatus>,
-	activeItems: SubagentDashboardItem[],
-	runtimeRoot: string,
 	ui: AgentBrowserUiState,
 	width: number,
 	rows: number,
 	theme: Theme,
 ): string[] {
-	const agent = row?.agent;
-	const activeItem = row?.item;
-	const displayLabel = row?.rowType === "task" && agent ? `${agent.name} ${row.label}` : row?.label;
-	if (!activeItem) {
-		ui.agentSubtab = 0;
-		return renderAgentInspector(agent, statuses, ui, width, rows, theme);
-	}
-	const tabs: TraceViewerItem[] = [
-		{ label: "Live", text: "", type: "transcript" },
-		{ label: "Chat", text: "", type: "summary" },
-		{ label: "Inspector", text: "", type: "summary" },
-	];
-	ui.agentSubtab = Math.max(0, Math.min(ui.agentSubtab, tabs.length - 1));
-	const agentChatItems = activeItems.filter((item) => item.agent === activeItem.agent);
-	const chatItems = row?.rowType === "agent" ? (agentChatItems.length > 0 ? agentChatItems : [activeItem]) : [activeItem];
-	const base = ui.agentSubtab === 0
-		? renderActiveAgentDetail(activeItem, displayLabel, ui, width, rows, theme)
-		: ui.agentSubtab === 1
-			? renderChatRoomDetail(runtimeRoot, chatItems, ui, width, rows, theme)
-			: renderAgentInspector(agent, statuses, ui, width, rows, theme);
-	const tabLine = renderTraceTabBar(tabs, ui.agentSubtab, Math.max(8, width), theme);
-	return [base[0] ?? "", "", tabLine, "", ...base.slice(2)].slice(0, rows);
+	ui.agentSubtab = 0;
+	return renderAgentInspector(row?.agent, statuses, ui, width, rows, theme);
 }
 
 function renderAgentsBody(
 	discovery: ReturnType<typeof discoverAgents>,
 	rowsForList: AgentBrowserRow[],
 	statuses: Map<string, AgentPaneStatus>,
-	activeItems: SubagentDashboardItem[],
-	runtimeRoot: string,
 	ui: AgentBrowserUiState,
 	width: number,
 	theme: Theme,
@@ -1595,11 +1134,10 @@ function renderAgentsBody(
 	const liveCount = [...statuses.values()].filter((status) => status.live).length;
 	const paneCount = discovery.agents.filter((agent) => agent.pane).length;
 	const left = renderAgentList(rowsForList, statuses, ui, leftWidth, theme, layout.listRows);
-	const right = renderUnifiedAgentDetail(selectedRow, statuses, activeItems, runtimeRoot, ui, rightWidth, bodyRows, theme);
+	const right = renderUnifiedAgentDetail(selectedRow, statuses, ui, rightWidth, bodyRows, theme);
 	const rows = bodyRows;
 	const searchLine = theme.bg("toolPendingBg", agentPad(` > ${ui.search}${theme.inverse(" ")}`, width));
-	const workingCount = activeItems.filter((item) => isDashboardWorkingStatus(item.status)).length;
-	const filterLine = `${theme.fg("muted", "all scopes")}: ${rowsForList.length} rows · ${discovery.agents.length} agents · ${workingCount} working · ${paneCount} pane · ${liveCount} live`;
+	const filterLine = `${theme.fg("muted", "all scopes")}: ${rowsForList.length} rows · ${discovery.agents.length} agents · ${paneCount} pane · ${liveCount} live`;
 	const filterLines = wrapTextWithAnsi(filterLine, width);
 	const lines = [searchLine, ...filterLines, agentDivider(width, theme)];
 	for (let i = 0; i < rows; i += 1) {
@@ -1620,7 +1158,6 @@ function createAgentsBrowserComponent(
 	getLayout: () => AgentBrowserLayout,
 	done: (action: AgentBrowserAction) => void,
 	getActiveItems: () => SubagentDashboardItem[],
-	runtimeRoot: string,
 ) {
 	let closed = false;
 	let resizeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1650,7 +1187,7 @@ function createAgentsBrowserComponent(
 		done(action);
 	};
 	process.on("SIGWINCH", scheduleResizeRender);
-	const filtered = () => buildAgentRows(discovery.agents, ui.search, statuses, getActiveItems(), taskRegistry);
+	const filtered = () => buildAgentRows(discovery.agents, ui.search, statuses);
 	const selectedRow = () => filtered()[ui.selected];
 	const selectedAgent = () => selectedRow()?.agent;
 	const clamp = () => {
@@ -1738,12 +1275,8 @@ function createAgentsBrowserComponent(
 		if (matchesKey(data, "shift+tab")) return switchTab(-1);
 		if (matchesKey(data, "left")) {
 			if (ui.tab === "agents" && ui.pane === "inspector") {
-				if (ui.agentSubtab > 0) {
-					ui.agentSubtab -= 1;
-					ui.inspectorScroll = 0;
-				} else {
-					ui.pane = "list";
-				}
+				ui.agentSubtab = 0;
+				ui.pane = "list";
 				requestRender();
 				return;
 			}
@@ -1768,11 +1301,7 @@ function createAgentsBrowserComponent(
 					requestRender();
 					return;
 				}
-				if (selectedRow()?.item && ui.agentSubtab < 2) {
-					ui.agentSubtab += 1;
-					ui.inspectorScroll = 0;
-					requestRender();
-				}
+				ui.agentSubtab = 0;
 				return;
 			}
 			if (ui.tab === "history" && ui.pane === "inspector") {
@@ -1953,7 +1482,7 @@ function createAgentsBrowserComponent(
 		const lines = [
 			tabLine,
 			"",
-			...renderAgentsBody(discovery, filtered(), statuses, activeItems, runtimeRoot, ui, bodyWidth, theme, layout),
+			...renderAgentsBody(discovery, filtered(), statuses, ui, bodyWidth, theme, layout),
 			agentDivider(bodyWidth, theme),
 			...wrapTextWithAnsi(footer, bodyWidth),
 		];
@@ -1996,7 +1525,7 @@ export async function openAgentsBrowser(
 		const discovery = discoverAgents(ctx.cwd, "both");
 		const statuses = await loadAgentPaneStatuses(runtimeRoot);
 		if (initialAgentName) {
-			const selected = sortAgentsForUnifiedView(discovery.agents, statuses, getActiveItems()).findIndex((agent) => agent.name === initialAgentName);
+			const selected = sortAgentsForUnifiedView(discovery.agents, statuses).findIndex((agent) => agent.name === initialAgentName);
 			if (selected >= 0) ui.selected = selected;
 			else {
 				ctx.ui.notify(`Unknown agent "${initialAgentName}"`, "warning");
@@ -2015,7 +1544,6 @@ export async function openAgentsBrowser(
 				() => agentBrowserLayout(tui.terminal.rows),
 				done,
 				getActiveItems,
-				runtimeRoot,
 			),
 			{ overlay: true, overlayOptions: { anchor: "center", maxHeight: AGENTS_BROWSER_MAX_HEIGHT, width: AGENTS_BROWSER_WIDTH } },
 		);
