@@ -97,6 +97,11 @@ function usage(): never {
   flightdeck-daemon find-window --session <S>
   flightdeck-daemon events      --session <S>
   flightdeck-daemon ack         --session <S>
+
+start exit codes:
+  1 lock/spawn/runtime failure
+  2 usage, missing dependency/session, or inner-pane validation failure
+  4 stale --master pane (re-resolve from $TMUX_PANE and retry once)
 `);
 	process.exit(2);
 }
@@ -297,11 +302,11 @@ function cmdStatus(): void {
 
 function cmdFindWindow(): void {
 	if (!sessionId) die(`Error: tmux session '${sessionName}' not found`, 1);
-	const windowName = `flightdeck-daemon-${sessionKey}`;
-	const r = spawnSync("tmux", ["list-windows", "-t", sessionId, "-F", "#{window_id} #{window_name}"], { encoding: "utf8" });
+	const windowName = `[fd] daemon-${sessionKey}`;
+	const r = spawnSync("tmux", ["list-windows", "-t", sessionId, "-F", "#{window_id}\t#{window_name}"], { encoding: "utf8" });
 	if (r.status !== 0) process.exit(1);
 	for (const line of (r.stdout ?? "").split("\n")) {
-		const [wid, wname] = line.split(" ");
+		const [wid, wname] = line.split("\t");
 		if (wname === windowName && wid) {
 			process.stdout.write(`${wid}\n`);
 			process.exit(0);

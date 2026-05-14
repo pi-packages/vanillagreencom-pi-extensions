@@ -29,6 +29,7 @@ import { gcOrphanState } from "./gc.ts";
 import { installShutdownHandlers, killAllSubscribers } from "./lifecycle.ts";
 import { lockedCleanupState } from "../state/locking.ts";
 import { runLoop, type RunLoopOpts } from "./loop.ts";
+import { PaneCache, resolvePaneId } from "./pane-meta.ts";
 
 export interface StartOpts extends Omit<RunLoopOpts, "scriptPath" | "origArgs"> {
 	foreground: boolean;
@@ -46,7 +47,18 @@ function sleepMs(ms: number): Promise<void> {
 	return new Promise((res) => setTimeout(res, ms));
 }
 
+function validateMasterTargetAlive(target: string): void {
+	const cache = new PaneCache();
+	cache.refresh();
+	const masterId = resolvePaneId(target);
+	if (!masterId || !cache.alive(masterId)) {
+		process.stderr.write(`error: master pane '${target}' does not exist; pass --master "$TMUX_PANE" or run 'tmux list-panes -a'\n`);
+		process.exit(4);
+	}
+}
+
 async function dispatchSpawn(opts: StartOpts): Promise<never> {
+	validateMasterTargetAlive(opts.masterTarget);
 	const pidFile = fdPidFile(opts.stateDir, opts.sessionKey);
 	const logFile = fdLogFile(opts.stateDir, opts.sessionKey);
 	// Build child args. opts.origArgs is the post-action argv slice
@@ -57,7 +69,7 @@ async function dispatchSpawn(opts: StartOpts): Promise<never> {
 	const childArgs = ["start", ...opts.origArgs.filter((a) => !SKIP_FLAGS.has(a)), "--foreground"];
 
 	if (opts.spawnMode === "tmux-window") {
-		const windowName = `flightdeck-daemon-${opts.sessionKey}`;
+		const windowName = `[fd] daemon-${opts.sessionKey}`;
 		// tmux server doesn't inherit caller env (round-4 #4 fix).
 		// Prepend `env KEY=VALUE ...` carrying the daemon-state knobs
 		// so the child window writes state to the right directory and
@@ -236,6 +248,8 @@ async function foregroundStart(opts: StartOpts): Promise<void> {
 		}
 	}
 
+	validateMasterTargetAlive(opts.masterTarget);
+
 	// Write own pid into the PID_FILE.
 	writeFileSync(pidFile, `${process.pid}\n`);
 
@@ -245,7 +259,9 @@ async function foregroundStart(opts: StartOpts): Promise<void> {
 	installShutdownHandlers({
 		pidFile,
 		heartbeatFile,
+		eventsFile,
 		wakeEventsLog,
+		sessionLock,
 		killSubscribers: () => killAllSubscribers({
 			stateDir: opts.stateDir,
 			sessionKey: opts.sessionKey,
@@ -280,6 +296,7 @@ async function foregroundStart(opts: StartOpts): Promise<void> {
 			});
 		},
 		log,
+		masterId: () => opts.masterTarget,
 	});
 
 	// Fresh-start state wipe under SESSION_LOCK. Round-5 #1: skip
@@ -290,7 +307,8 @@ async function foregroundStart(opts: StartOpts): Promise<void> {
 	if (opts.fromHandoff) {
 		log("from-handoff", `pid=${process.pid} (preserving wake-pending/events/wake-events.log from predecessor)`);
 	} else {
-		lockedCleanupState(sessionLock, { wakePending, eventsFile, wakeEventsLog });
+		// Preserve previous daemon-exited rows so the master can drain them after respawn.
+		lockedCleanupState(sessionLock, { wakePending, wakeEventsLog });
 	}
 
 	void resolve;

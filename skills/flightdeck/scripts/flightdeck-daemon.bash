@@ -171,6 +171,11 @@ start spawn modes:
                        harnesses where backgrounding is unreliable.
   --foreground       — keep the process attached. Used internally by both
                        spawn modes; pass directly for ops debugging.
+
+start exit codes:
+  1 lock/spawn/runtime failure
+  2 usage, missing dependency/session, or inner-pane validation failure
+  4 stale --master pane (re-resolve from $TMUX_PANE and retry once)
 EOF
 exit 2; }
 
@@ -273,12 +278,14 @@ log() {
   printf -v line '%s [%s] %s\n' "$(date -Iseconds)" "$1" "$2"
   printf '%s' "$line" >> "$LOG"
   [[ -t 1 ]] && printf '%s' "$line"
+  return 0
 }
 warn() {
   local line
   printf -v line '%s [%s] %s\n' "$(date -Iseconds)" "$1" "$2"
   printf '%s' "$line" >> "$LOG"
   printf '%s' "$line" >&2
+  return 0
 }
 
 # Startup GC for orphaned daemon state files (sessions that no longer exist).
@@ -395,6 +402,51 @@ pane_alive() {
   # not yet refreshed; refresh_pane_cache is called at the top of every
   # tick so this is reliable inside run_loop).
   [[ -n "${PANE_TARGET_CACHE[$pid]:-}" ]]
+}
+
+emit_daemon_exited_event() {
+  if [[ -z "${EVENTS_FILE:-}" || -z "${SESSION_LOCK:-}" ]]; then
+    warn daemon-exited-emit-failed "missing EVENTS_FILE or SESSION_LOCK"
+    printf '[daemon-exited-emit-failed] missing EVENTS_FILE or SESSION_LOCK\n' >&2
+    return 1
+  fi
+  local reason="${DAEMON_EXIT_REASON:-other}" ts master_id_for_event hash err_file err_tail
+  ts=$(date -Iseconds)
+  master_id_for_event="${master_id:-${MASTER_TARGET:-}}"
+  hash=$(printf '%s|%s|%s|%s' "$ts" "$reason" "$master_id_for_event" "$$" | sha256sum | awk '{print substr($1,1,12)}')
+  err_file=$(mktemp -t fd-daemon-exited-err.XXXXXX 2>/dev/null || true)
+  if ! (
+    exec 219>"$SESSION_LOCK"
+    flock 219
+    jq -nc --arg ts "$ts" \
+           --arg pane_id "$master_id_for_event" \
+           --arg event_type "daemon-exited" \
+           --arg reason "$reason" \
+           --arg master_id "$master_id_for_event" \
+           --arg tag "daemon-exited" \
+           --arg hash "$hash" \
+           --argjson pid "$$" \
+           '{ts:$ts,pane_id:$pane_id,event_type:$event_type,reason:$reason,master_id:$master_id,pid:$pid,hash:$hash,tag:$tag,stable_age_sec:0,details:{event_type:$event_type,reason:$reason,master_id:$master_id,pid:$pid}}' \
+           >> "$EVENTS_FILE"
+  ) 2>"${err_file:-/dev/null}"; then
+    err_tail="unknown"
+    [[ -n "$err_file" && -f "$err_file" ]] && err_tail=$(tail -c 300 "$err_file" | tr '\n' ' ')
+    rm -f "${err_file:-}" 2>/dev/null || true
+    warn daemon-exited-emit-failed "events_file=$EVENTS_FILE reason=$reason error=${err_tail:-unknown}"
+    printf '[daemon-exited-emit-failed] events_file=%s reason=%s error=%s\n' "$EVENTS_FILE" "$reason" "${err_tail:-unknown}" >&2
+    return 1
+  fi
+  rm -f "${err_file:-}" 2>/dev/null || true
+}
+
+validate_master_target_alive() {
+  local target="$1" master_id=""
+  refresh_pane_cache
+  master_id=$(resolve_pane_id "$target" 2>/dev/null || true)
+  if [[ -z "$master_id" ]] || ! pane_alive "$master_id"; then
+    echo "error: master pane '$target' does not exist; pass --master \"\$TMUX_PANE\" or run 'tmux list-panes -a'" >&2
+    exit 4
+  fi
 }
 
 session_alive() {
@@ -837,7 +889,15 @@ locked_rm_wake_pending() {
 # Subshell-test for exec to avoid permanent stderr redirection.
 locked_state_cleanup() {
   local nonblock=""
-  [[ "${1:-}" == "--nonblock" ]] && nonblock="-n"
+  local keep_events=0
+  local keep_wake_events=0
+  for arg in "$@"; do
+    case "$arg" in
+      --nonblock) nonblock="-n" ;;
+      --keep-events) keep_events=1 ;;
+      --keep-wake-events) keep_wake_events=1 ;;
+    esac
+  done
 
   if ! ( exec 207>"$SESSION_LOCK" ) 2>/dev/null; then
     return 0
@@ -847,13 +907,20 @@ locked_state_cleanup() {
     exec 207>&-
     return 0
   fi
-  rm -f "$WAKE_PENDING" "$EVENTS_FILE"
-  [[ -n "${WAKE_EVENTS_LOG:-}" ]] && rm -f "$WAKE_EVENTS_LOG"
+  rm -f "$WAKE_PENDING"
+  if (( keep_events == 0 )); then
+    rm -f "$EVENTS_FILE"
+  fi
+  if (( keep_wake_events == 0 )); then
+    [[ -n "${WAKE_EVENTS_LOG:-}" ]] && rm -f "$WAKE_EVENTS_LOG"
+  fi
   shopt -s nullglob
   local f
-  for f in "$EVENTS_FILE".draining.*; do
-    rm -f "$f"
-  done
+  if (( keep_events == 0 )); then
+    for f in "$EVENTS_FILE".draining.*; do
+      rm -f "$f"
+    done
+  fi
   if [[ -n "${WAKE_EVENTS_LOG:-}" ]]; then
     for f in "$WAKE_EVENTS_LOG".draining.*; do
       rm -f "$f"
@@ -1883,15 +1950,20 @@ run_loop() {
   # WAKE_EVENTS_LOG are bound, the trap fires under set -u and
   # `unbound variable` masks the real failure. Use defaults so the trap
   # is always safe to run.
+  DAEMON_EXIT_REASON="other"
+  DAEMON_CLEANED=0
   _on_exit() {
+    [[ "${DAEMON_CLEANED:-0}" == "1" ]] && return 0
+    DAEMON_CLEANED=1
     kill_all_oc_subscribers || true
     rm -f "${PID_FILE:-}" "${HEARTBEAT_FILE:-}" 2>/dev/null || true
-    rm -f "${WAKE_EVENTS_LOG:-}" 2>/dev/null || true
-    locked_state_cleanup --nonblock || true
+    locked_state_cleanup --nonblock --keep-wake-events || true
+    emit_daemon_exited_event || true
     log stop "pid=$$"
   }
   trap '_on_exit' EXIT
-  trap '_on_exit; exit 0' INT TERM
+  trap 'DAEMON_EXIT_REASON="signal-int"; _on_exit; exit 0' INT
+  trap 'DAEMON_EXIT_REASON="signal-term"; _on_exit; exit 0' TERM HUP
 
   while true; do
     # Watchdog: touch the heartbeat file every tick. Master can read its
@@ -1931,6 +2003,7 @@ run_loop() {
 
     if ! pane_alive "$master_id"; then
       log master-gone "master $master_id gone; exiting"
+      DAEMON_EXIT_REASON="master-gone"
       break
     fi
 
@@ -2218,6 +2291,7 @@ case "$ACTION" in
   start)
     [[ -z "$MASTER_TARGET" || -z "$INNER_TARGETS" ]] && { echo "start needs --master and --inner" >&2; usage; }
     [[ -z "$SESSION_ID" ]] && { echo "Error: tmux session '$SESSION_NAME' not found" >&2; exit 2; }
+    validate_master_target_alive "$MASTER_TARGET"
 
     # --- Spawn mode dispatch:
     #   detach (default)  → re-exec self with --foreground via setsid + nohup.
@@ -2250,7 +2324,7 @@ case "$ACTION" in
           # Spawn a detached tmux window in the master's session running
           # 'start --foreground ...'. The window's lifetime ties to the
           # tmux session; killing the session reaps the daemon.
-          window_name="flightdeck-daemon-${SESSION_KEY}"
+          window_name="[fd] daemon-${SESSION_KEY}"
           # Build the command string for tmux to execute; quote each arg.
           cmd_str=$(printf '%q ' "$script_path" "${child_args[@]}")
           if ! tmux new-window -d -t "$SESSION_ID" -n "$window_name" "$cmd_str" 2>/dev/null; then
@@ -2345,9 +2419,11 @@ case "$ACTION" in
       fi
     done
 
+    validate_master_target_alive "$MASTER_TARGET"
+
     echo $$ > "$PID_FILE"
-    # Fresh start: clear any stale wake/event state under SESSION_LOCK.
-    locked_state_cleanup
+    # Fresh start: keep prior daemon-exited rows for the master to drain on recovery.
+    locked_state_cleanup --keep-events
     run_loop
     ;;
 
@@ -2451,9 +2527,9 @@ case "$ACTION" in
     # Print the tmux window-id of the daemon's window if it was spawned in
     # tmux-window mode. Empty output (exit 1) when not found.
     [[ -z "$SESSION_ID" ]] && { echo "Error: tmux session '$SESSION_NAME' not found" >&2; exit 1; }
-    window_name="flightdeck-daemon-${SESSION_KEY}"
-    wid=$(tmux list-windows -t "$SESSION_ID" -F '#{window_id} #{window_name}' 2>/dev/null \
-          | awk -v n="$window_name" '$2==n {print $1; exit}')
+    window_name="[fd] daemon-${SESSION_KEY}"
+    wid=$(tmux list-windows -t "$SESSION_ID" -F '#{window_id}	#{window_name}' 2>/dev/null \
+          | awk -F '\t' -v n="$window_name" '$2==n {print $1; exit}')
     if [[ -z "$wid" ]]; then
       exit 1
     fi
