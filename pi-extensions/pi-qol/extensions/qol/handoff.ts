@@ -6,6 +6,11 @@ import { serializeMessagesForSummary } from "./compaction.js";
 import { HANDOFF_SYSTEM_PROMPT } from "./constants.js";
 import { settingBoolean } from "./settings.js";
 
+function errorMessage(error: unknown): string {
+	const message = error instanceof Error ? error.message : String(error);
+	return message.length > 180 ? `${message.slice(0, 179)}…` : message;
+}
+
 export async function runHandoff(args: string, ctx: ExtensionCommandContext): Promise<void> {
 	if (!ctx.hasUI) {
 		ctx.ui.notify("handoff requires interactive mode", "error");
@@ -36,56 +41,58 @@ export async function runHandoff(args: string, ctx: ExtensionCommandContext): Pr
 
 	const releaseModalLock = acquireVstackModalLock();
 	let result: string | null = null;
+	let generationError: unknown;
 	try {
-	result = await ctx.ui.custom<string | null>((tui: any, theme: any, _kb: any, done: (value: string | null) => void) => {
-		const loader = new BorderedLoader(tui, theme, "Generating handoff prompt...");
-		loader.onAbort = () => done(null);
+		result = await ctx.ui.custom<string | null>((tui: any, theme: any, _kb: any, done: (value: string | null) => void) => {
+			const loader = new BorderedLoader(tui, theme, "Generating handoff prompt...");
+			loader.onAbort = () => done(null);
 
-		const doGenerate = async () => {
-			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(ctx.model!);
-			if (!auth.ok || !auth.apiKey) {
-				throw new Error(auth.ok ? `No API key for ${ctx.model!.provider}` : auth.error);
-			}
+			const doGenerate = async () => {
+				const auth = await ctx.modelRegistry.getApiKeyAndHeaders(ctx.model!);
+				if (!auth.ok || !auth.apiKey) {
+					throw new Error(auth.ok ? `No API key for ${ctx.model!.provider}` : auth.error);
+				}
 
-			const userMessage: Message = {
-				role: "user",
-				content: [
-					{
-						type: "text",
-						text: `## Conversation History\n\n${conversationText}\n\n## User's Goal for New Thread\n\n${goal}`,
-					},
-				],
-				timestamp: Date.now(),
+				const userMessage: Message = {
+					role: "user",
+					content: [
+						{
+							type: "text",
+							text: `## Conversation History\n\n${conversationText}\n\n## User's Goal for New Thread\n\n${goal}`,
+						},
+					],
+					timestamp: Date.now(),
+				};
+
+				const response = await complete(
+					ctx.model!,
+					{ systemPrompt: HANDOFF_SYSTEM_PROMPT, messages: [userMessage] },
+					{ apiKey: auth.apiKey, headers: auth.headers, signal: loader.signal },
+				);
+
+				if (response.stopReason === "aborted") return null;
+				return response.content
+					.filter((content): content is { type: "text"; text: string } => content.type === "text")
+					.map((content) => content.text)
+					.join("\n");
 			};
 
-			const response = await complete(
-				ctx.model!,
-				{ systemPrompt: HANDOFF_SYSTEM_PROMPT, messages: [userMessage] },
-				{ apiKey: auth.apiKey, headers: auth.headers, signal: loader.signal },
-			);
+			doGenerate()
+				.then(done)
+				.catch((error) => {
+					generationError = error;
+					done(null);
+				});
 
-			if (response.stopReason === "aborted") return null;
-			return response.content
-				.filter((content): content is { type: "text"; text: string } => content.type === "text")
-				.map((content) => content.text)
-				.join("\n");
-		};
-
-		doGenerate()
-			.then(done)
-			.catch((error) => {
-				console.error("Handoff generation failed:", error);
-				done(null);
-			});
-
-		return loader;
-	});
+			return loader;
+		});
 	} finally {
 		releaseModalLock();
 	}
 
 	if (result === null) {
-		ctx.ui.notify("Cancelled", "info");
+		if (generationError) ctx.ui.notify(`Handoff generation failed: ${errorMessage(generationError)}`, "error");
+		else ctx.ui.notify("Cancelled", "info");
 		return;
 	}
 

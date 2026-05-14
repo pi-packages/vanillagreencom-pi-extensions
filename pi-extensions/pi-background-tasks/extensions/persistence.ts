@@ -22,6 +22,7 @@ import { dirname, join, resolve } from "node:path";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
+import { logBackgroundDiagnostic } from "./diagnostics.js";
 import type { BackgroundTaskSnapshot } from "./types.js";
 
 export interface PersistResult {
@@ -92,7 +93,7 @@ export function reportPersistFailure(
 	notify?: (where: string, message: string) => void,
 ): void {
 	const msg = error instanceof Error ? error.message : String(error);
-	process.stderr.write(`[pi-background-tasks] persistence failed (${where}): ${msg}\n`);
+	logBackgroundDiagnostic("persistence failed", { where, error: msg });
 	notify?.(where, msg);
 }
 

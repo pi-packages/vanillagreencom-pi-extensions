@@ -1154,8 +1154,10 @@ async function* captureGeneratedImages(
 						data: result,
 						mimeType: `image/${normalizedOutputFormat}`,
 					});
-				} catch (error) {
-					console.warn("[pi-codex-conversion] Failed to save generated image", error);
+				} catch {
+					// Image persistence is best-effort. Do not write raw diagnostics to
+					// stdout/stderr from inside the TUI; terminal output can corrupt active
+					// widgets and boxes.
 				}
 			}
 		}

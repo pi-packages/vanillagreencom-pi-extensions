@@ -15,6 +15,11 @@ import { patchInteractiveModeStartupSkillsBlock, setStartupHideEnabled } from ".
 import { setSkillEnabled } from "./skills-manager/toggle.js";
 import { EMPTY_REGISTRY, type SkillEntry, type SkillRegistry } from "./skills-manager/types.js";
 
+function errorMessage(error: unknown): string {
+	const message = error instanceof Error ? error.message : String(error);
+	return message.length > 180 ? `${message.slice(0, 179)}…` : message;
+}
+
 function insertNativeSkillCommand(ctx: ExtensionContext, skill: SkillEntry): void {
 	ctx.ui.pasteToEditor(`/skill:${skill.name}\n`);
 }
@@ -64,7 +69,7 @@ export default function skillsManager(pi: ExtensionAPI): void {
 			await refreshRegistry(ctx.cwd);
 		} catch (error) {
 			registry = EMPTY_REGISTRY;
-			console.error("pi-skills-manager: failed to load skills registry", error);
+			ctx.ui.notify(`Skills Manager failed to load registry: ${errorMessage(error)}`, "error");
 		}
 		return false;
 	}
@@ -95,8 +100,7 @@ export default function skillsManager(pi: ExtensionAPI): void {
 			try {
 				await refreshRegistry(ctx.cwd);
 			} catch (error) {
-				console.error("pi-skills-manager: failed to refresh skills registry", error);
-				ctx.ui.notify("Failed to load skills list", "error");
+				ctx.ui.notify(`Failed to load skills list: ${errorMessage(error)}`, "error");
 				return;
 			}
 			const selection = await showSkillsManager(ctx, registry, {

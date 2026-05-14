@@ -57,6 +57,7 @@ import {
 	frameWidget,
 	renderTaskEventMessage,
 } from "./render.js";
+import { logBackgroundDiagnostic } from "./diagnostics.js";
 import { registerAll } from "./registrations.js";
 import { finalizeTaskLifecycle, replayMissedExitsLifecycle, type LifecycleHooks } from "./lifecycle.js";
 import { createOrphanWatcher, type OrphanWatcher } from "./orphan-watcher.js";
@@ -175,7 +176,7 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 			}
 		} catch (error) {
 			const msg = error instanceof Error ? error.message : String(error);
-			process.stderr.write(`[pi-background-tasks] persistence failed (sidecar-read): ${msg}\n`);
+			logBackgroundDiagnostic("persistence failed (sidecar-read)", { error: msg });
 			// Fall back to session entries below.
 		}
 		for (const entry of ctx.sessionManager.getBranch()) {
@@ -301,7 +302,7 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 	};
 
 	const logWakeDiagnostic = (diagnostic: WakeDiagnostic) => {
-		process.stderr.write(`[pi-background-tasks] wake diagnostic ${JSON.stringify(diagnostic)}\n`);
+		logBackgroundDiagnostic("wake diagnostic", diagnostic);
 	};
 
 	const persistScheduledOutputDrop = (
@@ -439,7 +440,7 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 			getTasks: () => tasks.values(),
 			hooks: lifecycleHooks,
 			onFinalize: (task, reason) => {
-				process.stderr.write(`[pi-background-tasks] orphan task ${task.id} (pid ${task.pid}) ${reason}; finalized as ${task.status}\n`);
+				logBackgroundDiagnostic("orphan task finalized", { id: task.id, pid: task.pid, reason, status: task.status });
 			},
 		});
 		orphanWatcher.start();
@@ -460,7 +461,7 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 			if (legacyFallbackWarned.has(task.id)) continue;
 			legacyFallbackWarned.add(task.id);
 			const msg = `Background task ${task.id} (pid ${task.pid}) restored from a pre-1.2.2 snapshot without process identity. Liveness will degrade to PID-only, so a pid reuse could falsely keep the task alive. Restart will recapture identity for any task spawned after this upgrade.`;
-			process.stderr.write(`[pi-background-tasks] ${msg}\n`);
+			logBackgroundDiagnostic(msg);
 			activeCtx?.ui.notify?.(msg, "warning");
 		}
 	};
@@ -478,7 +479,7 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 	const replayMissedExits = () => {
 		const replayed = replayMissedExitsLifecycle(tasks.values(), lifecycleHooks);
 		if (replayed > 0) {
-			process.stderr.write(`[pi-background-tasks] replayed ${replayed} missed exit wake(s) for session=${activeSessionId ?? "unknown"}\n`);
+			logBackgroundDiagnostic("replayed missed exit wakes", { replayed, session: activeSessionId ?? "unknown" });
 		}
 	};
 

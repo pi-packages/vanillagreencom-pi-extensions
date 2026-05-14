@@ -111,6 +111,10 @@ All settings live in the extension manager under **Background Tasks**.
 | --- | --- |
 | Task log directory | Override log file location. `PI_BG_TASK_DIR` env var still wins. |
 
+### Diagnostics
+
+Routine wake/persistence diagnostics are written only when `PI_BG_TASK_DEBUG=1`, `PI_BG_TASK_DIAGNOSTICS=1`, or `PI_BG_TASK_DIAGNOSTIC_LOG=/path/to/log` is set. They go to a log file (default: `$TMPDIR/vstack-pi-bg/diagnostics.log`) instead of stdout/stderr so active TUI widgets cannot be corrupted by raw terminal output.
+
 ## Notes
 
 Tasks are scoped to the current Pi runtime and stopped on session shutdown. Shells start in their own process group so `/bg:stop` and shutdown terminate children. Tasks inherit Pi's environment and working directory.

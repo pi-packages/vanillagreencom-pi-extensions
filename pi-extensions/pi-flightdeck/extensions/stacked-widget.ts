@@ -1,5 +1,6 @@
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { Component, TUI } from "@earendil-works/pi-tui";
+import { truncateToWidth } from "@earendil-works/pi-tui";
 
 export type MiniDashboardPlacement = "aboveEditor" | "belowEditor";
 export type MiniDashboardComponent = Component & { dispose?(): void };
@@ -97,7 +98,7 @@ function stackComponent(value: MiniDashboardRegistry, placement: MiniDashboardPl
 			for (const entry of entries) {
 				lines.push(...ensureComponent(entry).render(width));
 			}
-			return lines;
+			return lines.map((line) => truncateToWidth(line, Math.max(1, width), ""));
 		},
 		dispose() {
 			for (const cached of components.values()) cached.component.dispose?.();
