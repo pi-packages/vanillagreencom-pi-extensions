@@ -100,12 +100,6 @@ describe("handler domain guards", () => {
 		expectWarning(result, "routing as domain-mismatch");
 	});
 
-	test("legacy caller with allow-missing-kind warns but remains permissive", () => {
-		const result = expectBoth(fixture("14-merge-now.buffer"), ["--allow-missing-kind"], "merge-now");
-		expectWarning(result, "--allow-missing-kind was set");
-		expectWarning(result, "Migrate to --entry-kind issue");
-	});
-
 	test("generic tag on issue entry remains generic for the generic handler", () => {
 		expectBoth(GENERIC_PROMPT, ["--entry-kind", "issue"], "generic-multi-choice");
 	});

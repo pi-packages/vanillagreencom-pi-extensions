@@ -188,13 +188,11 @@ describe("flightdeck-state parity", () => {
 		expect(readOwnerViaJq(tsRepo)).toBe(readOwnerViaJq(bashRepo));
 	});
 
-	test("init records schema_version and additive entries map", () => {
+	test("init records additive entries map", () => {
 		run(false, bashRepo, ["init"]);
 		run(true, tsRepo, ["init"]);
-		const bashState = readState(bashRepo) as { schema_version?: unknown; entries?: unknown; owner?: unknown };
-		const tsState = readState(tsRepo) as { schema_version?: unknown; entries?: unknown; owner?: unknown };
-		expect(bashState.schema_version).toBe(1.1);
-		expect(tsState.schema_version).toBe(1.1);
+		const bashState = readState(bashRepo) as { entries?: unknown; owner?: unknown };
+		const tsState = readState(tsRepo) as { entries?: unknown; owner?: unknown };
 		expect(bashState.entries).toEqual({});
 		expect(tsState.entries).toEqual({});
 		expect(bashState.owner).toBeTruthy();
@@ -357,38 +355,6 @@ describe("flightdeck-state parity", () => {
 		}
 	});
 
-	test("unknown schema warns on read and refuses write unless override is set", () => {
-		const entry = sampleTrackedEntry();
-		const future = { entries: {}, issues: {}, schema_version: "9.9" };
-		writeState(bashRepo, future);
-		writeState(tsRepo, future);
-		const warning = 'Warning: unknown schema_version "9.9", treating as 1.1 (read-only safe).';
-		expect(parseRunJsonWithWarning<Record<string, TrackedEntry>>(run(false, bashRepo, ["tracked-entries"]), warning)).toEqual({});
-		expect(parseRunJsonWithWarning<Record<string, TrackedEntry>>(run(true, tsRepo, ["tracked-entries"]), warning)).toEqual({});
-		for (const repo of [bashRepo, tsRepo]) {
-			const useTs = repo === tsRepo;
-			const refused = run(useTs, repo, ["write-entry", entry.id, JSON.stringify(entry)]);
-			expect(refused.status).toBe(2);
-			expect(refused.stderr).toContain('Error: unknown schema_version "9.9"; refusing write (set FLIGHTDECK_ALLOW_FUTURE_SCHEMA=1 to override)');
-			const allowed = run(useTs, repo, ["write-entry", entry.id, JSON.stringify(entry)], { FLIGHTDECK_ALLOW_FUTURE_SCHEMA: "1" });
-			expect(allowed.status).toBe(0);
-			expect(allowed.stderr).toBe(`${warning}\n`);
-		}
-	});
-
-	test("phase warns on unknown schema before reading flightdeck state fallback", () => {
-		const future = { issues: { "CC-777": { state: "waiting" } }, schema_version: "9.9" };
-		writeState(bashRepo, future);
-		writeState(tsRepo, future);
-		const warning = 'Warning: unknown schema_version "9.9", treating as 1.1 (read-only safe).';
-		for (const repo of [bashRepo, tsRepo]) {
-			const useTs = repo === tsRepo;
-			const phase = run(useTs, repo, ["phase", "CC-777"]);
-			expect(phase.status).toBe(0);
-			expect(phase.stdout.trim()).toBe("fd:waiting");
-			expect(phase.stderr).toBe(`${warning}\n`);
-		}
-	});
 
 	test("write-entry round-trips through tracked-entries", () => {
 		const entry = sampleTrackedEntry();

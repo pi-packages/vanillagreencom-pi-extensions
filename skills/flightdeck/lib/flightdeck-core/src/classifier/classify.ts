@@ -9,7 +9,6 @@ export interface ClassifyOptions {
 	noFooterGate?: boolean;
 	entryKind?: string;
 	entryKindUnknown?: boolean;
-	allowMissingKind?: boolean;
 }
 
 // Mirrors scripts/prompt-classify control flow exactly:
@@ -19,7 +18,7 @@ export interface ClassifyOptions {
 //   4. fallback: idle
 export function classifyBuffer(buf: string, options: ClassifyOptions = {}): ClassifyResult {
 	for (const rule of PRE_FOOTER_RULES) {
-		if (rule.pattern.test(buf)) return applyDomainGuard({ matched: rule.matched, tag: rule.tag }, options.entryKind, options.entryKindUnknown, options.allowMissingKind);
+		if (rule.pattern.test(buf)) return applyDomainGuard({ matched: rule.matched, tag: rule.tag }, options.entryKind, options.entryKindUnknown);
 	}
 
 	if (!options.noFooterGate) {
@@ -30,16 +29,16 @@ export function classifyBuffer(buf: string, options: ClassifyOptions = {}): Clas
 	}
 
 	for (const rule of POST_FOOTER_RULES) {
-		if (rule.pattern.test(buf)) return applyDomainGuard({ matched: rule.matched, tag: rule.tag }, options.entryKind, options.entryKindUnknown, options.allowMissingKind);
+		if (rule.pattern.test(buf)) return applyDomainGuard({ matched: rule.matched, tag: rule.tag }, options.entryKind, options.entryKindUnknown);
 	}
 
 	return { matched: "", tag: "idle" };
 }
 
-export function applyDomainGuard(result: ClassifyResult, entryKind?: string, entryKindUnknown = false, allowMissingKind = false): ClassifyResult {
+export function applyDomainGuard(result: ClassifyResult, entryKind?: string, entryKindUnknown = false): ClassifyResult {
 	const kind = entryKindUnknown ? "unknown" : entryKind?.trim().toLowerCase();
 	if (!ISSUE_ONLY_TAGS.has(result.tag)) return result;
-	if (kind === "issue" || (!kind && allowMissingKind)) return result;
+	if (kind === "issue") return result;
 	if (!kind) {
 		return {
 			matched: `issue-only ${result.tag} without entry kind`,

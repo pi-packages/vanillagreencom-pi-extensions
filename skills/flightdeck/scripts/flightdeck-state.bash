@@ -51,7 +51,6 @@ fi
 
 STATE_DIR="${FLIGHTDECK_STATE_DIR:-tmp}"
 STATE_BASE="$PROJECT_ROOT/$STATE_DIR"
-FLIGHTDECK_SCHEMA_VERSION="1.1"
 mkdir -p "$STATE_BASE"
 
 # Resolve session id
@@ -306,40 +305,6 @@ def legacy_entry($id; $i): {
 JQ
 }
 
-unknown_schema_value() {
-  local file="$1"
-  [[ -f "$file" ]] || return 0
-  local value
-  value=$(jq -r 'if type == "object" and has("schema_version") and .schema_version != null then (.schema_version | tostring) else "" end' "$file" 2>/dev/null || true)
-  if [[ -n "$value" && "$value" != "$FLIGHTDECK_SCHEMA_VERSION" ]]; then
-    printf '%s' "$value"
-  fi
-}
-
-warn_unknown_schema() {
-  local value="$1"
-  [[ -z "$value" ]] && return 0
-  printf 'Warning: unknown schema_version "%s", treating as 1.1 (read-only safe).\n' "$value" >&2
-}
-
-warn_unknown_schema_from_file() {
-  local value
-  value=$(unknown_schema_value "$FILE")
-  warn_unknown_schema "$value"
-}
-
-assert_writable_schema() {
-  local value
-  value=$(unknown_schema_value "$FILE")
-  [[ -z "$value" ]] && return 0
-  if [[ "${FLIGHTDECK_ALLOW_FUTURE_SCHEMA:-}" == "1" ]]; then
-    warn_unknown_schema "$value"
-    return 0
-  fi
-  printf 'Error: unknown schema_version "%s"; refusing write (set FLIGHTDECK_ALLOW_FUTURE_SCHEMA=1 to override)\n' "$value" >&2
-  exit 2
-}
-
 warn_malformed_entries() {
   [[ -f "$FILE" ]] || return 0
   local ids
@@ -429,7 +394,6 @@ case "$ACTION" in
 
   init)
     gc_tmp_orphans "$FILE"
-    assert_writable_schema
     owner_pid=$(resolve_owner_pid)
     owner_pane_id=$(resolve_owner_pane_id)
     owner_pane_target=$(resolve_owner_pane_target)
@@ -459,9 +423,8 @@ case "$ACTION" in
       # but backfill the additive owner block on pre-owner live state files.
       # Stale `terminated: true` files are rotated by `terminate.md § 5` via
       # the `archive` action, so a present file here is always a live session.
-      if jq -e '(.owner? == null) or (.schema_version? == null) or (.entries? == null)' "$FILE" >/dev/null 2>&1; then
+      if jq -e '(.owner? == null) or (.entries? == null)' "$FILE" >/dev/null 2>&1; then
         jq \
-          --argjson schema_version "$FLIGHTDECK_SCHEMA_VERSION" \
           --arg owner_harness "$owner_harness" \
           --arg owner_pane_id "$owner_pane_id" \
           --arg owner_pane_target "$owner_pane_target" \
@@ -481,7 +444,6 @@ case "$ACTION" in
              discovery_error: ($owner_discovery_error | if . == "" then null else . end)
            };
            (if .owner? == null then . + {owner: owner} else . end)
-           | (if .schema_version? == null then . + {schema_version: $schema_version} else . end)
            | (if .entries? == null then . + {entries: {}} else . end)' "$FILE" > "$init_tmp"
         mv "$init_tmp" "$FILE"
       fi
@@ -492,7 +454,6 @@ case "$ACTION" in
     jq -n \
       --arg session_id "$SESSION" \
       --arg started_at "$started_at" \
-      --argjson schema_version "$FLIGHTDECK_SCHEMA_VERSION" \
       --arg owner_harness "$owner_harness" \
       --arg owner_pane_id "$owner_pane_id" \
       --arg owner_pane_target "$owner_pane_target" \
@@ -502,7 +463,6 @@ case "$ACTION" in
       --arg owner_pi_bridge_socket "$owner_pi_bridge_socket" \
       --arg owner_discovery_error "$owner_discovery_error" \
       '{
-        schema_version: $schema_version,
         session_id: $session_id,
         started_at: $started_at,
         terminated: false,
@@ -529,13 +489,11 @@ case "$ACTION" in
   get)
     [[ ${#ARGS[@]} -lt 1 ]] && { echo "Usage: get <jq-path>" >&2; exit 2; }
     [[ ! -f "$FILE" ]] && exit 1
-    warn_unknown_schema_from_file
     jq -r "${ARGS[0]}" "$FILE"
     ;;
 
   set)
     [[ ${#ARGS[@]} -lt 2 ]] && { echo "Usage: set <field> <json-value>" >&2; exit 2; }
-    assert_writable_schema
     field=$(normalize_path "${ARGS[0]}")
     value="${ARGS[1]}"
     update_state "$FILE" "$field = ($value)"
@@ -543,7 +501,6 @@ case "$ACTION" in
 
   append)
     [[ ${#ARGS[@]} -lt 2 ]] && { echo "Usage: append <field> <json-value>" >&2; exit 2; }
-    assert_writable_schema
     field=$(normalize_path "${ARGS[0]}")
     value="${ARGS[1]}"
     update_state "$FILE" "$field += [($value)]"
@@ -551,14 +508,12 @@ case "$ACTION" in
 
   increment)
     [[ ${#ARGS[@]} -lt 1 ]] && { echo "Usage: increment <field>" >&2; exit 2; }
-    assert_writable_schema
     field=$(normalize_path "${ARGS[0]}")
     update_state "$FILE" "$field = (($field // 0) + 1)"
     ;;
 
   tracked-entries)
     [[ ! -f "$FILE" ]] && exit 1
-    warn_unknown_schema_from_file
     warn_malformed_entries
     warn_invalid_entry_ids
     jq -c "$(tracked_entries_filter)" "$FILE"
@@ -566,7 +521,6 @@ case "$ACTION" in
 
   write-entry)
     [[ ${#ARGS[@]} -lt 2 ]] && { echo "Usage: write-entry <ENTRY_ID> <json-entry>" >&2; exit 2; }
-    assert_writable_schema
     validate_entry_id "${ARGS[0]}" "entry id"
     entry_id="$ENTRY_ID_RESULT"
     entry_json=$(jq -c . <<< "${ARGS[1]}") || { echo "Error: invalid json-entry" >&2; exit 2; }
@@ -614,7 +568,6 @@ case "$ACTION" in
     else
       # No orchestration state — use flightdeck's own view.
       if [[ -f "$FILE" ]]; then
-        warn_unknown_schema_from_file
         fd_state=$(jq -r ".issues[\"$issue\"].state // empty" "$FILE" 2>/dev/null)
         if [[ -n "$fd_state" ]]; then
           echo "fd:$fd_state"
@@ -628,7 +581,6 @@ case "$ACTION" in
     ;;
 
   archive)
-    assert_writable_schema
     [[ ! -f "$FILE" ]] && exit 0
     ts=$(jq -r '.terminated_at // empty' "$FILE" 2>/dev/null)
     [[ -z "$ts" ]] && ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")

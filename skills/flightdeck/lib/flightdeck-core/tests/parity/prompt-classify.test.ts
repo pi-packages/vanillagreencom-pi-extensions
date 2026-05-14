@@ -42,7 +42,7 @@ function loadFixtures(): Fixture[] {
 function runBash(fixture: Fixture): string {
 	const args = ["--buffer-file", fixture.bufferPath];
 	if (fixture.noFooterGate) args.push("--no-footer-gate");
-	if (ISSUE_ONLY_TAGS.has(fixture.expectedTag)) args.push("--allow-missing-kind");
+	if (ISSUE_ONLY_TAGS.has(fixture.expectedTag)) args.push("--entry-kind", "issue");
 	const r = spawnSync(BASH_SCRIPT, args, { encoding: "utf8" });
 	if (r.status !== 0) throw new Error(`bash classify exit ${r.status}: ${r.stderr}`);
 	return r.stdout.trim();
@@ -51,7 +51,7 @@ function runBash(fixture: Fixture): string {
 function runTs(fixture: Fixture): string {
 	const args = ["run", TS_SCRIPT, "--buffer-file", fixture.bufferPath];
 	if (fixture.noFooterGate) args.push("--no-footer-gate");
-	if (ISSUE_ONLY_TAGS.has(fixture.expectedTag)) args.push("--allow-missing-kind");
+	if (ISSUE_ONLY_TAGS.has(fixture.expectedTag)) args.push("--entry-kind", "issue");
 	const r = spawnSync("bun", args, { encoding: "utf8" });
 	if (r.status !== 0) throw new Error(`ts classify exit ${r.status}: ${r.stderr}`);
 	return r.stdout.trim();

@@ -7,7 +7,6 @@ import type {
 } from "./types.ts";
 
 export const ENTRY_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
-export const SUPPORTED_SCHEMA_VERSION = "1.1";
 
 export interface ReadTrackedEntriesOptions {
 	warn?: (message: string) => void;
@@ -232,17 +231,3 @@ export function legacyIssueProjection(entry: TrackedEntry, issueId = issueIdForE
 	};
 }
 
-export function unknownSchemaWarning(state: FlightdeckStateLike | undefined | null): string | undefined {
-	if (!state || typeof state !== "object") return undefined;
-	if (!("schema_version" in state) || state.schema_version === null || state.schema_version === undefined) return undefined;
-	const raw = String(state.schema_version);
-	if (raw === SUPPORTED_SCHEMA_VERSION) return undefined;
-	return `Warning: unknown schema_version ${JSON.stringify(raw)}, treating as 1.1 (read-only safe).`;
-}
-
-export function assertWritableSchemaVersion(state: FlightdeckStateLike | undefined | null, allowFuture = false): void {
-	const warning = unknownSchemaWarning(state);
-	if (!warning || allowFuture) return;
-	const version = state && typeof state === "object" && state.schema_version !== undefined ? String(state.schema_version) : "unknown";
-	throw new Error(`unknown schema_version ${JSON.stringify(version)}; refusing write (set FLIGHTDECK_ALLOW_FUTURE_SCHEMA=1 to override)`);
-}

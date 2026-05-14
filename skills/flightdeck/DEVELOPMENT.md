@@ -4,20 +4,19 @@ This file is for agents and humans hacking on flightdeck itself. End users shoul
 
 ## TypeScript port status
 
-The scripts under `scripts/` ship as bash trampolines that exec the TypeScript port in `lib/flightdeck-core/` by default. Each trampoline checks `FLIGHTDECK_USE_TS_<SCRIPT>` first, then the global `FLIGHTDECK_USE_TS`. Both default to `1`. Set either to `0` to route back to the `.bash` sibling.
+All scripts under `scripts/` ship as bash trampolines that exec the TypeScript implementation under `lib/flightdeck-core/`. `bun` is a hard runtime dependency.
 
-- **Default is TS.** `bun` is a hard runtime dependency; the trampoline execs `bun .../src/bin/<script>.ts` unless the operator opts out.
-- **The `.bash` siblings remain in place** as the opt-out target for at least one full production cycle on TS defaults.
-- **`flightdeck-daemon start` still defaults to the bash sibling.** The TS run-loop + subscriber lifecycle is fully ported and parity-tested, but the `start` sub-action keeps a separate gate (`FLIGHTDECK_USE_TS_DAEMON_START=1` or `FLIGHTDECK_USE_TS=1`) until one full production cycle. Other daemon CLI actions (`status`, `events`, `ack`, `health`, `stop`, `find-window`) run through TS by default.
-- **Parity tests** under `lib/flightdeck-core/tests/parity/` are the baseline. Live wake (`tests/live-wake.sh`) under the same gate is the production gate before flipping a default.
+- **`flightdeck-daemon start` is the only remaining bash-default sub-action.** Its TS run-loop + subscriber lifecycle is fully ported and parity-tested but pending one production cycle before its default flips. Opt into the TS run-loop with `FLIGHTDECK_USE_TS_DAEMON_START=1`. Every other action runs TS-only with no opt-out.
+- **`.bash` siblings still exist for daemon `start`.** All other `.bash` siblings are scaffolding for the parity test matrix; they should not be invoked directly.
+- **Parity tests** under `lib/flightdeck-core/tests/parity/` are the baseline. Live wake (`tests/live-wake.sh`) is the production gate before flipping daemon `start` to TS.
 
 ## Session model and schema boundary
 
-Flightdeck core is the generic tmux-session manager. It owns `TrackedEntry` lifecycle, owner metadata, daemon wake routing, generic prompt handling, and stable pane/window ids for any harness session. Issue orchestration is a domain layer on top: it adds GitHub/Linear/worktree metadata under `domain.issue`, legacy issue states, PR conflict graphs, merge queues, and next-cycle recommendations.
+Flightdeck core is the generic tmux-session manager. It owns `TrackedEntry` lifecycle, owner metadata, daemon wake routing, generic prompt handling, and stable pane/window ids for any harness session. Issue orchestration is a domain layer on top: it adds GitHub/Linear/worktree metadata under `domain.issue`, issue-specific lifecycle states, PR conflict graphs, merge queues, and next-cycle recommendations.
 
-Master-state schema `1.1` is the compatibility bridge toward the v2 entries model. `flightdeck-state init` keeps v1 `.issues`, `.merge_queue`, and `.conflict_graph`, adds `schema_version: 1.1`, `owner`, and additive `.entries`, and projects `kind="issue"` writes back into `.issues` so older issue workflows continue to run. Future schema v2 makes `.entries` canonical and moves issue-only data under `domain.issue`, but readers must keep v1 projection until the compatibility window closes.
+`flightdeck-state init` writes `entries`, `issues`, `merge_queue`, `conflict_graph`, and `owner`. The `.issues` map is a per-issue projection that issue-mode workflows still read directly; new core readers should call `readTrackedEntries(state)` to get the canonical `TrackedEntry` view. `writeTrackedEntry` projects `kind="issue"` entries back into `.issues` so issue-mode workflows keep working until the projection is removed.
 
-Use the TrackedEntry seam everywhere new code reads tracked sessions. Core helpers (`readTrackedEntries`, `writeTrackedEntry`, `entryIdForIssue`, `issueIdForEntry`) live under `lib/flightdeck-core/src/state/`; `pane-registry list --format json` and `flightdeck-state tracked-entries` expose the same normalized view to scripts. `pi-flightdeck` mirrors the seam with read-only `TrackedSession` / `TrackedState` render types, prefers schema-1.1 `.entries`, folds legacy `.issues`, and uses `owner.pane_id` for default owner-scoped rendering. Do not add fresh direct `.issues` reads outside compatibility code.
+Use the TrackedEntry seam everywhere new code reads tracked sessions. Core helpers (`readTrackedEntries`, `writeTrackedEntry`, `entryIdForIssue`, `issueIdForEntry`) live under `lib/flightdeck-core/src/state/`; `pane-registry list --format json` and `flightdeck-state tracked-entries` expose the same normalized view to scripts. `pi-flightdeck` mirrors the seam with read-only `TrackedSession` / `TrackedState` render types, prefers `.entries`, folds `.issues` projections, and uses `owner.pane_id` for default owner-scoped rendering. Do not add new direct `.issues` reads outside the projection-compatibility code.
 
 ## `flightdeck-session` flag reference
 
@@ -48,7 +47,7 @@ skills/flightdeck/scripts/flightdeck-session attach \
   --title "Manual Pi"
 ```
 
-`pane-registry list --format json` returns normalized entries for both ad-hoc sessions and legacy issue rows. `session watch` uses the generic session loop; issue `watch` layers merge/PR workflow logic on top. Issue-only prompt tags on ad-hoc sessions trigger a `domain-mismatch` guard; lookups that cannot determine `kind` must pass `--entry-kind-unknown` or the legacy `--allow-missing-kind` flag.
+`pane-registry list --format json` returns normalized entries for both ad-hoc and issue rows. `session watch` uses the generic session loop; issue `watch` layers merge/PR workflow logic on top. Issue-only prompt tags on ad-hoc sessions trigger a `domain-mismatch` guard; lookups that cannot determine `kind` must pass `--entry-kind-unknown` to fail closed.
 
 ## Daemon tuning (`FD_*` env vars)
 

@@ -1,5 +1,3 @@
-export const FLIGHTDECK_SCHEMA_VERSION = 1.1;
-
 export type IssueState = "waiting" | "prompting" | "submitting" | "merge-ready" | "merged" | "aborted" | "dead";
 export type TrackedEntryState = IssueState | "ready" | "complete" | "cancelled" | string;
 export type TrackedEntryKind = "adhoc" | "issue" | "workflow" | string;
@@ -112,7 +110,6 @@ export interface LegacyIssueRecord {
 }
 
 export interface FlightdeckStateLike {
-	schema_version?: number | string;
 	entries?: unknown;
 	issues?: unknown;
 	[key: string]: unknown;

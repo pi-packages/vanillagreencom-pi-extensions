@@ -63,8 +63,6 @@ These tags assume issue-domain metadata (`domain.issue.*`), PR state, Linear/Git
 
 `prompt-classify --entry-kind <kind>` and the TS classifier option used by `pane-poll` rewrite issue-only tags on non-issue entries to `domain-mismatch`. Missing kind now fails closed by default: if an issue-only tag is classified without any kind signal, the classifier emits a warning and returns `domain-mismatch`. If registry lookup fails, callers should pass `--entry-kind-unknown`; that sentinel also routes issue-only tags to `domain-mismatch`. The watch loop must log a warning, skip all issue handlers, and surface a master question. This prevents an ad-hoc session from accidentally triggering cleanup, force-push, merge, Linear, or GitHub actions.
 
-Legacy issue-mode callers that genuinely cannot pass kind yet must opt in explicitly with `--allow-missing-kind` (TS: `allowMissingKind: true`). That returns the original issue-only tag with a warning and exists only as a migration bridge; new call sites should pass `--entry-kind issue` or `--entry-kind-unknown` and should not rely on the opt-in.
-
 ---
 
 ## Issue handler notes

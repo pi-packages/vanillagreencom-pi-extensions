@@ -19,7 +19,6 @@ function baseState(entries: Record<string, unknown>, issues: Record<string, unkn
 		issues,
 		merge_queue: [],
 		paused_for_user: null,
-		schema_version: 1.1,
 		session_id: "TERM",
 		started_at: "2026-05-13T00:00:00Z",
 		terminated: false,

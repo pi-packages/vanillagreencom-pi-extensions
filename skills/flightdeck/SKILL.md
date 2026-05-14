@@ -81,7 +81,7 @@ Issue/PR/worktree workflows. Entering these commands loads the issue-mode depend
 | `start new` | `[title]` | `workflows/start-new.md` | Create new issue + spawn through the issue workflow path. |
 | `start self` | — | inline | Initialize master issue session only, await further issue commands. |
 | `parallel-check` | `[ISSUE_IDS]` | `workflows/parallel-check.md` | Verify a candidate issue set is safe to spawn in parallel. |
-| `watch` | `[ISSUE_IDS]` | `workflows/watch.md` → `workflows/session-watch.md` | Issue-mode extension over the generic loop. Keeps legacy issue states, routes PR/Linear/worktree handlers, and resumes merge planning. |
+| `watch` | `[ISSUE_IDS]` | `workflows/watch.md` → `workflows/session-watch.md` | Issue-mode extension over the generic loop. Tracks issue-specific lifecycle states, routes PR/Linear/worktree handlers, and resumes merge planning. |
 | `merge-plan` | — | `workflows/merge-plan.md` | Build PR conflict graph and choose smallest-safe merge order for issue entries. |
 | `close-issue` | `<ISSUE_ID>` | `workflows/close-issue.md` | Verify terminal issue outcome, record issue fields, and tear down the issue window safely. |
 | `terminate` | — | `workflows/terminate.md` | If any tracked entry is `kind=issue`, produce the issue/PR/new-issue recommendation summary; mixed sessions also include generic session summary. |
@@ -147,21 +147,14 @@ Decision rules grouped by domain. Each pattern doc under `patterns/` has the ful
 .agents/skills/flightdeck/scripts/<script> [args]
 ```
 
-**Implementation status:** Default is the TypeScript port under
-`skills/flightdeck/lib/flightdeck-core/`. Each ported script ships as a
-trampoline that execs `bun .../src/bin/<script>.ts` unless the operator
-opts out to the canonical bash sibling via `FLIGHTDECK_USE_TS_<SCRIPT>=0`
-(per-script) or `FLIGHTDECK_USE_TS=0` (global). `bun` is therefore a
-hard runtime dependency. Currently ported: `prompt-classify`,
-`flightdeck-state`, `parallel-groups`, `pane-registry`, `pane-poll`,
-`pane-respond`, `flightdeck-daemon` (CLI surface — `status`/`events`/
-`ack`/`find-window`/`health`/`stop` are TS by default). The daemon
-`start` sub-action has a complete TS run-loop + subscriber lifecycle
-port that is parity-tested, but its runtime default still forwards to
-the bash sibling; opt in with `FLIGHTDECK_USE_TS_DAEMON_START=1` (or
-`FLIGHTDECK_USE_TS=1`). The `.bash` siblings remain in place as the
-opt-out target until one full production cycle on TS defaults is
-complete. Parity tests for every port live under
+**Implementation:** All scripts are TypeScript under
+`skills/flightdeck/lib/flightdeck-core/`. Trampolines under `scripts/`
+exec `bun .../src/bin/<script>.ts`. `bun` is a hard runtime dependency.
+A few `.bash` siblings remain alongside the trampolines for the
+`flightdeck-daemon start` run-loop, which still defaults to the bash
+implementation pending one production cycle on the TS port (opt in
+via `FLIGHTDECK_USE_TS_DAEMON_START=1`). All other actions are TS
+by default with no opt-out. Parity tests live under
 `lib/flightdeck-core/tests/parity/`.
 
 | Script | Purpose |
@@ -177,7 +170,7 @@ complete. Parity tests for every port live under
 | `pane-respond` | Send response to a pane. Modes: free-text payload, `--option N`, `--option-multi`, `--keys` (rejected without `--keys-allow-tmux`), `--question <reqID> --answer\|--answer-multi\|--answer-text\|--answers-json\|--reject`. Validates rebase-multi-choice payloads for the preserve/apply/verify triplet. See `patterns/prompt-handlers.md` for mode selection and `patterns/opencode-questions.md` / `patterns/pi-questions.md` for question routing. |
 | `pane-clear-bell` | Atomic chained-command bell clear (no flicker). |
 | `pr-conflict-graph` | File-intersection adjacency for a list of PR numbers via `gh pr view --json files`. |
-| `prompt-classify` | Regex/sentinel + computed-tag matcher mapping pane state to a handler tag: `rendering`, `terminal-state-reached`, `bash-permission-prompt`, `force-merge-confirm`, `merge-ready-but-unknown`, `merge-now`, `bot-review-wait-stuck`, `rebase-multi-choice`, `force-push-prompt`, `cleanup-prompt`, `audit-relation-prompt`, `descope-related`, `external-fix-suggestions`, `cycle-fix-suggestions`, `scope-creep-detected` [computed], `multi-select-tabbed`, `awaiting-direction`, `generic-multi-choice`, `domain-mismatch`, `idle`. `--entry-kind` guards issue-only tags on non-issue entries; omitted kind and `--entry-kind-unknown` fail closed as `domain-mismatch`. Legacy issue callers can explicitly opt in with `--allow-missing-kind` while migrating. Daemon/event-only tags: `oc-question`, `pi-question`, `pi-subagent-completion`, `pi-bg-task-exit`, `daemon-exited`.
+| `prompt-classify` | Regex/sentinel + computed-tag matcher mapping pane state to a handler tag: `rendering`, `terminal-state-reached`, `bash-permission-prompt`, `force-merge-confirm`, `merge-ready-but-unknown`, `merge-now`, `bot-review-wait-stuck`, `rebase-multi-choice`, `force-push-prompt`, `cleanup-prompt`, `audit-relation-prompt`, `descope-related`, `external-fix-suggestions`, `cycle-fix-suggestions`, `scope-creep-detected` [computed], `multi-select-tabbed`, `awaiting-direction`, `generic-multi-choice`, `domain-mismatch`, `idle`. `--entry-kind` guards issue-only tags on non-issue entries; omitted kind and `--entry-kind-unknown` fail closed as `domain-mismatch`. Daemon/event-only tags: `oc-question`, `pi-question`, `pi-subagent-completion`, `pi-bg-task-exit`, `daemon-exited`.
 
 `pi-bg-task-exit` (vstack#15): the Pi subscriber matches `pi-bridge stream` events of shape `{ type: "event", event: "message_end", data.message.customType: "vstack-background-tasks:event", data.message.details.eventType: "exit" }` and appends a canonical wake row to `WAKE_EVENTS_LOG`:
 
@@ -197,13 +190,14 @@ The daemon (`scripts/flightdeck-daemon.bash` + `lib/flightdeck-core/src/daemon/l
 
 ## Schema — master state
 
-Master state lives at `<project-root>/<FLIGHTDECK_STATE_DIR>/flightdeck-state-<TMUX_SESSION_NAME>.json` (default `tmp/`). Survives compaction; rotated to `*-<terminated_at>.json.archive` on terminate (see `terminate.md § 6`). The archive preserves the full `.issues` map (including merged-issue `decisions_log`, `pr_number`, `merge_commit`) so post-completion dashboards and post-mortem inspection have the whole session history — do not call `pane-registry remove-merged` between `set terminated true` and `archive`. pi-flightdeck's `buildSnapshot` falls back to the newest matching `*.json.archive` when the live file is gone, so the completed-session view in the dashboard / popup keeps rendering until a new `flightdeck start` rewrites the live file. Daemon-private files in `FD_STATE_DIR` are keyed by `SESSION_KEY=s<N>` instead (see `patterns/tmux-monitoring.md`).
+Master state lives at `<project-root>/<FLIGHTDECK_STATE_DIR>/flightdeck-state-<TMUX_SESSION_NAME>.json` (default `tmp/`). Survives compaction; rotated to `*-<terminated_at>.json.archive` on terminate (see `terminate.md § 6`). The archive preserves the full session history (including merged-issue `decisions_log`, `pr_number`, `merge_commit`) so post-completion dashboards and post-mortem inspection have the whole session history — do not call `pane-registry remove-merged` between `set terminated true` and `archive`. pi-flightdeck's `buildSnapshot` falls back to the newest matching `*.json.archive` when the live file is gone, so the completed-session view in the dashboard / popup keeps rendering until a new `flightdeck start` rewrites the live file. Daemon-private files in `FD_STATE_DIR` are keyed by `SESSION_KEY=s<N>` instead (see `patterns/tmux-monitoring.md`).
 
-Schema `1.1` is additive and is the v1↔v2 compatibility bridge. `flightdeck-state init` writes `schema_version: 1.1`, keeps the v1 `.issues`, `.merge_queue`, and `.conflict_graph` fields, and adds `.entries` for the neutral `TrackedEntry` model that v2 will make canonical. Older v1 readers ignore `schema_version` and `.entries`; issue-mode readers continue using `.issues`. New core readers must call `readTrackedEntries(state)` instead of touching `.issues` directly: it projects legacy `.issues` records first, then overlays valid `.entries` records by id so `.entries` wins on collisions but issue-only legacy updates remain visible. Malformed non-object `.entries` values are skipped with a stderr warning; malformed internal `entry.id` values warn and fall back to the map key. `writeTrackedEntry(state, id, entry)` validates non-empty ids, including `entry.domain.issue.id` when present, writes `.entries[id]`, and projects `kind: "issue"` entries back to `.issues[issueId]` for compatibility. Unknown future `schema_version` values warn on read (including `phase`) and refuse writes unless `FLIGHTDECK_ALLOW_FUTURE_SCHEMA=1` is set. This mirrors the pi-flightdeck render seam; do not fork renderer-only `.issues` reads back into core logic.
+Auto-archive on session start: `flightdeck-session start` rolls the live file to a `.json.archive` sibling before fresh init when (a) `terminated == true` or (b) the file has tracked entries but ZERO `pane_id` is currently alive in tmux. Removes the need to manually prune leftover state from prior tmux sessions or crashed masters.
+
+Readers call `readTrackedEntries(state)` to get the canonical `TrackedEntry` map. Malformed non-object entry values are skipped with a stderr warning; malformed internal `entry.id` values warn and fall back to the map key. `writeTrackedEntry(state, id, entry)` validates non-empty ids (including `entry.domain.issue.id` when present) and writes `.entries[id]`; `kind: "issue"` entries also get projected into `.issues[issueId]` so issue-mode workflows keep working until the `.issues` map is collapsed entirely.
 
 ```json
 {
-  "schema_version": 1.1,
   "session_id": "<TMUX_SESSION_NAME>",
   "started_at": "<ISO8601>",
   "terminated": false,
@@ -291,7 +285,7 @@ Schema `1.1` is additive and is the v1↔v2 compatibility bridge. `flightdeck-st
 }
 ```
 
-Legacy issue state enum: `state ∈ {waiting, prompting, submitting, merge-ready, merged, aborted, dead}`. Generic session state enum is `state ∈ {waiting, prompting, submitting, ready, complete, cancelled, dead}`; issue mode maps `merge-ready → ready + domain.issue.phase="merge-ready"`, `merged → complete + domain.issue.outcome="merged"`, and `aborted → cancelled + domain.issue.outcome="aborted"` while preserving legacy values for compatibility. `entryIdForIssue(issueId)` currently returns the issue id unchanged after validation (empty/invalid ids return null); `issueIdForEntry(entry)` reads `entry.domain.issue.id` or, for `kind: "issue"`, `entry.id`. `owner` is additive metadata written by `flightdeck-state init`; `owner.pid` is the owner harness PID supplied by `FLIGHTDECK_OWNER_PID` (falling back to parent PID), and `owner.discovery_error` records Pi bridge metadata lookup failures when the owner harness is Pi. pi-flightdeck uses `owner.pane_id` to keep the persistent dashboard owner-scoped by default, while older readers ignore the field. `paused_for_user` carries `{entry_id|issue_id, reason, prompt_text}` when a generic guard or issue-mode pause fires.
+Tracked entry state enum: `state ∈ {waiting, prompting, submitting, ready, complete, cancelled, dead}`. Issue-mode workflows additionally use `{merge-ready, merged, aborted}` for issue-specific lifecycle states; these still map onto the generic enum via `domain.issue.phase` / `domain.issue.outcome` (e.g. `merged → complete + outcome="merged"`). `entryIdForIssue(issueId)` returns the issue id unchanged after validation (empty/invalid ids return null); `issueIdForEntry(entry)` reads `entry.domain.issue.id` or, for `kind: "issue"`, `entry.id`. `owner` is metadata written by `flightdeck-state init`; `owner.pid` is the owner harness PID supplied by `FLIGHTDECK_OWNER_PID` (falling back to parent PID), and `owner.discovery_error` records Pi bridge metadata lookup failures when the owner harness is Pi. pi-flightdeck uses `owner.pane_id` to keep the persistent dashboard owner-scoped by default. `paused_for_user` carries `{entry_id|issue_id, reason, prompt_text}` when a guard or issue-mode pause fires.
 
 ## Configuration
 
@@ -319,9 +313,7 @@ TS-port toggles:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `FLIGHTDECK_USE_TS` | unset (treated as `1`) | Global opt-out switch. Set to `0` to route every trampolined script back to its `.bash` sibling. Per-script flags below override. |
-| `FLIGHTDECK_USE_TS_<SCRIPT>` | unset (treated as `1`) | Per-script opt-out (e.g. `FLIGHTDECK_USE_TS_PROMPT_CLASSIFY=0`). Useful for isolating a regression to one script while keeping the rest on TS. |
-| `FLIGHTDECK_USE_TS_DAEMON_START` | unset (treated as `0`) | Opt-in for the TS daemon `start` run-loop. The TS port is complete and parity-tested, but `start` still defaults to the bash sibling until one full production cycle on TS. |
+| `FLIGHTDECK_USE_TS_DAEMON_START` | unset (treated as `0`) | Opt-in for the TS daemon `start` run-loop. Pending one production cycle on the TS port; all other actions are TS-only. |
 | `FD_ADAPTER_READ_TIMEOUT_SEC` | `2` | Bounds per-adapter read subprocesses in TS `pane-poll` (fractional values honored). Stale adapters fall through to tmux capture rather than wedging the tick. |
 
 ## Workflows
@@ -333,7 +325,7 @@ TS-port toggles:
 | `workflows/parallel-check.md` | `parallel-check` (also nested from `start.md` § 4) | Verify candidate issue set is safe to spawn in parallel |
 | `workflows/session-watch.md` | `session watch`, and core loop invoked by issue `watch` | Generic state init, entry reconciliation, daemon spawn/ack/yield, polling, generic prompt routing, compaction recovery |
 | `workflows/session-handle-prompt.md` | Nested invocation from `session-watch` / issue `watch` for generic tags | Generic prompt response surface; no PR/Linear/GitHub/worktree dependency |
-| `workflows/watch.md` | `watch` (issue entry) or invoked at end of `start.md` after spawn | Issue-mode extension over `session-watch`: load issue skills, map legacy issue states, route issue-only handlers, plan merges, terminate |
+| `workflows/watch.md` | `watch` (issue entry) or invoked at end of `start.md` after spawn | Issue-mode extension over `session-watch`: load issue skills, track issue-specific lifecycle states, route issue-only handlers, plan merges, terminate |
 | `workflows/handle-prompt.md` | Nested invocation from issue `watch` for issue-only tags | PR/Linear/worktree prompt response surface only |
 | `workflows/close-issue.md` | Nested invocation from `watch` § 2 on `terminal-state-reached` | Verify two-signal terminal state, update master state, kill window, keep registry entry for terminate reporting/final cleanup |
 | `workflows/merge-plan.md` | Nested invocation from `watch` § 4 | Conflict-graph build + smallest-first merge ordering |

@@ -17,9 +17,7 @@ import {
 } from "../state/master-state.ts";
 import { resolveProjectRoot } from "../shared/project.ts";
 import {
-	assertWritableSchemaVersion,
 	readTrackedEntries,
-	unknownSchemaWarning,
 	validateDomainIssueId,
 	validateEntryId,
 } from "../state/tracked-entry.ts";
@@ -63,34 +61,29 @@ switch (action) {
 		break;
 	}
 	case "init": {
-		assertWritableSchemaFromFile();
 		initState(file);
 		break;
 	}
 	case "get": {
 		if (rest.length < 1) die("Usage: get <jq-path>");
 		if (!existsSync(file)) process.exit(1);
-		warnUnknownSchemaFromFile();
 		process.stdout.write(getField(file, rest[0]!));
 		break;
 	}
 	case "set": {
 		if (rest.length < 2) die("Usage: set <field> <json-value>");
-		assertWritableSchemaFromFile();
 		const field = normalizePath(rest[0]!);
 		updateState(file, `${field} = (${rest[1]})`);
 		break;
 	}
 	case "append": {
 		if (rest.length < 2) die("Usage: append <field> <json-value>");
-		assertWritableSchemaFromFile();
 		const field = normalizePath(rest[0]!);
 		updateState(file, `${field} += [(${rest[1]})]`);
 		break;
 	}
 	case "increment": {
 		if (rest.length < 1) die("Usage: increment <field>");
-		assertWritableSchemaFromFile();
 		const field = normalizePath(rest[0]!);
 		updateState(file, `${field} = ((${field} // 0) + 1)`);
 		break;
@@ -98,13 +91,11 @@ switch (action) {
 	case "tracked-entries": {
 		if (!existsSync(file)) process.exit(1);
 		const state = readStateJson();
-		warnUnknownSchema(state);
 		process.stdout.write(`${JSON.stringify(readTrackedEntries(state, { warn: warnLine }))}\n`);
 		break;
 	}
 	case "write-entry": {
 		if (rest.length < 2) die("Usage: write-entry <ENTRY_ID> <json-entry>");
-		assertWritableSchemaFromFile();
 		let entry: TrackedEntry;
 		try {
 			entry = JSON.parse(rest[1]!) as TrackedEntry;
@@ -121,7 +112,6 @@ switch (action) {
 		break;
 	}
 	case "archive": {
-		assertWritableSchemaFromFile();
 		const ap = archiveState(file);
 		if (ap) process.stdout.write(`${ap}\n`);
 		break;
@@ -152,44 +142,8 @@ function readStateJson(): FlightdeckStateLike {
 	return JSON.parse(readFileSync(file, "utf8")) as FlightdeckStateLike;
 }
 
-function tryReadStateJson(): FlightdeckStateLike | undefined {
-	try {
-		return readStateJson();
-	} catch {
-		// Preserve legacy jq-driven error semantics for corrupt files: callers
-		// like pane-registry distinguish read failure from not-found by jq's exit
-		// status, so schema preflight must not collapse malformed JSON to exit 1.
-		return undefined;
-	}
-}
-
 function warnLine(message: string): void {
 	process.stderr.write(`${message}\n`);
-}
-
-function warnUnknownSchema(state: FlightdeckStateLike): void {
-	const warning = unknownSchemaWarning(state);
-	if (warning) warnLine(warning);
-}
-
-function warnUnknownSchemaFromFile(): void {
-	if (!existsSync(file)) return;
-	const state = tryReadStateJson();
-	if (state) warnUnknownSchema(state);
-}
-
-function assertWritableSchemaFromFile(): void {
-	if (!existsSync(file)) return;
-	const state = tryReadStateJson();
-	if (!state) return;
-	const warning = unknownSchemaWarning(state);
-	const allowFuture = process.env.FLIGHTDECK_ALLOW_FUTURE_SCHEMA === "1";
-	if (warning && allowFuture) warnLine(warning);
-	try {
-		assertWritableSchemaVersion(state, allowFuture);
-	} catch (error) {
-		die(`Error: ${error instanceof Error ? error.message : String(error)}`);
-	}
 }
 
 function validateEntryIdOrDie(value: unknown, label: string): string {
@@ -230,7 +184,6 @@ function runPhase(issue: string): void {
 		return;
 	}
 	if (existsSync(file)) {
-		warnUnknownSchemaFromFile();
 		const fd = getField(file, `.issues["${issue}"].state // empty`).trim();
 		if (fd) {
 			process.stdout.write(`fd:${fd}\n`);
