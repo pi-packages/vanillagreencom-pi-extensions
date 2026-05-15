@@ -6,6 +6,7 @@ use serde_json::json;
 use tokio::sync::broadcast;
 
 use crate::cli::{DaemonAction, DaemonArgs, DaemonStartArgs, DaemonTailSource, SuperviseArgs};
+use crate::daemon::busy::{self, BusyPaths};
 use crate::daemon::client::DaemonClient;
 use crate::daemon::lifecycle::{
     self, append_log, pid_alive, read_pid, remove_pid, remove_socket, stop_pid, write_pid,
@@ -26,6 +27,8 @@ pub async fn run_daemon(args: DaemonArgs) -> Result<()> {
         DaemonAction::Stop(args) => stop_daemon(args.session.as_deref()).await,
         DaemonAction::Status(args) => print_status(args.session.as_deref()).await,
         DaemonAction::Health(args) => print_health(args.session.as_deref()).await,
+        DaemonAction::Events(args) => drain_events(args.session.as_deref(), false).await,
+        DaemonAction::Ack(args) => drain_events(args.session.as_deref(), true).await,
         DaemonAction::Tail(args) => tail(args.session.as_deref(), args.source).await,
     }
 }
@@ -169,6 +172,15 @@ async fn print_health(session: Option<&str>) -> Result<()> {
             println!("{line}");
         }
     }
+    Ok(())
+}
+
+async fn drain_events(session: Option<&str>, clear_pending: bool) -> Result<()> {
+    let state_dir = fd_resolve_state_dir();
+    let session_key = resolve_session_key_or_passthrough(session)?;
+    let paths = BusyPaths::new(&state_dir, &session_key);
+    let body = busy::with_session_lock(&paths, || busy::drain_events(&paths, clear_pending))?;
+    print!("{body}");
     Ok(())
 }
 

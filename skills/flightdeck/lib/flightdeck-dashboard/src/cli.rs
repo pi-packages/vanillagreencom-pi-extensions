@@ -56,6 +56,10 @@ pub enum DaemonAction {
     Status(SessionArgs),
     /// Print health summary.
     Health(SessionArgs),
+    /// Drain queued daemon events.
+    Events(SessionArgs),
+    /// Acknowledge queued daemon events and clear wake-pending markers.
+    Ack(SessionArgs),
     /// Tail daemon output streams.
     Tail(DaemonTailArgs),
 }

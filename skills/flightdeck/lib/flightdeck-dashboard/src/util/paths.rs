@@ -81,6 +81,16 @@ pub fn fd_log_file(state_dir: &Path, session_key: &str) -> PathBuf {
 }
 
 #[must_use]
+pub fn fd_session_lock(state_dir: &Path, session_key: &str) -> PathBuf {
+    state_dir.join(format!("fd-daemon-{session_key}.session-lock"))
+}
+
+#[must_use]
+pub fn fd_wake_pending(state_dir: &Path, session_key: &str) -> PathBuf {
+    state_dir.join(format!("fd-wake-pending-{session_key}"))
+}
+
+#[must_use]
 pub fn dashboard_pid_file(state_dir: &Path, session_key: &str) -> PathBuf {
     state_dir.join(format!("dashboard-{session_key}.pid"))
 }
