@@ -1,11 +1,14 @@
 mod common;
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
-use flightdeck_dashboard::app::model::{ModalState, Tab};
+use flightdeck_dashboard::app::command::SnapshotSource;
+use flightdeck_dashboard::app::model::{ModalState, Model, Tab};
 use flightdeck_dashboard::app::motion::{self, EffectKind, EffectTarget, MotionLevel};
 use flightdeck_dashboard::cost::{CostMetrics, HarnessTotal, SessionTotals};
 use flightdeck_dashboard::state::snapshot::{ActivitySource, Event, EventImportance};
+use flightdeck_dashboard::state::tracked_entries;
 
 #[test]
 fn mixed_overview_tab() {
@@ -168,6 +171,39 @@ fn mixed_costs_tab() {
 }
 
 #[test]
+fn merges_renders_full_queue() {
+    let model = audit_model_for_tab(Tab::Merges);
+    let rendered = common::render_model_with_size(&model, 181, 36);
+    assert!(rendered.contains("1. HT-9002"));
+    assert!(rendered.contains("Ready to merge"));
+    assert!(rendered.contains("2. HT-9001"));
+    assert!(rendered.contains("Needs input"));
+    insta::assert_snapshot!("tab_merges_full_queue", rendered);
+}
+
+#[test]
+fn decisions_render_all_entries_from_fixture() {
+    let model = audit_model_for_tab(Tab::Decisions);
+    let rendered = common::render_model_with_size(&model, 181, 36);
+    let expected = [
+        "scope-creep-detected",
+        "merge-ready-but-unknown",
+        "bot-review-wait",
+        "cleanup-prompt",
+        "rebase-multi-choice",
+        "merge-now",
+        "audit-relation-prompt",
+    ];
+    for prompt_tag in expected {
+        assert!(
+            rendered.contains(prompt_tag),
+            "missing {prompt_tag}:\n{rendered}"
+        );
+    }
+    insta::assert_snapshot!("tab_decisions_all_entries", rendered);
+}
+
+#[test]
 fn decisions_detail_popup() {
     let mut model = common::model_for_fixture("decisions", MotionLevel::Off);
     model.current_tab = Tab::Decisions;
@@ -202,6 +238,74 @@ fn daemon_tab_file_mode_message() {
     assert!(rendered.contains("daemon: file-mode"));
     insta::assert_snapshot!("tab_daemon_file_mode", rendered);
 }
+
+fn audit_model_for_tab(tab: Tab) -> Model {
+    let snapshot = tracked_entries::snapshot_from_str(AUDIT_STATE, common::fixed_now())
+        .expect("audit state parses");
+    let mut model = Model::new(
+        snapshot,
+        SnapshotSource::File(PathBuf::from("audit-state.json")),
+        MotionLevel::Off,
+        flightdeck_dashboard::app::theme::Theme::Moon,
+        common::fixed_now,
+    );
+    model.current_pane_id = None;
+    model.current_tab = tab;
+    model
+}
+
+const AUDIT_STATE: &str = r#"
+{
+  "session_id": "VS",
+  "started_at": "2026-05-15T14:00:00Z",
+  "updated_at": "2026-05-15T19:52:00Z",
+  "owner": { "harness": "pi", "pane_id": "%25", "pane_target": "VS:0.0", "cwd": "/repo", "pid": 1, "pi_session_id": null, "pi_bridge_socket": null, "discovery_error": null },
+  "entries": {
+    "HT-9001": {
+      "id": "HT-9001",
+      "title": "Refactor order book pricing path",
+      "kind": "issue",
+      "state": "prompting",
+      "harness": "pi",
+      "pane_id": "%2001",
+      "pane_target": "VS:3.1",
+      "decisions_log": [
+        { "ts": "2026-05-15T16:12:33Z", "prompt_tag": "audit-relation-prompt", "answer": "child of HT-9000" },
+        { "ts": "2026-05-15T17:45:01Z", "prompt_tag": "rebase-multi-choice", "answer": "rebase against main" },
+        { "ts": "2026-05-15T19:50:12Z", "prompt_tag": "scope-creep-detected", "answer": "PAUSED FOR USER" }
+      ]
+    },
+    "HT-9002": {
+      "id": "HT-9002",
+      "title": "Add Venue.Coinbase enum variant",
+      "kind": "issue",
+      "state": "merge-ready",
+      "harness": "claude",
+      "pane_id": "%2002",
+      "pane_target": "VS:4.1",
+      "decisions_log": [
+        { "ts": "2026-05-15T18:30:55Z", "prompt_tag": "bot-review-wait", "answer": "skip; reviewDecision=APPROVED" },
+        { "ts": "2026-05-15T19:42:08Z", "prompt_tag": "merge-ready-but-unknown", "answer": "wait; unknown_since=120s < threshold" }
+      ]
+    },
+    "HT-9000": {
+      "id": "HT-9000",
+      "title": "Strict-mode tick parser",
+      "kind": "issue",
+      "state": "merged",
+      "harness": "opencode",
+      "pane_id": "%2000",
+      "pane_target": "VS:2.1",
+      "decisions_log": [
+        { "ts": "2026-05-15T16:20:11Z", "prompt_tag": "merge-now", "answer": "yes" },
+        { "ts": "2026-05-15T17:58:30Z", "prompt_tag": "cleanup-prompt", "answer": "yes; worktree path matches registered entry" }
+      ]
+    }
+  },
+  "merge_queue": ["HT-9002", "HT-9001"],
+  "conflict_graph": { "edges": [["HT-9001", "HT-9002"]], "computed_at": "2026-05-15T19:42:08Z" }
+}
+"#;
 
 fn sample_cost_totals() -> SessionTotals {
     let mut by_entry = HashMap::new();

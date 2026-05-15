@@ -98,7 +98,7 @@ When adding a tab, wire the enum/state in `app/model.rs`, key handling in `app/k
 
 Popup chrome lives in `app/view/popup.rs`; individual popups live in `app/view/modals.rs`. Keep popups one-at-a-time and closeable via Esc, `[ ✕ ]`, or the backdrop. Confirm popups are the only write affordance; the pending action must be data (`actions::WriteAction`), not a closure hidden inside view code. Base-layer click zones must remain masked while a popup is open.
 
-`app/theme.rs` is the single source of truth for colors and styles. Views must consume `Palette` style helpers (`theme.ok()`, `theme.warning()`, `theme.error()`, etc.) and never hard-code raw colors. Motion effects live in `app/view/fx.rs` and `app/motion.rs`; add new effects to the catalog, respect `MotionLevel::Off`, and keep semantic information visible without animation.
+`app/theme.rs` is the single source of truth for colors and styles. Views must consume `Palette` style helpers (`theme.ok()`, `theme.warning()`, `theme.error()`, etc.) and never hard-code raw colors. The frame renderer paints `Palette::bg` once for non-system themes, panels use `Palette::surface`, and popups use `Palette::overlay`; keep System background reset so terminal palettes still win. Motion effects live in `app/view/fx.rs` and `app/motion.rs`; add new effects to the catalog, respect `MotionLevel::Off`, and keep semantic information visible without animation.
 
 ### Information hierarchy
 

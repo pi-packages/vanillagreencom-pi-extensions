@@ -73,7 +73,7 @@ fn legend_lines(theme: &Palette) -> Vec<Line<'static>> {
         Line::from("State counts    P = Needs input · S = Submitting · W = Running · R = Idle"),
         Line::from("                MR = Ready to merge · M = Merged · C = Completed"),
         Line::from("                D = Stopped · CA = Cancelled · AB = Aborted"),
-        Line::from("Status chips    fresh / stale-warn / stale-dead = how recent the state is"),
+        Line::from("Status chips    fresh / 1m old / 5m old · stale = how recent the state is"),
         Line::from("                file-mode = reading the state file directly; observer = different tmux pane than master"),
         Line::from("Spinners        Braille spinner next to a badge means transient work is being polled"),
         Line::from("PR / worktree   Pull Request number and local git worktree directory"),
@@ -105,7 +105,11 @@ pub fn render_theme_picker(
             .iter()
             .enumerate()
             .map(|(idx, (choice, name, desc))| {
-                let radio = if *choice == model.theme { "●" } else { "○" };
+                let radio = if idx == model.theme_picker_index {
+                    "●"
+                } else {
+                    "○"
+                };
                 hitmap.push(
                     Rect::new(body.x, body.y.saturating_add(idx as u16), body.width, 1),
                     ClickAction::SelectTheme(*choice),
@@ -126,7 +130,7 @@ pub fn render_theme_picker(
                         Span::styled("█", Style::new().fg(palette.error).bg(palette.bg)),
                     ])),
                 ])
-                .style(if *choice == model.theme {
+                .style(if idx == model.theme_picker_index {
                     model.selection_style()
                 } else {
                     theme.frame()
@@ -183,7 +187,12 @@ pub fn render_decision_detail(
             Line::from(Span::styled("Session", theme.header())),
             Line::from(format!("{} · {}", decision.entry_id, decision.title)),
         ];
-        frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), body);
+        frame.render_widget(
+            Paragraph::new(lines)
+                .wrap(Wrap { trim: true })
+                .scroll(popup_scroll(model)),
+            body,
+        );
     });
 }
 
@@ -293,7 +302,12 @@ pub fn render_session_detail(
                 10,
             );
         }
-        frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), body);
+        frame.render_widget(
+            Paragraph::new(lines)
+                .wrap(Wrap { trim: true })
+                .scroll(popup_scroll(model)),
+            body,
+        );
     });
 }
 
@@ -393,7 +407,8 @@ pub fn render_event_detail(
                 Line::from(""),
                 Line::from(format!("importance: {:?}", event.importance)),
             ])
-            .wrap(Wrap { trim: true }),
+            .wrap(Wrap { trim: true })
+            .scroll(popup_scroll(model)),
             body,
         );
     });
@@ -431,6 +446,10 @@ pub fn render_filter_input(
             body,
         );
     });
+}
+
+fn popup_scroll(model: &Model) -> (u16, u16) {
+    (u16::try_from(model.popup_scroll).unwrap_or(u16::MAX), 0)
 }
 
 fn render_message_popup(

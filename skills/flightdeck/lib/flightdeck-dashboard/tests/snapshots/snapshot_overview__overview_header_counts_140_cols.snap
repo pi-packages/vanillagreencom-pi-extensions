@@ -3,7 +3,7 @@ source: tests/snapshot_overview.rs
 expression: rendered
 ---
 "┌ Flightdeck ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐"
-"│ Flightdeck   session demo-mixed  ·  Master pi at /repo/demo  ·  daemon: file-mode  ·  uptime 2h25m  ·  Adhoc 1 · Issue 1 · Workflow 1  · │"
+"│ Flightdeck   session demo-mixed  ·  Master pi  ·  file  ·  uptime 2h25m  ·  Adhoc 1 · Issue 1 · Workflow 1  ·  4m old  $0.00/0T   moon ▾ │"
 "└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘"
 "┌ tabs ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐"
 "│ Overview │ Live feed │ Conversations │ Conflicts & merges (issue mode) │ Decisions │ Costs │ Daemon                                      │"

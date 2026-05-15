@@ -18,9 +18,11 @@ fn render_fixture(name: &'static str) -> String {
 
 fn render_with_theme_summary(model: &Model) -> String {
     format!(
-        "theme={} ({})\ntitle={:?}\nselection={:?}\nwarning={:?}\n{}",
+        "theme={} ({})\nouter={:?}\npanel={:?}\ntitle={:?}\nselection={:?}\nwarning={:?}\n{}",
         model.theme.as_str(),
         model.theme.display_name(),
+        model.palette().outer(),
+        model.palette().panel(),
         model.palette().title(),
         model.selection_style(),
         model.palette().warning(),
@@ -60,6 +62,7 @@ fn overview_dawn() {
     model.theme = Theme::Dawn;
     let rendered = render_with_theme_summary(&model);
     assert_ne!(rendered, render_fixture("mixed"));
+    assert!(rendered.contains("bg(Color::Rgb(250, 244, 237))"));
     insta::assert_snapshot!("overview_theme_dawn", rendered);
 }
 
@@ -194,6 +197,29 @@ fn header_counts_fit_at_140_cols() {
     assert!(!rendered.contains("P:1"));
     assert!(!rendered.contains("prompting:"));
     insta::assert_snapshot!("overview_header_counts_140_cols", rendered);
+}
+
+#[test]
+fn header_keeps_theme_visible_at_live_audit_widths() {
+    let mut model = common::model_for_fixture("mixed", MotionLevel::Off);
+    model.snapshot.paused_for_user = Some(PauseInfo {
+        entry_id: Some("VST-101".to_owned()),
+        issue_id: Some("VST-101".to_owned()),
+        reason: "scope_creep_detected".to_owned(),
+        prompt_text: Some("scope_files_actual=23 > 2x declared=8".to_owned()),
+    });
+    for width in [100, 140, 160, 181, 220] {
+        let rendered = common::render_model_with_size(&model, width, common::SNAPSHOT_HEIGHT);
+        let header = rendered.lines().take(3).collect::<Vec<_>>().join("\n");
+        assert!(
+            header.contains("moon ▾"),
+            "theme clipped at width {width}:\n{header}"
+        );
+        assert!(
+            !header.contains(" paused"),
+            "redundant paused chip at width {width}:\n{header}"
+        );
+    }
 }
 
 #[test]

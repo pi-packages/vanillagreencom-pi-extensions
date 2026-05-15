@@ -24,6 +24,7 @@ pub fn render(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.border_active())
+        .style(theme.panel())
         .title(Span::styled(title, theme.title()));
 
     if model.recent_events.is_empty() {

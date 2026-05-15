@@ -107,6 +107,8 @@ pub const SYSTEM: Palette = Palette {
 };
 
 impl Theme {
+    pub const ALL: [Self; 4] = [Self::Moon, Self::Dawn, Self::Pantera, Self::System];
+
     #[must_use]
     pub fn from_cli_or_env(cli: Option<&str>, env: Option<&str>) -> Self {
         if let Some(value) = cli.and_then(non_empty) {
@@ -149,6 +151,19 @@ impl Theme {
     }
 
     #[must_use]
+    pub fn index(self) -> usize {
+        Self::ALL
+            .iter()
+            .position(|theme| *theme == self)
+            .unwrap_or_default()
+    }
+
+    #[must_use]
+    pub fn from_index(index: usize) -> Self {
+        Self::ALL[index.min(Self::ALL.len().saturating_sub(1))]
+    }
+
+    #[must_use]
     pub fn row_style_selected(self) -> Style {
         let palette = self.palette();
         match self {
@@ -166,44 +181,64 @@ impl Theme {
 
 impl Palette {
     #[must_use]
-    pub const fn frame(self) -> Style {
+    pub fn paints_outer_background(self) -> bool {
+        self.bg != Color::Reset
+    }
+
+    #[must_use]
+    pub const fn outer(self) -> Style {
         Style::new().fg(self.text).bg(self.bg)
+    }
+
+    #[must_use]
+    pub const fn panel(self) -> Style {
+        Style::new().fg(self.text).bg(self.surface)
+    }
+
+    #[must_use]
+    pub const fn overlay_panel(self) -> Style {
+        Style::new().fg(self.text).bg(self.overlay)
+    }
+
+    #[must_use]
+    pub const fn frame(self) -> Style {
+        Style::new().fg(self.text).bg(self.surface)
     }
 
     #[must_use]
     pub fn title(self) -> Style {
         Style::new()
             .fg(self.accent)
-            .bg(self.bg)
+            .bg(self.surface)
             .add_modifier(Modifier::BOLD)
     }
 
     #[must_use]
     pub const fn muted(self) -> Style {
-        Style::new().fg(self.muted).bg(self.bg)
+        Style::new().fg(self.muted).bg(self.surface)
     }
 
     #[must_use]
     pub const fn status(self) -> Style {
-        Style::new().fg(self.text).bg(self.bg)
+        Style::new().fg(self.text).bg(self.surface)
     }
 
     #[must_use]
     pub fn status_label(self) -> Style {
         Style::new()
             .fg(self.info)
-            .bg(self.bg)
+            .bg(self.surface)
             .add_modifier(Modifier::BOLD)
     }
 
     #[must_use]
     pub const fn border(self) -> Style {
-        Style::new().fg(self.border_inactive).bg(self.bg)
+        Style::new().fg(self.border_inactive).bg(self.surface)
     }
 
     #[must_use]
     pub const fn border_active(self) -> Style {
-        Style::new().fg(self.border_active).bg(self.bg)
+        Style::new().fg(self.border_active).bg(self.surface)
     }
 
     #[must_use]
@@ -215,27 +250,27 @@ impl Palette {
                 .add_modifier(Modifier::BOLD | Modifier::REVERSED);
         }
         Style::new()
-            .fg(self.bg)
+            .fg(self.surface)
             .bg(self.accent)
             .add_modifier(Modifier::BOLD)
     }
 
     #[must_use]
     pub const fn tab_inactive(self) -> Style {
-        Style::new().fg(self.subtle).bg(self.bg)
+        Style::new().fg(self.subtle).bg(self.surface)
     }
 
     #[must_use]
     pub fn header(self) -> Style {
         Style::new()
             .fg(self.accent)
-            .bg(self.bg)
+            .bg(self.surface)
             .add_modifier(Modifier::BOLD)
     }
 
     #[must_use]
     pub const fn footer(self) -> Style {
-        Style::new().fg(self.subtle).bg(self.bg)
+        Style::new().fg(self.subtle).bg(self.surface)
     }
 
     #[must_use]
@@ -252,7 +287,7 @@ impl Palette {
                 .add_modifier(Modifier::BOLD);
         }
         Style::new()
-            .fg(self.bg)
+            .fg(self.surface)
             .bg(self.error)
             .add_modifier(Modifier::BOLD)
     }
@@ -261,7 +296,7 @@ impl Palette {
     pub fn ok(self) -> Style {
         Style::new()
             .fg(self.success)
-            .bg(self.bg)
+            .bg(self.surface)
             .add_modifier(Modifier::BOLD)
     }
 
@@ -269,7 +304,7 @@ impl Palette {
     pub fn warning(self) -> Style {
         Style::new()
             .fg(self.warning)
-            .bg(self.bg)
+            .bg(self.surface)
             .add_modifier(Modifier::BOLD)
     }
 
@@ -277,7 +312,7 @@ impl Palette {
     pub fn info(self) -> Style {
         Style::new()
             .fg(self.info)
-            .bg(self.bg)
+            .bg(self.surface)
             .add_modifier(Modifier::BOLD)
     }
 
@@ -312,7 +347,7 @@ impl Palette {
 
     #[must_use]
     fn subtle(self) -> Style {
-        Style::new().fg(self.subtle).bg(self.bg)
+        Style::new().fg(self.subtle).bg(self.surface)
     }
 
     #[must_use]
@@ -324,7 +359,7 @@ impl Palette {
                 .add_modifier(Modifier::BOLD);
         }
         Style::new()
-            .fg(self.bg)
+            .fg(self.surface)
             .bg(color)
             .add_modifier(Modifier::BOLD)
     }

@@ -87,6 +87,7 @@ pub fn render(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.border_active())
+        .style(theme.panel())
         .title(Span::styled(" daemon ", theme.title()));
     frame.render_widget(
         Paragraph::new(lines).block(block).wrap(Wrap { trim: true }),
@@ -121,6 +122,7 @@ fn render_file_mode(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: &Pa
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.border_active())
+        .style(theme.panel())
         .title(Span::styled(" daemon file-mode ", theme.title()));
     frame.render_widget(
         Paragraph::new(lines).block(block).wrap(Wrap { trim: true }),

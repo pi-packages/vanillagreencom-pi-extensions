@@ -46,6 +46,7 @@ pub fn render_popup<F>(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.border_active())
+        .style(theme.overlay_panel())
         .title(Span::styled(format!(" {} ", chrome.title), theme.title()));
     frame.render_widget(block, popup);
 

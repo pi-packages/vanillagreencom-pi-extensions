@@ -116,6 +116,7 @@ pub fn render(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.border_active())
+        .style(theme.panel())
         .title(Span::styled(" Costs ", theme.title()));
     frame.render_widget(
         Paragraph::new(lines)

@@ -4,6 +4,7 @@ use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::app::hitmap::HitMap;
+use crate::app::labels::state_label_for;
 use crate::app::model::Model;
 use crate::app::theme::Palette;
 use crate::state::snapshot::SessionKind;
@@ -32,6 +33,7 @@ fn render_no_issue(frame: &mut Frame<'_>, area: Rect, theme: &Palette) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.border())
+        .style(theme.panel())
         .title(Span::styled(" conflicts & merges ", theme.muted()));
     frame.render_widget(
         Paragraph::new(
@@ -56,7 +58,7 @@ fn render_queue(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: &Palett
                 .sessions
                 .iter()
                 .find(|session| session.id == *item && session.kind == SessionKind::Issue)
-                .map(|session| session.state.as_str())
+                .map(|session| state_label_for(&session.state))
                 .unwrap_or("unknown");
             lines.push(Line::from(vec![
                 Span::styled(format!("{}.", idx + 1), theme.status_label()),
@@ -71,6 +73,7 @@ fn render_queue(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: &Palett
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.border_active())
+        .style(theme.panel())
         .title(Span::styled(" merge queue ", theme.title()));
     frame.render_widget(
         Paragraph::new(lines).block(block).wrap(Wrap { trim: true }),
@@ -105,6 +108,7 @@ fn render_graph(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: &Palett
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.border_active())
+        .style(theme.panel())
         .title(Span::styled(
             " conflicts & merges (issue mode) ",
             theme.title(),

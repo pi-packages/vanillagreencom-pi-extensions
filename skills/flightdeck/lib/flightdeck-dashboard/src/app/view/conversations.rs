@@ -21,6 +21,7 @@ pub fn render(
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(theme.border())
+            .style(theme.panel())
             .title(Span::styled(" conversations ", theme.muted()));
         let read_mode = if matches!(model.snapshot_source, SnapshotSource::Socket(_)) {
             "daemon socket"
@@ -76,6 +77,7 @@ pub fn render(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.border_active())
+        .style(theme.panel())
         .title(Line::from(vec![
             Span::styled(" conversations ", theme.title()),
             Span::styled("newest first · pane ids hidden", theme.muted()),

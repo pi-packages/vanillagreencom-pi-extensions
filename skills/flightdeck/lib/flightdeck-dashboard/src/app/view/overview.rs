@@ -206,6 +206,7 @@ fn render_single_column(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.border_active())
+        .style(theme.panel())
         .title(Span::styled(
             format!(" sessions ({} tracked) ", snapshot.counts.total),
             theme.title(),
@@ -280,6 +281,7 @@ fn render_left_rail(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: &Pa
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.border())
+        .style(theme.panel())
         .title(Span::styled(" left rail ", theme.muted()));
     frame.render_widget(
         Paragraph::new(lines).block(block).wrap(Wrap { trim: true }),
@@ -343,6 +345,7 @@ fn render_session_table(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.border_active())
+        .style(theme.panel())
         .title(Span::styled(
             format!(" sessions ({} tracked) ", model.snapshot.counts.total),
             theme.title(),
@@ -401,6 +404,7 @@ fn render_detail(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.border())
+        .style(theme.panel())
         .title(Span::styled(" detail ", theme.muted()));
     for (line_index, action, width) in buttons {
         hitmap.push(

@@ -12,15 +12,17 @@ pub mod popup;
 use chrono::{DateTime, Utc};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Tabs};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Tabs};
 use ratatui::Frame;
 
 use crate::app::command::SnapshotSource;
 use crate::app::hitmap::{ClickAction, HitMap};
 use crate::app::model::{Model, Tab};
 use crate::app::theme::Palette;
-use crate::cost::format_summary;
+use crate::cost::{format_cost, format_summary};
 use crate::state::snapshot::Staleness;
+
+const HEADER_COMPACT_WIDTH: u16 = 200;
 
 pub fn render(frame: &mut Frame<'_>, model: &Model) {
     let mut hitmap = HitMap::default();
@@ -31,6 +33,7 @@ pub fn render_with_hitmap(frame: &mut Frame<'_>, model: &Model, hitmap: &mut Hit
     hitmap.clear();
     let theme = model.palette();
     let area = frame.area();
+    render_frame_background(frame, area, theme);
     let pause_height = u16::from(model.snapshot.paused_for_user.is_some());
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -75,6 +78,14 @@ pub fn render_with_hitmap(frame: &mut Frame<'_>, model: &Model, hitmap: &mut Hit
     }
 }
 
+fn render_frame_background(frame: &mut Frame<'_>, area: Rect, theme: &Palette) {
+    if !theme.paints_outer_background() {
+        return;
+    }
+    frame.render_widget(Clear, area);
+    frame.render_widget(Block::default().style(theme.outer()), area);
+}
+
 fn render_status(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -83,27 +94,25 @@ fn render_status(
     hitmap: &mut HitMap,
 ) {
     let snapshot = &model.snapshot;
-    let owner = owner_label(model);
+    let compact = area.width < HEADER_COMPACT_WIDTH;
+    let owner = owner_label(model, compact);
     let elapsed = snapshot
         .started_at
         .map(|started| human_duration(started, model.now))
         .unwrap_or_else(|| String::from("unknown"));
-    let daemon = daemon_label(model).to_owned();
-    let kind_counts = format!(
-        "Adhoc {} · Issue {} · Workflow {}",
-        snapshot.counts.adhoc, snapshot.counts.issue, snapshot.counts.workflow
-    );
-    let staleness = match snapshot.staleness(model.now) {
-        Staleness::Fresh => String::from("fresh"),
-        Staleness::WarnAfter(age) => format!("stale-warn {}", duration_label(age)),
-        Staleness::StaleAfter(age) => format!("stale-dead {}", duration_label(age)),
+    let daemon = daemon_label(model, compact).to_owned();
+    let kind_counts = kind_counts_label(model);
+    let staleness = staleness_label(snapshot.staleness(model.now));
+    let cost_chip = if compact {
+        format!(
+            "{}/{}T",
+            format_cost(model.cost_totals.grand.cost_usd),
+            model.cost_totals.grand.turns
+        )
+    } else {
+        format_summary(&model.cost_totals.grand)
     };
-    let cost_chip = format_summary(&model.cost_totals.grand);
     let theme_chip = format!("{} ▾", model.theme.as_str());
-    let pause_chip = snapshot
-        .paused_for_user
-        .as_ref()
-        .map(|_| String::from("paused"));
 
     let mut spans = vec![
         Span::styled(" Flightdeck ", theme.title()),
@@ -130,10 +139,6 @@ fn render_status(
         spans.push(Span::raw("  "));
         spans.push(Span::styled("observer", theme.warning()));
     }
-    if let Some(chip) = &pause_chip {
-        spans.push(Span::raw("  "));
-        spans.push(Span::styled(chip.clone(), theme.pause()));
-    }
     spans.push(Span::raw("  "));
     spans.push(Span::styled(cost_chip.clone(), theme.info()));
     if model.cost_totals.unhealthy_sources > 0 {
@@ -146,8 +151,6 @@ fn render_status(
             theme.warning(),
         ));
     }
-    spans.push(Span::raw("  "));
-    spans.push(Span::styled(theme_chip.clone(), theme.header()));
     if let Some(status) = &model.status_message {
         spans.push(Span::raw("  "));
         let style = if status.success {
@@ -176,20 +179,6 @@ fn render_status(
             1,
         );
     }
-    if let Some(chip) = &pause_chip {
-        if let Some(pause_x) = header_chip_x(&spans, chip) {
-            hitmap.push(
-                Rect::new(
-                    inner_x.saturating_add(pause_x),
-                    inner_y,
-                    chip.len() as u16,
-                    1,
-                ),
-                ClickAction::JumpToPaused,
-                1,
-            );
-        }
-    }
     if let Some(cost_x) = header_chip_x(&spans, &cost_chip) {
         hitmap.push(
             Rect::new(
@@ -202,38 +191,38 @@ fn render_status(
             1,
         );
     }
-    if let Some(theme_x) = header_chip_x(&spans, &theme_chip) {
-        hitmap.push(
-            Rect::new(
-                inner_x.saturating_add(theme_x),
-                inner_y,
-                theme_chip.len() as u16,
-                1,
-            ),
-            ClickAction::OpenThemePicker,
-            1,
-        );
-    }
-    hitmap.push(
-        Rect::new(
-            area.x.saturating_add(area.width.saturating_sub(14)),
-            inner_y,
-            area.width.min(14),
-            1,
-        ),
-        ClickAction::OpenThemePicker,
+    let theme_width = u16::try_from(theme_chip.chars().count()).unwrap_or(u16::MAX);
+    let theme_rect = Rect::new(
+        area.x
+            .saturating_add(area.width.saturating_sub(theme_width.saturating_add(2))),
+        inner_y,
+        theme_width.min(area.width),
         1,
     );
+    hitmap.push(theme_rect, ClickAction::OpenThemePicker, 1);
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.border_active())
+        .style(theme.panel())
         .title(Span::styled(" Flightdeck ", theme.title()));
+    let status_area = block.inner(area);
+    let status_width = theme_rect
+        .x
+        .saturating_sub(status_area.x)
+        .saturating_sub(1)
+        .min(status_area.width);
+    let status_rect = Rect::new(status_area.x, status_area.y, status_width, 1);
+    frame.render_widget(block, area);
+    if status_rect.width > 0 {
+        frame.render_widget(
+            Paragraph::new(Line::from(spans)).style(theme.status()),
+            status_rect,
+        );
+    }
     frame.render_widget(
-        Paragraph::new(Line::from(spans))
-            .block(block)
-            .style(theme.status()),
-        area,
+        Paragraph::new(Span::styled(theme_chip, theme.header())).style(theme.status()),
+        theme_rect,
     );
 }
 
@@ -294,6 +283,7 @@ fn render_tabs(
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(theme.border())
+                .style(theme.panel())
                 .title(Span::styled(title, theme.muted())),
         )
         .select(model.selected_tab_position())
@@ -411,6 +401,22 @@ fn render_footer(
     frame.render_widget(paragraph, area);
 }
 
+fn kind_counts_label(model: &Model) -> String {
+    let counts = &model.snapshot.counts;
+    format!(
+        "Adhoc {} · Issue {} · Workflow {}",
+        counts.adhoc, counts.issue, counts.workflow
+    )
+}
+
+fn staleness_label(staleness: Staleness) -> String {
+    match staleness {
+        Staleness::Fresh => String::from("fresh"),
+        Staleness::WarnAfter(age) => format!("{} old", duration_label(age)),
+        Staleness::StaleAfter(age) => format!("{} old · stale", duration_label(age)),
+    }
+}
+
 fn header_chip_x(spans: &[Span<'_>], needle: &str) -> Option<u16> {
     let mut offset = 0usize;
     for span in spans {
@@ -443,21 +449,32 @@ fn push_rect_target(hitmap: &mut HitMap, rect: Rect, action: ClickAction) {
     hitmap.push(rect, action, 1);
 }
 
-fn daemon_label(model: &Model) -> &str {
-    if matches!(model.snapshot_source, SnapshotSource::Socket(_))
+fn daemon_label(model: &Model, compact: bool) -> &str {
+    let label = if matches!(model.snapshot_source, SnapshotSource::Socket(_))
         || model.snapshot.daemon.label != "daemon: unknown"
     {
         model.snapshot.daemon.label.as_str()
     } else {
         "daemon: file-mode"
+    };
+    if compact {
+        match label.strip_prefix("daemon: ").unwrap_or(label) {
+            "file-mode" => "file",
+            compact_label => compact_label,
+        }
+    } else {
+        label
     }
 }
 
-fn owner_label(model: &Model) -> String {
+fn owner_label(model: &Model, compact: bool) -> String {
     let Some(owner) = &model.snapshot.owner else {
         return String::from("unknown");
     };
     let harness = owner.harness.as_deref().unwrap_or("unknown");
+    if compact {
+        return format!("Master {harness}");
+    }
     let cwd = owner
         .cwd
         .as_ref()

@@ -227,6 +227,8 @@ pub struct Model {
     overview_selection_initialized: bool,
     pub show_help: bool,
     pub modal: ModalState,
+    pub theme_picker_index: usize,
+    pub popup_scroll: usize,
     pub ui: UiFlags,
     pub feed_filter: FeedFilter,
     pub event_detail: Option<usize>,
@@ -275,6 +277,8 @@ impl Model {
             overview_selection_initialized: false,
             show_help: false,
             modal: ModalState::None,
+            theme_picker_index: theme.index(),
+            popup_scroll: 0,
             ui: UiFlags {
                 compact: false,
                 filter_open: false,

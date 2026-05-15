@@ -29,6 +29,7 @@ pub fn render(
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(theme.border())
+            .style(theme.panel())
             .title(Span::styled(" decisions ", theme.muted()));
         frame.render_widget(
             Paragraph::new("No decisions recorded yet.")
@@ -70,6 +71,7 @@ pub fn render(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.border_active())
+        .style(theme.panel())
         .title(Line::from(vec![
             Span::styled(" decisions ", theme.title()),
             Span::styled("Enter opens answer detail", theme.muted()),

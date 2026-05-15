@@ -12,6 +12,7 @@ use super::keymap::{self, Action};
 use super::model::{ActionStatus, ConfirmDialog, ModalState, Model, Tab};
 use super::motion::{self, EffectKind, EffectTarget};
 use super::msg::Msg;
+use super::theme::Theme;
 
 const PAGE_STEP: usize = 10;
 
@@ -143,32 +144,13 @@ fn request_reload(model: &mut Model) -> Vec<Cmd> {
 }
 
 fn handle_key(model: &mut Model, key: &KeyEvent) -> Vec<Cmd> {
-    if model.ui.filter_open {
-        return handle_filter_key(model, key);
+    if model.modal != ModalState::None {
+        return handle_popup_key(model, key);
     }
 
     let Some(action) = keymap::action_for(key) else {
         return Vec::new();
     };
-
-    if model.modal == ModalState::ConfirmAction && action == Action::OpenDetail {
-        return confirm_action(model);
-    }
-
-    if model.modal != ModalState::None
-        && !matches!(
-            action,
-            Action::MoveDown
-                | Action::MoveUp
-                | Action::OpenDetail
-                | Action::ToggleHelp
-                | Action::OpenThemePicker
-                | Action::Quit
-                | Action::CloseModal
-        )
-    {
-        return Vec::new();
-    }
 
     match action {
         Action::NextTab => {
@@ -236,10 +218,7 @@ fn handle_key(model: &mut Model, key: &KeyEvent) -> Vec<Cmd> {
             }
             vec![Cmd::Render]
         }
-        Action::OpenThemePicker => {
-            model.modal = ModalState::ThemePicker;
-            vec![Cmd::Render]
-        }
+        Action::OpenThemePicker => open_theme_picker(model),
         Action::Quit => {
             model.quit_requested = true;
             vec![Cmd::Render]
@@ -253,6 +232,117 @@ fn handle_key(model: &mut Model, key: &KeyEvent) -> Vec<Cmd> {
             vec![Cmd::Render]
         }
     }
+}
+
+fn handle_popup_key(model: &mut Model, key: &KeyEvent) -> Vec<Cmd> {
+    match model.modal {
+        ModalState::Help => handle_help_key(model, key),
+        ModalState::ThemePicker => handle_theme_picker_key(model, key),
+        ModalState::DecisionDetail | ModalState::SessionDetail | ModalState::EventDetail => {
+            handle_detail_popup_key(model, key)
+        }
+        ModalState::FilterInput => handle_filter_key(model, key),
+        ModalState::ConfirmAction => handle_confirm_key(model, key),
+        ModalState::None => Vec::new(),
+    }
+}
+
+fn handle_help_key(model: &mut Model, key: &KeyEvent) -> Vec<Cmd> {
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q') => {
+            close_overlay(model);
+            vec![Cmd::Render]
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn handle_theme_picker_key(model: &mut Model, key: &KeyEvent) -> Vec<Cmd> {
+    match key.code {
+        KeyCode::Down | KeyCode::Char('j') => {
+            move_theme_picker(model, 1);
+            vec![Cmd::Render]
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            move_theme_picker(model, -1);
+            vec![Cmd::Render]
+        }
+        KeyCode::Home | KeyCode::PageUp => {
+            model.theme_picker_index = 0;
+            vec![Cmd::Render]
+        }
+        KeyCode::End | KeyCode::PageDown => {
+            model.theme_picker_index = Theme::ALL.len().saturating_sub(1);
+            vec![Cmd::Render]
+        }
+        KeyCode::Enter => {
+            model.theme = Theme::from_index(model.theme_picker_index);
+            close_overlay(model);
+            vec![Cmd::Render]
+        }
+        KeyCode::Esc => {
+            close_overlay(model);
+            vec![Cmd::Render]
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn handle_detail_popup_key(model: &mut Model, key: &KeyEvent) -> Vec<Cmd> {
+    match key.code {
+        KeyCode::Esc => {
+            close_overlay(model);
+            vec![Cmd::Render]
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            model.popup_scroll = model.popup_scroll.saturating_add(1);
+            vec![Cmd::Render]
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            model.popup_scroll = model.popup_scroll.saturating_sub(1);
+            vec![Cmd::Render]
+        }
+        KeyCode::PageDown => {
+            model.popup_scroll = model.popup_scroll.saturating_add(PAGE_STEP);
+            vec![Cmd::Render]
+        }
+        KeyCode::PageUp => {
+            model.popup_scroll = model.popup_scroll.saturating_sub(PAGE_STEP);
+            vec![Cmd::Render]
+        }
+        KeyCode::Home => {
+            model.popup_scroll = 0;
+            vec![Cmd::Render]
+        }
+        KeyCode::End => {
+            model.popup_scroll = usize::MAX / 2;
+            vec![Cmd::Render]
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn handle_confirm_key(model: &mut Model, key: &KeyEvent) -> Vec<Cmd> {
+    match key.code {
+        KeyCode::Enter => confirm_action(model),
+        KeyCode::Esc => {
+            close_overlay(model);
+            vec![Cmd::Render]
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn move_theme_picker(model: &mut Model, delta: isize) {
+    let len = Theme::ALL.len();
+    if len == 0 {
+        return;
+    }
+    model.theme_picker_index = if delta.is_negative() {
+        (model.theme_picker_index + len - 1) % len
+    } else {
+        (model.theme_picker_index + 1) % len
+    };
 }
 
 fn handle_click(model: &mut Model, action: ClickAction) -> Vec<Cmd> {
@@ -299,6 +389,7 @@ fn handle_click(model: &mut Model, action: ClickAction) -> Vec<Cmd> {
                     model.current_tab = Tab::Overview;
                     model.set_selected_index(index);
                     model.mark_overview_selection_initialized();
+                    model.popup_scroll = 0;
                     model.modal = ModalState::SessionDetail;
                 }
             }
@@ -324,12 +415,10 @@ fn handle_click(model: &mut Model, action: ClickAction) -> Vec<Cmd> {
             model.modal = ModalState::Help;
             vec![Cmd::Render]
         }
-        ClickAction::OpenThemePicker => {
-            model.modal = ModalState::ThemePicker;
-            vec![Cmd::Render]
-        }
+        ClickAction::OpenThemePicker => open_theme_picker(model),
         ClickAction::SelectTheme(theme) => {
             model.theme = theme;
+            model.theme_picker_index = theme.index();
             vec![Cmd::Render]
         }
         ClickAction::CloseOverlay => {
@@ -353,6 +442,7 @@ fn handle_click(model: &mut Model, action: ClickAction) -> Vec<Cmd> {
 }
 
 fn open_detail(model: &mut Model) -> Vec<Cmd> {
+    model.popup_scroll = 0;
     match model.current_tab {
         Tab::Overview => model.modal = ModalState::SessionDetail,
         Tab::Decisions if model.decision_count() > 0 => model.modal = ModalState::DecisionDetail,
@@ -478,7 +568,15 @@ fn quick_focus_enabled() -> bool {
         .is_some_and(|value| value.trim() == "1")
 }
 
+fn open_theme_picker(model: &mut Model) -> Vec<Cmd> {
+    model.theme_picker_index = model.theme.index();
+    model.popup_scroll = 0;
+    model.modal = ModalState::ThemePicker;
+    vec![Cmd::Render]
+}
+
 fn open_filter(model: &mut Model) -> Vec<Cmd> {
+    model.popup_scroll = 0;
     model.feed_filter.begin_edit();
     model.ui.filter_open = true;
     model.modal = ModalState::FilterInput;
@@ -494,6 +592,7 @@ fn close_overlay(model: &mut Model) {
     model.ui.filter_open = false;
     model.event_detail = None;
     model.confirm = None;
+    model.popup_scroll = 0;
 }
 
 fn handle_scroll(model: &mut Model, source: ScrollSource, delta: isize) {
@@ -524,10 +623,6 @@ fn handle_filter_key(model: &mut Model, key: &KeyEvent) -> Vec<Cmd> {
         KeyCode::Backspace => {
             model.feed_filter.input.pop();
             model.feed_filter.error = None;
-            vec![Cmd::Render]
-        }
-        KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            model.ui.hide_noise = !model.ui.hide_noise;
             vec![Cmd::Render]
         }
         KeyCode::Char(ch) if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT => {
