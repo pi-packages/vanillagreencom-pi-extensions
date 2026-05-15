@@ -28,7 +28,7 @@ PR, worktree, and merge metadata render only on `ISS` rows.
 
 ## Read-only by design
 
-The flightdeck skill owns state mutation; the daemon owns wake delivery; `pane-respond` owns sending input to inner panes. pi-flightdeck only renders what's already on disk. The skill works fine without this extension; it's purely additive UX for the Pi harness.
+The flightdeck skill owns state mutation; the daemon owns wake delivery; `pane-respond` owns sending input to inner panes. pi-flightdeck only renders what's already on disk. The one exception is the explicit `p`/`del` prune keybind on the Overview tab, which shells to `pane-registry remove <id>` for entries whose tmux pane is already gone. The skill works fine without this extension; it's purely additive UX for the Pi harness.
 
 ## Install
 
