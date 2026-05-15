@@ -94,9 +94,23 @@ cargo insta test
 
 Snapshot tests use `ratatui::backend::TestBackend::new(200, 60)`. The shared constants live in `tests/common/mod.rs` (`SNAPSHOT_WIDTH`, `SNAPSHOT_HEIGHT`); update intentional snapshot diffs with `INSTA_UPDATE=always cargo insta test`, then run `cargo insta review` before committing.
 
-When adding a tab, wire the enum/state in `app/model.rs`, key handling in `app/keymap.rs`, update logic in `app/update.rs`, and render code under `app/view/<tab>.rs` plus `app/view/mod.rs`. Keep view modules render-only: write paths go through existing Flightdeck helpers, not direct mutations from the TUI.
+When adding a tab, wire the enum/state in `app/model.rs`, key handling in `app/keymap.rs`, update logic in `app/update.rs`, and render code under `app/view/<tab>.rs` plus `app/view/mod.rs`. Keep view modules render-only: write paths go through existing Flightdeck helpers, not direct mutations from the TUI. Mouse targets come from the per-frame `app/hitmap.rs` registry; never store absolute coordinates in `Model`.
+
+Popup chrome lives in `app/view/popup.rs`; individual popups live in `app/view/modals.rs`. Keep popups read-only, one-at-a-time, and closeable via Esc, `[ ✕ ]`, or the backdrop. Base-layer click zones must remain masked while a popup is open.
 
 `app/theme.rs` is the single source of truth for colors and styles. Views must consume `Palette` style helpers (`theme.ok()`, `theme.warning()`, `theme.error()`, etc.) and never hard-code raw colors. Motion effects live in `app/view/fx.rs` and `app/motion.rs`; add new effects to the catalog, respect `MotionLevel::Off`, and keep semantic information visible without animation.
+
+### Information hierarchy
+
+Keep each dashboard fact in one canonical home:
+
+- Header: session id, master harness/path, daemon chip, uptime, kind counts, freshness/observer/theme chips. Do not add per-state counts or owner pane ids here.
+- Left rail: status counts, merge queue glance, and conflict glance.
+- Session table: scan-friendly row data only — kind badge, friendly state, harness, title, PR/worktree, age, last decision, last activity.
+- Right rail: selected-session summary grouped as Where, Issue, Paused, and Recent decisions. Keep low-level adapter/debug fields out of the rail.
+- Detail popups: full wrapped decision/event/session text and debugging details that would crowd the main layout.
+- Daemon tab: daemon/pane/debug metadata, including owner pane ids and socket/file-mode details.
+- Help popup: the canonical legend for kind badges, state-count badges, status chips, spinners, and PR/worktree labels.
 
 ### Theme tokens
 
