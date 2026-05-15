@@ -52,7 +52,7 @@ Runtime requirements for the shipped core scripts remain `bash` 4+, `tmux` 3.x, 
 
 ## Rust dashboard
 
-The Rust dashboard binary lives at `skills/flightdeck/lib/flightdeck-dashboard/`, with the user-facing trampoline at `skills/flightdeck/scripts/flightdeck-dashboard`. It is a read-only ratatui view of the master state file: it renders tracked sessions, owner/observer status, pause/stale/archive/pre-purge banners, live Activity rows from daemon/wake JSONL, conversations, decisions, merges, and daemon health. Live mode file-watches the state/archive paths with debounced reloads; the optional Rust daemon adds a UDS JSON-RPC snapshot stream and Pi-only wake subscriber absorption. Mouse support is navigation-only: click tabs, rows, pause/banner chips, the daemon/theme chips, footer hints, and popup controls; scroll panels to move the current selection.
+The Rust dashboard binary lives at `skills/flightdeck/lib/flightdeck-dashboard/`, with the user-facing trampoline at `skills/flightdeck/scripts/flightdeck-dashboard`. It is a ratatui view of the master state file: it renders tracked sessions, owner/observer status, pause/stale/archive/pre-purge banners, cross-harness cost/token totals, live Activity rows from daemon/wake JSONL, conversations, decisions, merges, and daemon health. Live mode file-watches the state/archive paths with debounced reloads; the optional Rust daemon adds a UDS JSON-RPC snapshot stream and Pi-only wake subscriber absorption. Mouse support covers tabs, rows, pause/banner chips, the daemon/theme/cost chips, footer hints, popup controls, and panel scrolling. The only write actions are confirmation-gated shells to canonical helpers: prune stale registry entries through `pane-registry remove` and focus a session through `tmux select-window`.
 
 `flightdeck-dashboard launch` is the best-effort startup hook used by Flightdeck. It opens one tracked tmux window through `flightdeck-session start --kind workflow --harness shell`, registers `.entries.flightdeck-dashboard`, and skips cleanly outside tmux, when disabled, or when tmux idempotency probes fail. Use `launch --theme moon|dawn|pantera|system` to forward a theme to the child TUI. It honors:
 
@@ -64,9 +64,13 @@ The Rust dashboard binary lives at `skills/flightdeck/lib/flightdeck-dashboard/`
 | `FLIGHTDECK_DASHBOARD_THEME` | Theme: `moon` (default Rose Pine Moon), `dawn`, `pantera` (Crush-inspired neon), or `system`; CLI `--theme` overrides it. |
 | `FLIGHTDECK_DAEMON_RUST=1` | Opt into the Rust daemon wake side; default off keeps the canonical TypeScript daemon in charge of wake delivery. |
 | `FLIGHTDECK_DASHBOARD_BELL=0` | Suppress the pause-edge terminal bell. |
+| `FLIGHTDECK_DASHBOARD_COST_POLL_SECS` | Cost-source poll interval, default `5`. |
+| `FLIGHTDECK_DASHBOARD_PRICING_FILE` | Override the bundled per-million-token pricing TOML; malformed files warn and fall back to bundled rates. |
+| `FLIGHTDECK_DASHBOARD_QUICK_FOCUS=1` | Skip the focus confirmation popup for power users. Prune always requires confirmation. |
+| `TMUX_PROBE_TTL` | Cached `tmux list-panes` stale-row probe TTL, default `5` seconds. |
 | `FLIGHTDECK_DASHBOARD_STALE_WARN_SECS` / `FLIGHTDECK_DASHBOARD_STALE_DEAD_SECS` | Tune stale-chip thresholds. |
 
-`flightdeck-dashboard tui --demo[=NAME]` runs compiled demo fixtures (`empty`, `one-adhoc`, `one-issue`, `mixed`, `terminated`, `paused`, `observer`, `conversations`, `no-issue`, `decisions`). `tui --state-file <path>` reads a concrete master-state JSON file, and `tui --session <name>` resolves `<project-root>/<FLIGHTDECK_STATE_DIR>/flightdeck-state-<name>.json` (default state dir `tmp/`) with terminated-archive fallback. With neither flag inside tmux, the dashboard uses the current tmux session. Use `--theme moon|dawn|pantera|system` to select Rose Pine Moon, Rose Pine Dawn, Pantera neon, or terminal-system colors. `?` opens Help with the legend, `T` opens the theme picker, `/` opens the filter popup, and `Enter` opens the selected session/decision/event detail popup.
+`flightdeck-dashboard tui --demo[=NAME]` runs compiled demo fixtures (`empty`, `one-adhoc`, `one-issue`, `mixed`, `terminated`, `paused`, `observer`, `conversations`, `no-issue`, `decisions`). `tui --state-file <path>` reads a concrete master-state JSON file, and `tui --session <name>` resolves `<project-root>/<FLIGHTDECK_STATE_DIR>/flightdeck-state-<name>.json` (default state dir `tmp/`) with terminated-archive fallback. With neither flag inside tmux, the dashboard uses the current tmux session. Use `--theme moon|dawn|pantera|system` to select Rose Pine Moon, Rose Pine Dawn, Pantera neon, or terminal-system colors. `?` opens Help with the legend, `T` opens the theme picker, `/` opens the filter popup, `Enter` opens the selected session/decision/event detail popup, `g` confirms focus for the selected pane, and `D` confirms prune for stale rows.
 
 The legacy in-Pi dashboard extension remains documented in [`pi-extensions/pi-flightdeck/README.md`](../../pi-extensions/pi-flightdeck/README.md), but it is deprecated for new sessions. Prefer the Rust dashboard for new Flightdeck runs.
 
@@ -103,6 +107,10 @@ Most users never touch these. The ones that occasionally matter:
 | `FLIGHTDECK_DASHBOARD_THEME` | Rust dashboard theme: `moon` (default), `dawn`, `pantera`, or `system`. CLI `--theme` wins over the env var. |
 | `FLIGHTDECK_DAEMON_RUST` | Set to `1` to let `flightdeck-dashboard launch` start the Rust daemon; unset/`0` defers daemon ownership to the canonical TypeScript path. |
 | `FLIGHTDECK_DASHBOARD_BELL` | Set to `0` to suppress the terminal bell on a new pause-for-user edge. The dashboard never auto-focuses tmux windows. |
+| `FLIGHTDECK_DASHBOARD_COST_POLL_SECS` | Rust dashboard cost-source poll interval (default `5`). |
+| `FLIGHTDECK_DASHBOARD_PRICING_FILE` | Path to a pricing TOML override for dashboard cost calculations. |
+| `FLIGHTDECK_DASHBOARD_QUICK_FOCUS` | Set to `1` to make `g` focus without confirmation. |
+| `TMUX_PROBE_TTL` | Stale-pane probe cache TTL in seconds (default `5`). |
 | `FLIGHTDECK_DASHBOARD_STALE_WARN_SECS` | Rust dashboard stale-warning threshold in seconds (default `30`). |
 | `FLIGHTDECK_DASHBOARD_STALE_DEAD_SECS` | Rust dashboard stale/dead threshold in seconds (default `300`). |
 
