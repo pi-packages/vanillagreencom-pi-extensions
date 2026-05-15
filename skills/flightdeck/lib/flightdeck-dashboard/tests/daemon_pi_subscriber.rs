@@ -91,6 +91,78 @@ exit 0
 }
 
 #[tokio::test]
+async fn pi_empty_after_compact_detection_is_deferred() -> Result<(), Box<dyn Error>> {
+    let temp = tempfile::tempdir()?;
+    let state_file = temp.path().join("flightdeck-state-s505.json");
+    write_state(&state_file, "issue")?;
+    let bridge = write_fake_bridge(
+        temp.path(),
+        r#"
+if [[ "$1" == "stream" ]]; then
+  echo '{"type":"event","event":"session_compact","data":{}}'
+  echo '{"type":"event","event":"agent_end","data":{"content":[]}}'
+  exit 0
+fi
+exit 0
+"#,
+    )?;
+
+    let bin = dashboard_bin();
+    let mut daemon = spawn_daemon(bin, temp.path(), SESSION, &state_file, &bridge, &[]).await?;
+
+    assert_no_wake_rows(temp.path(), Duration::from_millis(600)).await?;
+
+    daemon.stop();
+    Ok(())
+}
+
+#[tokio::test]
+async fn pi_classifier_timeout_falls_back_to_regex() -> Result<(), Box<dyn Error>> {
+    let temp = tempfile::tempdir()?;
+    let state_file = temp.path().join("flightdeck-state-s505.json");
+    write_state(&state_file, "issue")?;
+    let bridge = write_fake_bridge(
+        temp.path(),
+        r#"
+if [[ "$1" == "stream" ]]; then
+  echo '{"type":"event","event":"message_end","data":{"message":{"role":"assistant","stopReason":"stop","content":[{"type":"text","text":"Ready to merge now"}]}}}'
+  exit 0
+fi
+exit 0
+"#,
+    )?;
+    let classifier = write_fake_executable(
+        temp.path(),
+        "classifier",
+        r#"
+sleep 5
+echo terminal-state-reached
+"#,
+    )?;
+
+    let bin = dashboard_bin();
+    let mut daemon = spawn_daemon(
+        bin,
+        temp.path(),
+        SESSION,
+        &state_file,
+        &bridge,
+        &[("FD_CLASSIFIER", classifier.as_path())],
+    )
+    .await?;
+
+    let rows = wait_for_wake_rows(temp.path(), 1).await?;
+    assert!(
+        rows.iter()
+            .any(|row| row.get("classifier_tag").and_then(Value::as_str) == Some("merge-now")),
+        "timed-out classifier falls back to regex classifier"
+    );
+
+    daemon.stop();
+    Ok(())
+}
+
+#[tokio::test]
 async fn rust_wake_side_default_gate_off() -> Result<(), Box<dyn Error>> {
     let temp = tempfile::tempdir()?;
     let state_file = temp.path().join("flightdeck-state-s505.json");
@@ -332,7 +404,7 @@ async fn wait_for_wake_rows(
     min_rows: usize,
 ) -> Result<Vec<Value>, Box<dyn Error>> {
     let path = wake_events_path(state_dir);
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         if let Ok(body) = std::fs::read_to_string(&path) {
             let rows = body
@@ -357,6 +429,27 @@ fn wake_events_path(state_dir: &Path) -> PathBuf {
 
 fn wake_pending_path(state_dir: &Path) -> PathBuf {
     state_dir.join(format!("fd-wake-pending-{SESSION}"))
+}
+
+async fn assert_no_wake_rows(state_dir: &Path, duration: Duration) -> Result<(), Box<dyn Error>> {
+    let path = wake_events_path(state_dir);
+    let deadline = Instant::now() + duration;
+    loop {
+        if let Ok(body) = std::fs::read_to_string(&path) {
+            let rows = body
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .map(serde_json::from_str::<Value>)
+                .collect::<Result<Vec<_>, _>>()?;
+            if !rows.is_empty() {
+                return Err(format!("unexpected wake rows in {}: {rows:?}", path.display()).into());
+            }
+        }
+        if Instant::now() >= deadline {
+            return Ok(());
+        }
+        sleep(Duration::from_millis(50)).await;
+    }
 }
 
 fn subscriber_pid_path(state_dir: &Path) -> PathBuf {
@@ -448,7 +541,11 @@ fn write_empty_state(path: &Path) -> Result<(), Box<dyn Error>> {
 }
 
 fn write_fake_bridge(dir: &Path, body: &str) -> Result<PathBuf, Box<dyn Error>> {
-    let path = dir.join("pi-bridge");
+    write_fake_executable(dir, "pi-bridge", body)
+}
+
+fn write_fake_executable(dir: &Path, name: &str, body: &str) -> Result<PathBuf, Box<dyn Error>> {
+    let path = dir.join(name);
     std::fs::write(
         &path,
         format!("#!/usr/bin/env bash\nset -euo pipefail\n{body}\n"),

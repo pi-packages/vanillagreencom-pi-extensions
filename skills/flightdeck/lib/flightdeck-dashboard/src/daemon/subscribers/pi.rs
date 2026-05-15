@@ -1,12 +1,12 @@
 use std::collections::HashSet;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
 use crate::daemon::wake::{apply_domain_guard, is_canonical_tag, WakeAppender, WakeEvent};
@@ -21,6 +21,7 @@ const SUBAGENT_COMPLETION_CUSTOM_TYPE: &str = "subagent-completion";
 const INITIAL_RESTART_BACKOFF: Duration = Duration::from_millis(200);
 const MAX_RESTART_BACKOFF: Duration = Duration::from_secs(2);
 const TEXT_EXCERPT_BYTES: usize = 1024;
+const CLASSIFIER_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug)]
 pub struct PiSubscriber;
@@ -110,6 +111,7 @@ struct PiStreamState {
     last_hash: Option<String>,
     compact_seen: bool,
     last_parse_error: Option<String>,
+    last_classifier_spawn_error: Option<io::ErrorKind>,
 }
 
 impl PiStreamState {
@@ -119,6 +121,7 @@ impl PiStreamState {
             last_hash: None,
             compact_seen: false,
             last_parse_error: None,
+            last_classifier_spawn_error: None,
         }
     }
 
@@ -137,7 +140,7 @@ enum BridgeEvent {
     Question { request_id: String, payload: Value },
     BgTaskExit { task: Value, hash: String },
     AssistantText { text: String, hash: String },
-    EmptyAfterCompact { hash: String, details: Value },
+    EmptyAfterCompactDeferred,
     Ignored,
 }
 
@@ -235,7 +238,12 @@ async fn handle_line(config: &PiConfig, state: &mut PiStreamState, line: &str) {
             value
         }
         Err(error) => {
-            warn_parse_transition(state, format!("{:?}", error.classify()), line);
+            warn_parse_transition(
+                state,
+                &config.pane_id,
+                format!("{:?}", error.classify()),
+                line,
+            );
             return;
         }
     };
@@ -253,7 +261,7 @@ async fn handle_line(config: &PiConfig, state: &mut PiStreamState, line: &str) {
             .await;
         }
         BridgeEvent::AssistantText { text, hash } => {
-            let raw_tag = classify_text(&text);
+            let raw_tag = classify_text(config, state, &text).await;
             let guarded_tag = apply_domain_guard(&raw_tag, &config.entry_kind);
             if is_canonical_tag(&guarded_tag) {
                 emit_wake(
@@ -268,12 +276,8 @@ async fn handle_line(config: &PiConfig, state: &mut PiStreamState, line: &str) {
                 .await;
             }
         }
-        BridgeEvent::EmptyAfterCompact { hash, details } => {
-            emit_wake(
-                config,
-                WakeEvent::empty_after_compact(config.pane_id.clone(), hash, details),
-            )
-            .await;
+        BridgeEvent::EmptyAfterCompactDeferred => {
+            tracing::debug!(pane_id = %config.pane_id, "pi empty-after-compact detected but emission deferred until TS canonical tag set includes it");
         }
         BridgeEvent::Ignored => {}
     }
@@ -297,13 +301,11 @@ fn classify_bridge_event(value: &Value, state: &mut PiStreamState) -> BridgeEven
         }
         "agent_end" if state.compact_seen && agent_end_content_empty(value) => {
             state.compact_seen = false;
-            let hash = sha12("compact-then-empty");
-            let details = json!({
-                "event_type": "empty-after-compact",
-                "reason": "compact-then-empty",
-                "source": "pi-bridge-stream"
-            });
-            BridgeEvent::EmptyAfterCompact { hash, details }
+            // P5-3 sequencing: keep the vstack#38 detection state machine, but
+            // do not emit `pi-empty-after-compact` until the TS daemon's
+            // canonical tag set includes it. Re-enable Rust emission in the
+            // same release that updates TS delivery.
+            BridgeEvent::EmptyAfterCompactDeferred
         }
         "question" if question_opened(value) => question_event(value),
         "message_end" => message_end_event(value, state),
@@ -473,34 +475,80 @@ fn message_text(message: &Value) -> Option<String> {
     }
 }
 
-fn classify_text(text: &str) -> String {
+async fn classify_text(config: &PiConfig, state: &mut PiStreamState, text: &str) -> String {
     if let Some(classifier) = std::env::var_os("FD_CLASSIFIER")
         .or_else(|| std::env::var_os("FLIGHTDECK_CLASSIFIER"))
         .map(PathBuf::from)
         .filter(|path| path.is_file())
     {
-        if let Ok(output) = std::process::Command::new(classifier)
-            .arg("--no-footer-gate")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .and_then(|mut child| {
-                if let Some(mut stdin) = child.stdin.take() {
-                    use std::io::Write as _;
-                    stdin.write_all(text.as_bytes())?;
-                }
-                child.wait_with_output()
-            })
-        {
-            if output.status.success() {
-                let tag = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-                if !tag.is_empty() {
-                    return tag;
-                }
+        match run_classifier(&classifier, text).await {
+            Ok(Some(tag)) => {
+                state.last_classifier_spawn_error = None;
+                return tag;
+            }
+            Ok(None) => {
+                state.last_classifier_spawn_error = None;
+            }
+            Err(ClassifierError::Spawn(error)) => {
+                warn_classifier_spawn_transition(state, config, &classifier, error.kind());
+            }
+            Err(ClassifierError::Io(error)) => {
+                state.last_classifier_spawn_error = None;
+                tracing::warn!(pane_id = %config.pane_id, classifier_path = %classifier.display(), error_kind = ?error.kind(), %error, "pi classifier io failed");
+            }
+            Err(ClassifierError::Timeout) => {
+                state.last_classifier_spawn_error = None;
+                tracing::warn!(pane_id = %config.pane_id, classifier_path = %classifier.display(), timeout_ms = CLASSIFIER_TIMEOUT.as_millis(), "pi classifier timed out; falling back to regex");
             }
         }
     }
     fallback_classify_text(text)
+}
+
+#[derive(Debug)]
+enum ClassifierError {
+    Spawn(io::Error),
+    Io(io::Error),
+    Timeout,
+}
+
+async fn run_classifier(path: &Path, text: &str) -> Result<Option<String>, ClassifierError> {
+    let mut child = Command::new(path)
+        .arg("--no-footer-gate")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(ClassifierError::Spawn)?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(text.as_bytes())
+            .await
+            .map_err(ClassifierError::Io)?;
+    }
+    let output = tokio::time::timeout(CLASSIFIER_TIMEOUT, child.wait_with_output())
+        .await
+        .map_err(|_| ClassifierError::Timeout)?
+        .map_err(ClassifierError::Io)?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let tag = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    Ok((!tag.is_empty()).then_some(tag))
+}
+
+fn warn_classifier_spawn_transition(
+    state: &mut PiStreamState,
+    config: &PiConfig,
+    classifier: &Path,
+    error_kind: io::ErrorKind,
+) {
+    if state.last_classifier_spawn_error == Some(error_kind) {
+        return;
+    }
+    state.last_classifier_spawn_error = Some(error_kind);
+    tracing::warn!(pane_id = %config.pane_id, classifier_path = %classifier.display(), error_kind = ?error_kind, "pi classifier spawn failed; falling back to regex");
 }
 
 fn fallback_classify_text(text: &str) -> String {
@@ -563,13 +611,13 @@ fn sha12(input: &str) -> String {
             .collect::<String>()[..10]
 }
 
-fn warn_parse_transition(state: &mut PiStreamState, kind: String, line: &str) {
+fn warn_parse_transition(state: &mut PiStreamState, pane_id: &str, kind: String, line: &str) {
     if state.last_parse_error.as_deref() == Some(kind.as_str()) {
         return;
     }
     state.last_parse_error = Some(kind.clone());
     let excerpt = line.chars().take(160).collect::<String>();
-    tracing::warn!(error_kind = %kind, excerpt = %excerpt, "malformed pi-bridge stream line");
+    tracing::warn!(pane_id = %pane_id, error_kind = %kind, excerpt = %excerpt, "malformed pi-bridge stream line");
 }
 
 fn resolve_bridge_bin() -> Option<PathBuf> {

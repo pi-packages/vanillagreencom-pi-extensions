@@ -249,7 +249,6 @@ pub fn is_canonical_tag(tag: &str) -> bool {
             | PI_QUESTION_TAG
             | PI_SUBAGENT_COMPLETION_TAG
             | PI_BG_TASK_EXIT_TAG
-            | PI_EMPTY_AFTER_COMPACT_TAG
             | "daemon-exited"
             | DOMAIN_MISMATCH_TAG
     )
