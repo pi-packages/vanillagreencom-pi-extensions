@@ -1,8 +1,8 @@
 use super::command::Cmd;
 use super::keymap::{self, Action};
 use super::model::{ModalState, Model};
+use super::motion::{self, EffectKind, EffectTarget};
 use super::msg::Msg;
-use super::view::fx::{self, EffectKind, EffectTarget};
 
 const PAGE_STEP: usize = 10;
 
@@ -14,7 +14,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         }
         Msg::AnimateTick => {
             model.animate_frame = model.animate_frame.saturating_add(1);
-            fx::prune_effects(model);
+            motion::prune_effects(&mut model.active_effects, model.animate_frame);
             vec![Cmd::Render]
         }
         Msg::KeyPressed(key) => handle_key(model, &key),
@@ -27,7 +27,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         }
         Msg::Error(error) => {
             model.error = Some(error);
-            fx::push_effect(model, EffectKind::ErrorFlash, EffectTarget::Global);
+            push_effect(model, EffectKind::ErrorFlash, EffectTarget::Global);
             vec![Cmd::Render]
         }
         Msg::Quit => {
@@ -54,14 +54,14 @@ fn handle_key(model: &mut Model, key: &crossterm::event::KeyEvent) -> Vec<Cmd> {
     match action {
         Action::NextTab => {
             model.current_tab = model.current_tab.next();
-            let target = EffectTarget::Tab(model.current_tab);
-            fx::push_effect(model, EffectKind::TabSwitchForward, target);
+            let target = EffectTarget::Tab(model.current_tab.index());
+            push_effect(model, EffectKind::TabSwitchForward, target);
             vec![Cmd::Render]
         }
         Action::PreviousTab => {
             model.current_tab = model.current_tab.previous();
-            let target = EffectTarget::Tab(model.current_tab);
-            fx::push_effect(model, EffectKind::TabSwitchBackward, target);
+            let target = EffectTarget::Tab(model.current_tab.index());
+            push_effect(model, EffectKind::TabSwitchBackward, target);
             vec![Cmd::Render]
         }
         Action::MoveDown => {
@@ -83,13 +83,13 @@ fn handle_key(model: &mut Model, key: &crossterm::event::KeyEvent) -> Vec<Cmd> {
         Action::First => {
             model.set_selected_index(0);
             let target = EffectTarget::Row(model.selected_index());
-            fx::push_effect(model, EffectKind::SelectionHalo, target);
+            push_effect(model, EffectKind::SelectionHalo, target);
             vec![Cmd::Render]
         }
         Action::Last => {
             model.set_selected_index(model.max_selection_index());
             let target = EffectTarget::Row(model.selected_index());
-            fx::push_effect(model, EffectKind::SelectionHalo, target);
+            push_effect(model, EffectKind::SelectionHalo, target);
             vec![Cmd::Render]
         }
         Action::OpenDetail => vec![Cmd::LogAction(format!(
@@ -116,7 +116,7 @@ fn handle_key(model: &mut Model, key: &crossterm::event::KeyEvent) -> Vec<Cmd> {
             } else {
                 ModalState::None
             };
-            fx::push_effect(model, EffectKind::HelpOverlay, EffectTarget::Global);
+            push_effect(model, EffectKind::HelpOverlay, EffectTarget::Global);
             vec![Cmd::Render]
         }
         Action::Quit => {
@@ -139,5 +139,15 @@ fn move_selection(model: &mut Model, delta: isize) {
         .min(model.max_selection_index());
     model.set_selected_index(next);
     let target = EffectTarget::Row(model.selected_index());
-    fx::push_effect(model, EffectKind::SelectionHalo, target);
+    push_effect(model, EffectKind::SelectionHalo, target);
+}
+
+fn push_effect(model: &mut Model, kind: EffectKind, target: EffectTarget) {
+    motion::push_effect(
+        &mut model.active_effects,
+        model.motion,
+        model.animate_frame,
+        kind,
+        target,
+    );
 }

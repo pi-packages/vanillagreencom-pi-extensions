@@ -2,6 +2,7 @@ pub mod command;
 pub mod effects;
 pub mod keymap;
 pub mod model;
+pub mod motion;
 pub mod msg;
 pub mod theme;
 pub mod update;

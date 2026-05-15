@@ -1,7 +1,7 @@
 mod common;
 
-use flightdeck_dashboard::app::model::{MotionLevel, Tab};
-use flightdeck_dashboard::app::view::fx;
+use flightdeck_dashboard::app::model::Tab;
+use flightdeck_dashboard::app::motion::{self, MotionLevel};
 
 fn render_fixture(name: &'static str) -> String {
     common::render_model(&common::model_for_fixture(name, MotionLevel::Off))
@@ -43,6 +43,6 @@ fn motion_effects_overview_start_and_settled() {
     model.current_tab = Tab::Overview;
     insta::assert_snapshot!("overview_motion_t0", common::render_model(&model));
     model.animate_frame = 8;
-    fx::prune_effects(&mut model);
+    motion::prune_effects(&mut model.active_effects, model.animate_frame);
     insta::assert_snapshot!("overview_motion_settled", common::render_model(&model));
 }

@@ -11,8 +11,8 @@ use crossterm::terminal::{
 };
 use flightdeck_dashboard::app::command::SnapshotSource;
 use flightdeck_dashboard::app::effects::Effects;
-use flightdeck_dashboard::app::model::{utc_now, Model, MotionLevel};
-use flightdeck_dashboard::app::view::fx;
+use flightdeck_dashboard::app::model::{utc_now, Model};
+use flightdeck_dashboard::app::motion::{self, MotionLevel};
 use flightdeck_dashboard::app::{update, view};
 use flightdeck_dashboard::cli::{Cli, Command};
 use flightdeck_dashboard::fixtures;
@@ -83,7 +83,7 @@ async fn run_app_loop(
                     effects.run_commands(commands);
                 }
             }
-            _ = anim.tick(), if fx::has_active_effects(model) => {
+            _ = anim.tick(), if motion::has_active_effects(&model.active_effects, model.motion, model.animate_frame, &model.snapshot.sessions) => {
                 let commands = update(model, flightdeck_dashboard::app::msg::Msg::AnimateTick);
                 effects.run_commands(commands);
             }

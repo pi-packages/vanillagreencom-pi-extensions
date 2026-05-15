@@ -4,7 +4,7 @@ use std::time::Instant;
 use chrono::{DateTime, Utc};
 
 use crate::app::command::SnapshotSource;
-use crate::app::view::fx::{EffectKind, EffectTarget};
+use crate::app::motion::{EffectInstance, MotionLevel};
 use crate::state::snapshot::{DashboardSnapshot, TrackedSession};
 
 pub type Clock = fn() -> DateTime<Utc>;
@@ -70,44 +70,6 @@ impl Tab {
         let len = Self::ALL.len();
         Self::ALL[(idx + len - 1) % len]
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MotionLevel {
-    Full,
-    Reduced,
-    Off,
-}
-
-impl MotionLevel {
-    #[must_use]
-    pub fn from_env() -> Self {
-        if std::env::var_os("NO_MOTION").is_some() || std::env::var_os("NO_COLOR").is_some() {
-            return Self::Off;
-        }
-        match std::env::var("FLIGHTDECK_DASHBOARD_MOTION") {
-            Ok(value) if value.eq_ignore_ascii_case("off") => Self::Off,
-            Ok(value) if value.eq_ignore_ascii_case("reduced") => Self::Reduced,
-            _ => Self::Full,
-        }
-    }
-
-    #[must_use]
-    pub const fn allows_motion(self) -> bool {
-        !matches!(self, Self::Off)
-    }
-
-    #[must_use]
-    pub const fn allows_rich_motion(self) -> bool {
-        matches!(self, Self::Full)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct EffectInstance {
-    pub kind: EffectKind,
-    pub target: EffectTarget,
-    pub started_frame: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

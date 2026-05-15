@@ -1,10 +1,9 @@
 mod common;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use flightdeck_dashboard::app::model::MotionLevel;
+use flightdeck_dashboard::app::motion::{self, MotionLevel};
 use flightdeck_dashboard::app::msg::Msg;
 use flightdeck_dashboard::app::update;
-use flightdeck_dashboard::app::view::fx;
 
 #[test]
 fn repeated_tab_motion_stays_bounded() {
@@ -17,5 +16,5 @@ fn repeated_tab_motion_stays_bounded() {
         assert!(!commands.is_empty());
     }
 
-    assert!(model.active_effects.len() <= fx::MAX_ACTIVE_EFFECTS);
+    assert!(model.active_effects.len() <= motion::MAX_ACTIVE_EFFECTS);
 }

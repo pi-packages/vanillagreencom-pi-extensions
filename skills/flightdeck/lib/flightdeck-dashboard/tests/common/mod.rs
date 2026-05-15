@@ -2,7 +2,8 @@
 
 use chrono::{DateTime, TimeZone, Utc};
 use flightdeck_dashboard::app::command::SnapshotSource;
-use flightdeck_dashboard::app::model::{Model, MotionLevel, Tab};
+use flightdeck_dashboard::app::model::{Model, Tab};
+use flightdeck_dashboard::app::motion::MotionLevel;
 use flightdeck_dashboard::app::view;
 use flightdeck_dashboard::fixtures;
 use ratatui::backend::TestBackend;
