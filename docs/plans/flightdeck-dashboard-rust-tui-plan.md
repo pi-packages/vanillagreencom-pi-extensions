@@ -13,28 +13,36 @@ Build a first-class, fast, polished standalone terminal dashboard for the `fligh
 
 Engineering, not patching. Where existing bash/TS interfaces no longer fit the new architecture, rewrite or reshape them cleanly. Preserve user-visible Flightdeck behavior and cross-harness support.
 
-## Status update (2026-05-14, post-reframe + #27 baseline)
+## Status update (2026-05-14, post-legacy-purge baseline)
 
-`origin/main` already includes the work this plan must build on:
+The flightdeck legacy purge landed on 2026-05-14 (commits `c204989`, `3fbd4ce`, `87aa9ac`). This plan executes against the post-purge codebase. Key shape differences from earlier drafts of this plan:
 
-- **Schema 1.1 + TrackedEntry seam** (PR #26). Master state has `schema_version: 1.1`, `.entries` (kind-aware tracked sessions), `.issues` (legacy projection), an `owner` block, plus `merge_queue` / `conflict_graph` for issue-mode. `readTrackedEntries` (TS) is the normalization seam — the Rust reader produces the same shape.
+- **No `schema_version` field.** Master state is a single canonical shape — no version negotiation, no future-schema warnings, no `FLIGHTDECK_ALLOW_FUTURE_SCHEMA` opt-in. The Rust reader does not need to dispatch on `schema_version`.
+- **No `.issues` map.** Tracked sessions live in `.entries` only. Issue-mode metadata lives under `entry.domain.issue` (`id`, `pr_number`, `worktree`, `merge_commit`, `scope_files_*`, `orchestration_started`). The Rust reader does not need a `.issues`→`.entries` projection layer.
+- **No bash siblings, no `FLIGHTDECK_USE_TS_*` gates.** All `scripts/*` are trampolines that exec the TS binary under `lib/flightdeck-core/src/bin/`. The Rust dashboard does not need a `FLIGHTDECK_USE_TS_*` discipline of its own; the canonical path is the Rust binary once it ships, and the existing TS implementation until then.
+- **`pre-purge state files surface a loud error.`** A state file that still has `.issues` but no `.entries` returns a `masterError` from `readMasterState`; the dashboard must render that error rather than silently displaying empty content.
+- **`pane-registry set <ENTRY_ID> <field>` redirects issue-domain fields into `domain.issue`.** The Rust binding for `pane-registry set` should preserve this behavior so callers writing `pr_number`/`worktree`/`merge_commit` land them in the right path.
+
+The rest of the prior context (still accurate for PRs #20–#44):
+
+- **TrackedEntry seam.** Master state has `.entries` (kind-aware tracked sessions), `owner`, `merge_queue`, `conflict_graph`. `readTrackedEntries` (TS) is the normalization seam — the Rust reader produces the same shape.
 - **Owner block + visibility** (PR #25). `owner` has `harness`, `pane_id`, `pane_target`, `cwd`, `pid`, `pi_session_id`, `pi_bridge_socket`, `discovery_error`. The Rust TUI is its own tmux window so the gating differs — see [Owner / observer awareness](#owner--observer-awareness).
 - **Generic launcher** (PR #28). `skills/flightdeck/scripts/flightdeck-session start|attach` is the canonical entry for tracked tmux windows. The dashboard registers itself the same way when launched managed.
 - **Generic watch + handler split** (PR #29). `workflows/session-watch.md` is the generic loop; `workflows/watch.md` is the issue-mode layer. The dashboard reflects both — generic sessions get a session summary, issue sessions get the full PR/Linear/worktree story.
 - **Issue-mode dependency isolation** (PR #30). `terminate.md` routes by tracked-entry kinds; `session-summary.ts` handles generic vs issue summaries. The dashboard's termination panel mirrors that routing.
 - **Sessions-first Pi UI** (PR #31). `pi-flightdeck` already migrated to kind badges (`AH`/`ISS`/`WF`), `readTrackedEntries`, and the `state-archive.ts` / `state-normalizers.ts` / `render-terminated.ts` / `session-ui.ts` / `dashboard-visibility.ts` modules. These are the reference for what the Rust UI must render.
-- **TrackedEntry-aware set-state + teardown** (PR #33). `pane-registry teardown-entry` requires terminal state; `set-state` dual-updates `.entries` and `.issues`. The dashboard never mutates state directly in Phase 1; later phases shell to these.
+- **TrackedEntry-aware set-state + teardown** (PR #33 + the legacy purge). `pane-registry teardown-entry` requires a terminal state; `set-state` writes to `.entries` directly. The dashboard never mutates state in Phase 1; later phases shell to these.
 - **bg-task wake metadata** (PR #34). `pi-extensions/pi-background-tasks` writes wake records with `eventAt`, monotonic `sequence`, `notifyMode`, `dedupeKey`, `voidedWakes` / `voidedWakeSequences`, and a `cleared-on-task-exit` diagnostic. The dashboard's event feed consumes these without re-deduping.
 - **pi-agents-tmux split** (PR #35). `subagent/` is now `index.ts` (wiring), `runner.ts`, `dispatch.ts`, `sessions.ts`, `wait.ts`. Per-pane agent stats are exposed at `globalThis[Symbol.for("vstack.pi.agents")]` only when running inside Pi.
 - **Per-skill DEVELOPMENT.md docs** exist for orchestration, flightdeck, pi-agents-tmux, pi-background-tasks. New dashboard developer notes belong in `skills/flightdeck/DEVELOPMENT.md`.
-- **Adhoc/generic session lifecycle gaps closed** (PR #41, commit `a7f29e7`). `pane-respond` accepts `%pane_id` stable ids and surfaces specific failures (`registry_read | not_registered | missing_pane_target`); `pane-registry teardown-entry` accepts generic terminal states (`complete | cancelled` in addition to legacy `merged | aborted | dead`); `pane-registry remove` drops both `.issues[]` and `.entries[]`; Pi subscriber drains open `pi-questions` on attach + on `bridge_hello` re-drain to close the snapshot→subscribe race. The dashboard reads pane state via the same registry/state seam, so these behaviors are visible immediately; the Phase 2+ write paths use the now-symmetric teardown/remove vocabulary.
+- **Adhoc/generic session lifecycle gaps closed** (PR #41 + legacy purge). `pane-respond` accepts `%pane_id` stable ids and surfaces specific failures (`registry_read | not_registered | missing_pane_target`); `pane-registry teardown-entry` accepts generic terminal states (`complete | cancelled` alongside `merged | aborted | dead`); `pane-registry remove` drops the `.entries[]` row; Pi subscriber drains open `pi-questions` on attach + on `bridge_hello` re-drain to close the snapshot→subscribe race. The dashboard reads pane state via the same registry/state seam, so these behaviors are visible immediately.
 - **WORKTREE_MKDIRS env var** (PR #42, commit `1e98287`). `skills/worktree/scripts/worktree create` auto-creates project-relative dirs listed in `WORKTREE_MKDIRS` (default value in `.env.local.example`: `"tmp"`). Dashboard work uses `<worktree>/tmp/` for scratch (engineer task briefs, intermediate result JSONs, parity-test fixtures). Not at worktree root; not `/tmp/`.
 - **Worktree info/exclude fix** (PR #43, commit `56b4990`). The harness-mirror symlinks (`.agents`, `.pi`, `.opencode`, `.codex`, `.cursor`, `.claude/agents`) the worktree skill lays down are now properly hidden via `<repo>/.git/info/exclude` (the common git-dir, not the per-worktree dir git ignores). `git status` is clean in a fresh worktree; `worktree remove` succeeds without `--force`. Earlier dashboard plan drafts that recommended `--force` cleanup are out of date.
 - **Cross-shell launch + daemon lifecycle hardening** (PR #44, closes #39 + #40). Several pieces relevant to the dashboard's daemon absorption:
   - `flightdeck-session start --prompt` writes the prompt to a tempfile under `$XDG_RUNTIME_DIR/flightdeck/` and launches as `bash -c 'p=$(<tmp); rm tmp; exec env <kv> pi "$p"'`. No more `bash %q` `$'...'` quoting in user shells. The Rust dashboard's `launch` subcommand mirrors this approach when spawning the dashboard tmux window.
   - `tmux display-message -p '#{pane_id}'` is replaced everywhere with `${TMUX_PANE:-$(tmux display-message ...)}`. The Rust dashboard MUST read `$TMUX_PANE` from its own environment when self-registering as a tracked entry.
   - `flightdeck-daemon start` now validates `--master` via `pane_alive` and refuses a stale id with **exit code `4`** (distinct from generic usage/lock errors). The Rust daemon absorbs this contract.
-  - On cleanup the bash/TS daemon writes a structured `daemon-exited` row to `EVENTS_FILE` (the file `flightdeck-daemon events` drains) with `reason` classification (`master-gone | signal-term | signal-int | other`). The Rust dashboard's Activity tab consumes this row as a canonical daemon-lifecycle event; the Rust daemon (Phase 5) MUST emit the same shape under `SESSION_LOCK`.
+  - On cleanup the TS daemon writes a structured `daemon-exited` row to `EVENTS_FILE` (the file `flightdeck-daemon events` drains) with `reason` classification (`master-gone | signal-term | signal-int | other`). The Rust dashboard's Activity tab consumes this row as a canonical daemon-lifecycle event; the Rust daemon (Phase 5) MUST emit the same shape under `SESSION_LOCK`.
   - `--in-tmux-window` daemons are named `[fd] daemon-<session>` so operators don't accidentally close them. Rust daemon keeps the convention.
   - `pane-registry list --format inner-panes-live` filters to panes whose `pane_id` is currently in `tmux list-panes -a`. The Rust daemon's respawn-on-restart path uses this listing.
   - `workflows/session-watch.md` now documents the master respawn contract: on `flightdeck-daemon status` returning `no daemon` with live tracked entries, master MUST respawn with the `inner-panes-live` listing and handle exit codes (4 = retry with `$TMUX_PANE`; 1 = check status for raced-respawn; other = `daemon-respawn-failed`, no yield). The Rust dashboard's daemon-supervisor mode respects this contract.
@@ -52,7 +60,7 @@ The activity plan will add a `flightdeck-activity-<session>.jsonl` sidecar plus 
 - Spawn focused agents in new tmux windows for parallel work; manage from master via `pi-bridge` (or the master's harness adapter).
 - Run autonomously through all phases; iterate with `reviewer-*` agents until clean.
 - Do not stop until there is a working dashboard the user can look at.
-- Do not delete `.bash` siblings under `lib/flightdeck-core/` while the legacy daemon is still canonical.
+
 - Do not inspect or edit harness mirror directories (`.agents/`, `.claude/`, `.opencode/`, `.pi/`, `.codex/`).
 
 ## Crate selection
@@ -67,8 +75,8 @@ Architecture spine, all current as of 2026-05:
 | App architecture | Hand-rolled Elm-style: `Model`, `Msg`, `update(&mut Model, Msg) -> Vec<Cmd>` | Matches ratatui docs (The Elm Architecture page). Pure update, side effects out via `Cmd`. |
 | Command dispatch | `tokio::sync::mpsc::UnboundedSender<Msg>` returned from effect futures | Standard pattern from the async-actions template. |
 | File watching | `notify` + `notify-debouncer-full` | Debouncer collapses storms — no hand-rolled debounce needed. |
-| CLI | `clap` v4 (derive) | Subcommands: `tui`, `daemon`, `status`, `supervise` (legacy alias), `launch`. |
-| Serde | `serde`, `serde_json`, `serde_with` (for `chrono` interop) | Mirrors the TS schema 1.1 shape. |
+| CLI | `clap` v4 (derive) | Subcommands: `tui`, `daemon`, `status`, `supervise` (back-compat alias), `launch`. |
+| Serde | `serde`, `serde_json`, `serde_with` (for `chrono` interop) | Mirrors the TS `MasterState` / `TrackedEntry` shape. |
 | Time | `chrono` (`serde`, `clock`) | Already established in this repo's tooling; `jiff` is an option but unnecessary churn. |
 | Errors | `color-eyre` for top-level binaries; `thiserror` for module errors | `unwrap` outside `main`/tests is a review blocker. |
 | Logging | `tracing` + `tracing-subscriber` (env filter + `fmt`) + `tracing-appender` (rolling file) | TUI mode logs to file only (stderr would corrupt rendering). |
@@ -124,12 +132,12 @@ Two TUIs can attach to the same daemon (e.g. user attached over SSH plus locally
 
 ### Daemon absorption strategy (gated, reversible)
 
-The existing `skills/flightdeck/scripts/flightdeck-daemon` (bash, ~2.5k lines) + `lib/flightdeck-core/src/daemon/*.ts` (TS port, ~4.5k lines) stays canonical until the Rust daemon proves out. Mirrors the existing `FLIGHTDECK_USE_TS` discipline:
+The existing `lib/flightdeck-core/src/daemon/*.ts` (~4.5k lines) is the canonical daemon. The Rust daemon ships behind an opt-in gate until it proves out:
 
-- New env: `FLIGHTDECK_DAEMON_RUST=1` (default `0`) selects the Rust daemon. Default `0` means existing bash/TS daemon keeps starting; Rust daemon is opt-in until parity is proven.
+- New env: `FLIGHTDECK_DAEMON_RUST=1` (default `0`) selects the Rust daemon. Default `0` means the canonical TS daemon keeps starting; Rust daemon is opt-in until parity is proven.
 - `flightdeck-dashboard launch` reads the env and picks the right daemon binary.
-- Live wake parity tests (`skills/flightdeck/tests/live-wake.sh`) must pass under the Rust daemon before any default flip — same rule the TS port followed.
-- Once parity is proven for one production cycle, flip the default to Rust, then deprecate bash/TS daemon a cycle later.
+- Live wake tests (`skills/flightdeck/tests/live-wake.sh`) must pass under the Rust daemon before any default flip.
+- Once parity is proven for one production cycle, flip the default to Rust, then remove the TS daemon a cycle later.
 
 The Rust daemon is built up phase by phase: first a thin shim that watches state and republishes to TUI; then it absorbs subscriber loops one harness at a time (Pi first since the wake event surface is best documented post-PR #24); then wake routing; finally GC and the busy-state machine.
 
@@ -138,7 +146,7 @@ The Rust daemon is built up phase by phase: first a thin shim that watches state
 Phase 1 TUI is **read-only**.
 
 - `flightdeck` skill (workflow markdown) remains policy brain (spawn/watch/merge decisions).
-- Rust daemon = poll/wake actuator (eventually replaces bash daemon).
+- Rust daemon = poll/wake actuator (eventually replaces the TS daemon).
 - Rust TUI = render-only client.
 
 Phase 2+ writes (gated behind explicit flags / confirmations):
@@ -156,7 +164,7 @@ Write paths route through the same harness-neutral helpers the workflow markdown
 
 | Source | Path | Contract |
 | --- | --- | --- |
-| Master state (live) | `<project>/<FLIGHTDECK_STATE_DIR>/flightdeck-state-<TMUX_SESSION>.json` | `schema_version: 1.1`; `.entries` first, `.issues` folded in. Default `FLIGHTDECK_STATE_DIR=tmp`. |
+| Master state (live) | `<project>/<FLIGHTDECK_STATE_DIR>/flightdeck-state-<TMUX_SESSION>.json` | `.entries` is the canonical tracked-session map. Default `FLIGHTDECK_STATE_DIR=tmp`. |
 | Master state (archive) | `<project>/<FLIGHTDECK_STATE_DIR>/flightdeck-state-<TMUX_SESSION>-*.json.archive` | Newest-first iteration; only `terminated: true` archives count. Mirror `readArchiveStrict`. |
 | Daemon runtime state | `$FD_STATE_DIR`, default `$XDG_RUNTIME_DIR/flightdeck` (or `/tmp/flightdeck-$UID`) | Mode `0700`. Wake-event log, pending-events, daemon pid file, daemon log. |
 | Daemon control socket | `$FD_STATE_DIR/dashboard.sock` (Rust daemon) | New IPC channel for TUI ↔ daemon. JSON-RPC line-delimited frames. |
@@ -237,7 +245,7 @@ skills/flightdeck/lib/flightdeck-dashboard/
         modals.rs                      # detail popups, help, filter, observer banner
       theme.rs                         # tokens (Color, Style, Modifier) + light/dark
       keymap.rs                        # central key bindings; help overlay reads from this
-    state/                             # schema 1.1 readers
+    state/                             # MasterState / TrackedEntry readers
       mod.rs
       schema.rs                        # serde structs
       tracked_entries.rs               # readTrackedEntries equivalent
@@ -410,7 +418,7 @@ Upstream `@earendil-works/pi-coding-agent` issues we observed during the 2026-05
 
 ## Daemon (absorbed) responsibilities
 
-Final-state Rust daemon owns everything the bash/TS daemon owns today, plus the workarounds above:
+Final-state Rust daemon owns everything the TS daemon owns today, plus the workarounds above:
 
 - Subscriber lifecycles per harness adapter (Pi, Claude, OpenCode, Codex, tmux fallback) — including cold-start grace, exponential backoff after unchanged polls, subscriber restart on death.
 - Drain `pi-bridge stream` (or each harness adapter's stream), classify canonical wake tags, append durable wake rows, wake master.
@@ -445,12 +453,12 @@ Update Flightdeck startup so the dashboard launches with a session.
 - New env: `FLIGHTDECK_DASHBOARD=1` (default on inside tmux); `0` disables.
 - `FLIGHTDECK_DASHBOARD_WINDOW=flightdeck` default window name.
 - `FLIGHTDECK_DASHBOARD_MOTION=full|reduced|off` selects animation intensity (default `full`). See [Animations and motion](#animations-and-motion).
-- `FLIGHTDECK_DAEMON_RUST=1` opts in to the Rust daemon. Default `0` keeps the existing bash/TS daemon canonical.
+- `FLIGHTDECK_DAEMON_RUST=1` opts in to the Rust daemon. Default `0` keeps the canonical TS daemon.
 
 At session init:
 
 1. `flightdeck-dashboard launch` is invoked from `workflows/start.md`.
-2. It starts the appropriate daemon (Rust or legacy, per env). Daemon is detached, lives in `$FD_STATE_DIR`, idempotent on re-launch.
+2. It starts the daemon (Rust opt-in, otherwise the canonical TS daemon). Daemon is detached, lives in `$FD_STATE_DIR`, idempotent on re-launch.
 3. It opens a tmux window for `flightdeck-dashboard tui`, via `flightdeck-session start --kind workflow --harness shell --cmd '…'` so the dashboard window itself is a TrackedEntry and inherits `FLIGHTDECK_MANAGED=1` (PR #21).
 4. Failure does not block Flightdeck — logs warning, continues.
 
@@ -463,9 +471,9 @@ The next session acts as master and runs this end-to-end.
 Recommended agent split:
 
 1. **Master agent (you)** — owns worktree, integration, task panel, commits, review cycles.
-2. **Recon agent (one-shot)** — confirm Rust toolchain, inspect daemon CLI surface, dump exact JSON shapes the bash daemon writes today.
+2. **Recon agent (one-shot)** — confirm Rust toolchain, inspect daemon CLI surface, dump exact JSON shapes the TS daemon writes today.
 3. **Rust TUI agent (`rust` pane agent)** — crate skeleton, theme, Elm-style app, view modules, snapshot tests.
-4. **State / watcher agent** — schema 1.1 readers, archive fallback, notify-debouncer-full glue.
+4. **State / watcher agent** — MasterState / TrackedEntry readers, archive fallback, notify-debouncer-full glue.
 5. **Daemon-port agent (later phases)** — port subscriber loops one harness at a time behind `FLIGHTDECK_DAEMON_RUST=1`.
 6. **Integration agent** — script wrapper, launch integration, docs.
 7. **Review agents** — `reviewer-arch`, `reviewer-test`, `reviewer-structure`, `reviewer-error`, `reviewer-doc`. Use distinct ephemeral `sessionKey` per dispatch (PR #35 default).
@@ -536,11 +544,11 @@ The TUI is visually useful before any live integration.
 
 Goals:
 
-- Serde types mirroring schema 1.1.
-- `readTrackedEntries` equivalent: `.entries` first, project legacy `.issues`, fold into one map; never lose data.
+- Serde types mirroring the canonical `MasterState` / `TrackedEntry` shape.
+- `readTrackedEntries` equivalent: read `.entries`; surface a loud error when a pre-purge state file with `.issues` but no `.entries` is encountered (matches the post-purge TS reader).
 - Archive fallback: newest-first iteration of `flightdeck-state-<session>-*.json.archive`; require `terminated: true` AND valid object root; mirror `readArchiveStrict`.
 - Normalizers for `conflict_graph.edges` and `decisions_log` shapes.
-- Fixtures covering: v1-only (`.issues`-only legacy), v2-only (`.entries`), mixed, malformed entry, blank archive, ENOENT archive dir, EACCES archive dir, every-candidate-malformed.
+- Fixtures covering: `.entries` happy path, `.issues`-only pre-purge state (must produce the loud-error path), malformed entry, blank archive, ENOENT archive dir, EACCES archive dir, every-candidate-malformed.
 
 Success criteria:
 
@@ -568,7 +576,7 @@ Goals:
 - `flightdeck-dashboard daemon --detach` runs a minimal daemon: reads master state, broadcasts `DashboardSnapshot` updates over UDS, exposes `status`/`health`/`tail` over the socket.
 - Pid file in `$FD_STATE_DIR/dashboard-<TMUX_SESSION>.pid`.
 - TUI talks to the daemon over the socket; falls back to direct file reads if no daemon is up.
-- The bash/TS daemon keeps running as today — Rust daemon at this phase is *additive* and read-only.
+- The TS daemon keeps running as today — Rust daemon at this phase is *additive* and read-only.
 
 Tests: socket round-trip, pid file lifecycle, daemon survives TUI exit, two TUIs attached to one daemon both render.
 
@@ -707,7 +715,7 @@ cd cli && cargo test
 - **Cross-platform notify.** macOS and Linux primary; document Mac inotify-equivalent caveats. Windows is best-effort, untested.
 - **Cross-harness safety.** Nothing in this crate may `require!` pi-bridge / Pi state. Pi reads are `if let Some(…)` enrichment.
 - **Daemon absorption is gated.** Do not default `FLIGHTDECK_DAEMON_RUST=1` until subscribers are parity-tested and `live-wake.sh` green for one production cycle.
-- **No deletion of `.bash` siblings** while the legacy daemon is canonical.
+
 - **Activity tab is scaffolded, not populated** in this plan — the JSONL reader comes with the activity-events plan.
 
 ## Proposed delivery order

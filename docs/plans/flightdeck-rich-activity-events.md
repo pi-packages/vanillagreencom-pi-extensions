@@ -2,17 +2,25 @@
 
 Date: 2026-05-14
 
-## Status update (2026-05-14, post-reframe + #27 baseline)
+## Status update (2026-05-14, post-legacy-purge baseline)
 
-This plan was drafted against `origin/main` after the session-management reframe (PRs #20–#33), pi-background-tasks output-wake hardening (PR #34, commit `7da6ee2`), pi-agents-tmux subagent stabilization (PR #35, commit `cd804a7`), and the 2026-05-14 cross-shell/lifecycle hardening pass (PRs #41–#44). Concrete impacts:
+The flightdeck legacy purge landed on 2026-05-14 (commits `c204989`, `3fbd4ce`, `87aa9ac`). This plan now executes against a post-purge codebase: `.entries` is the only tracked-entry shape, `.issues` is gone, bash siblings are deleted, `FLIGHTDECK_USE_TS_*` gates are gone, and daemon `start` is TS-only. Impacts on this plan:
+
+- **No bash mirror requirements.** The TypeScript implementation is canonical. Phase 1 ships TS-only helpers under `skills/flightdeck/lib/flightdeck-core/src/activity/`; bash trampolines exec the TS binary. Skip the "bash mirror" step in every phase and skip parity tests against deleted bash siblings.
+- **`.entries[ENTRY_ID].decisions_log` is canonical.** `pane-registry log-decision` already writes only to `.entries`. The Phase 2 "generic decision logging fix" is already done — just emit `decision.recorded` activity from the existing append point.
+- **`pane-registry set` redirects issue-domain fields into `domain.issue`.** Activity producers that read `pr_number` / `worktree` / `merge_commit` / `scope_files_*` / `orchestration_started` must read them from `entry.domain.issue.<field>`, not as top-level fields.
+- **Daemon `start` is TS-only.** Phase 3 emits activity from `lib/flightdeck-core/src/daemon/loop.ts` and `src/daemon/start.ts` directly; no bash path to mirror. The risks list in this plan that previously said "don't flip TS, don't delete .bash" is removed — both already happened.
+- **`pi-flightdeck` reads `.entries` only.** Phase 6 Activity tab uses `readTrackedEntries(state)` (which now reads `.entries` directly) without the `.issues` fallback path.
+
+The pre-purge context retained below is still accurate for the prior PRs (#20–#44):
 
 - `pi-extensions/pi-background-tasks/extensions/wake-events.ts` already defines `eventAt`, `sequence`, `notifyMode` (`always | transition | first-match-only`), `dedupeKey`, `pendingWakes`, `voidedWakes`/`voidedWakeSequences`. The activity event `id`/dedup rule in this plan must compose with that schema, not parallel it — see [Activity event schema](#activity-event-schema).
 - `pi-extensions/pi-agents-tmux/extensions/subagent/` has been split: `index.ts` is now wiring, with `runner.ts`, `dispatch.ts`, `sessions.ts`, and `wait.ts` owning the execution surface. Activity producers attach to `runner.ts`/`dispatch.ts`. The `wait_for_subagent_idle` tool (`waitFor: "idle" | "completion"`) is the canonical pane-idle observation point.
 - `skills/flightdeck/lib/flightdeck-core/src/state/master-state.ts::archiveState` already exists (PR #23). Activity archival in Phase 1 must hook into the same `flightdeck-state archive` flow.
 - `skills/orchestration/scripts/flightdeck-mode` exposes the tri-state `FLIGHTDECK_MANAGED` signal (PR #21). Phase 5 GitHub/Linear wrapper instrumentation should gate on `FLIGHTDECK_MANAGED=1` or `FLIGHTDECK_SESSION_ID`.
 - `pi-extensions/pi-flightdeck/extensions/state-archive.ts`, `state-normalizers.ts`, `render-terminated.ts`, `session-ui.ts`, and `dashboard-visibility.ts` (PRs #25, #31) are the right seams for the Phase 6 Activity tab.
-- `pane-registry log-decision` was *not* touched by PR #33 — it still appends only to `.issues[ISSUE].decisions_log`. The Phase 2 generic-decision fix here is still required; PR #33's `set-state`/`set-substate`/`set` dual-update is the pattern to copy.
-- **Adhoc lifecycle gaps closed (PR #41, commit `a7f29e7`).** `pane-registry remove <id>` now drops `.entries[]` (in addition to legacy `.issues[]`), and `teardown-entry` accepts generic terminal states (`complete | cancelled` alongside `merged | aborted | dead`). Phase 2 instrumentation can emit canonical `entry.completed` / `entry.cancelled` / `entry.dead` activity events at both mutation points without worrying about the issue-vs-generic asymmetry that previously existed. `pane-respond` also accepts `%pane_id` stable ids — producers emitting activity from prompt-response paths can reference `pane_id` directly without a `pane_target` lookup.
+- **`pane-registry log-decision` writes only `.entries[ENTRY_ID].decisions_log`** after the legacy purge. Phase 2's "generic decision fix" is done; Phase 2 instrumentation just adds an activity-append call at the existing point.
+- **Adhoc lifecycle gaps closed (PR #41, commit `a7f29e7`, and the purge).** `pane-registry remove <id>` and `teardown-entry` operate on `.entries[]` only, accepting `complete | cancelled` alongside `merged | aborted | dead`. Phase 2 instrumentation can emit canonical `entry.completed` / `entry.cancelled` / `entry.dead` activity events at both mutation points. `pane-respond` accepts `%pane_id` stable ids — producers emitting activity from prompt-response paths can reference `pane_id` directly without a `pane_target` lookup.
 - **Cross-shell launch + daemon hardening (PR #44, closes #39 + #40).** Adds a canonical `daemon-exited` event written to `EVENTS_FILE` (the file `flightdeck-daemon events` drains) with `reason` classification (`master-gone | signal-term | signal-int | other`). Phase 3 of this plan should map it directly to the `daemon.stopped` activity type (with `severity` derived from `reason`: `master-gone | signal-term` → `warning`; `signal-int` → `info`; `other` → `error`). New `flightdeck-daemon start` exit code `4` for stale `--master` is a useful audit signal too — map to `daemon.warning` with `details.exit_code = 4`. Pi subscriber drain semantics (initial drain + `bridge_hello` re-drain + `seen_qids` dedupe) mean Pi `question.opened` activity events MUST dedupe by `requestId`, not by drain attempt.
 - **WORKTREE_MKDIRS (PR #42) and info/exclude fix (PR #43).** Activity plan work uses `<worktree>/tmp/` for any scratch JSONL fixtures generated by parity tests. The worktree is now clean of untracked harness-mirror symlinks, so `worktree remove` without `--force` is the standard cleanup.
 
@@ -73,17 +81,14 @@ Relevant files:
 - `skills/flightdeck/lib/flightdeck-core/src/state/types.ts`
 - `skills/flightdeck/lib/flightdeck-core/src/state/master-state.ts`
 - `skills/flightdeck/lib/flightdeck-core/src/bin/flightdeck-state.ts`
-- `skills/flightdeck/scripts/flightdeck-state.bash`
 - `skills/flightdeck/lib/flightdeck-core/src/bin/pane-registry.ts`
-- `skills/flightdeck/scripts/pane-registry.bash`
 
-Current model:
+Current model (post-purge):
 
-- Schema `1.1` is the active compatibility bridge.
-- `.entries` is the neutral tracked-session model; `.issues` remains the legacy issue projection.
-- `flightdeck-state tracked-entries` and `pane-registry list --format json` are the normalized read seam.
+- `.entries` is the single tracked-session map. Issue-mode metadata lives under `entry.domain.issue`.
+- `flightdeck-state tracked-entries` and `pane-registry list --format json` are the canonical read seam.
 - `pane-registry init-entry` creates a tracked entry with `kind`, `title`, pane metadata, adapter metadata, and `decisions_log: []`.
-- `pane-registry log-decision` appends to legacy `.issues[ISSUE].decisions_log` only. The write projection keeps issue entries mostly compatible, but generic entries need a first-class way to append decisions/events to `.entries[ENTRY_ID]`.
+- `pane-registry log-decision` appends to `.entries[ENTRY_ID].decisions_log`.
 
 Limitations:
 
@@ -100,9 +105,9 @@ Relevant files:
 - `skills/flightdeck/lib/flightdeck-core/src/daemon/loop.ts`
 - `skills/flightdeck/lib/flightdeck-core/src/daemon/wake.ts`
 - `skills/flightdeck/lib/flightdeck-core/src/daemon/subscribers/spawn.ts`
-- `skills/flightdeck/scripts/lib/subscribers.bash`
+- `skills/flightdeck/scripts/lib/subscribers.bash` (subscriber bodies sourced from the TS daemon)
 - `skills/flightdeck/lib/flightdeck-core/src/events/bg-task-exit.ts`
-- `skills/flightdeck/scripts/lib/daemon-bg-task-events.sh`
+- `skills/flightdeck/scripts/lib/daemon-bg-task-events.sh` (Pi subscriber's bg-task helper)
 
 Current model:
 
@@ -344,8 +349,7 @@ Use the same review cadence proven in PRs #41 and #44:
    - `append.ts`
    - `read.ts`
    - `format.ts`
-2. Add bash mirror helpers under `skills/flightdeck/scripts/lib/activity.bash`.
-3. Add `flightdeck-state activity` subcommands in bash and TS:
+2. Add `flightdeck-state activity` subcommands in TS (`src/bin/flightdeck-state.ts` action dispatch):
    - `activity path [--session <name>]`
    - `activity append <json-event>`
    - `activity tail [--limit N] [--json]`
@@ -356,7 +360,7 @@ Use the same review cadence proven in PRs #41 and #44:
    - JSON schema normalization
    - id generation/dedup
    - lock-held append under concurrent writers
-   - bash/TS parity for `activity path|append|tail|export`
+   - CLI surface (`activity path|append|tail|export`)
 
 Validation:
 
@@ -379,18 +383,13 @@ Add events in `pane-registry` bash and TS:
 - `teardown-entry/window` -> `entry.completed` / `entry.dead` / `entry.cancelled` depending state/result
 - `reconcile` drift/drop/backfill -> `daemon.warning` or `entry.dead`
 
-Fix generic decision logging while here:
-
-- Add `pane-registry log-decision-entry <ENTRY_ID> <tag> <answer>` or make existing `log-decision` resolve normalized entries.
-- Append to `.entries[ENTRY_ID].decisions_log` and project to `.issues[ISSUE].decisions_log` for issue entries.
-- Mirror every decision as `decision.recorded` in activity.
+Decision logging is already canonical (`.entries[ENTRY_ID].decisions_log` after the legacy purge). Just mirror every `log-decision` call as `decision.recorded` in activity.
 
 Tests:
 
-- issue entry still gets legacy `.issues[ISSUE].decisions_log`
 - generic entry gets `.entries[ENTRY].decisions_log`
 - activity records emitted exactly once
-- old callers remain compatible
+- existing callers remain compatible
 
 ### Phase 3 — Instrument daemon and subscriber lifecycle
 
@@ -545,7 +544,7 @@ Rendering rules:
 
 Decisions interplay:
 
-- Keep Decisions tab as a dedicated view for `decision.recorded` events plus legacy `decisions_log` fallback.
+- Keep Decisions tab as a dedicated view for `decision.recorded` events; fall back to reading `.entries[].decisions_log` directly when the activity sidecar is missing (older archives).
 - Use the same row/detail component as Activity.
 - Activity includes decision rows by default because decisions are important chronological context.
 - Decisions tab answers "why did Flightdeck choose this?" Activity answers "what happened when?"
@@ -574,8 +573,8 @@ Docs to update with implementation:
 
 Migration:
 
-- New UI must synthesize legacy activity for old sessions.
-- Keep `decisions_log` as durable audit source; activity mirrors it, not replaces it, for at least one production cycle.
+- Pre-purge sessions (state files with `.issues` but no `.entries`) are auto-archived by `flightdeck-session start` and by the pi-flightdeck reader's explicit error path. Activity does not need a legacy synth.
+- Keep `decisions_log` as the durable audit source; activity mirrors it for filtering convenience, it does not replace it.
 - Keep wake-event routing unchanged until tests prove activity append cannot interfere.
 
 ## UX proposal
@@ -679,7 +678,7 @@ End-to-end smoke:
    - shows red `ERR`/error styling for failures
    - detail popup wraps and scrolls
    - editor export contains the same filtered rows with full refs/details
-7. Verify Decisions tab still shows existing decision history and does not lose legacy sessions.
+7. Verify Decisions tab still shows existing decision history from earlier sessions.
 8. Terminate Flightdeck and reopen popup; activity archive still renders.
 
 ## Risks and guardrails
@@ -687,16 +686,13 @@ End-to-end smoke:
 - Activity must not create extra wakes by itself. Wake routing remains explicit.
 - Activity must not become raw transcript storage. Store summaries and bounded details; link to logs/transcripts for large payloads.
 - Multi-process append must use the same flock discipline as state updates.
-- TS port parity matters. Every bash helper change needs TS mirror + parity tests.
-- Do not flip `flightdeck-daemon start` to TS as part of this work.
-- Do not delete `.bash` siblings.
-- Do not inspect or edit harness mirror directories (`.agents/`, `.claude/`, `.opencode/`, `.pi/`).
+- Do not inspect or edit harness mirror directories (`.agents/`, `.claude/`, `.opencode/`, `.pi/`, `.codex/`).
 
 ## Proposed delivery order
 
 1. Core activity sidecar + `flightdeck-state activity` CLI.
 2. Registry/state transition instrumentation + decision-log generic fix.
-3. pi-flightdeck Activity tab reading new sidecar with legacy fallback.
+3. pi-flightdeck Activity tab reading new sidecar with `.entries[].decisions_log` fallback for archives that predate the sidecar.
 4. Daemon/subscriber curated events.
 5. Pi activity broker through session-bridge, then background-task/agent/question producers.
 6. Issue-domain workflow instrumentation for PR/CI/Linear lifecycle.
