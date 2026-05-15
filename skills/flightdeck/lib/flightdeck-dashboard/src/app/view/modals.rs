@@ -5,36 +5,43 @@ use ratatui::Frame;
 
 use crate::app::keymap::BINDINGS;
 use crate::app::model::Model;
-use crate::app::theme::Theme;
+use crate::app::theme::Palette;
 
-pub fn render_help(frame: &mut Frame<'_>, area: Rect, _model: &Model, theme: Theme) {
+pub fn render_help(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: &Palette) {
     let popup = centered_rect(70, 70, area);
     frame.render_widget(Clear, popup);
     let mut lines = vec![
-        Line::from(Span::styled("Flightdeck dashboard help", theme.title)),
+        Line::from(Span::styled("Flightdeck dashboard help", theme.title())),
         Line::from(""),
     ];
     for binding in BINDINGS {
         lines.push(Line::from(vec![
-            Span::styled(format!("{:<16}", binding.keys), theme.status_label),
+            Span::styled(format!("{:<16}", binding.keys), theme.status_label()),
             Span::raw(binding.description),
         ]));
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         "Counts: P=prompting W=waiting R=ready MR=merge-ready M=merged D=dead C=complete",
-        theme.muted,
+        theme.muted(),
     )));
+    lines.push(Line::from(vec![
+        Span::styled("Theme: ", theme.status_label()),
+        Span::raw(model.theme.as_str()),
+        Span::raw(" ("),
+        Span::raw(model.theme.display_name()),
+        Span::raw(") · change with --theme dawn|system or FLIGHTDECK_DASHBOARD_THEME=..."),
+    ]));
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         "Esc or ? closes this overlay",
-        theme.footer,
+        theme.footer(),
     )));
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(theme.border_active)
-        .title(Span::styled(" help ", theme.title));
+        .border_style(theme.border_active())
+        .title(Span::styled(" help ", theme.title()));
     let paragraph = Paragraph::new(lines)
         .block(block)
         .alignment(Alignment::Left)
@@ -62,43 +69,43 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
     horizontal[1]
 }
 
-pub fn render_decision_detail(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
+pub fn render_decision_detail(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: &Palette) {
     let popup = centered_rect(72, 58, area);
     frame.render_widget(Clear, popup);
     let lines = if let Some(decision) = super::decisions::selected_decision(model) {
         vec![
             Line::from(vec![
-                Span::styled("Session ", theme.status_label),
+                Span::styled("Session ", theme.status_label()),
                 Span::raw(format!("{} · {}", decision.entry_id, decision.title)),
             ]),
             Line::from(vec![
-                Span::styled("Time ", theme.status_label),
+                Span::styled("Time ", theme.status_label()),
                 Span::raw(decision.ts.to_rfc3339()),
             ]),
             Line::from(vec![
-                Span::styled("Prompt tag ", theme.status_label),
-                Span::styled(decision.prompt_tag, theme.warning),
+                Span::styled("Prompt tag ", theme.status_label()),
+                Span::styled(decision.prompt_tag, theme.warning()),
             ]),
             Line::from(""),
-            Line::from(Span::styled("Answer", theme.header)),
+            Line::from(Span::styled("Answer", theme.header())),
             Line::from(decision.answer),
             Line::from(""),
             Line::from(Span::styled(
                 "Esc or Backspace returns to decisions list",
-                theme.footer,
+                theme.footer(),
             )),
         ]
     } else {
         vec![Line::from(Span::styled(
             "No decision selected",
-            theme.muted,
+            theme.muted(),
         ))]
     };
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(theme.border_active)
-        .title(Span::styled(" decision detail ", theme.title));
+        .border_style(theme.border_active())
+        .title(Span::styled(" decision detail ", theme.title()));
     let paragraph = Paragraph::new(lines)
         .block(block)
         .alignment(Alignment::Left)

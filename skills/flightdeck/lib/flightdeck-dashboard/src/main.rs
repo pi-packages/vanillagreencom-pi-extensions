@@ -12,8 +12,11 @@ use flightdeck_dashboard::app::effects::Effects;
 use flightdeck_dashboard::app::model::{utc_now, Model, ReadSourceState};
 use flightdeck_dashboard::app::motion::{self, MotionLevel};
 use flightdeck_dashboard::app::msg::Msg;
+use flightdeck_dashboard::app::theme::Theme;
 use flightdeck_dashboard::app::{update, view};
-use flightdeck_dashboard::cli::{Cli, Command, DaemonAction, DaemonArgs, MotionArg, TuiArgs};
+use flightdeck_dashboard::cli::{
+    Cli, Command, DaemonAction, DaemonArgs, MotionArg, ThemeArg, TuiArgs,
+};
 use flightdeck_dashboard::daemon::client::DaemonClient;
 use flightdeck_dashboard::daemon::rpc::DaemonStatus as RuntimeDaemonStatus;
 use flightdeck_dashboard::events::{self, EventSource};
@@ -62,11 +65,13 @@ async fn run_tui(args: TuiArgs) -> Result<()> {
     if !matches!(initial.source, SnapshotSource::Socket(_)) {
         initial.snapshot.daemon = file_mode_daemon_status();
     }
-    tracing::info!(source = ?initial.source, "dashboard read mode selected");
+    let theme = theme_choice(args.theme);
+    tracing::info!(source = ?initial.source, theme = theme.as_str(), "dashboard read mode selected");
     let mut model = Model::new(
         initial.snapshot,
         initial.source,
         motion_level(&args),
+        theme,
         utc_now,
     );
     model.read_source_state = initial.source_state;
@@ -172,6 +177,11 @@ fn file_session_key(session: &str) -> String {
     } else {
         session.to_owned()
     }
+}
+
+fn theme_choice(cli: Option<ThemeArg>) -> Theme {
+    let env_theme = std::env::var("FLIGHTDECK_DASHBOARD_THEME").ok();
+    Theme::from_cli_or_env(cli.map(ThemeArg::as_str), env_theme.as_deref())
 }
 
 fn motion_level(args: &TuiArgs) -> MotionLevel {

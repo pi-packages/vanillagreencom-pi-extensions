@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc};
 use crate::app::command::SnapshotSource;
 use crate::app::motion::{EffectInstance, MotionLevel};
 use crate::app::reload::ReloadCoalescer;
+use crate::app::theme::{Palette, Theme};
 use crate::state::snapshot::{
     DashboardSnapshot, Event, EventImportance, SessionKind, SessionState, TrackedSession,
 };
@@ -191,6 +192,7 @@ pub struct Model {
     pub reload_coalescer: ReloadCoalescer,
     pub now: DateTime<Utc>,
     pub motion: MotionLevel,
+    pub theme: Theme,
     pub motion_clock: Instant,
     pub active_effects: Vec<EffectInstance>,
     pub selection: HashMap<Tab, usize>,
@@ -212,6 +214,7 @@ impl Model {
         snapshot: DashboardSnapshot,
         snapshot_source: SnapshotSource,
         motion: MotionLevel,
+        theme: Theme,
         clock: Clock,
     ) -> Self {
         let tabs_enabled = enabled_tabs_for(&snapshot);
@@ -232,6 +235,7 @@ impl Model {
             reload_coalescer: ReloadCoalescer::new(),
             now: clock(),
             motion,
+            theme,
             motion_clock: Instant::now(),
             active_effects: Vec::with_capacity(8),
             selection,
@@ -258,6 +262,11 @@ impl Model {
 
     pub fn refresh_now(&mut self) {
         self.now = (self.clock)();
+    }
+
+    #[must_use]
+    pub const fn palette(&self) -> &'static Palette {
+        self.theme.palette()
     }
 
     #[must_use]

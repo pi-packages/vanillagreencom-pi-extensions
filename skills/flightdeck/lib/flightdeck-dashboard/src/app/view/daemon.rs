@@ -6,9 +6,9 @@ use ratatui::Frame;
 
 use crate::app::command::SnapshotSource;
 use crate::app::model::{Model, ReadSourceState};
-use crate::app::theme::Theme;
+use crate::app::theme::Palette;
 
-pub fn render(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
+pub fn render(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: &Palette) {
     if !matches!(model.snapshot_source, SnapshotSource::Socket(_)) {
         render_file_mode(frame, area, model, theme);
         return;
@@ -25,19 +25,19 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
         .map(|ts| format!("{} ago", age_label(ts, model.now)))
         .unwrap_or_else(|| String::from("not observed"));
     let health = match daemon.healthy {
-        Some(true) => Span::styled("healthy", theme.ok),
-        Some(false) => Span::styled("stopped", theme.error),
-        None => Span::styled("unknown", theme.muted),
+        Some(true) => Span::styled("healthy", theme.ok()),
+        Some(false) => Span::styled("stopped", theme.error()),
+        None => Span::styled("unknown", theme.muted()),
     };
 
     let mut lines = vec![
-        Line::from(vec![Span::styled("Status ", theme.status_label), health]),
+        Line::from(vec![Span::styled("Status ", theme.status_label()), health]),
         Line::from(vec![
-            Span::styled("Label ", theme.status_label),
+            Span::styled("Label ", theme.status_label()),
             Span::raw(daemon.label.clone()),
         ]),
         Line::from(vec![
-            Span::styled("PID ", theme.status_label),
+            Span::styled("PID ", theme.status_label()),
             Span::raw(
                 daemon
                     .pid
@@ -46,60 +46,60 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
             ),
         ]),
         Line::from(vec![
-            Span::styled("Last heartbeat ", theme.status_label),
+            Span::styled("Last heartbeat ", theme.status_label()),
             Span::raw(heartbeat_label),
         ]),
         Line::from(vec![
-            Span::styled("Heartbeat folding ", theme.status_label),
+            Span::styled("Heartbeat folding ", theme.status_label()),
             Span::raw(format!(
                 "{heartbeat_count} heartbeat event(s) folded into this row"
             )),
         ]),
         Line::from(vec![
-            Span::styled("Snapshot diff drops ", theme.status_label),
+            Span::styled("Snapshot diff drops ", theme.status_label()),
             Span::raw(model.snapshot_diff_drops.to_string()),
         ]),
         Line::from(vec![
-            Span::styled("Read source ", theme.status_label),
+            Span::styled("Read source ", theme.status_label()),
             Span::raw(read_source_label(model.read_source_state)),
         ]),
     ];
     if let Some(error) = &model.snapshot.master_archive_error {
         lines.push(Line::from(vec![
-            Span::styled("Archive warning ", theme.status_label),
-            Span::styled(error.clone(), theme.warning),
+            Span::styled("Archive warning ", theme.status_label()),
+            Span::styled(error.clone(), theme.warning()),
         ]));
     }
     if let Some(error) = &model.snapshot.master_error {
         lines.push(Line::from(vec![
-            Span::styled("State error ", theme.status_label),
-            Span::styled(error.clone(), theme.error),
+            Span::styled("State error ", theme.status_label()),
+            Span::styled(error.clone(), theme.error()),
         ]));
     }
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(theme.border_active)
-        .title(Span::styled(" daemon ", theme.title));
+        .border_style(theme.border_active())
+        .title(Span::styled(" daemon ", theme.title()));
     frame.render_widget(
         Paragraph::new(lines).block(block).wrap(Wrap { trim: true }),
         area,
     );
 }
 
-fn render_file_mode(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
+fn render_file_mode(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: &Palette) {
     let updated = model.snapshot.updated_at;
     let lines = vec![
         Line::from(vec![
-            Span::styled("Read mode      ", theme.status_label),
+            Span::styled("Read mode      ", theme.status_label()),
             Span::raw("file-watcher (no daemon socket)"),
         ]),
         Line::from(vec![
-            Span::styled("State file     ", theme.status_label),
+            Span::styled("State file     ", theme.status_label()),
             Span::raw(model.snapshot.master_state_path.display().to_string()),
         ]),
         Line::from(vec![
-            Span::styled("File mtime     ", theme.status_label),
+            Span::styled("File mtime     ", theme.status_label()),
             Span::raw(format!(
                 "{} ({} ago)",
                 updated.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
@@ -107,14 +107,14 @@ fn render_file_mode(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: The
             )),
         ]),
         Line::from(vec![
-            Span::styled("Note           ", theme.status_label),
+            Span::styled("Note           ", theme.status_label()),
             Span::raw("Daemon socket not connected. Run `flightdeck-dashboard daemon start --session <name>` to populate daemon-side telemetry, then relaunch with `--socket $FD_STATE_DIR/dashboard-<key>.sock`."),
         ]),
     ];
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(theme.border_active)
-        .title(Span::styled(" daemon file-mode ", theme.title));
+        .border_style(theme.border_active())
+        .title(Span::styled(" daemon file-mode ", theme.title()));
     frame.render_widget(
         Paragraph::new(lines).block(block).wrap(Wrap { trim: true }),
         area,

@@ -3,101 +3,315 @@ use ratatui::style::{Color, Modifier, Style};
 use crate::state::snapshot::{SessionKind, SessionState};
 
 #[derive(Debug, Clone, Copy)]
-pub struct Theme {
-    pub frame: Style,
-    pub title: Style,
-    pub muted: Style,
-    pub status: Style,
-    pub status_label: Style,
-    pub border: Style,
-    pub border_active: Style,
-    pub tab_active: Style,
-    pub tab_inactive: Style,
-    pub selection: Style,
-    pub header: Style,
-    pub footer: Style,
-    pub pause: Style,
-    pub error: Style,
-    pub ok: Style,
-    pub warning: Style,
-    pub info: Style,
-    pub filter: Style,
+pub struct Palette {
+    pub bg: Color,
+    pub surface: Color,
+    pub overlay: Color,
+    pub selected_bg: Color,
+    pub text: Color,
+    pub subtle: Color,
+    pub muted: Color,
+    pub accent: Color,
+    pub success: Color,
+    pub warning: Color,
+    pub error: Color,
+    pub info: Color,
+    pub secondary: Color,
+    pub border_active: Color,
+    pub border_inactive: Color,
+    pub chrome: Color,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Theme {
+    Moon,
+    Dawn,
+    System,
+}
+
+pub const MOON: Palette = Palette {
+    bg: Color::Rgb(0x23, 0x21, 0x36),
+    surface: Color::Rgb(0x2a, 0x27, 0x3f),
+    overlay: Color::Rgb(0x39, 0x35, 0x52),
+    selected_bg: Color::Rgb(0x44, 0x41, 0x5a),
+    text: Color::Rgb(0xe0, 0xde, 0xf4),
+    subtle: Color::Rgb(0x90, 0x8c, 0xaa),
+    muted: Color::Rgb(0x6e, 0x6a, 0x86),
+    accent: Color::Rgb(0xc4, 0xa7, 0xe7),
+    success: Color::Rgb(0x9c, 0xcf, 0xd8),
+    warning: Color::Rgb(0xf6, 0xc1, 0x77),
+    error: Color::Rgb(0xeb, 0x6f, 0x92),
+    info: Color::Rgb(0x3e, 0x8f, 0xb0),
+    secondary: Color::Rgb(0xea, 0x9a, 0x97),
+    border_active: Color::Rgb(0xc4, 0xa7, 0xe7),
+    border_inactive: Color::Rgb(0x56, 0x52, 0x6e),
+    chrome: Color::Rgb(0x90, 0x8c, 0xaa),
+};
+
+pub const DAWN: Palette = Palette {
+    bg: Color::Rgb(0xfa, 0xf4, 0xed),
+    surface: Color::Rgb(0xff, 0xfa, 0xf3),
+    overlay: Color::Rgb(0xf2, 0xe9, 0xe1),
+    selected_bg: Color::Rgb(0xdf, 0xda, 0xd9),
+    text: Color::Rgb(0x57, 0x52, 0x79),
+    subtle: Color::Rgb(0x79, 0x75, 0x93),
+    muted: Color::Rgb(0x98, 0x93, 0xa5),
+    accent: Color::Rgb(0x90, 0x7a, 0xa9),
+    success: Color::Rgb(0x56, 0x94, 0x9f),
+    warning: Color::Rgb(0xea, 0x9d, 0x34),
+    error: Color::Rgb(0xb4, 0x63, 0x7a),
+    info: Color::Rgb(0x28, 0x69, 0x83),
+    secondary: Color::Rgb(0xd7, 0x82, 0x7e),
+    border_active: Color::Rgb(0x90, 0x7a, 0xa9),
+    border_inactive: Color::Rgb(0xce, 0xca, 0xcd),
+    chrome: Color::Rgb(0x79, 0x75, 0x93),
+};
+
+pub const SYSTEM: Palette = Palette {
+    bg: Color::Reset,
+    surface: Color::Reset,
+    overlay: Color::Reset,
+    selected_bg: Color::Reset,
+    text: Color::Reset,
+    subtle: Color::Gray,
+    muted: Color::DarkGray,
+    accent: Color::Cyan,
+    success: Color::Green,
+    warning: Color::Yellow,
+    error: Color::Red,
+    info: Color::Blue,
+    secondary: Color::Magenta,
+    border_active: Color::Cyan,
+    border_inactive: Color::DarkGray,
+    chrome: Color::Reset,
+};
 
 impl Theme {
     #[must_use]
-    pub fn dark() -> Self {
-        Self {
-            frame: Style::default().fg(Color::Gray).bg(Color::Reset),
-            title: Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-            muted: Style::default().fg(Color::DarkGray),
-            status: Style::default().fg(Color::White).bg(Color::Black),
-            status_label: Style::default()
-                .fg(Color::LightCyan)
-                .add_modifier(Modifier::BOLD),
-            border: Style::default().fg(Color::DarkGray),
-            border_active: Style::default().fg(Color::Cyan),
-            tab_active: Style::default()
-                .fg(Color::Black)
-                .bg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-            tab_inactive: Style::default().fg(Color::Gray),
-            selection: Style::default()
-                .fg(Color::Black)
-                .bg(Color::LightCyan)
-                .add_modifier(Modifier::BOLD),
-            header: Style::default()
-                .fg(Color::LightBlue)
-                .add_modifier(Modifier::BOLD),
-            footer: Style::default().fg(Color::DarkGray),
-            pause: Style::default()
-                .fg(Color::Black)
-                .bg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-            error: Style::default()
-                .fg(Color::White)
-                .bg(Color::Red)
-                .add_modifier(Modifier::BOLD),
-            ok: Style::default().fg(Color::Green),
-            warning: Style::default().fg(Color::Yellow),
-            info: Style::default().fg(Color::LightBlue),
-            filter: Style::default().fg(Color::Black).bg(Color::Yellow),
+    pub fn from_cli_or_env(cli: Option<&str>, env: Option<&str>) -> Self {
+        if let Some(value) = cli.and_then(non_empty) {
+            return parse_theme(value).unwrap_or_else(|| invalid_theme(value));
         }
+        if let Some(value) = env.and_then(non_empty) {
+            return parse_theme(value).unwrap_or_else(|| invalid_theme(value));
+        }
+        Self::Moon
+    }
+
+    #[must_use]
+    pub const fn palette(self) -> &'static Palette {
+        match self {
+            Self::Moon => &MOON,
+            Self::Dawn => &DAWN,
+            Self::System => &SYSTEM,
+        }
+    }
+
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Moon => "moon",
+            Self::Dawn => "dawn",
+            Self::System => "system",
+        }
+    }
+
+    #[must_use]
+    pub const fn display_name(self) -> &'static str {
+        match self {
+            Self::Moon => "Rose Pine Moon",
+            Self::Dawn => "Rose Pine Dawn",
+            Self::System => "System terminal palette",
+        }
+    }
+}
+
+impl Palette {
+    #[must_use]
+    pub const fn frame(self) -> Style {
+        Style::new().fg(self.text).bg(self.bg)
+    }
+
+    #[must_use]
+    pub fn title(self) -> Style {
+        Style::new()
+            .fg(self.accent)
+            .bg(self.bg)
+            .add_modifier(Modifier::BOLD)
+    }
+
+    #[must_use]
+    pub const fn muted(self) -> Style {
+        Style::new().fg(self.muted).bg(self.bg)
+    }
+
+    #[must_use]
+    pub const fn status(self) -> Style {
+        Style::new().fg(self.text).bg(self.bg)
+    }
+
+    #[must_use]
+    pub fn status_label(self) -> Style {
+        Style::new()
+            .fg(self.info)
+            .bg(self.bg)
+            .add_modifier(Modifier::BOLD)
+    }
+
+    #[must_use]
+    pub const fn border(self) -> Style {
+        Style::new().fg(self.border_inactive).bg(self.bg)
+    }
+
+    #[must_use]
+    pub const fn border_active(self) -> Style {
+        Style::new().fg(self.border_active).bg(self.bg)
+    }
+
+    #[must_use]
+    pub fn tab_active(self) -> Style {
+        if self.selected_bg == Color::Reset {
+            return Style::new()
+                .fg(self.accent)
+                .bg(self.bg)
+                .add_modifier(Modifier::BOLD | Modifier::REVERSED);
+        }
+        Style::new()
+            .fg(self.bg)
+            .bg(self.accent)
+            .add_modifier(Modifier::BOLD)
+    }
+
+    #[must_use]
+    pub const fn tab_inactive(self) -> Style {
+        Style::new().fg(self.subtle).bg(self.bg)
+    }
+
+    #[must_use]
+    pub fn selection(self) -> Style {
+        if self.selected_bg == Color::Reset {
+            return Style::new()
+                .fg(self.text)
+                .bg(self.bg)
+                .add_modifier(Modifier::BOLD | Modifier::REVERSED);
+        }
+        Style::new()
+            .fg(self.text)
+            .bg(self.selected_bg)
+            .add_modifier(Modifier::BOLD)
+    }
+
+    #[must_use]
+    pub fn header(self) -> Style {
+        Style::new()
+            .fg(self.accent)
+            .bg(self.bg)
+            .add_modifier(Modifier::BOLD)
+    }
+
+    #[must_use]
+    pub const fn footer(self) -> Style {
+        Style::new().fg(self.subtle).bg(self.bg)
+    }
+
+    #[must_use]
+    pub fn pause(self) -> Style {
+        self.chip(self.warning)
+    }
+
+    #[must_use]
+    pub fn error(self) -> Style {
+        if self.bg == Color::Reset {
+            return Style::new()
+                .fg(self.error)
+                .bg(self.bg)
+                .add_modifier(Modifier::BOLD);
+        }
+        Style::new()
+            .fg(self.bg)
+            .bg(self.error)
+            .add_modifier(Modifier::BOLD)
+    }
+
+    #[must_use]
+    pub const fn ok(self) -> Style {
+        Style::new().fg(self.success).bg(self.bg)
+    }
+
+    #[must_use]
+    pub const fn warning(self) -> Style {
+        Style::new().fg(self.warning).bg(self.bg)
+    }
+
+    #[must_use]
+    pub const fn info(self) -> Style {
+        Style::new().fg(self.info).bg(self.bg)
+    }
+
+    #[must_use]
+    pub fn filter(self) -> Style {
+        self.chip(self.warning)
     }
 
     #[must_use]
     pub fn kind_badge(self, kind: &SessionKind) -> Style {
         match kind {
-            SessionKind::Adhoc => Style::default()
-                .fg(Color::Black)
-                .bg(Color::LightBlue)
-                .add_modifier(Modifier::BOLD),
-            SessionKind::Issue => Style::default()
-                .fg(Color::Black)
-                .bg(Color::Magenta)
-                .add_modifier(Modifier::BOLD),
-            SessionKind::Workflow => Style::default()
-                .fg(Color::Black)
-                .bg(Color::LightGreen)
-                .add_modifier(Modifier::BOLD),
-            SessionKind::Other(_) => self.muted,
+            SessionKind::Adhoc => self.chip(self.info),
+            SessionKind::Issue => self.chip(self.secondary),
+            SessionKind::Workflow => self.chip(self.success),
+            SessionKind::Other(_) => self.muted(),
         }
     }
 
     #[must_use]
     pub fn state(self, state: &SessionState) -> Style {
         match state {
-            SessionState::Complete | SessionState::Merged => self.ok,
-            SessionState::Ready => Style::default().fg(Color::LightGreen),
-            SessionState::Waiting | SessionState::Submitting => self.info,
-            SessionState::Prompting | SessionState::MergeReady => self.warning,
-            SessionState::Cancelled | SessionState::Aborted => {
-                Style::default().fg(Color::LightYellow)
+            SessionState::Complete | SessionState::Merged | SessionState::Ready => self.ok(),
+            SessionState::Waiting | SessionState::Prompting | SessionState::MergeReady => {
+                self.warning()
             }
-            SessionState::Dead => self.error,
-            SessionState::Other(_) => self.muted,
+            SessionState::Submitting => self.info(),
+            SessionState::Cancelled | SessionState::Aborted => self.subtle(),
+            SessionState::Dead => self.error(),
+            SessionState::Other(_) => self.muted(),
         }
     }
+
+    #[must_use]
+    fn subtle(self) -> Style {
+        Style::new().fg(self.subtle).bg(self.bg)
+    }
+
+    #[must_use]
+    fn chip(self, color: Color) -> Style {
+        if self.bg == Color::Reset {
+            return Style::new()
+                .fg(color)
+                .bg(self.bg)
+                .add_modifier(Modifier::BOLD);
+        }
+        Style::new()
+            .fg(self.bg)
+            .bg(color)
+            .add_modifier(Modifier::BOLD)
+    }
+}
+
+fn non_empty(value: &str) -> Option<&str> {
+    let value = value.trim();
+    (!value.is_empty()).then_some(value)
+}
+
+fn parse_theme(value: &str) -> Option<Theme> {
+    match value.to_ascii_lowercase().as_str() {
+        "moon" => Some(Theme::Moon),
+        "dawn" => Some(Theme::Dawn),
+        "system" => Some(Theme::System),
+        _ => None,
+    }
+}
+
+fn invalid_theme(value: &str) -> Theme {
+    eprintln!("flightdeck-dashboard: warning: invalid theme '{value}'; using moon");
+    Theme::Moon
 }

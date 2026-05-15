@@ -6,24 +6,24 @@ use ratatui::Frame;
 
 use crate::app::model::Model;
 use crate::app::motion::{Effect, EffectKind, EffectTarget};
-use crate::app::theme::Theme;
+use crate::app::theme::Palette;
 use crate::state::snapshot::{Event, EventImportance};
 
-pub fn render(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
+pub fn render(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: &Palette) {
     let events = model.filtered_events();
     let hidden_noise = model.hidden_noise_count();
     let row_count = events.len().saturating_add(usize::from(hidden_noise > 0));
     let title = title_for(row_count, model);
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(theme.border_active)
-        .title(Span::styled(title, theme.title));
+        .border_style(theme.border_active())
+        .title(Span::styled(title, theme.title()));
 
     if model.recent_events.is_empty() {
         frame.render_widget(
             Paragraph::new("Activity feed is empty. Daemon events appear here when the daemon writes to fd-daemon-<key>.log / fd-wake-events-<key>.log.")
                 .block(block)
-                .style(theme.muted)
+                .style(theme.muted())
                 .alignment(Alignment::Center)
                 .wrap(Wrap { trim: true }),
             area,
@@ -51,7 +51,7 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
         Cell::from("!"),
         Cell::from("Message"),
     ])
-    .style(theme.header);
+    .style(theme.header());
     let table = Table::new(
         rows,
         [
@@ -80,7 +80,7 @@ fn title_for(row_count: usize, model: &Model) -> String {
     )
 }
 
-fn row_for_event<'a>(event: &Event, idx: usize, model: &Model, theme: Theme) -> Row<'a> {
+fn row_for_event<'a>(event: &Event, idx: usize, model: &Model, theme: &Palette) -> Row<'a> {
     let entered = is_active(model, EffectKind::ActivityRowEnter, EffectTarget::Row(idx));
     let flash = is_active(
         model,
@@ -94,12 +94,12 @@ fn row_for_event<'a>(event: &Event, idx: usize, model: &Model, theme: Theme) -> 
         .format("%H:%M:%S")
         .to_string();
     let importance_style = match event.importance {
-        EventImportance::Low => theme.muted,
-        EventImportance::Medium => theme.warning,
-        EventImportance::Important => theme.error,
+        EventImportance::Low => theme.muted(),
+        EventImportance::Medium => theme.warning(),
+        EventImportance::Important => theme.error(),
     };
     let source_style = if flash {
-        theme.error
+        theme.error()
     } else {
         theme.kind_badge(&crate::state::snapshot::SessionKind::Workflow)
     };
@@ -108,31 +108,31 @@ fn row_for_event<'a>(event: &Event, idx: usize, model: &Model, theme: Theme) -> 
         Cell::from(Span::styled(event.source.as_chip(), source_style)),
         Cell::from(Span::styled(event.importance.dot(), importance_style)),
         Cell::from(Line::from(vec![
-            Span::styled(accent.to_owned(), theme.info),
+            Span::styled(accent.to_owned(), theme.info()),
             Span::raw(event.message.clone()),
         ])),
     ])
     .style(if idx == model.selected_index() {
-        theme.selection
+        theme.selection()
     } else {
-        theme.frame
+        theme.frame()
     })
 }
 
-fn row_for_folded_noise<'a>(count: usize, idx: usize, model: &Model, theme: Theme) -> Row<'a> {
+fn row_for_folded_noise<'a>(count: usize, idx: usize, model: &Model, theme: &Palette) -> Row<'a> {
     Row::new(vec![
         Cell::from("—"),
-        Cell::from(Span::styled("NOISE", theme.muted)),
-        Cell::from(Span::styled("·", theme.muted)),
+        Cell::from(Span::styled("NOISE", theme.muted())),
+        Cell::from(Span::styled("·", theme.muted())),
         Cell::from(Span::styled(
             format!("{count} heartbeat/noise events folded · press Ctrl+N to show."),
-            theme.muted,
+            theme.muted(),
         )),
     ])
     .style(if idx == model.selected_index() {
-        theme.selection
+        theme.selection()
     } else {
-        theme.frame
+        theme.frame()
     })
 }
 

@@ -5,7 +5,7 @@ use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, Wrap};
 use ratatui::Frame;
 
 use crate::app::model::{Model, ReadSourceState};
-use crate::app::theme::Theme;
+use crate::app::theme::Palette;
 use crate::app::view::{fx, human_duration};
 use crate::state::snapshot::{SessionState, TrackedSession};
 use crate::state::tracked_entries::PRE_PURGE_BANNER;
@@ -13,7 +13,7 @@ use crate::state::tracked_entries::PRE_PURGE_BANNER;
 const RIGHT_RAIL_MIN_WIDTH: u16 = 100;
 const SINGLE_COLUMN_WIDTH: u16 = 80;
 
-pub fn render(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
+pub fn render(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: &Palette) {
     let area = render_transition_banners(frame, area, model, theme);
     if area.width <= SINGLE_COLUMN_WIDTH || model.ui.compact {
         render_single_column(frame, area, model, theme);
@@ -47,7 +47,7 @@ fn render_transition_banners(
     frame: &mut Frame<'_>,
     mut area: Rect,
     model: &Model,
-    theme: Theme,
+    theme: &Palette,
 ) -> Rect {
     if model.snapshot.pre_purge_state {
         area = render_banner(
@@ -55,10 +55,10 @@ fn render_transition_banners(
             area,
             " state schema warning ",
             PRE_PURGE_BANNER,
-            theme.error,
+            theme.error(),
         );
     } else if let Some(error) = &model.snapshot.master_error {
-        area = render_banner(frame, area, " state read error ", error, theme.error);
+        area = render_banner(frame, area, " state read error ", error, theme.error());
     }
     match model.read_source_state {
         ReadSourceState::Archive { archived_at } => {
@@ -67,7 +67,7 @@ fn render_transition_banners(
                 area,
                 " archive state ",
                 &format!("Live state archived; showing terminated snapshot from {archived_at}."),
-                theme.warning,
+                theme.warning(),
             );
         }
         ReadSourceState::Missing => {
@@ -76,7 +76,7 @@ fn render_transition_banners(
                 area,
                 " missing state ",
                 "No live state file or terminated archive found yet.",
-                theme.muted,
+                theme.muted(),
             );
         }
         ReadSourceState::Live => {}
@@ -109,14 +109,14 @@ fn render_banner(
     chunks[1]
 }
 
-fn render_single_column(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
+fn render_single_column(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: &Palette) {
     let snapshot = &model.snapshot;
     let elapsed = snapshot
         .started_at
         .map(|started| human_duration(started, model.now))
         .unwrap_or_else(|| String::from("unknown"));
     let mut lines = vec![Line::from(vec![
-        Span::styled("Session ", theme.status_label),
+        Span::styled("Session ", theme.status_label()),
         Span::raw(snapshot.session_id.clone()),
         Span::raw("  ·  "),
         Span::raw(format!(
@@ -128,7 +128,7 @@ fn render_single_column(frame: &mut Frame<'_>, area: Rect, model: &Model, theme:
     ])];
     if let Some(pause) = &snapshot.paused_for_user {
         lines.push(Line::from(vec![
-            Span::styled("PAUSED ", theme.pause),
+            Span::styled("PAUSED ", theme.pause()),
             Span::raw(
                 pause
                     .entry_id
@@ -146,7 +146,7 @@ fn render_single_column(frame: &mut Frame<'_>, area: Rect, model: &Model, theme:
         ]));
     }
     if snapshot.terminated {
-        lines.push(Line::from(Span::styled("✔ session complete", theme.ok)));
+        lines.push(Line::from(Span::styled("✔ session complete", theme.ok())));
     }
     lines.push(Line::from(""));
     for (idx, session) in snapshot.sessions.iter().enumerate() {
@@ -161,9 +161,9 @@ fn render_single_column(frame: &mut Frame<'_>, area: Rect, model: &Model, theme:
             .map(|pr| format!("PR #{pr}"))
             .unwrap_or_default();
         let style = if idx == model.selected_index() {
-            theme.selection
+            theme.selection()
         } else {
-            theme.frame
+            theme.frame()
         };
         lines.push(Line::from(vec![
             Span::styled(format!("{cursor} "), style),
@@ -184,10 +184,10 @@ fn render_single_column(frame: &mut Frame<'_>, area: Rect, model: &Model, theme:
     }
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(theme.border_active)
+        .border_style(theme.border_active())
         .title(Span::styled(
             format!(" sessions ({} tracked) ", snapshot.counts.total),
-            theme.title,
+            theme.title(),
         ));
     frame.render_widget(
         Paragraph::new(lines).block(block).wrap(Wrap { trim: true }),
@@ -195,10 +195,13 @@ fn render_single_column(frame: &mut Frame<'_>, area: Rect, model: &Model, theme:
     );
 }
 
-fn render_left_rail(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
-    let mut lines = vec![Line::from(Span::styled("States", theme.header))];
+fn render_left_rail(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: &Palette) {
+    let mut lines = vec![Line::from(Span::styled("States", theme.header()))];
     if model.snapshot.counts.by_state.is_empty() {
-        lines.push(Line::from(Span::styled("no tracked entries", theme.muted)));
+        lines.push(Line::from(Span::styled(
+            "no tracked entries",
+            theme.muted(),
+        )));
     } else {
         for (state, count) in ordered_state_counts(model) {
             lines.push(Line::from(vec![
@@ -208,18 +211,18 @@ fn render_left_rail(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: The
         }
     }
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled("Merge queue", theme.header)));
+    lines.push(Line::from(Span::styled("Merge queue", theme.header())));
     if model.snapshot.merge_queue.is_empty() {
-        lines.push(Line::from(Span::styled("empty", theme.muted)));
+        lines.push(Line::from(Span::styled("empty", theme.muted())));
     } else {
         for item in &model.snapshot.merge_queue {
             lines.push(Line::from(Span::raw(format!("• {item}"))));
         }
     }
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled("Conflict graph", theme.header)));
+    lines.push(Line::from(Span::styled("Conflict graph", theme.header())));
     if model.snapshot.conflict_graph.edges.is_empty() {
-        lines.push(Line::from(Span::styled("no edges", theme.muted)));
+        lines.push(Line::from(Span::styled("no edges", theme.muted())));
     } else {
         for (from, to) in &model.snapshot.conflict_graph.edges {
             lines.push(Line::from(Span::raw(format!("• {from} ↔ {to}"))));
@@ -228,15 +231,15 @@ fn render_left_rail(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: The
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(theme.border)
-        .title(Span::styled(" left rail ", theme.muted));
+        .border_style(theme.border())
+        .title(Span::styled(" left rail ", theme.muted()));
     frame.render_widget(
         Paragraph::new(lines).block(block).wrap(Wrap { trim: true }),
         area,
     );
 }
 
-fn render_session_table(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
+fn render_session_table(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: &Palette) {
     let header = Row::new([
         Cell::from("Kind"),
         Cell::from("State"),
@@ -247,7 +250,7 @@ fn render_session_table(frame: &mut Frame<'_>, area: Rect, model: &Model, theme:
         Cell::from("Decision"),
         Cell::from("Activity"),
     ])
-    .style(theme.header);
+    .style(theme.header());
 
     let rows = model
         .snapshot
@@ -256,15 +259,15 @@ fn render_session_table(frame: &mut Frame<'_>, area: Rect, model: &Model, theme:
         .enumerate()
         .map(|(idx, session)| {
             let row_style = if idx == model.selected_index() {
-                theme.selection
+                theme.selection()
             } else {
-                theme.frame
+                theme.frame()
             };
             Row::new(vec![
                 Cell::from(Line::from(vec![
                     Span::styled(session.kind.badge(), theme.kind_badge(&session.kind)),
                     Span::raw(" "),
-                    Span::styled(fx::spinner(model, session), theme.info),
+                    Span::styled(fx::spinner(model, session), theme.info()),
                 ])),
                 Cell::from(Span::styled(
                     session.state.as_str(),
@@ -283,10 +286,10 @@ fn render_session_table(frame: &mut Frame<'_>, area: Rect, model: &Model, theme:
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(theme.border_active)
+        .border_style(theme.border_active())
         .title(Span::styled(
             format!(" sessions ({} tracked) ", model.snapshot.counts.total),
-            theme.title,
+            theme.title(),
         ));
     let table = Table::new(
         rows,
@@ -307,15 +310,18 @@ fn render_session_table(frame: &mut Frame<'_>, area: Rect, model: &Model, theme:
     frame.render_widget(table, area);
 }
 
-fn render_detail(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
+fn render_detail(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: &Palette) {
     let lines = match model.selected_session() {
         Some(session) => detail_lines(session, model, theme),
-        None => vec![Line::from(Span::styled("No session selected", theme.muted))],
+        None => vec![Line::from(Span::styled(
+            "No session selected",
+            theme.muted(),
+        ))],
     };
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(theme.border)
-        .title(Span::styled(" detail ", theme.muted));
+        .border_style(theme.border())
+        .title(Span::styled(" detail ", theme.muted()));
     frame.render_widget(
         Paragraph::new(lines)
             .block(block)
@@ -325,60 +331,60 @@ fn render_detail(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme)
     );
 }
 
-fn detail_lines(session: &TrackedSession, model: &Model, theme: Theme) -> Vec<Line<'static>> {
+fn detail_lines(session: &TrackedSession, model: &Model, theme: &Palette) -> Vec<Line<'static>> {
     let mut lines = vec![
-        Line::from(Span::styled(session.title.clone(), theme.title)),
+        Line::from(Span::styled(session.title.clone(), theme.title())),
         Line::from(vec![
-            Span::styled("id ", theme.status_label),
+            Span::styled("id ", theme.status_label()),
             Span::raw(session.id.clone()),
         ]),
         Line::from(vec![
-            Span::styled("kind ", theme.status_label),
+            Span::styled("kind ", theme.status_label()),
             Span::raw(session.kind.to_string()),
             Span::raw("  "),
-            Span::styled("state ", theme.status_label),
+            Span::styled("state ", theme.status_label()),
             Span::styled(session.state.to_string(), theme.state(&session.state)),
         ]),
     ];
     if let Some(substate) = &session.substate {
         lines.push(Line::from(vec![
-            Span::styled("substate ", theme.status_label),
+            Span::styled("substate ", theme.status_label()),
             Span::raw(substate.clone()),
         ]));
     }
     if let Some(pane) = &session.pane_id {
         lines.push(Line::from(vec![
-            Span::styled("pane ", theme.status_label),
+            Span::styled("pane ", theme.status_label()),
             Span::raw(pane.clone()),
         ]));
     }
     if let Some(cwd) = &session.cwd {
         lines.push(Line::from(vec![
-            Span::styled("cwd ", theme.status_label),
+            Span::styled("cwd ", theme.status_label()),
             Span::raw(cwd.display().to_string()),
         ]));
     }
     if let Some(issue) = session.issue() {
         lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled("Issue domain", theme.header)));
+        lines.push(Line::from(Span::styled("Issue domain", theme.header())));
         lines.push(Line::from(vec![
-            Span::styled("issue ", theme.status_label),
+            Span::styled("issue ", theme.status_label()),
             Span::raw(issue.id.clone()),
         ]));
         if let Some(pr) = issue.pr_number {
             lines.push(Line::from(vec![
-                Span::styled("PR ", theme.status_label),
+                Span::styled("PR ", theme.status_label()),
                 Span::raw(format!("#{pr}")),
             ]));
         }
         if let Some(worktree) = &issue.worktree {
             lines.push(Line::from(vec![
-                Span::styled("worktree ", theme.status_label),
+                Span::styled("worktree ", theme.status_label()),
                 Span::raw(worktree.display().to_string()),
             ]));
         }
         lines.push(Line::from(vec![
-            Span::styled("scope ", theme.status_label),
+            Span::styled("scope ", theme.status_label()),
             Span::raw(format!(
                 "declared={} actual={}",
                 optional_count(issue.scope_files_declared),
@@ -393,14 +399,14 @@ fn detail_lines(session: &TrackedSession, model: &Model, theme: Theme) -> Vec<Li
             .is_some_and(|entry_id| entry_id == session.id)
         {
             lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled("PAUSED FOR USER", theme.pause)));
+            lines.push(Line::from(Span::styled("PAUSED FOR USER", theme.pause())));
             lines.push(Line::from(vec![
-                Span::styled("reason ", theme.status_label),
+                Span::styled("reason ", theme.status_label()),
                 Span::raw(pause.reason.clone()),
             ]));
             if let Some(prompt) = &pause.prompt_text {
                 lines.push(Line::from(vec![
-                    Span::styled("prompt ", theme.status_label),
+                    Span::styled("prompt ", theme.status_label()),
                     Span::raw(prompt.clone()),
                 ]));
             }
@@ -408,9 +414,9 @@ fn detail_lines(session: &TrackedSession, model: &Model, theme: Theme) -> Vec<Li
     }
     if let Some(decision) = session.latest_decision() {
         lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled("Last decision", theme.header)));
+        lines.push(Line::from(Span::styled("Last decision", theme.header())));
         lines.push(Line::from(vec![
-            Span::styled(decision.prompt_tag.clone(), theme.warning),
+            Span::styled(decision.prompt_tag.clone(), theme.warning()),
             Span::raw(" → "),
             Span::raw(decision.answer.clone()),
         ]));

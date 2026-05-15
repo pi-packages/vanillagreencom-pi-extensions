@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use flightdeck_dashboard::app::command::SnapshotSource;
 use flightdeck_dashboard::app::model::{Model, ReadSourceState, Tab};
 use flightdeck_dashboard::app::motion::{self, MotionLevel};
+use flightdeck_dashboard::app::theme::Theme;
 use flightdeck_dashboard::state::snapshot::{DashboardSnapshot, PauseInfo, SessionState};
 use flightdeck_dashboard::state::tracked_entries::{
     self, PRE_PURGE_BANNER, PRE_PURGE_STATE_MESSAGE,
@@ -13,6 +14,18 @@ use flightdeck_dashboard::state::tracked_entries::{
 
 fn render_fixture(name: &'static str) -> String {
     common::render_model(&common::model_for_fixture(name, MotionLevel::Off))
+}
+
+fn render_with_theme_summary(model: &Model) -> String {
+    format!(
+        "theme={} ({})\ntitle={:?}\nselection={:?}\nwarning={:?}\n{}",
+        model.theme.as_str(),
+        model.theme.display_name(),
+        model.palette().title(),
+        model.palette().selection(),
+        model.palette().warning(),
+        common::render_model(model)
+    )
 }
 
 #[test]
@@ -33,6 +46,31 @@ fn one_issue_fixture_overview() {
 #[test]
 fn mixed_fixture_overview() {
     insta::assert_snapshot!("overview_mixed", render_fixture("mixed"));
+}
+
+#[test]
+fn overview_moon_default() {
+    let model = common::model_for_fixture("mixed", MotionLevel::Off);
+    insta::assert_snapshot!("overview_theme_moon", render_with_theme_summary(&model));
+}
+
+#[test]
+fn overview_dawn() {
+    let mut model = common::model_for_fixture("mixed", MotionLevel::Off);
+    model.theme = Theme::Dawn;
+    let rendered = render_with_theme_summary(&model);
+    assert_ne!(rendered, render_fixture("mixed"));
+    insta::assert_snapshot!("overview_theme_dawn", rendered);
+}
+
+#[test]
+fn overview_system() {
+    let mut model = common::model_for_fixture("mixed", MotionLevel::Off);
+    model.theme = Theme::System;
+    let rendered = render_with_theme_summary(&model);
+    assert_ne!(rendered, render_fixture("mixed"));
+    assert!(rendered.contains("reversed"));
+    insta::assert_snapshot!("overview_theme_system", rendered);
 }
 
 #[test]
@@ -93,6 +131,7 @@ fn default_selects_paused_then_prompting_then_first() {
         paused_snapshot,
         SnapshotSource::Demo("mixed"),
         MotionLevel::Off,
+        Theme::Moon,
         common::fixed_now,
     );
     assert_eq!(
@@ -120,6 +159,7 @@ fn default_selects_paused_then_prompting_then_first() {
         first_snapshot,
         SnapshotSource::Demo("mixed"),
         MotionLevel::Off,
+        Theme::Moon,
         common::fixed_now,
     );
     assert_eq!(
@@ -234,6 +274,7 @@ fn archive_fallback_from_dir() {
         snapshot,
         SnapshotSource::File(temp.path().join("flightdeck-state-demo-terminated.json")),
         MotionLevel::Off,
+        Theme::Moon,
         common::fixed_now,
     );
     model.current_pane_id = None;
@@ -260,6 +301,7 @@ fn pre_purge_banner() {
         snapshot,
         SnapshotSource::File(PathBuf::from("tmp/flightdeck-state-HT.json")),
         MotionLevel::Off,
+        Theme::Moon,
         common::fixed_now,
     );
     let rendered = common::render_model(&model);

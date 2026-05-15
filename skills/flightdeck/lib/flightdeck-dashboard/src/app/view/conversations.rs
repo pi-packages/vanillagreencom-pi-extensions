@@ -6,22 +6,22 @@ use ratatui::Frame;
 
 use crate::app::command::SnapshotSource;
 use crate::app::model::Model;
-use crate::app::theme::Theme;
+use crate::app::theme::Palette;
 use crate::state::snapshot::ConversationStream;
 
-pub fn render(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
+pub fn render(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: &Palette) {
     if model.snapshot.conversations.is_empty() {
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(theme.border)
-            .title(Span::styled(" conversations ", theme.muted));
+            .border_style(theme.border())
+            .title(Span::styled(" conversations ", theme.muted()));
         let read_mode = if matches!(model.snapshot_source, SnapshotSource::Socket(_)) {
             "daemon socket"
         } else {
             "file-watcher"
         };
         let lines = vec![
-            Line::from(Span::styled("Conversations stream", theme.header)),
+            Line::from(Span::styled("Conversations stream", theme.header())),
             Line::from(""),
             Line::from("When connected via a daemon socket, this tab shows per-pane last prompt and assistant excerpts (newest-first, Pi streaming partials folded)."),
             Line::from(""),
@@ -30,7 +30,7 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
         frame.render_widget(
             Paragraph::new(lines)
                 .block(block)
-                .style(theme.muted)
+                .style(theme.muted())
                 .alignment(Alignment::Left)
                 .wrap(Wrap { trim: true }),
             area,
@@ -44,7 +44,7 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
         Cell::from("Role"),
         Cell::from("Excerpt"),
     ])
-    .style(theme.header);
+    .style(theme.header());
     let rows = model
         .snapshot
         .conversations
@@ -52,9 +52,9 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
         .enumerate()
         .map(|(idx, conversation)| {
             let row_style = if idx == model.selected_index() {
-                theme.selection
+                theme.selection()
             } else {
-                theme.frame
+                theme.frame()
             };
             Row::new([
                 Cell::from(time_label(conversation.ts)),
@@ -68,10 +68,10 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(theme.border_active)
+        .border_style(theme.border_active())
         .title(Line::from(vec![
-            Span::styled(" conversations ", theme.title),
-            Span::styled("newest first · pane ids hidden", theme.muted),
+            Span::styled(" conversations ", theme.title()),
+            Span::styled("newest first · pane ids hidden", theme.muted()),
         ]));
     let table = Table::new(
         rows,

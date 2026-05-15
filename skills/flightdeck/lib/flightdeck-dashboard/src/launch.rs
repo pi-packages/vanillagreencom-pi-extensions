@@ -6,7 +6,7 @@ use color_eyre::eyre::Result;
 use serde_json::Value;
 use tokio::process::Command;
 
-use crate::cli::{LaunchArgs, MotionArg};
+use crate::cli::{LaunchArgs, MotionArg, ThemeArg};
 use crate::daemon::lifecycle::{pid_alive, read_pid};
 use crate::state::tracked_entries;
 use crate::util::paths::{fd_resolve_state_dir, resolve_session_key};
@@ -16,6 +16,7 @@ const DEFAULT_WINDOW_NAME: &str = "flightdeck";
 const DASHBOARD_ENV: &str = "FLIGHTDECK_DASHBOARD";
 const WINDOW_ENV: &str = "FLIGHTDECK_DASHBOARD_WINDOW";
 const MOTION_ENV: &str = "FLIGHTDECK_DASHBOARD_MOTION";
+const THEME_ENV: &str = "FLIGHTDECK_DASHBOARD_THEME";
 const DAEMON_RUST_ENV: &str = "FLIGHTDECK_DAEMON_RUST";
 const SESSION_BIN_ENV: &str = "FLIGHTDECK_SESSION_BIN";
 const SKILL_DIR_ENV: &str = "FLIGHTDECK_SKILL_DIR";
@@ -48,6 +49,7 @@ pub async fn run(args: LaunchArgs) -> Result<()> {
         }
     };
     let window_name = select_window_name(args.window_name.as_deref());
+    let theme = select_theme(args.theme);
     let motion = select_motion(args.motion);
     let project_root = resolve_project_root();
     let explicit_state_file = args.state_file.as_deref().map(absolutize);
@@ -106,6 +108,7 @@ pub async fn run(args: LaunchArgs) -> Result<()> {
     launch_window(
         &session,
         &window_name,
+        theme,
         motion,
         explicit_state_file.as_deref(),
         &project_root,
@@ -133,6 +136,26 @@ fn select_window_name(cli: Option<&str>) -> String {
                 .filter(|value| !value.is_empty())
         })
         .unwrap_or_else(|| DEFAULT_WINDOW_NAME.to_owned())
+}
+
+fn select_theme(cli: Option<ThemeArg>) -> Option<ThemeArg> {
+    cli.or_else(|| {
+        std::env::var(THEME_ENV)
+            .ok()
+            .and_then(|value| theme_from_str(value.trim()))
+    })
+}
+
+fn theme_from_str(value: &str) -> Option<ThemeArg> {
+    if value.eq_ignore_ascii_case("moon") {
+        Some(ThemeArg::Moon)
+    } else if value.eq_ignore_ascii_case("dawn") {
+        Some(ThemeArg::Dawn)
+    } else if value.eq_ignore_ascii_case("system") {
+        Some(ThemeArg::System)
+    } else {
+        None
+    }
 }
 
 fn select_motion(cli: Option<MotionArg>) -> Option<MotionArg> {
@@ -310,6 +333,7 @@ async fn tmux_window_exists(window_name: &str) -> Result<bool> {
 async fn launch_window(
     session: &str,
     window_name: &str,
+    theme: Option<ThemeArg>,
     motion: Option<MotionArg>,
     state_file: Option<&Path>,
     project_root: &Path,
@@ -318,7 +342,7 @@ async fn launch_window(
         warn("flightdeck-session not found; dashboard window not launched".to_owned());
         return;
     };
-    let cmd = tui_command(session, motion, state_file);
+    let cmd = tui_command(session, theme, motion, state_file);
     let mut command = Command::new(session_bin);
     command.args([
         "start",
@@ -373,7 +397,12 @@ fn resolve_flightdeck_session_bin(project_root: &Path) -> Option<PathBuf> {
     which("flightdeck-session")
 }
 
-fn tui_command(session: &str, motion: Option<MotionArg>, state_file: Option<&Path>) -> String {
+fn tui_command(
+    session: &str,
+    theme: Option<ThemeArg>,
+    motion: Option<MotionArg>,
+    state_file: Option<&Path>,
+) -> String {
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("flightdeck-dashboard"));
     let mut args = vec![exe.display().to_string(), "tui".to_owned()];
     if let Some(path) = state_file {
@@ -382,6 +411,10 @@ fn tui_command(session: &str, motion: Option<MotionArg>, state_file: Option<&Pat
     } else {
         args.push("--session".to_owned());
         args.push(session.to_owned());
+    }
+    if let Some(theme) = theme {
+        args.push("--theme".to_owned());
+        args.push(theme.as_str().to_owned());
     }
     if let Some(motion) = motion {
         args.push("--motion".to_owned());

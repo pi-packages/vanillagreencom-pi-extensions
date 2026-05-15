@@ -17,11 +17,11 @@ use ratatui::Frame;
 
 use crate::app::command::SnapshotSource;
 use crate::app::model::{Model, Tab};
-use crate::app::theme::Theme;
+use crate::app::theme::Palette;
 use crate::state::snapshot::{SessionState, Staleness};
 
 pub fn render(frame: &mut Frame<'_>, model: &Model) {
-    let theme = Theme::dark();
+    let theme = model.palette();
     let area = frame.area();
     let pause_height = u16::from(model.snapshot.paused_for_user.is_some());
     let chunks = Layout::default()
@@ -50,7 +50,7 @@ pub fn render(frame: &mut Frame<'_>, model: &Model) {
     }
 }
 
-fn render_status(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
+fn render_status(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: &Palette) {
     let snapshot = &model.snapshot;
     let owner = owner_label(model);
     let elapsed = snapshot
@@ -60,17 +60,17 @@ fn render_status(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme)
     let state_counts = state_counts_label(&snapshot.counts.by_state);
 
     let mut spans = vec![
-        Span::styled(" Flightdeck ", theme.title),
+        Span::styled(" Flightdeck ", theme.title()),
         Span::raw(" "),
-        Span::styled("session ", theme.status_label),
+        Span::styled("session ", theme.status_label()),
         Span::raw(snapshot.session_id.as_str()),
         Span::raw("  "),
-        Span::styled("owner ", theme.status_label),
+        Span::styled("owner ", theme.status_label()),
         Span::raw(owner),
         Span::raw("  "),
-        Span::styled(daemon_label(model), theme.muted),
+        Span::styled(daemon_label(model), theme.muted()),
         Span::raw("  "),
-        Span::styled("elapsed ", theme.status_label),
+        Span::styled("elapsed ", theme.status_label()),
         Span::raw(elapsed),
         Span::raw("  "),
         Span::styled(
@@ -78,51 +78,51 @@ fn render_status(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme)
                 "AH:{} ISS:{} WF:{}",
                 snapshot.counts.adhoc, snapshot.counts.issue, snapshot.counts.workflow
             ),
-            theme.info,
+            theme.info(),
         ),
     ];
     if !state_counts.is_empty() {
         spans.push(Span::raw("  "));
-        spans.push(Span::styled(state_counts, theme.muted));
+        spans.push(Span::styled(state_counts, theme.muted()));
     }
     spans.push(Span::raw("  "));
     match snapshot.staleness(model.now) {
-        Staleness::Fresh => spans.push(Span::styled(" fresh ", theme.muted)),
+        Staleness::Fresh => spans.push(Span::styled(" fresh ", theme.muted())),
         Staleness::WarnAfter(age) => spans.push(Span::styled(
             format!(" stale-warn {} ", duration_label(age)),
-            theme.warning,
+            theme.warning(),
         )),
         Staleness::StaleAfter(age) => spans.push(Span::styled(
             format!(" stale {} ", duration_label(age)),
-            theme.error,
+            theme.error(),
         )),
     }
     if snapshot.terminated {
         spans.push(Span::raw("  "));
-        spans.push(Span::styled(" ✔ session complete ", theme.ok));
+        spans.push(Span::styled(" ✔ session complete ", theme.ok()));
     }
     if model.is_observer() {
         spans.push(Span::raw("  "));
-        spans.push(Span::styled(" observer ", theme.warning));
+        spans.push(Span::styled(" observer ", theme.warning()));
     }
     if let Some(error) = &model.error {
         spans.push(Span::raw("  "));
-        spans.push(Span::styled(format!(" ERR {error} "), theme.error));
+        spans.push(Span::styled(format!(" ERR {error} "), theme.error()));
     }
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(theme.border_active)
-        .title(Span::styled(" Flightdeck ", theme.title));
+        .border_style(theme.border_active())
+        .title(Span::styled(" Flightdeck ", theme.title()));
     frame.render_widget(
         Paragraph::new(Line::from(spans))
             .block(block)
-            .style(theme.status),
+            .style(theme.status()),
         area,
     );
 }
 
-fn render_pause_banner(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
+fn render_pause_banner(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: &Palette) {
     if area.height == 0 {
         return;
     }
@@ -139,10 +139,10 @@ fn render_pause_banner(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: 
         text.push_str(" · ");
         text.push_str(&trim_for_header(prompt, 96));
     }
-    frame.render_widget(Paragraph::new(text).style(theme.pause), area);
+    frame.render_widget(Paragraph::new(text).style(theme.pause()), area);
 }
 
-fn render_tabs(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
+fn render_tabs(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: &Palette) {
     let labels = model
         .tabs_enabled
         .iter()
@@ -158,16 +158,16 @@ fn render_tabs(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(theme.border)
-                .title(Span::styled(title, theme.muted)),
+                .border_style(theme.border())
+                .title(Span::styled(title, theme.muted())),
         )
         .select(model.selected_tab_position())
-        .style(theme.tab_inactive)
-        .highlight_style(theme.tab_active);
+        .style(theme.tab_inactive())
+        .highlight_style(theme.tab_active());
     frame.render_widget(tabs, area);
 }
 
-fn render_body(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
+fn render_body(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: &Palette) {
     match model.current_tab {
         Tab::Overview => overview::render(frame, area, model, theme),
         Tab::LiveFeed => live_feed::render(frame, area, model, theme),
@@ -178,7 +178,7 @@ fn render_body(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
     }
 }
 
-fn render_footer(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
+fn render_footer(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: &Palette) {
     let text = if model.ui.filter_open {
         let prefix = if model.feed_filter.error.is_some() {
             " regex invalid > "
@@ -186,8 +186,8 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme)
             " filter > "
         };
         Line::from(vec![
-            Span::styled(prefix, theme.filter),
-            Span::styled(model.feed_filter.input.clone(), theme.filter),
+            Span::styled(prefix, theme.filter()),
+            Span::styled(model.feed_filter.input.clone(), theme.filter()),
         ])
     } else {
         let noisy = if model.ui.hide_noise {
@@ -204,15 +204,15 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme)
             format!(
                 " Tab/Shift+Tab tabs  j/k select  r reload  Ctrl+N {noisy}  / {filter}  Alt+M compact  ? help  q quit "
             ),
-            theme.footer,
+            theme.footer(),
         )])
     };
-    let mut paragraph = Paragraph::new(text).style(theme.footer);
+    let mut paragraph = Paragraph::new(text).style(theme.footer());
     if model.ui.filter_open && model.feed_filter.error.is_some() {
         paragraph = paragraph.block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(theme.error),
+                .border_style(theme.error()),
         );
     }
     frame.render_widget(paragraph, area);

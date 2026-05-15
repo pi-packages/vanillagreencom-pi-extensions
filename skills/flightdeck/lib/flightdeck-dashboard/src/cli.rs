@@ -38,6 +38,9 @@ pub struct TuiArgs {
     /// Subscribe to a dashboard daemon Unix socket.
     #[arg(long, value_name = "PATH")]
     pub socket: Option<PathBuf>,
+    /// Color theme for dashboard rendering.
+    #[arg(long, value_enum)]
+    pub theme: Option<ThemeArg>,
     /// Motion level for dashboard effects.
     #[arg(long, value_enum)]
     pub motion: Option<MotionArg>,
@@ -94,6 +97,9 @@ pub struct SuperviseArgs {
     /// Flightdeck tmux session name/id/key.
     #[arg(long, value_name = "NAME")]
     pub session: Option<String>,
+    /// Color theme for dashboard rendering when a TUI is spawned by compatible callers.
+    #[arg(long, value_enum)]
+    pub theme: Option<ThemeArg>,
 }
 
 #[derive(Debug, Args)]
@@ -124,6 +130,9 @@ pub struct LaunchArgs {
     /// Read a concrete Flightdeck master-state JSON file.
     #[arg(long, value_name = "PATH")]
     pub state_file: Option<PathBuf>,
+    /// Color theme for the launched TUI.
+    #[arg(long, value_enum)]
+    pub theme: Option<ThemeArg>,
     /// Motion level for the launched TUI.
     #[arg(long, value_enum)]
     pub motion: Option<MotionArg>,
@@ -133,6 +142,24 @@ pub struct LaunchArgs {
     /// Ignore already-running guards for debugging.
     #[arg(long)]
     pub force: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ThemeArg {
+    Moon,
+    Dawn,
+    System,
+}
+
+impl ThemeArg {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Moon => "moon",
+            Self::Dawn => "dawn",
+            Self::System => "system",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

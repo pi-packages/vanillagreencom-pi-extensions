@@ -6,6 +6,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use flightdeck_dashboard::app::command::SnapshotSource;
 use flightdeck_dashboard::app::model::{Model, Tab};
 use flightdeck_dashboard::app::motion::MotionLevel;
+use flightdeck_dashboard::app::theme::Theme;
 use flightdeck_dashboard::app::view;
 use flightdeck_dashboard::fixtures;
 use ratatui::backend::TestBackend;
@@ -22,7 +23,13 @@ pub fn fixed_now() -> DateTime<Utc> {
 
 pub fn model_for_fixture(name: &'static str, motion: MotionLevel) -> Model {
     let snapshot = fixtures::load_demo_snapshot(name, fixed_now()).expect("fixture loads");
-    let mut model = Model::new(snapshot, SnapshotSource::Demo(name), motion, fixed_now);
+    let mut model = Model::new(
+        snapshot,
+        SnapshotSource::Demo(name),
+        motion,
+        Theme::Moon,
+        fixed_now,
+    );
     model.current_pane_id = None;
     model
 }

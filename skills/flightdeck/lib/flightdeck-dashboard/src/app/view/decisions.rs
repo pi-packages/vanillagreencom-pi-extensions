@@ -5,7 +5,7 @@ use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, Wrap};
 use ratatui::Frame;
 
 use crate::app::model::Model;
-use crate::app::theme::Theme;
+use crate::app::theme::Palette;
 
 #[derive(Debug, Clone)]
 pub struct DecisionRow {
@@ -16,17 +16,17 @@ pub struct DecisionRow {
     pub answer: String,
 }
 
-pub fn render(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
+pub fn render(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: &Palette) {
     let rows = decision_rows(model);
     if rows.is_empty() {
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(theme.border)
-            .title(Span::styled(" decisions ", theme.muted));
+            .border_style(theme.border())
+            .title(Span::styled(" decisions ", theme.muted()));
         frame.render_widget(
             Paragraph::new("No decisions recorded yet.")
                 .block(block)
-                .style(theme.muted)
+                .style(theme.muted())
                 .alignment(Alignment::Center)
                 .wrap(Wrap { trim: true }),
             area,
@@ -40,15 +40,15 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
         Cell::from("Prompt tag"),
         Cell::from("Answer"),
     ])
-    .style(theme.header);
+    .style(theme.header());
     let table_rows = rows
         .iter()
         .enumerate()
         .map(|(idx, row)| {
             let row_style = if idx == model.selected_index() {
-                theme.selection
+                theme.selection()
             } else {
-                theme.frame
+                theme.frame()
             };
             Row::new([
                 Cell::from(row.ts.format("%H:%M:%S").to_string()),
@@ -62,10 +62,10 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(theme.border_active)
+        .border_style(theme.border_active())
         .title(Line::from(vec![
-            Span::styled(" decisions ", theme.title),
-            Span::styled("Enter opens answer detail", theme.muted),
+            Span::styled(" decisions ", theme.title()),
+            Span::styled("Enter opens answer detail", theme.muted()),
         ]));
     let table = Table::new(
         table_rows,
