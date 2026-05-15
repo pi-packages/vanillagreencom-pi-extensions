@@ -6,6 +6,7 @@ import test from "node:test";
 import type { AgentConfig } from "../extensions/subagent/agents.js";
 import {
 	appendBgChatMessages,
+	agentSystemPromptMarkdownTheme,
 	buildMonitorSessionGroups,
 	buildAgentRows,
 	clampMonitorUiToRows,
@@ -647,6 +648,17 @@ test("Monitor session selection shows aggregate detail", () => {
 	assert.match(plain, /Pane ID:\s+%1/);
 	assert.match(plain, /Transcript:\s+\/tmp\/planner-session\.jsonl/);
 	assert.match(plain, /Task #2 · \d{2}:\d{2} · running/);
+
+	const colored = renderMonitorSessionDetail(group, taskNumberById([first, second]), uiState({ tab: "monitor" }), 140, 40, ansiTheme as any).join("\n");
+	assert.match(colored, /\x1b\[35m\x1b\[1mSession/);
+	assert.match(colored, /\n\n\x1b\[35m\x1b\[1mTask list/);
+});
+
+test("Monitor footer labels arrow navigation as pane switch", () => {
+	const rendered = stripAnsi(monitorFooterHint(theme as any));
+
+	assert.match(rendered, /←\/→ pane/);
+	assert.doesNotMatch(rendered, /tree↔detail/);
 });
 
 test("Agents tab rows are flat static catalog entries", () => {
@@ -697,8 +709,28 @@ test("Agents Inspector shows static config only for agent with active tasks", ()
 	assert.match(rendered, /Pane: running \(started \d{2}:\d{2}\)/);
 	assert.match(rendered, /System Prompt/);
 	assert.match(rendered, /Planner system prompt body\./);
+	assert.doesNotMatch(rendered, /planner \[(pane|bg)\]|\[(P|U)\]/);
 	assert.doesNotMatch(rendered, new RegExp(taskId));
 	assert.doesNotMatch(rendered, /Task ID|Transcript|Latest Message|completion summary unavailable|Last task|Pane session/i);
+});
+
+test("Agents Inspector colors prompt label magenta but markdown tokens accent", () => {
+	const config = agent("planner", true, {
+		systemPrompt: "# Planner Agent\n\nUse `plan.md`.\n\n- Keep scope tight.",
+	});
+	const rendered = renderAgentInspector(config, new Map(), uiState(), 120, 40, ansiTheme as any).join("\n");
+	const markdownTheme = agentSystemPromptMarkdownTheme(ansiTheme as any);
+	const promptTokens = [
+		markdownTheme.heading(ansiTheme.bold("Planner Agent")),
+		markdownTheme.code("plan.md"),
+		markdownTheme.listBullet("- "),
+	].join("\n");
+
+	assert.match(rendered, /\x1b\[35m\x1b\[1mSystem Prompt/);
+	assert.match(promptTokens, /\x1b\[36m\x1b\[1mPlanner Agent/);
+	assert.match(promptTokens, /\x1b\[36mplan\.md/);
+	assert.match(promptTokens, /\x1b\[36m- /);
+	assert.doesNotMatch(promptTokens, /\x1b\[35m/);
 });
 
 test("Monitor tab task rendering still exposes task trace metadata", async () => {

@@ -43,7 +43,7 @@ Persistent panes require running Pi inside tmux.
 
 | Command | Action |
 | --- | --- |
-| `/agents` | Open the agent browser. |
+| `/agents` | Open the agent browser for both project and user scopes. |
 | `/agents project\|user\|both` | Open the browser with an explicit scope. |
 | `/agents show <name> [scope]` | Inspect an agent. |
 | `/agents:start <name>` | Start or resume a pane. |

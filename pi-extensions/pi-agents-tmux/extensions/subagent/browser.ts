@@ -3,7 +3,6 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
-	getMarkdownTheme,
 	type ExtensionContext,
 	type Theme,
 	withFileMutationQueue,
@@ -14,6 +13,7 @@ import {
 	truncateToWidth,
 	visibleWidth,
 	wrapTextWithAnsi,
+	type MarkdownTheme,
 	type TUI,
 } from "@earendil-works/pi-tui";
 import {
@@ -558,6 +558,26 @@ function displayAgentEffort(agent: AgentConfig): string {
 	return normalizeReasoningEffort(agent.effort) ?? effortFromModelId(agent.model) ?? "default";
 }
 
+export function agentSystemPromptMarkdownTheme(theme: Theme): MarkdownTheme {
+	return {
+		heading: (text: string) => theme.fg("accent", text),
+		link: (text: string) => theme.fg("accent", text),
+		linkUrl: (text: string) => theme.fg("accent", text),
+		code: (text: string) => theme.fg("accent", text),
+		codeBlock: (text: string) => theme.fg("toolOutput", text),
+		codeBlockBorder: (text: string) => theme.fg("dim", text),
+		quote: (text: string) => theme.fg("toolOutput", text),
+		quoteBorder: (text: string) => theme.fg("dim", text),
+		hr: (text: string) => theme.fg("dim", text),
+		listBullet: (text: string) => theme.fg("accent", text),
+		bold: (text: string) => theme.bold(text),
+		italic: (text: string) => text,
+		underline: (text: string) => text,
+		strikethrough: (text: string) => text,
+		highlightCode: (code: string) => code.split(/\r?\n/).map((line) => theme.fg("toolOutput", line)),
+	};
+}
+
 function recordRunEffort(record: PaneTaskRecord, agentConfig: AgentConfig | undefined): string | undefined {
 	return normalizeReasoningEffort(record.effort) ?? effortFromModelId(record.model) ?? normalizeReasoningEffort(agentConfig?.effort) ?? effortFromModelId(agentConfig?.model);
 }
@@ -591,7 +611,7 @@ export function renderAgentList(rows: AgentBrowserRow[], statuses: Map<string, A
 
 function renderAgentPromptViewport(agent: AgentConfig, ui: AgentBrowserUiState, width: number, rows: number, theme: Theme): string[] {
 	const prompt = agent.systemPrompt.trim() || theme.fg("dim", "(empty prompt)");
-	const renderedPrompt = new Markdown(prompt, 0, 0, getMarkdownTheme()).render(width);
+	const renderedPrompt = new Markdown(prompt, 0, 0, agentSystemPromptMarkdownTheme(theme)).render(width);
 	const promptLines = renderedPrompt.length > 0 ? renderedPrompt : wrapTextWithAnsi(prompt, width);
 	const visibleRows = Math.max(1, rows - 1);
 	const maxScroll = Math.max(0, promptLines.length - visibleRows);
@@ -632,7 +652,7 @@ export function renderAgentInspector(agent: AgentConfig | undefined, statuses: M
 	const lines: string[] = [];
 	pushWrapped(
 		lines,
-		`${agentPaneTitle(theme, "Inspector", ui.pane === "inspector")} ${agentEntityTitle(theme, agent.name)} ${theme.fg("dim", `[${agent.pane ? "pane" : "bg"}]`)} ${theme.fg("dim", `[${agent.source === "project" ? "P" : "U"}]`)}`,
+		`${agentPaneTitle(theme, "Inspector", ui.pane === "inspector")} ${agentEntityTitle(theme, agent.name)}`,
 	);
 	lines.push("");
 	lines.push(...wrapTextWithAnsi(agent.description || "No description.", safeWidth).slice(0, 3));
@@ -647,7 +667,7 @@ export function renderAgentInspector(agent: AgentConfig | undefined, statuses: M
 	pushWrapped(lines, `${theme.fg("muted", "Source path")}: ${compactPath(agent.filePath, { baseDir: process.cwd(), maxChars: Number.POSITIVE_INFINITY }) || compactAgentPath(agent.filePath)}`);
 	const paneLine = paneStaticStatus(agent, status);
 	if (paneLine) pushWrapped(lines, `${theme.fg("muted", "Pane")}: ${paneLine}`);
-	lines.push("", theme.fg("muted", theme.bold("System Prompt")));
+	lines.push("", ansiMagenta(theme.bold("System Prompt")));
 	const promptRows = Math.max(1, rows - lines.length);
 	lines.push(...renderAgentPromptViewport(agent, ui, safeWidth, promptRows, theme));
 	return lines.slice(0, rows);
@@ -1038,7 +1058,7 @@ function renderTraceContentLine(raw: string, type: TraceViewerItem["type"] | und
 	if (!trimmed) return [""];
 	if (/^── .+ ──$/.test(trimmed)) return wrapTextWithAnsi(theme.fg("muted", trimmed.replace(/(assistant|user|tool call|tool start|tool end|turn start|turn end|exit)/i, (match) => theme.fg("accent", theme.bold(match)))), width);
 	if (/^-{3,}$/.test(trimmed)) return [];
-	if (/^(Overview|Metadata|Summary|Files changed|Validation|Notes|Task|Artifacts)$/i.test(trimmed)) {
+	if (/^(Overview|Metadata|Summary|Files changed|Validation|Notes|Task|Artifacts|Session|Task list|System Prompt)$/i.test(trimmed)) {
 		return wrapTextWithAnsi(ansiMagenta(theme.bold(trimmed)), width);
 	}
 	const labelMatch = line.match(/^(Ref|Agent|Session #|Task #|Status|Task ID|Task file|Created|Done|Model|Effort|Session|Session type|Start|Latest|Duration|Tasks|Usage|Pane ID|SessionKey|Transcript|Completion|Archive|Source)\s{2,}(.+)$/);
@@ -1053,7 +1073,7 @@ function renderTraceContentLine(raw: string, type: TraceViewerItem["type"] | und
 }
 
 export function monitorFooterHint(theme: Theme): string {
-	return `${ansiYellow("tab")} ${theme.fg("dim", "switch · ")}${ansiYellow("↑/↓ -/=")} ${theme.fg("dim", "page · ")}${ansiYellow("←/→")} ${theme.fg("dim", "tree↔detail · ")}${ansiYellow("enter")} ${theme.fg("dim", "open/toggle")}${theme.fg("dim", " · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`;
+	return `${ansiYellow("tab")} ${theme.fg("dim", "switch · ")}${ansiYellow("↑/↓ -/=")} ${theme.fg("dim", "page · ")}${ansiYellow("←/→")} ${theme.fg("dim", "pane · ")}${ansiYellow("enter")} ${theme.fg("dim", "open/toggle")}${theme.fg("dim", " · ")}${ansiYellow("esc")} ${theme.fg("dim", "close")}`;
 }
 
 export function renderMonitorDetail(
@@ -1238,7 +1258,7 @@ export function renderMonitorSessionDetail(group: MonitorSessionGroup | undefine
 		group.type === "pane" && group.transcriptPath ? `Transcript  ${group.transcriptPath}` : "",
 		group.type === "bg-lane" && group.sessionKey ? `SessionKey  ${group.sessionKey}` : "",
 		group.type === "bg-one-shot" && group.transcriptPath ? `Transcript  ${group.transcriptPath}` : "",
-		"",
+		" ",
 		"Task list",
 		"---------",
 		...group.records.map((record) => `${monitorStatusIcon(record.status, theme, animateSpinners)} Task ${monitorTaskRowLabel(record, taskNumbers)} · ${monitorStatusText(record.status, theme)}`),
@@ -1295,7 +1315,6 @@ function renderUnifiedAgentDetail(
 }
 
 function renderAgentsBody(
-	discovery: ReturnType<typeof discoverAgents>,
 	rowsForList: AgentBrowserRow[],
 	statuses: Map<string, AgentPaneStatus>,
 	ui: AgentBrowserUiState,
@@ -1309,14 +1328,10 @@ function renderAgentsBody(
 	const leftWidth = Math.max(10, Math.min(maxLeftWidth, Math.max(Math.min(AGENTS_LEFT_MIN_WIDTH, maxLeftWidth), desiredLeftWidth)));
 	const rightWidth = Math.max(1, width - leftWidth - 3);
 	const bodyRows = layout.bodyRows;
-	const liveCount = [...statuses.values()].filter((status) => status.live).length;
-	const paneCount = discovery.agents.filter((agent) => agent.pane).length;
 	const left = renderAgentList(rowsForList, statuses, ui, leftWidth, theme, layout.listRows);
 	const right = renderUnifiedAgentDetail(selectedRow, statuses, ui, rightWidth, bodyRows, theme);
 	const rows = bodyRows;
-	const scopeLabel = ui.scope === "both" ? "all scopes" : `${ui.scope} scope`;
-	const overviewLine = `${theme.fg("muted", scopeLabel)} · ${discovery.agents.length} agents · ${paneCount} pane · ${liveCount} live`;
-	const lines = [...wrapTextWithAnsi(overviewLine, width), agentDivider(width, theme)];
+	const lines = [agentDivider(width, theme)];
 	for (let i = 0; i < rows; i += 1) {
 		lines.push(`${agentPad(left[i] ?? "", leftWidth)} ${theme.fg("dim", "│")} ${truncateToWidth(right[i] ?? "", rightWidth, "")}`);
 	}
@@ -1630,7 +1645,7 @@ function createAgentsBrowserComponent(
 		const lines = [
 			tabLine,
 			"",
-			...renderAgentsBody(discovery, agentRows(), statuses, ui, bodyWidth, theme, layout),
+			...renderAgentsBody(agentRows(), statuses, ui, bodyWidth, theme, layout),
 			agentDivider(bodyWidth, theme),
 			...wrapTextWithAnsi(footer, bodyWidth),
 		];

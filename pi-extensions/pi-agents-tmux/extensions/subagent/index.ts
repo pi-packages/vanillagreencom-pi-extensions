@@ -1217,7 +1217,7 @@ export default function (pi: ExtensionAPI) {
 		const parentThinkingLevel = pi.getThinkingLevel();
 		const parentSessionId = runtimeSessionId(ctx);
 		const runtimeRoot = sessionRuntimeDir(parentSessionId);
-		await openAgentsBrowser(ctx, "project", undefined, runtimeRoot, parentSessionId, parentModel, parentThinkingLevel, pi.getActiveTools(), () => activeDashboardItems(Object.values(dashboardState.items)), removeDashboardAgent);
+		await openAgentsBrowser(ctx, "both", undefined, runtimeRoot, parentSessionId, parentModel, parentThinkingLevel, pi.getActiveTools(), () => activeDashboardItems(Object.values(dashboardState.items)), removeDashboardAgent);
 	};
 	const popup = popupShortcut();
 	if (popup !== "none") {

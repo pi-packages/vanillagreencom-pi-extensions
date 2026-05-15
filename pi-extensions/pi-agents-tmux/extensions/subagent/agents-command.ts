@@ -30,7 +30,7 @@ export function registerAgentsCommands(deps: AgentsCommandDeps): void {
 		const parts = args.trim().split(/\s+/).filter(Boolean);
 		const scopes = new Set<AgentScope>(["user", "project", "both"]);
 		const command = parts[0];
-		let scope: AgentScope = "project";
+		let scope: AgentScope = "both";
 		let content = "";
 		let messageDetails: Record<string, unknown> | undefined;
 
