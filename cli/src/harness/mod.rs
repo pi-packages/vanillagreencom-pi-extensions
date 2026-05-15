@@ -386,35 +386,23 @@ mod tests {
 
     #[test]
     fn pi_global_paths_honor_env_override() {
-        static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _guard = ENV_LOCK.lock().unwrap();
-        let prev = std::env::var_os("PI_CODING_AGENT_DIR");
         let sandbox =
             std::env::temp_dir().join(format!("vstack_pi_env_override_{}", std::process::id()));
-        unsafe {
-            std::env::set_var("PI_CODING_AGENT_DIR", &sandbox);
-        }
 
-        let agents_dir = Harness::Pi.agents_dir(true);
-        let skills_dir = Harness::Pi.skills_dir(true);
-        let install_root = Harness::Pi.install_root(true);
+        crate::test_util::with_pi_dir(&sandbox, || {
+            let agents_dir = Harness::Pi.agents_dir(true);
+            let skills_dir = Harness::Pi.skills_dir(true);
+            let install_root = Harness::Pi.install_root(true);
 
-        assert!(
-            agents_dir.starts_with(&sandbox),
-            "expected agents under {sandbox:?}, got {agents_dir:?}"
-        );
-        assert!(
-            skills_dir.starts_with(&sandbox),
-            "expected skills under {sandbox:?}, got {skills_dir:?}"
-        );
-        assert_eq!(install_root, sandbox);
-
-        unsafe {
-            if let Some(prev) = prev {
-                std::env::set_var("PI_CODING_AGENT_DIR", prev);
-            } else {
-                std::env::remove_var("PI_CODING_AGENT_DIR");
-            }
-        }
+            assert!(
+                agents_dir.starts_with(&sandbox),
+                "expected agents under {sandbox:?}, got {agents_dir:?}"
+            );
+            assert!(
+                skills_dir.starts_with(&sandbox),
+                "expected skills under {sandbox:?}, got {skills_dir:?}"
+            );
+            assert_eq!(install_root, sandbox);
+        });
     }
 }
