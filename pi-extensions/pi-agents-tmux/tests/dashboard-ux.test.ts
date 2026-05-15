@@ -232,8 +232,8 @@ test("dashboard expanded message lines mark inbound prompt and outbound result",
 		items: { a: dashboardItem({ status: "completed", task: "Inspect tests", message: "No gaps found.", messageProvenance: "persisted" }) },
 	}, theme as any, cwd, 220).join("\n"));
 
-	assert.match(rendered, /-> Inspect tests/);
-	assert.match(rendered, /<- No gaps found\./);
+	assert.match(rendered, /\|_ -> Inspect tests/);
+	assert.match(rendered, /\|_ <- No gaps found\./);
 });
 
 test("dashboard spinner setting replaces running animation with static gear", () => {

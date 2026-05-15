@@ -199,11 +199,12 @@ function outgoingDashboardMessage(item: SubagentDashboardItem): string | undefin
 }
 
 function expandedDashboardMessageLines(item: SubagentDashboardItem, stem: string, theme: Theme, width: number): string[] {
-	const maxChars = Math.max(48, width - 20);
+	const childBranch = theme.fg("muted", "|_ ");
+	const maxChars = Math.max(48, width - 23);
 	const lines: string[] = [];
-	if (item.task?.trim()) lines.push(`${stem}${ansiYellow("->")} ${theme.fg("toolOutput", oneLinePreview(item.task, maxChars))}`);
+	if (item.task?.trim()) lines.push(`${stem}${childBranch}${ansiYellow("->")} ${theme.fg("toolOutput", oneLinePreview(item.task, maxChars))}`);
 	const outgoing = outgoingDashboardMessage(item);
-	if (outgoing) lines.push(`${stem}${ansiGreen("<-")} ${theme.fg("toolOutput", oneLinePreview(outgoing, maxChars))}`);
+	if (outgoing) lines.push(`${stem}${childBranch}${ansiGreen("<-")} ${theme.fg("toolOutput", oneLinePreview(outgoing, maxChars))}`);
 	return lines;
 }
 
