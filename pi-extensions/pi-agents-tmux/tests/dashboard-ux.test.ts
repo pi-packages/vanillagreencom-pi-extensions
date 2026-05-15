@@ -10,7 +10,6 @@ import {
 	buildAgentRows,
 	clampMonitorUiToRows,
 	monitorFooterHint,
-	monitorRecordLabel,
 	monitorTreeRows,
 	renderMonitorDetail,
 	renderAgentBrowserTabs,
@@ -413,14 +412,37 @@ test("task echo fallback is suppressed but different fallback renders", () => {
 	assert.equal(messages.find((message) => message.taskId === differentItem.taskId && message.kind === "completion")?.body, "actual completion body");
 });
 
-test("monitor labels number repeated same-agent tasks latest-first friendly", () => {
-	const first = record("reviewer-arch", "reviewer-arch-1700000000-11111111", "2026-05-14T05:00:00.000Z");
-	const second = record("reviewer-arch", "reviewer-arch-1700000120-77abfc41", "2026-05-14T05:02:00.000Z");
-	const numbers = taskNumberById([second, first]);
+test("Monitor numbers repeated agent launches as sessions and resets task numbers per session", async () => {
+	const first = record("reviewer-arch", "reviewer-arch-1700000000-11111111", "2026-05-14T05:00:00.000Z", { kind: "oneshot", sessionMode: "fresh" });
+	const second = record("reviewer-arch", "reviewer-arch-1700000120-77abfc41", "2026-05-14T05:02:00.000Z", { kind: "oneshot", sessionMode: "fresh" });
+	const paneFirst = record("planner", "planner-1700000180-aaaaaaaa", "2026-05-14T05:03:00.000Z", { kind: "pane", paneId: "%1" });
+	const paneSecond = record("planner", "planner-1700000240-bbbbbbbb", "2026-05-14T05:04:00.000Z", { kind: "pane", paneId: "%1" });
+	const records = [second, first, paneSecond, paneFirst];
+	const numbers = taskNumberById(records);
 
 	assert.equal(numbers.get(first.taskId), 1);
-	assert.equal(numbers.get(second.taskId), 2);
-	assert.match(monitorRecordLabel(second, numbers), /reviewer-arch #2 · \d{2}:\d{2}$/);
+	assert.equal(numbers.get(second.taskId), 1);
+	assert.equal(numbers.get(paneFirst.taskId), 1);
+	assert.equal(numbers.get(paneSecond.taskId), 2);
+
+	const groups = buildMonitorSessionGroups(records);
+	const latestReviewerGroup = groups.find((group) => group.agent === "reviewer-arch" && group.records[0]?.taskId === second.taskId)!;
+	const firstReviewerGroup = groups.find((group) => group.agent === "reviewer-arch" && group.records[0]?.taskId === first.taskId)!;
+	assert.equal(firstReviewerGroup.sessionNumber, 1);
+	assert.equal(latestReviewerGroup.sessionNumber, 2);
+
+	const tree = renderMonitorTree(monitorTreeRows(groups), records, new Set(), uiState({ tab: "monitor", pane: "list" }), 180, theme as any, 20).join("\n").replace(/\x1b\[[0-9;]*m/g, "");
+	assert.match(tree, /reviewer-arch · session #2 · fresh/);
+	assert.match(tree, /reviewer-arch · session #1 · fresh/);
+	assert.match(tree, /Task #1 · \d{2}:\d{2} · completed/);
+	assert.doesNotMatch(tree, /reviewer-arch #2/);
+
+	const items = await traceViewerItems(second, numbers.get(second.taskId), { agents: [agent("reviewer-arch")] }, latestReviewerGroup.sessionNumber);
+	const detail = renderMonitorDetail(second, new Map([[second.taskId, { items }]]), uiState({ tab: "monitor", pane: "inspector" }), numbers.get(second.taskId), { agents: [agent("reviewer-arch")] } as any, 180, 30, theme as any, latestReviewerGroup.sessionNumber).join("\n").replace(/\x1b\[[0-9;]*m/g, "");
+	assert.match(detail, /reviewer-arch · session #2 · task #1 · completed/);
+	assert.match(items[0]!.text, /Session #  2/);
+	assert.match(items[0]!.text, /Task #   1/);
+	assert.doesNotMatch(detail, /reviewer-arch #2/);
 });
 
 test("Monitor tab line replaces History", () => {
@@ -620,7 +642,6 @@ test("Monitor tab task rendering still exposes task trace metadata", async () =>
 	const numbers = taskNumberById([taskRecord]);
 	const items = await traceViewerItems(taskRecord, numbers.get(taskId), { agents: [agent("planner", true, { effort: "xhigh" })] });
 
-	assert.match(monitorRecordLabel(taskRecord, numbers), /planner #1 · \d{2}:\d{2}$/);
 	assert.match(items[0]!.text, /Task ID  planner-1700000120-bbbbbbbb/);
 	assert.match(items[0]!.text, /Model    openai-codex\/gpt-5\.5/);
 	assert.match(items[0]!.text, /Effort   xhigh/);

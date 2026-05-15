@@ -767,6 +767,7 @@ export interface MonitorSessionGroup {
 	latestAt: string;
 	paneId?: string;
 	records: PaneTaskRecord[];
+	sessionNumber?: number;
 	sessionKey?: string;
 	sessionMode?: PaneTaskRecord["sessionMode"];
 	taskCount: number;
@@ -789,15 +790,16 @@ function sortedMonitorRecords(registry: PaneTaskRegistry): PaneTaskRecord[] {
 }
 
 export function taskNumberById(records: PaneTaskRecord[]): Map<string, number> {
-	const byAgent = new Map<string, PaneTaskRecord[]>();
+	const bySession = new Map<string, PaneTaskRecord[]>();
 	for (const record of records) {
 		if (!record.taskId || !record.agent) continue;
-		const list = byAgent.get(record.agent) ?? [];
+		const sessionId = monitorSessionKey(record).id;
+		const list = bySession.get(sessionId) ?? [];
 		list.push(record);
-		byAgent.set(record.agent, list);
+		bySession.set(sessionId, list);
 	}
 	const out = new Map<string, number>();
-	for (const list of byAgent.values()) {
+	for (const list of bySession.values()) {
 		list
 			.sort((a, b) => {
 				const delta = recordTimestampLocal(a) - recordTimestampLocal(b);
@@ -808,18 +810,16 @@ export function taskNumberById(records: PaneTaskRecord[]): Map<string, number> {
 	return out;
 }
 
+function sessionNumberLabel(group: MonitorSessionGroup | { sessionNumber?: number }, prefix = "session"): string | undefined {
+	return group.sessionNumber ? `${prefix} #${group.sessionNumber}` : undefined;
+}
+
 function recordClockTime(record: PaneTaskRecord): string {
 	const raw = record.completedAt ?? record.updatedAt ?? record.createdAt;
 	if (!raw) return "--:--";
 	const date = new Date(raw);
 	if (!Number.isFinite(date.getTime())) return "--:--";
 	return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-}
-
-export function monitorRecordLabel(record: PaneTaskRecord, taskNumbers: Map<string, number>): string {
-	const number = taskNumbers.get(record.taskId);
-	const numberText = number ? ` #${number}` : "";
-	return `${record.agent}${numberText} · ${recordClockTime(record)}`;
 }
 
 export function monitorTaskRowLabel(record: PaneTaskRecord, taskNumbers: Map<string, number>): string {
@@ -916,6 +916,21 @@ export function buildMonitorSessionGroups(records: PaneTaskRecord[]): MonitorSes
 			usage: usageSum(groupRecords),
 		});
 	}
+	const groupsByAgent = new Map<string, MonitorSessionGroup[]>();
+	for (const group of groups) {
+		const list = groupsByAgent.get(group.agent) ?? [];
+		list.push(group);
+		groupsByAgent.set(group.agent, list);
+	}
+	for (const list of groupsByAgent.values()) {
+		if (list.length <= 1) continue;
+		list
+			.sort((a, b) => {
+				const delta = Date.parse(a.createdAt) - Date.parse(b.createdAt);
+				return delta !== 0 ? delta : a.id.localeCompare(b.id);
+			})
+			.forEach((group, index) => { group.sessionNumber = index + 1; });
+	}
 	return groups.sort((a, b) => {
 		const delta = Date.parse(b.latestAt) - Date.parse(a.latestAt);
 		return delta !== 0 ? delta : a.id.localeCompare(b.id);
@@ -976,10 +991,12 @@ function monitorSessionModeLabel(group: MonitorSessionGroup): string | undefined
 
 function monitorSessionRowLabel(group: MonitorSessionGroup, theme: Theme): string {
 	const mode = monitorSessionModeLabel(group);
+	const sessionNumber = sessionNumberLabel(group);
+	const sessionNumberSuffix = sessionNumber ? `${theme.fg("dim", " · ")}${theme.fg("muted", sessionNumber)}` : "";
 	const modeSuffix = mode ? `${theme.fg("dim", " · ")}${theme.fg("muted", mode)}` : "";
 	const tasksText = group.taskCount === 1 ? "1 task" : `${group.taskCount} tasks`;
 	const meta = theme.fg("dim", ` (${tasksText} · last ${formatRelativeTime(group.latestAt)})`);
-	return `${theme.fg("muted", monitorSessionKindLabel(group))}${theme.fg("dim", " · ")}${ansiMagenta(group.agent)}${modeSuffix}${meta}`;
+	return `${theme.fg("muted", monitorSessionKindLabel(group))}${theme.fg("dim", " · ")}${ansiMagenta(group.agent)}${sessionNumberSuffix}${modeSuffix}${meta}`;
 }
 
 export function renderMonitorTree(rows: MonitorTreeRow[], records: PaneTaskRecord[], collapsedSessionIds: Set<string>, ui: AgentBrowserUiState, width: number, theme: Theme, listRows: number, animateSpinners = true): string[] {
@@ -1072,7 +1089,7 @@ function renderTraceContentLine(raw: string, type: TraceViewerItem["type"] | und
 	if (/^(Overview|Metadata|Summary|Files changed|Validation|Notes|Task|Artifacts)$/i.test(trimmed)) {
 		return wrapTextWithAnsi(ansiMagenta(theme.bold(trimmed)), width);
 	}
-	const labelMatch = line.match(/^(Ref|Agent|Task #|Status|Task ID|Created|Done|Model|Effort|Session|Session type|Start|Latest|Duration|Tasks|Usage|Pane ID|SessionKey|Transcript|Completion|Archive|Source)\s{2,}(.+)$/);
+	const labelMatch = line.match(/^(Ref|Agent|Session #|Task #|Status|Task ID|Created|Done|Model|Effort|Session|Session type|Start|Latest|Duration|Tasks|Usage|Pane ID|SessionKey|Transcript|Completion|Archive|Source)\s{2,}(.+)$/);
 	if (labelMatch) return wrapTextWithAnsi(colorTraceValue(labelMatch[1], labelMatch[2], theme), width);
 	if (traceLineLooksJsonLike(line, type)) return wrapTextWithAnsi(highlightInlinePreview(line, theme), width);
 	const bullet = line.match(/^(\s*)([-*]|\d+\.)\s+(.*)$/);
@@ -1083,16 +1100,17 @@ function renderTraceContentLine(raw: string, type: TraceViewerItem["type"] | und
 	return wrapTextWithAnsi(theme.fg(type === "summary" ? "text" : "toolOutput", backtick), width);
 }
 
-function monitorTaskTitle(record: PaneTaskRecord, taskNumber: number | undefined, discovery: ReturnType<typeof discoverAgents>, theme: Theme, active: boolean): string {
+function monitorTaskTitle(record: PaneTaskRecord, taskNumber: number | undefined, discovery: ReturnType<typeof discoverAgents>, theme: Theme, active: boolean, sessionNumber?: number): string {
 	const agentConfig = discovery.agents.find((agent) => agent.name === record.agent);
-	const taskNumberText = taskNumber ? ` #${taskNumber}` : "";
+	const sessionNumberText = sessionNumber ? `${theme.fg("dim", " · ")}${theme.fg("muted", `session #${sessionNumber}`)}` : "";
+	const taskNumberText = taskNumber ? `${theme.fg("dim", " · ")}${theme.fg("muted", `task #${taskNumber}`)}` : "";
 	const kind = recordMonitorKind(record) === "pane" ? "pane" : "bg";
 	const session = sessionModeChipLabel({ kind: recordMonitorKind(record), sessionMode: record.sessionMode, sessionKey: record.sessionKey });
 	const sessionPart = session ? `${theme.fg("dim", " · ")}${theme.fg("muted", session)}` : "";
 	const model = recordRunModel(record, agentConfig);
 	const effort = recordRunEffort(record, agentConfig);
 	const modelPart = model ? `${theme.fg("dim", " · ")}${theme.fg("muted", `${model}${effort ? ` ${effort}` : ""}`)}` : "";
-	return `${agentPaneTitle(theme, "Detail", active)} ${ansiMagenta(theme.bold(`${record.agent}${taskNumberText}`))}${theme.fg("dim", " · ")}${monitorStatusText(record.status, theme)}${theme.fg("dim", " · ")}${theme.fg("muted", kind)}${sessionPart}${modelPart}`;
+	return `${agentPaneTitle(theme, "Detail", active)} ${ansiMagenta(theme.bold(record.agent))}${sessionNumberText}${taskNumberText}${theme.fg("dim", " · ")}${monitorStatusText(record.status, theme)}${theme.fg("dim", " · ")}${theme.fg("muted", kind)}${sessionPart}${modelPart}`;
 }
 
 export function monitorFooterHint(theme: Theme): string {
@@ -1108,6 +1126,7 @@ export function renderMonitorDetail(
 	width: number,
 	rows: number,
 	theme: Theme,
+	sessionNumber?: number,
 ): string[] {
 	if (!record) {
 		return [`${agentPaneTitle(theme, "Detail", ui.pane === "inspector")} ${theme.fg("dim", "Select a task to view its trace.")}`];
@@ -1119,7 +1138,7 @@ export function renderMonitorDetail(
 	const subtabs: TraceViewerItem[] = items ?? MONITOR_SUBTAB_LABELS.map((label) => ({ label, text: placeholderText, type: label.toLowerCase() as TraceViewerItem["type"] }));
 	const subtabIndex = Math.max(0, Math.min(ui.monitorSubtab, subtabs.length - 1));
 	ui.monitorSubtab = subtabIndex;
-	const titleLine = monitorTaskTitle(record, taskNumber, discovery, theme, ui.pane === "inspector");
+	const titleLine = monitorTaskTitle(record, taskNumber, discovery, theme, ui.pane === "inspector", sessionNumber);
 	const subtabLine = renderTraceTabBar(subtabs, subtabIndex, safeWidth, theme);
 	const item = subtabs[subtabIndex];
 	const fileLines = item?.path
@@ -1259,12 +1278,14 @@ export function renderMonitorSessionDetail(group: MonitorSessionGroup | undefine
 	if (!group) return [`${agentPaneTitle(theme, "Detail", ui.pane === "inspector")} ${theme.fg("dim", "Select a session or task.")}`];
 	const safeWidth = Math.max(8, width);
 	const mode = monitorSessionModeLabel(group);
-	const header = `${agentPaneTitle(theme, "Detail", ui.pane === "inspector")} ${theme.fg("muted", monitorSessionKindLabel(group))}${theme.fg("dim", " · ")}${ansiMagenta(theme.bold(group.agent))}${mode ? `${theme.fg("dim", " · ")}${theme.fg("muted", mode)}` : ""}`;
+	const sessionNumber = sessionNumberLabel(group);
+	const header = `${agentPaneTitle(theme, "Detail", ui.pane === "inspector")} ${theme.fg("muted", monitorSessionKindLabel(group))}${theme.fg("dim", " · ")}${ansiMagenta(theme.bold(group.agent))}${sessionNumber ? `${theme.fg("dim", " · ")}${theme.fg("muted", sessionNumber)}` : ""}${mode ? `${theme.fg("dim", " · ")}${theme.fg("muted", mode)}` : ""}`;
 	const taskCountText = group.taskCount === 1 ? "1 task" : `${group.taskCount} tasks`;
 	const metadata = [
 		"Session",
 		"-------",
 		`Session type  ${monitorSessionTypeLabel(group)}`,
+		group.sessionNumber ? `Session #  ${group.sessionNumber}` : "",
 		`Start     ${formatDateTime(group.createdAt)}`,
 		`Latest    ${formatDateTime(group.latestAt)}`,
 		`Duration  ${formatDurationBetween(group.createdAt, group.latestAt)}`,
@@ -1307,7 +1328,7 @@ function renderMonitorTabBody(
 	const selection = selectedMonitorRow(rows, ui);
 	const taskNumbers = taskNumberById(records);
 	const right = selection?.kind === "task"
-		? renderMonitorDetail(selection.record, cache, ui, taskNumbers.get(selection.record.taskId), discovery, rightWidth, bodyRows, theme)
+		? renderMonitorDetail(selection.record, cache, ui, taskNumbers.get(selection.record.taskId), discovery, rightWidth, bodyRows, theme, selection.group.sessionNumber)
 		: renderMonitorSessionDetail(selection?.kind === "session" ? selection.group : undefined, taskNumbers, ui, rightWidth, bodyRows, theme, animateSpinners);
 	const lines: string[] = [agentDivider(width, theme)];
 	for (let i = 0; i < bodyRows; i += 1) {
@@ -1422,13 +1443,13 @@ function createAgentsBrowserComponent(
 	const currentMonitorRows = () => monitorTreeRows(monitorGroups, monitorCollapsedSections, monitorCollapsedSessions);
 	const monitorCache = new Map<string, MonitorDetailEntry>();
 	const monitorTaskNumbers = taskNumberById(monitorRecords);
-	const loadMonitorRecord = (record: PaneTaskRecord | undefined) => {
+	const loadMonitorRecord = (record: PaneTaskRecord | undefined, group?: MonitorSessionGroup) => {
 		if (!record) return;
 		const cacheKey = record.taskId;
 		const entry = monitorCache.get(cacheKey);
-		if (entry?.items || entry?.loading) return;
+		if (entry?.items || entry?.loading || entry?.error) return;
 		monitorCache.set(cacheKey, { loading: true });
-		void traceViewerItems(record, monitorTaskNumbers.get(record.taskId), discovery).then((items) => {
+		void traceViewerItems(record, monitorTaskNumbers.get(record.taskId), discovery, group?.sessionNumber).then((items) => {
 			monitorCache.set(cacheKey, { items });
 			requestRender();
 		}).catch((error) => {
@@ -1438,7 +1459,7 @@ function createAgentsBrowserComponent(
 	};
 	const loadMonitorSelection = () => {
 		const row = selectedMonitorRow(currentMonitorRows(), ui);
-		if (row?.kind === "task") loadMonitorRecord(row.record);
+		if (row?.kind === "task") loadMonitorRecord(row.record, row.group);
 	};
 	const clampMonitor = () => {
 		const layout = getLayout();
@@ -1533,6 +1554,7 @@ function createAgentsBrowserComponent(
 				}
 				return;
 			}
+			if (ui.tab === "monitor" && selectedMonitorRow(currentMonitorRows(), ui)?.kind === "section") return;
 			ui.pane = "inspector";
 			requestRender();
 			return;
@@ -1942,9 +1964,9 @@ export async function showAgentEditConfirmation(ctx: ExtensionContext, message: 
 	}), { overlay: true, overlayOptions: { anchor: "center", width: AGENT_EDIT_CONFIRM_WIDTH, maxHeight: "40%" } });
 }
 
-export async function traceViewerItems(record: PaneTaskRecord, taskNumber?: number, discovery?: { agents: AgentConfig[] }): Promise<TraceViewerItem[]> {
+export async function traceViewerItems(record: PaneTaskRecord, taskNumber?: number, discovery?: { agents: AgentConfig[] }, sessionNumber?: number): Promise<TraceViewerItem[]> {
 	const ref = recordTraceRef(record);
-	const usage = record.usage ? formatUsageStats(record.usage, record.model) : "";
+	const usage = record.usage ? formatUsageStats(record.usage) : "";
 	const summaryText = record.summary?.trim()
 		? completionBodyWithoutPromptEcho(record.summary, record.task)
 		: record.status === "completed" || record.status === "failed" || record.status === "blocked"
@@ -1968,6 +1990,7 @@ export async function traceViewerItems(record: PaneTaskRecord, taskNumber?: numb
 		"",
 		`Ref      ${ref}`,
 		`Agent    ${record.agent}`,
+		sessionNumber ? `Session #  ${sessionNumber}` : "",
 		taskNumber ? `Task #   ${taskNumber}` : "",
 		`Status   ${record.status}`,
 		`Task ID  ${record.taskId}`,
@@ -1996,6 +2019,7 @@ export async function traceViewerItems(record: PaneTaskRecord, taskNumber?: numb
 	const taskText = [
 		`Task ID  ${record.taskId}`,
 		`Created  ${record.createdAt}`,
+		sessionNumber ? `Session #  ${sessionNumber}` : "",
 		taskNumber ? `Task #   ${taskNumber}` : "",
 		"",
 		"Task",
