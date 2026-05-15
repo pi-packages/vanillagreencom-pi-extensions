@@ -1,6 +1,10 @@
 use std::io;
 use std::process::Stdio;
+use std::time::Duration;
 
+use nix::errno::Errno;
+use nix::sys::wait::{waitpid, WaitPidFlag, WaitStatus};
+use nix::unistd::Pid;
 use tokio::io::BufReader;
 use tokio::process::{Child, Command};
 
@@ -10,6 +14,16 @@ use super::{PiConfig, PiStreamState};
 pub(super) struct BridgeStream {
     child: Child,
     reader: BufReader<tokio::process::ChildStdout>,
+}
+
+impl Drop for BridgeStream {
+    fn drop(&mut self) {
+        let Some(pid) = self.child.id() else {
+            return;
+        };
+        let _ = self.child.start_kill();
+        reap_child(pid);
+    }
 }
 
 impl BridgeStream {
@@ -64,5 +78,19 @@ impl BridgeStream {
             )));
         }
         Ok(())
+    }
+}
+
+fn reap_child(pid: u32) {
+    let raw = Pid::from_raw(pid as i32);
+    for _ in 0..20 {
+        match waitpid(raw, Some(WaitPidFlag::WNOHANG)) {
+            Ok(WaitStatus::StillAlive) => std::thread::sleep(Duration::from_millis(10)),
+            Ok(_) | Err(Errno::ECHILD) | Err(Errno::ESRCH) => return,
+            Err(error) => {
+                tracing::debug!(pid, %error, "failed to reap pi-bridge child");
+                return;
+            }
+        }
     }
 }

@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+pub mod pi_daemon;
+
 use chrono::{DateTime, TimeZone, Utc};
 use flightdeck_dashboard::app::command::SnapshotSource;
 use flightdeck_dashboard::app::model::{Model, Tab};
