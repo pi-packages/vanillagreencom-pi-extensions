@@ -102,6 +102,14 @@ export function bashOutputMode(cwd?: string): BashOutputMode {
 	return settingEnum("bashOutputMode", ["hidden", "summary", "opencode", "preview"] as const, "opencode", cwd);
 }
 
+export function bashLiveOutputDelayMs(cwd?: string): number {
+	return Math.max(0, Math.floor(settingNumber("bashLiveOutputDelayMs", 1000, cwd)));
+}
+
+export function bashLiveTailLines(cwd?: string): number {
+	return Math.max(1, Math.floor(settingNumber("bashLiveTailLines", 4, cwd)));
+}
+
 export function mcpOutputMode(cwd?: string): McpOutputMode {
 	return settingEnum("mcpOutputMode", ["hidden", "summary", "preview"] as const, "preview", cwd);
 }

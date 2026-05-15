@@ -16,6 +16,8 @@ import {
 	type StructuredDiff,
 } from "./diff.js";
 import {
+	bashLiveOutputDelayMs,
+	bashLiveTailLines,
 	bashOutputMode,
 	readOutputMode,
 	searchOutputMode,
@@ -78,6 +80,58 @@ export function contextCwd(context: any, fallback: string): string {
 	return context?.cwd ?? fallback;
 }
 
+interface BashLiveTailState {
+	startedAt?: number;
+	tailShown?: boolean;
+	timer?: ReturnType<typeof setTimeout>;
+}
+
+function bashLiveTailState(context: any): BashLiveTailState {
+	const state = context?.state;
+	if (!state || typeof state !== "object") return {};
+	const record = state as Record<string, unknown>;
+	if (!record.vstackBashLiveTail || typeof record.vstackBashLiveTail !== "object") record.vstackBashLiveTail = {};
+	return record.vstackBashLiveTail as BashLiveTailState;
+}
+
+function markBashStarted(context: any): BashLiveTailState {
+	const state = bashLiveTailState(context);
+	if (!state.startedAt && context?.executionStarted) state.startedAt = Date.now();
+	return state;
+}
+
+function clearBashLiveTailTimer(state: BashLiveTailState): void {
+	if (!state.timer) return;
+	clearTimeout(state.timer);
+	state.timer = undefined;
+}
+
+function scheduleBashLiveTailRerender(state: BashLiveTailState, context: any, delayMs: number): void {
+	if (state.tailShown || state.timer || typeof context?.invalidate !== "function") return;
+	const startedAt = state.startedAt ?? Date.now();
+	const remaining = Math.max(0, startedAt + delayMs - Date.now());
+	state.timer = setTimeout(() => {
+		state.timer = undefined;
+		try {
+			context.invalidate();
+		} catch {
+			// Best-effort redraw only; tool execution continues either way.
+		}
+	}, remaining);
+	state.timer.unref?.();
+}
+
+function renderBashTail(output: string, limit: number, theme: any, cwd?: string): string {
+	const trimmed = output.replace(/(?:\r?\n)+$/, "");
+	if (!trimmed) return "";
+	const tailLines = preview(trimmed, limit, "tail", cwd).split(/\r?\n/);
+	return tailLines
+		.map((line, index) => {
+			const connector = treeConnector(theme, index === tailLines.length - 1 ? "└" : "├", cwd);
+			return `${connector}${theme.fg("dim", line)}`;
+		})
+		.join("\n");
+}
 
 export function registerRead(pi: ExtensionAPI, agent: any, cwd: string): void {
 	const original = getBuiltInTool(agent, cwd, "read");
@@ -132,6 +186,7 @@ export function registerBash(pi: ExtensionAPI, agent: any, cwd: string): void {
 			return getBuiltInTool(agent, contextCwd(context, cwd), "bash").execute(id, params, signal, onUpdate);
 		},
 		renderCall(args: any, theme: any, context: any) {
+			markBashStarted(context);
 			return renderPendingCall(bashCallText(args ?? {}, theme, context?.cwd ?? cwd), theme, context, cwd);
 		},
 		renderResult(result: any, { expanded, isPartial }: any, theme: any, context: any) {
@@ -140,27 +195,27 @@ export function registerBash(pi: ExtensionAPI, agent: any, cwd: string): void {
 			const effectiveCwd = context?.cwd ?? cwd;
 			const call = bashCallText(context?.args ?? {}, theme, effectiveCwd);
 			const output = textContent(result);
+			const liveTailState = markBashStarted(context);
 			if (isPartial) {
 				const trimmedOutput = output.trim();
-				const count = trimmedOutput ? output.split(/\r?\n/).filter((line) => line.trim().length > 0).length : 0;
+				const count = trimmedOutput ? lineCount(output.replace(/(?:\r?\n)+$/, "")) : 0;
 				const lineText = count === 0 ? "starting" : `${count} line${count === 1 ? "" : "s"}`;
 				const partialMode = bashOutputMode(effectiveCwd);
 				if (partialMode !== "summary" && partialMode !== "hidden" && trimmedOutput) {
-					const limit = Math.max(1, Math.floor(settingNumber("bashCollapsedLines", 10, effectiveCwd)));
-					const tailLines = preview(output, limit, "tail", effectiveCwd).split(/\r?\n/);
-					const hasOverflow = count > limit;
-					let partialText = `${treeConnector(theme, "├")}${theme.fg("warning", `running… ${lineText}`)}`;
-					for (let i = 0; i < tailLines.length; i++) {
-						const isLastTail = i === tailLines.length - 1;
-						const connector = treeConnector(theme, isLastTail && !hasOverflow ? "└" : "│");
-						partialText += `\n${connector}${theme.fg("dim", tailLines[i] ?? "")}`;
+					const delayMs = bashLiveOutputDelayMs(effectiveCwd);
+					const startedAt = liveTailState.startedAt ?? Date.now();
+					if (Date.now() - startedAt >= delayMs) {
+						clearBashLiveTailTimer(liveTailState);
+						liveTailState.tailShown = true;
+						const tailText = renderBashTail(output, bashLiveTailLines(effectiveCwd), theme, effectiveCwd);
+						if (tailText) return makeTruncatedLines(tailText);
 					}
-					if (hasOverflow) partialText += `\n${treeConnector(theme, "└")}${theme.fg("muted", `… ${count - limit} older line(s)`)}`;
-					return makeTruncatedLines(partialText);
+					scheduleBashLiveTailRerender(liveTailState, context, delayMs);
 				}
 				return renderPendingDetail(`running… ${lineText}`, theme);
 			}
 			clearBlink(context);
+			clearBashLiveTailTimer(liveTailState);
 			const exit = commandExit(output);
 			const count = lineCount(output);
 			const exitLabel = exit === null ? "exit 0" : `exit ${exit}`;
@@ -189,6 +244,9 @@ export function registerBash(pi: ExtensionAPI, agent: any, cwd: string): void {
 					.map((line) => `${treeConnector(theme, "│")}${theme.fg("dim", line)}`)
 					.join("\n")}`;
 				if (count > limit) text += `\n${treeConnector(theme, "│")}${theme.fg("muted", `… ${count - limit} older line(s)`)}`;
+			} else if (!suppressDiffOutput && mode === "opencode" && liveTailState.tailShown && output) {
+				const tailText = renderBashTail(output, bashLiveTailLines(effectiveCwd), theme, effectiveCwd);
+				if (tailText) text += `\n${tailText}`;
 			}
 			return makeTruncatedLines(text);
 		},

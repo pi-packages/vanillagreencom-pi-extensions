@@ -310,6 +310,24 @@
           "apply": "live"
         },
         {
+          "key": "bashLiveOutputDelayMs",
+          "label": "Live bash output delay (ms)",
+          "description": "Milliseconds a running bash call must stay active before compact renderers show a live output tail. Prevents fast commands from flashing output rows.",
+          "type": "number",
+          "default": 1000,
+          "category": "Bash",
+          "apply": "live"
+        },
+        {
+          "key": "bashLiveTailLines",
+          "label": "Live bash tail lines",
+          "description": "Last lines shown while a long-running bash command streams output, and preserved after completion when the live tail was shown.",
+          "type": "number",
+          "default": 4,
+          "category": "Bash",
+          "apply": "live"
+        },
+        {
           "key": "bashCollapsedLines",
           "label": "Collapsed bash preview lines",
           "description": "Tail lines shown in collapsed bash rows when bashOutputMode=preview.",

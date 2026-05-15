@@ -8,6 +8,7 @@ Compact renderers for Pi tools. Optional `tool_batch` composite tool. Optional r
 ## Highlights
 
 - Compact one-line tool rows for `read`, `bash`, `grep`, `find`, `ls`.
+- Delayed live bash tails avoid fast-command output flashes; long-running commands show/preserve the last few lines.
 - `tool_batch` runs multiple independent read/search/list/diagnostic bash calls and renders one combined result.
 - Optional rich Shiki diffs for `edit`/`write` with side-by-side previews, hunk counts, and inline word highlights.
 - Compact user-message cards with a green border and red π marker.
@@ -89,6 +90,8 @@ Open `/extensions:settings`; settings appear under the **Tool Renderer** tab.
 | Read output mode | `preview`, `summary`, or `hidden`. |
 | Search output mode | `preview`, `count`, or `hidden`. |
 | Bash output mode | `opencode`, `preview`, `summary`, or `hidden`. |
+| Live bash output delay (ms) | Wait this long before showing a running bash output tail. |
+| Live bash tail lines | Tail lines shown for long-running bash output and kept after completion. |
 | Expanded read/search/bash preview lines | Per-tool expand-time line caps. |
 | Command preview characters | Max command chars in collapsed bash rows. |
 | Collapsed bash preview lines | Tail lines shown when `bashOutputMode=preview`. |
