@@ -1,0 +1,68 @@
+use std::io;
+use std::process::Stdio;
+
+use tokio::io::BufReader;
+use tokio::process::{Child, Command};
+
+use super::stream_parse::{read_bridge_line, BridgeLineRead};
+use super::{PiConfig, PiStreamState};
+
+pub(super) struct BridgeStream {
+    child: Child,
+    reader: BufReader<tokio::process::ChildStdout>,
+}
+
+impl BridgeStream {
+    pub(super) fn spawn(config: &PiConfig) -> Result<Self, io::Error> {
+        let target = config.target.args();
+        let mut child = Command::new(&config.bridge_bin)
+            .arg("stream")
+            .arg(target[0])
+            .arg(target[1])
+            .kill_on_drop(true)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| io::Error::other("pi-bridge stream stdout unavailable"))?;
+        Ok(Self {
+            child,
+            reader: BufReader::new(stdout),
+        })
+    }
+
+    pub(super) fn child_id(&self) -> Option<u32> {
+        self.child.id()
+    }
+
+    pub(super) async fn next_line(
+        &mut self,
+        state: &mut PiStreamState,
+        pane_id: &str,
+    ) -> Result<Option<String>, io::Error> {
+        loop {
+            match read_bridge_line(&mut self.reader).await? {
+                BridgeLineRead::Line(line) => return Ok(Some(line)),
+                BridgeLineRead::TooLong => {
+                    if !state.bridge_line_too_long_warned {
+                        state.bridge_line_too_long_warned = true;
+                        tracing::warn!(pane_id = %pane_id, max_bytes = super::stream_parse::MAX_BRIDGE_LINE, "pi-bridge stream line exceeded cap; dropping chunk");
+                    }
+                }
+                BridgeLineRead::Eof => return Ok(None),
+            }
+        }
+    }
+
+    pub(super) async fn wait_success(mut self) -> Result<(), io::Error> {
+        let status = self.child.wait().await?;
+        if !status.success() {
+            return Err(io::Error::other(format!(
+                "pi-bridge stream exited with {status}"
+            )));
+        }
+        Ok(())
+    }
+}

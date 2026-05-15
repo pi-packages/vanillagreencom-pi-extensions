@@ -200,6 +200,24 @@ impl WakeEvent {
     }
 
     #[must_use]
+    pub fn subagent_completion(pane_id: String, completion: Value, hash: String) -> Self {
+        Self {
+            ts: String::new(),
+            pane_id,
+            harness: "pi".to_owned(),
+            event_type: Some("subagent-completion".to_owned()),
+            classifier_tag: PI_SUBAGENT_COMPLETION_TAG.to_owned(),
+            hash,
+            request_id: None,
+            question: None,
+            completion: Some(completion),
+            task: None,
+            last_assistant_text: None,
+            details: None,
+        }
+    }
+
+    #[must_use]
     pub fn empty_after_compact(pane_id: String, hash: String, details: Value) -> Self {
         Self {
             ts: String::new(),
