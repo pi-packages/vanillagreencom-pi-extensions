@@ -1068,7 +1068,7 @@ function renderTraceContentLine(raw: string, type: TraceViewerItem["type"] | und
 	if (/^(Overview|Metadata|Summary|Files changed|Validation|Notes|Task|Artifacts)$/i.test(trimmed)) {
 		return wrapTextWithAnsi(ansiMagenta(theme.bold(trimmed)), width);
 	}
-	const labelMatch = line.match(/^(Ref|Agent|Session #|Task #|Status|Task ID|Created|Done|Model|Effort|Session|Session type|Start|Latest|Duration|Tasks|Usage|Pane ID|SessionKey|Transcript|Completion|Archive|Source)\s{2,}(.+)$/);
+	const labelMatch = line.match(/^(Ref|Agent|Session #|Task #|Status|Task ID|Task file|Created|Done|Model|Effort|Session|Session type|Start|Latest|Duration|Tasks|Usage|Pane ID|SessionKey|Transcript|Completion|Archive|Source)\s{2,}(.+)$/);
 	if (labelMatch) return wrapTextWithAnsi(colorTraceValue(labelMatch[1], labelMatch[2], theme), width);
 	if (traceLineLooksJsonLike(line, type)) return wrapTextWithAnsi(highlightInlinePreview(line, theme), width);
 	const bullet = line.match(/^(\s*)([-*]|\d+\.)\s+(.*)$/);
@@ -1946,9 +1946,15 @@ export async function traceViewerItems(record: PaneTaskRecord, taskNumber?: numb
 	// survives the `.filter(Boolean)` pass below that drops conditionally
 	// empty entries (e.g. record.completedAt missing -> no `Done` line).
 	const BLANK = " ";
-	const metadata = [
-		"Overview",
-		"",
+	const completionPath = record.completionArchivePath ?? record.completionSourcePath;
+	const completion = await readTextFileIfExists(completionPath, 24_000);
+	const artifactLines = [
+		record.transcriptPath ? `Transcript  ${record.transcriptPath}` : "",
+		record.completionArchivePath ? `Archive   ${record.completionArchivePath}` : record.completionSourcePath ? `Completion  ${record.completionSourcePath}` : "",
+		record.completionArchivePath && record.completionSourcePath && record.completionSourcePath !== record.completionArchivePath ? `Source   ${record.completionSourcePath}` : "",
+		record.inboxFile ? `Task file  ${record.inboxFile}` : "",
+	].filter(Boolean);
+	const summary = [
 		`Ref      ${ref}`,
 		`Agent    ${record.agent}`,
 		sessionNumber ? `Session #  ${sessionNumber}` : "",
@@ -1961,7 +1967,24 @@ export async function traceViewerItems(record: PaneTaskRecord, taskNumber?: numb
 		usage ? `Usage    ${usage}` : "",
 		`Created  ${record.createdAt}`,
 		record.completedAt ? `Done     ${record.completedAt}` : "",
+		artifactLines.length ? BLANK : "",
+		artifactLines.length ? "Artifacts" : "",
+		artifactLines.length ? "---------" : "",
+		...artifactLines,
 		BLANK,
+		"Task",
+		"----",
+		record.task || "Task unavailable.",
+	].filter(Boolean).join("\n");
+	const completionJsonSection = completionPath
+		? [
+			BLANK,
+			"Completion JSON",
+			"---------------",
+			completion || "Completion JSON file could not be read.",
+		]
+		: [];
+	const completionText = [
 		"Summary",
 		"-------",
 		summaryText,
@@ -1974,26 +1997,11 @@ export async function traceViewerItems(record: PaneTaskRecord, taskNumber?: numb
 		"----------",
 		record.validation?.length ? record.validation.map((item) => `- ${item}`).join("\n") : "None reported",
 		record.notes ? `\nNotes\n-----\n${record.notes}` : "",
+		...completionJsonSection,
 	].filter(Boolean).join("\n");
-	const completionPath = record.completionArchivePath ?? record.completionSourcePath;
-	const completion = await readTextFileIfExists(completionPath, 24_000);
-	const completionText = completion || (completionPath
-		? "Completion JSON file could not be read. Summary uses the persisted task result."
-		: "No completion JSON artifact for this task. Background runs persist results in Summary.");
 	const common = { agent: record.agent, createdAt: record.completedAt ?? record.createdAt, ref, status: record.status, summary: summaryText };
-	const taskText = [
-		`Task ID  ${record.taskId}`,
-		`Created  ${record.createdAt}`,
-		sessionNumber ? `Session #  ${sessionNumber}` : "",
-		taskNumber ? `Task #   ${taskNumber}` : "",
-		"",
-		"Task",
-		"----",
-		record.task || "Task unavailable.",
-	].filter(Boolean).join("\n");
 	return [
-		{ ...common, label: "Summary", text: metadata, type: "summary" },
-		{ ...common, label: "Completion", path: completionPath, text: completionText, type: completionPath ? "completion" : "summary" },
-		{ ...common, label: "Task", path: record.inboxFile, text: taskText, type: "task" },
+		{ ...common, label: "Summary", text: summary, type: "summary" },
+		{ ...common, label: "Completion", path: completionPath, text: completionText, type: "summary" },
 	];
 }

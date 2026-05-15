@@ -416,7 +416,7 @@ test("full persisted one-shot summary feeds chat history and result formatting",
 	appendBgChatMessages(messages, [item], { [taskId]: taskRecord });
 
 	assert.equal(messages.find((message) => message.kind === "completion")?.body, longSummary);
-	assert.match((await traceViewerItems(taskRecord))[0]!.text, new RegExp(longSummary.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+	assert.match((await traceViewerItems(taskRecord))[1]!.text, new RegExp(longSummary.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 	assert.match(formatTaskRecordResult(taskRecord), new RegExp(longSummary.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
 
@@ -696,18 +696,24 @@ test("Monitor tab task rendering still exposes task trace metadata", async () =>
 	const numbers = taskNumberById([taskRecord]);
 	const items = await traceViewerItems(taskRecord, numbers.get(taskId), { agents: [agent("planner", true, { effort: "xhigh" })] });
 
+	assert.equal(items.length, 2);
 	assert.match(items[0]!.text, /Task ID  planner-1700000120-bbbbbbbb/);
 	assert.match(items[0]!.text, /Model    openai-codex\/gpt-5\.5/);
 	assert.match(items[0]!.text, /Effort   xhigh/);
-	assert.doesNotMatch(items[0]!.text, /Transcript  \/tmp\/planner-transcript\.jsonl/);
-	assert.doesNotMatch(items[0]!.text, /Completion  \/tmp\/planner-completion\.json/);
-	assert.doesNotMatch(items[0]!.text, /Archive  \/tmp\/planner-completion\.json/);
-	assert.doesNotMatch(items[0]!.text, /Source   \/tmp\/planner-source\.json/);
+	assert.match(items[0]!.text, /Artifacts\n---------/);
+	assert.match(items[0]!.text, /Transcript  \/tmp\/planner-transcript\.jsonl/);
+	assert.match(items[0]!.text, /Archive   \/tmp\/planner-completion\.json/);
+	assert.match(items[0]!.text, /Source   \/tmp\/planner-source\.json/);
+	assert.match(items[0]!.text, /Task\n----\nTask for planner/);
+	assert.doesNotMatch(items[0]!.text, /Overview|completed planner summary/);
 	assert.equal(items[1]!.path, "/tmp/planner-completion.json");
-	assert.match(items[0]!.text, /completed planner summary/);
+	assert.match(items[1]!.text, /Summary\n-------\ncompleted planner summary/);
+	assert.match(items[1]!.text, /Files changed\n-------------\nNone reported/);
+	assert.match(items[1]!.text, /Validation\n----------\nNone reported/);
+	assert.match(items[1]!.text, /Completion JSON\n---------------\nCompletion JSON file could not be read\./);
 });
 
-test("Monitor completion tab explains missing bg completion artifacts", async () => {
+test("Monitor completion tab shows persisted bg result without JSON warning", async () => {
 	const taskRecord = record("reviewer-doc", "reviewer-doc-1700000120-bg", "2026-05-14T05:02:00.000Z", {
 		kind: "oneshot",
 		sessionMode: "fresh",
@@ -715,11 +721,14 @@ test("Monitor completion tab explains missing bg completion artifacts", async ()
 	});
 	const items = await traceViewerItems(taskRecord, 1, { agents: [agent("reviewer-doc")] });
 
+	assert.equal(items.length, 2);
 	assert.equal(items[1]!.label, "Completion");
 	assert.equal(items[1]!.path, undefined);
 	assert.equal(items[1]!.type, "summary");
-	assert.match(items[1]!.text, /No completion JSON artifact/);
-	assert.match(items[1]!.text, /persist results in Summary/);
+	assert.match(items[1]!.text, /Summary\n-------\ncompleted reviewer summary/);
+	assert.match(items[1]!.text, /Files changed\n-------------\nNone reported/);
+	assert.match(items[1]!.text, /Validation\n----------\nNone reported/);
+	assert.doesNotMatch(items[1]!.text, /Completion JSON|unavailable|No completion JSON artifact/);
 });
 
 test("Monitor right-pane section labels use ANSI magenta", async () => {
@@ -727,7 +736,8 @@ test("Monitor right-pane section labels use ANSI magenta", async () => {
 	const items = await traceViewerItems(taskRecord, 1, { agents: [agent("planner", true)] });
 	const rendered = renderMonitorDetail(taskRecord, new Map([[taskRecord.taskId, { items }]]), uiState({ tab: "monitor", pane: "inspector" }), 120, 40, ansiTheme as any).join("\n");
 
-	assert.match(rendered, /\x1b\[35m\x1b\[1mOverview/);
+	assert.match(rendered, /\x1b\[35m\x1b\[1mTask/);
+	assert.doesNotMatch(rendered, /Overview/);
 });
 
 test("inline JSON highlighter protects keys before status value coloring", () => {

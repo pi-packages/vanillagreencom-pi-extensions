@@ -85,7 +85,7 @@ export type AgentBrowserTabId = "agents" | "monitor";
 export type AgentBrowserTabDef = { id: AgentBrowserTabId; label: string };
 export const AGENTS_BROWSER_TAB: AgentBrowserTabDef = { id: "agents", label: "Agents" };
 export const MONITOR_BROWSER_TAB: AgentBrowserTabDef = { id: "monitor", label: "Monitor" };
-export const MONITOR_SUBTAB_LABELS = ["Summary", "Completion", "Task"] as const;
+export const MONITOR_SUBTAB_LABELS = ["Summary", "Completion"] as const;
 
 export type AgentBrowserAction =
 	| { type: "attach"; agentName: string }
@@ -456,7 +456,7 @@ export interface TraceViewerItem {
 	ref?: string;
 	status?: string;
 	text: string;
-	type?: "index" | "summary" | "completion" | "task";
+	type?: "index" | "summary" | "completion";
 }
 
 export interface TraceViewerState {
