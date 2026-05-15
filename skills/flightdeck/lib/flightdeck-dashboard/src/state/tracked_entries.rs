@@ -263,6 +263,10 @@ pub fn read_archive_fallback_with_warn(
                 warn,
                 format!("Warning: blank archive {}; skipping.", archive.display()),
             );
+            failures.push(ArchiveFailure {
+                path: archive,
+                reason: "blank archive".to_owned(),
+            });
             continue;
         }
         let state = match parse_master_state_with_warn(&source, warn) {
@@ -517,16 +521,33 @@ fn list_terminated_archives(state_dir: &Path, session: &str) -> Result<Vec<PathB
         }
     };
 
+    let path_results = entries.map(|entry| entry.map(|entry| entry.path()));
+    collect_matching_archives(path_results, state_dir, session)
+}
+
+fn collect_matching_archives<I>(
+    entries: I,
+    state_dir: &Path,
+    session: &str,
+) -> Result<Vec<PathBuf>, ArchiveError>
+where
+    I: IntoIterator<Item = Result<PathBuf, std::io::Error>>,
+{
     let prefix = format!("flightdeck-state-{session}-");
     let suffix = ".json.archive";
-    let mut archives = entries
-        .filter_map(Result::ok)
-        .filter_map(|entry| {
-            let file_name = entry.file_name();
-            let name = file_name.to_string_lossy();
-            (name.starts_with(&prefix) && name.ends_with(suffix)).then(|| entry.path())
-        })
-        .collect::<Vec<_>>();
+    let mut archives = Vec::new();
+    for entry in entries {
+        let path = entry.map_err(|source| ArchiveError::DirectoryRead {
+            path: state_dir.to_path_buf(),
+            source,
+        })?;
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if name.starts_with(&prefix) && name.ends_with(suffix) {
+            archives.push(path);
+        }
+    }
     archives.sort_by(|left, right| {
         let left_name = left
             .file_name()

@@ -1,3 +1,4 @@
+use std::io;
 use std::path::{Path, PathBuf};
 
 use chrono::{TimeZone, Utc};
@@ -20,6 +21,35 @@ fn fixed_now() -> chrono::DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 5, 15, 10, 30, 0)
         .single()
         .expect("fixed timestamp is valid")
+}
+
+fn write_archive(dir: &Path, name: &str, source: &str) -> PathBuf {
+    let path = dir.join(name);
+    std::fs::write(&path, source).expect("archive writes");
+    path
+}
+
+fn valid_terminated_archive(entry_id: &str) -> String {
+    format!(
+        r#"{{
+  "session_id": "HT",
+  "updated_at": "2026-05-15T10:15:00Z",
+  "terminated": true,
+  "terminated_at": "2026-05-15T10:15:00Z",
+  "entries": {{
+    "{entry_id}": {{
+      "id": "{entry_id}",
+      "title": "Valid archive",
+      "kind": "adhoc",
+      "state": "complete",
+      "decisions_log": []
+    }}
+  }},
+  "merge_queue": [],
+  "conflict_graph": {{ "edges": [], "computed_at": null }},
+  "paused_for_user": null
+}}"#
+    )
 }
 
 #[test]
@@ -194,6 +224,108 @@ fn archive_all_malformed_returns_typed_error() {
 }
 
 #[test]
+fn archive_blank_then_valid_returns_valid_archive() {
+    let dir = tempfile::tempdir().expect("tempdir creates");
+    write_archive(
+        dir.path(),
+        "flightdeck-state-HT-20260515T101600Z.json.archive",
+        "\n\t\n",
+    );
+    write_archive(
+        dir.path(),
+        "flightdeck-state-HT-20260515T101500Z.json.archive",
+        &valid_terminated_archive("valid-after-blank"),
+    );
+    let mut warnings = Vec::new();
+    let mut warn = |message: &str| warnings.push(message.to_owned());
+
+    let snapshot = read_archive_fallback_with_warn(
+        dir.path(),
+        "HT",
+        Path::new("/repo/project"),
+        fixed_now(),
+        &mut warn,
+    )
+    .expect("valid archive after blank should load");
+
+    assert!(snapshot
+        .sessions
+        .iter()
+        .any(|entry| entry.id == "valid-after-blank"));
+    assert!(warnings
+        .iter()
+        .any(|message| message.contains("Warning: blank archive")));
+}
+
+#[test]
+fn archive_blank_and_malformed_returns_all_candidates_malformed() {
+    let dir = tempfile::tempdir().expect("tempdir creates");
+    let blank = write_archive(
+        dir.path(),
+        "flightdeck-state-HT-20260515T101600Z.json.archive",
+        "   \n",
+    );
+    write_archive(
+        dir.path(),
+        "flightdeck-state-HT-20260515T101500Z.json.archive",
+        "{not json",
+    );
+    let mut warnings = Vec::new();
+    let mut warn = |message: &str| warnings.push(message.to_owned());
+
+    let error = read_archive_fallback_with_warn(
+        dir.path(),
+        "HT",
+        Path::new("/repo/project"),
+        fixed_now(),
+        &mut warn,
+    )
+    .expect_err("blank plus malformed should be malformed candidates");
+
+    match error {
+        ArchiveError::AllCandidatesMalformed {
+            candidate_count,
+            latest_path,
+            latest_error,
+            failures,
+        } => {
+            assert_eq!(candidate_count, 2);
+            assert_eq!(latest_path, blank);
+            assert_eq!(latest_error, "blank archive");
+            assert_eq!(failures[0].reason, "blank archive");
+            assert!(!failures[1].reason.is_empty());
+            assert_ne!(failures[1].reason, "blank archive");
+        }
+        other => panic!("unexpected archive error: {other:?}"),
+    }
+    assert!(warnings
+        .iter()
+        .any(|message| message.contains("Warning: blank archive")));
+}
+
+#[test]
+fn archive_per_entry_read_dir_error_surfaces() {
+    let dir = Path::new("/synthetic/archive-dir");
+    let error = collect_matching_archives(
+        [Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "synthetic entry failure",
+        ))],
+        dir,
+        "HT",
+    )
+    .expect_err("per-entry read_dir error should surface");
+
+    match error {
+        ArchiveError::DirectoryRead { path, source } => {
+            assert_eq!(path, dir);
+            assert_eq!(source.kind(), io::ErrorKind::PermissionDenied);
+        }
+        other => panic!("unexpected archive error: {other:?}"),
+    }
+}
+
+#[test]
 fn archive_empty_dir_returns_no_archives() {
     let dir = fixture_path("archive-enoent");
     let mut warnings = Vec::new();
@@ -213,7 +345,7 @@ fn archive_empty_dir_returns_no_archives() {
 }
 
 #[test]
-fn archive_blank_warns_and_returns_no_archives() {
+fn archive_blank_warns_and_returns_all_candidates_malformed() {
     let dir = fixture_path("archive-blank");
     let mut warnings = Vec::new();
     let mut warn = |message: &str| warnings.push(message.to_owned());
@@ -225,9 +357,22 @@ fn archive_blank_warns_and_returns_no_archives() {
         fixed_now(),
         &mut warn,
     )
-    .expect_err("blank archive skipped");
+    .expect_err("blank archive is malformed");
 
-    assert!(matches!(error, ArchiveError::NoArchives { .. }));
+    match error {
+        ArchiveError::AllCandidatesMalformed {
+            candidate_count,
+            latest_error,
+            failures,
+            ..
+        } => {
+            assert_eq!(candidate_count, 1);
+            assert_eq!(latest_error, "blank archive");
+            assert_eq!(failures.len(), 1);
+            assert_eq!(failures[0].reason, "blank archive");
+        }
+        other => panic!("unexpected archive error: {other:?}"),
+    }
     assert!(warnings
         .iter()
         .any(|message| message.contains("Warning: blank archive")));
