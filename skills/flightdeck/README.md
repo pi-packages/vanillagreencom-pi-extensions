@@ -50,13 +50,26 @@ Issue mode adds the optional `github`, `linear`, `worktree`, and `project-manage
 
 Runtime requirements for the shipped core scripts remain `bash` 4+, `tmux` 3.x, `jq`, `flock`, and `bun` (https://bun.sh). Issue mode additionally needs the GitHub/Linear CLIs or auth wrappers used by those skills, plus normal git worktree support. Mac users: install GNU coreutils for `sha256sum` and GNU date.
 
-## Rust dashboard (experimental)
+## Rust dashboard
 
-`skills/flightdeck/scripts/flightdeck-dashboard launch` is the best-effort startup hook used by Flightdeck. It opens one tracked tmux window through `flightdeck-session start --kind workflow --harness shell`, registers `.entries.flightdeck-dashboard`, and skips cleanly outside tmux, when `FLIGHTDECK_DASHBOARD=0`, or when tmux idempotency probes fail (to avoid duplicate windows). By default it leaves wake delivery to the canonical TypeScript daemon; set `FLIGHTDECK_DAEMON_RUST=1` to have launch start the Rust dashboard daemon, or pass `--no-daemon` for file-mode only.
+The Rust dashboard binary lives at `skills/flightdeck/lib/flightdeck-dashboard/`, with the user-facing trampoline at `skills/flightdeck/scripts/flightdeck-dashboard`. It is a read-only ratatui view of the master state file: it renders tracked sessions, owner/observer status, pause/stale/archive/pre-purge banners, live Activity rows from daemon/wake JSONL, conversations, decisions, merges, and daemon health. Live mode file-watches the state/archive paths with debounced reloads; the optional Rust daemon adds a UDS JSON-RPC snapshot stream and Pi-only wake subscriber absorption.
 
-`skills/flightdeck/scripts/flightdeck-dashboard tui --demo[=NAME]` runs compiled demo fixtures (`empty`, `one-adhoc`, `one-issue`, `mixed`, `terminated`, `paused`, `observer`, `conversations`, `no-issue`, `decisions`). `tui --state-file <path>` reads a concrete master-state JSON file, and `tui --session <name>` resolves `<project-root>/<FLIGHTDECK_STATE_DIR>/flightdeck-state-<name>.json` (default state dir `tmp/`) with terminated-archive fallback. With neither flag inside tmux, the dashboard uses the current tmux session. Live runs watch the state directory with debounced reloads, show stale/archive/pre-purge chips and banners, and populate the Activity tab from daemon/wake JSONL tailers.
+`flightdeck-dashboard launch` is the best-effort startup hook used by Flightdeck. It opens one tracked tmux window through `flightdeck-session start --kind workflow --harness shell`, registers `.entries.flightdeck-dashboard`, and skips cleanly outside tmux, when disabled, or when tmux idempotency probes fail. It honors:
 
-Build a prebuilt binary with:
+| Variable | Purpose |
+| --- | --- |
+| `FLIGHTDECK_DASHBOARD=0` | Exit `0` silently without launching the dashboard. |
+| `FLIGHTDECK_DASHBOARD_WINDOW` | Tmux window name, default `flightdeck`. |
+| `FLIGHTDECK_DASHBOARD_MOTION` | Motion level: `full`, `reduced`, or `off`; `NO_MOTION` / `NO_COLOR` force `off`. |
+| `FLIGHTDECK_DAEMON_RUST=1` | Opt into the Rust daemon wake side; default off keeps the canonical TypeScript daemon in charge of wake delivery. |
+| `FLIGHTDECK_DASHBOARD_BELL=0` | Suppress the pause-edge terminal bell. |
+| `FLIGHTDECK_DASHBOARD_STALE_WARN_SECS` / `FLIGHTDECK_DASHBOARD_STALE_DEAD_SECS` | Tune stale-chip thresholds. |
+
+`flightdeck-dashboard tui --demo[=NAME]` runs compiled demo fixtures (`empty`, `one-adhoc`, `one-issue`, `mixed`, `terminated`, `paused`, `observer`, `conversations`, `no-issue`, `decisions`). `tui --state-file <path>` reads a concrete master-state JSON file, and `tui --session <name>` resolves `<project-root>/<FLIGHTDECK_STATE_DIR>/flightdeck-state-<name>.json` (default state dir `tmp/`) with terminated-archive fallback. With neither flag inside tmux, the dashboard uses the current tmux session.
+
+The legacy in-Pi dashboard extension remains documented in [`pi-extensions/pi-flightdeck/README.md`](../../pi-extensions/pi-flightdeck/README.md), but it is deprecated for new sessions. Prefer the Rust dashboard for new Flightdeck runs.
+
+After `vstack add`, build the release binary with:
 
 ```bash
 cd skills/flightdeck/lib/flightdeck-dashboard

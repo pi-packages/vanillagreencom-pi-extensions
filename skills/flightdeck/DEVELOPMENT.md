@@ -79,6 +79,31 @@ Not run by hand in normal use — the skill calls them.
 
 Full per-script descriptions follow in the [Scripts](#scripts) section below.
 
+## Rust dashboard
+
+The Rust dashboard crate lives in `skills/flightdeck/lib/flightdeck-dashboard/`; the trampoline at `scripts/flightdeck-dashboard` prefers `target/release/flightdeck-dashboard` and falls back to `cargo run --release`.
+
+Build and test from the crate root:
+
+```bash
+cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test
+cargo insta test
+```
+
+Snapshot tests use `ratatui::backend::TestBackend::new(200, 60)`. The shared constants live in `tests/common/mod.rs` (`SNAPSHOT_WIDTH`, `SNAPSHOT_HEIGHT`); update intentional snapshot diffs with `INSTA_UPDATE=always cargo insta test`, then run `cargo insta review` before committing.
+
+When adding a tab, wire the enum/state in `app/model.rs`, key handling in `app/keymap.rs`, update logic in `app/update.rs`, and render code under `app/view/<tab>.rs` plus `app/view/mod.rs`. Keep view modules render-only: write paths go through existing Flightdeck helpers, not direct mutations from the TUI.
+
+`app/theme.rs` is the single source of truth for colors and styles. Views must consume theme tokens (`theme.ok`, `theme.warning`, `theme.error`, etc.) and never hard-code raw colors. Motion effects live in `app/view/fx.rs` and `app/motion.rs`; add new effects to the catalog, respect `MotionLevel::Off`, and keep semantic information visible without animation.
+
+Daemon code lives under `src/daemon/`. The Pi subscriber is split by responsibility in `daemon/subscribers/pi/{lifecycle,bridge,stream_parse,classifier,wake_emitter}.rs`; keep future subscriber work similarly scoped and leave Claude/OpenCode/Codex/tmux fallback stubs explicit until implemented.
+
+Snapshot fixtures are embedded through `src/fixtures.rs` from `src/fixtures/*.json`. Live-state and archive integration fixtures belong under `tests/fixtures/state/` when needed; avoid ad-hoc fixture paths in test bodies when a reusable state fixture fits.
+
+Live wake parity testing uses `tests/live-wake.sh`. Run `tests/live-wake.sh --no-tmux` for a quick shape check, or `tests/live-wake.sh` against a real Pi/tmux session to verify daemon wake routing, subscriber behavior, and master resume semantics end to end.
+
 ## Tests
 
 ### Bun test suite
