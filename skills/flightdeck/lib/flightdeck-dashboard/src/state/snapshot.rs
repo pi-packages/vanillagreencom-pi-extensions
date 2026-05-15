@@ -144,6 +144,23 @@ impl SessionState {
     pub const fn is_transient(&self) -> bool {
         matches!(self, Self::Waiting | Self::Prompting | Self::Submitting)
     }
+
+    #[must_use]
+    pub const fn operator_priority(&self) -> u8 {
+        match self {
+            Self::Prompting => 0,
+            Self::Submitting => 1,
+            Self::Waiting => 2,
+            Self::Ready => 3,
+            Self::MergeReady => 4,
+            Self::Complete => 5,
+            Self::Merged => 6,
+            Self::Cancelled => 7,
+            Self::Aborted => 8,
+            Self::Dead => 9,
+            Self::Other(_) => 10,
+        }
+    }
 }
 
 impl Serialize for SessionState {
@@ -225,12 +242,17 @@ pub struct DashboardSnapshot {
 impl DashboardSnapshot {
     #[must_use]
     pub fn from_master_state(state: MasterState, now: DateTime<Utc>) -> Self {
+        let paused_entry_id = state
+            .paused_for_user
+            .as_ref()
+            .and_then(|pause| pause.entry_id.as_deref())
+            .map(str::to_owned);
         let mut sessions: Vec<TrackedSession> = state
             .entries
             .into_iter()
             .map(|(key, entry)| TrackedSession::from_entry(key, entry))
             .collect();
-        sessions.sort_by(|left, right| left.id.cmp(&right.id));
+        sort_sessions_for_operator(&mut sessions, paused_entry_id.as_deref());
         let counts = KindCounts::from_sessions(&sessions);
         Self {
             session_id: state.session_id,
@@ -366,6 +388,21 @@ fn threshold_secs(name: &str, default: u64) -> Duration {
         .filter(|seconds| *seconds > 0)
         .map(Duration::from_secs)
         .unwrap_or_else(|| Duration::from_secs(default))
+}
+
+fn sort_sessions_for_operator(sessions: &mut [TrackedSession], paused_entry_id: Option<&str>) {
+    sessions.sort_by(|left, right| {
+        let left_paused = paused_entry_id.is_some_and(|entry_id| entry_id == left.id);
+        let right_paused = paused_entry_id.is_some_and(|entry_id| entry_id == right.id);
+        right_paused
+            .cmp(&left_paused)
+            .then_with(|| {
+                left.state
+                    .operator_priority()
+                    .cmp(&right.state.operator_priority())
+            })
+            .then_with(|| left.id.cmp(&right.id))
+    });
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

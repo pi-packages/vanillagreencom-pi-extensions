@@ -52,7 +52,7 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
             };
             Row::new([
                 Cell::from(row.ts.format("%H:%M:%S").to_string()),
-                Cell::from(format!("{} · {}", row.entry_id, truncate(&row.title, 24))),
+                Cell::from(row.entry_id.clone()),
                 Cell::from(row.prompt_tag.clone()),
                 Cell::from(truncate(&row.answer, 70)),
             ])
@@ -71,7 +71,7 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
         table_rows,
         [
             Constraint::Length(9),
-            Constraint::Length(34),
+            Constraint::Length(18),
             Constraint::Length(28),
             Constraint::Min(40),
         ],

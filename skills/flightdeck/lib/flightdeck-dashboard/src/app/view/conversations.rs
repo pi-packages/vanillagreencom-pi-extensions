@@ -4,6 +4,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, Wrap};
 use ratatui::Frame;
 
+use crate::app::command::SnapshotSource;
 use crate::app::model::Model;
 use crate::app::theme::Theme;
 use crate::state::snapshot::ConversationStream;
@@ -14,11 +15,23 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
             .borders(Borders::ALL)
             .border_style(theme.border)
             .title(Span::styled(" conversations ", theme.muted));
+        let read_mode = if matches!(model.snapshot_source, SnapshotSource::Socket(_)) {
+            "daemon socket"
+        } else {
+            "file-watcher"
+        };
+        let lines = vec![
+            Line::from(Span::styled("Conversations stream", theme.header)),
+            Line::from(""),
+            Line::from("When connected via a daemon socket, this tab shows per-pane last prompt and assistant excerpts (newest-first, Pi streaming partials folded)."),
+            Line::from(""),
+            Line::from(format!("Current read mode: {read_mode}. Conversation excerpts require the daemon's pi-bridge / claude-channel / oc subscribers. Start the daemon with `flightdeck-dashboard daemon start --session <name>` and relaunch the TUI with `--socket <path>`.")),
+        ];
         frame.render_widget(
-            Paragraph::new("No conversation excerpts captured yet.")
+            Paragraph::new(lines)
                 .block(block)
                 .style(theme.muted)
-                .alignment(Alignment::Center)
+                .alignment(Alignment::Left)
                 .wrap(Wrap { trim: true }),
             area,
         );

@@ -85,7 +85,7 @@ pub const BINDINGS: &[KeyBinding] = &[
     },
     KeyBinding {
         keys: "Ctrl+N",
-        description: "Toggle noisy activity rows",
+        description: "Toggle heartbeat/noise folding",
         action: Action::ToggleNoise,
     },
     KeyBinding {

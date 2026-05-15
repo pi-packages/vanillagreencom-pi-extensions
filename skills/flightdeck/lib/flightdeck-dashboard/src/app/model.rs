@@ -10,7 +10,7 @@ use crate::app::command::SnapshotSource;
 use crate::app::motion::{EffectInstance, MotionLevel};
 use crate::app::reload::ReloadCoalescer;
 use crate::state::snapshot::{
-    DashboardSnapshot, Event, EventImportance, SessionKind, TrackedSession,
+    DashboardSnapshot, Event, EventImportance, SessionKind, SessionState, TrackedSession,
 };
 
 pub type Clock = fn() -> DateTime<Utc>;
@@ -80,7 +80,7 @@ impl Tab {
 pub struct UiFlags {
     pub compact: bool,
     pub filter_open: bool,
-    pub show_noisy: bool,
+    pub hide_noise: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -194,6 +194,7 @@ pub struct Model {
     pub motion_clock: Instant,
     pub active_effects: Vec<EffectInstance>,
     pub selection: HashMap<Tab, usize>,
+    overview_selection_initialized: bool,
     pub show_help: bool,
     pub modal: ModalState,
     pub ui: UiFlags,
@@ -220,7 +221,7 @@ impl Model {
         }
         let read_source_state = ReadSourceState::from_snapshot(&snapshot);
         let recent_events = snapshot.recent_events.clone();
-        Self {
+        let mut model = Self {
             current_tab: Tab::Overview,
             tabs_enabled,
             snapshot,
@@ -234,12 +235,13 @@ impl Model {
             motion_clock: Instant::now(),
             active_effects: Vec::with_capacity(8),
             selection,
+            overview_selection_initialized: false,
             show_help: false,
             modal: ModalState::None,
             ui: UiFlags {
                 compact: false,
                 filter_open: false,
-                show_noisy: true,
+                hide_noise: true,
             },
             feed_filter: FeedFilter::new(),
             current_pane_id: std::env::var("TMUX_PANE")
@@ -249,7 +251,9 @@ impl Model {
             error: None,
             clock,
             animate_frame: 0,
-        }
+        };
+        model.initialize_overview_selection();
+        model
     }
 
     pub fn refresh_now(&mut self) {
@@ -269,6 +273,23 @@ impl Model {
         self.selection.insert(self.current_tab, value.min(max));
     }
 
+    pub fn mark_overview_selection_initialized(&mut self) {
+        if self.current_tab == Tab::Overview {
+            self.overview_selection_initialized = true;
+        }
+    }
+
+    pub fn initialize_overview_selection(&mut self) {
+        if self.overview_selection_initialized {
+            return;
+        }
+        let Some(index) = default_overview_selection(&self.snapshot) else {
+            return;
+        };
+        self.selection.insert(Tab::Overview, index);
+        self.overview_selection_initialized = true;
+    }
+
     #[must_use]
     pub fn selected_session(&self) -> Option<&TrackedSession> {
         self.snapshot.sessions.get(self.selected_index())
@@ -278,7 +299,7 @@ impl Model {
     pub fn max_selection_index(&self) -> usize {
         let len = match self.current_tab {
             Tab::Overview => self.snapshot.sessions.len(),
-            Tab::LiveFeed => self.filtered_events().len(),
+            Tab::LiveFeed => self.live_feed_row_count(),
             Tab::Conversations => self.snapshot.conversations.len(),
             Tab::Merges => self
                 .snapshot
@@ -382,10 +403,67 @@ impl Model {
         self.recent_events
             .iter()
             .rev()
-            .filter(|event| self.ui.show_noisy || event.importance >= EventImportance::Important)
+            .filter(|event| !self.ui.hide_noise || event.importance > EventImportance::Low)
             .filter(|event| self.feed_filter.matches(event))
             .collect()
     }
+
+    #[must_use]
+    pub fn hidden_noise_count(&self) -> usize {
+        if !self.ui.hide_noise {
+            return 0;
+        }
+        self.recent_events
+            .iter()
+            .rev()
+            .filter(|event| event.importance == EventImportance::Low)
+            .filter(|event| self.feed_filter.matches(event))
+            .count()
+    }
+
+    #[must_use]
+    pub fn live_feed_row_count(&self) -> usize {
+        self.filtered_events()
+            .len()
+            .saturating_add(usize::from(self.hidden_noise_count() > 0))
+    }
+}
+
+fn default_overview_selection(snapshot: &DashboardSnapshot) -> Option<usize> {
+    if snapshot.sessions.is_empty() {
+        return None;
+    }
+    if let Some(entry_id) = snapshot
+        .paused_for_user
+        .as_ref()
+        .and_then(|pause| pause.entry_id.as_deref())
+    {
+        if let Some(index) = snapshot
+            .sessions
+            .iter()
+            .position(|session| session.id == entry_id)
+        {
+            return Some(index);
+        }
+    }
+    snapshot
+        .sessions
+        .iter()
+        .position(|session| {
+            matches!(
+                session.state,
+                SessionState::Prompting | SessionState::Submitting
+            )
+        })
+        .or_else(|| {
+            snapshot.sessions.iter().position(|session| {
+                matches!(
+                    session.state,
+                    SessionState::Waiting | SessionState::Ready | SessionState::MergeReady
+                )
+            })
+        })
+        .or(Some(0))
 }
 
 fn enabled_tabs_for(snapshot: &DashboardSnapshot) -> Vec<Tab> {

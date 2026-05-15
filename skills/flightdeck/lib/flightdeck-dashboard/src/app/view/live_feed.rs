@@ -11,21 +11,28 @@ use crate::state::snapshot::{Event, EventImportance};
 
 pub fn render(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
     let events = model.filtered_events();
-    let rows = events
+    let hidden_noise = model.hidden_noise_count();
+    let max_rows = area.height.saturating_sub(3) as usize;
+    let event_limit = max_rows.saturating_sub(usize::from(hidden_noise > 0));
+    let mut rows = events
         .iter()
-        .take(area.height.saturating_sub(3) as usize)
+        .take(event_limit)
         .enumerate()
         .map(|(idx, event)| row_for_event(event, idx, model, theme))
         .collect::<Vec<_>>();
+    if hidden_noise > 0 && rows.len() < max_rows {
+        rows.push(row_for_folded_noise(hidden_noise, rows.len(), model, theme));
+    }
 
+    let row_count = events.len().saturating_add(usize::from(hidden_noise > 0));
     let title = format!(
-        " activity feed · {} event{} · {} ",
-        events.len(),
-        if events.len() == 1 { "" } else { "s" },
-        if model.ui.show_noisy {
-            "noisy on"
+        " activity feed · {} row{} · {} ",
+        row_count,
+        if row_count == 1 { "" } else { "s" },
+        if model.ui.hide_noise {
+            "noise hidden"
         } else {
-            "important only"
+            "noise shown"
         }
     );
     let header = Row::new([
@@ -86,6 +93,26 @@ fn row_for_event<'a>(event: &Event, idx: usize, model: &Model, theme: Theme) -> 
             Span::styled(accent.to_owned(), theme.info),
             Span::raw(event.message.clone()),
         ])),
+    ])
+    .style(if idx == model.selected_index() {
+        theme.selection
+    } else {
+        theme.frame
+    })
+}
+
+fn row_for_folded_noise<'a>(count: usize, idx: usize, model: &Model, theme: Theme) -> Row<'a> {
+    Row::new(vec![
+        Cell::from("—"),
+        Cell::from(Span::styled("DAEMON", theme.muted)),
+        Cell::from(Span::styled("·", theme.muted)),
+        Cell::from(Span::styled(
+            format!(
+                "{count} heartbeat event{} folded",
+                if count == 1 { "" } else { "s" }
+            ),
+            theme.muted,
+        )),
     ])
     .style(if idx == model.selected_index() {
         theme.selection

@@ -4,10 +4,16 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
+use crate::app::command::SnapshotSource;
 use crate::app::model::{Model, ReadSourceState};
 use crate::app::theme::Theme;
 
 pub fn render(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
+    if !matches!(model.snapshot_source, SnapshotSource::Socket(_)) {
+        render_file_mode(frame, area, model, theme);
+        return;
+    }
+
     let daemon = &model.snapshot.daemon;
     let heartbeat_count = model
         .recent_events
@@ -75,6 +81,40 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
         .borders(Borders::ALL)
         .border_style(theme.border_active)
         .title(Span::styled(" daemon ", theme.title));
+    frame.render_widget(
+        Paragraph::new(lines).block(block).wrap(Wrap { trim: true }),
+        area,
+    );
+}
+
+fn render_file_mode(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
+    let updated = model.snapshot.updated_at;
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("Read mode      ", theme.status_label),
+            Span::raw("file-watcher (no daemon socket)"),
+        ]),
+        Line::from(vec![
+            Span::styled("State file     ", theme.status_label),
+            Span::raw(model.snapshot.master_state_path.display().to_string()),
+        ]),
+        Line::from(vec![
+            Span::styled("File mtime     ", theme.status_label),
+            Span::raw(format!(
+                "{} ({} ago)",
+                updated.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                age_label(updated, model.now)
+            )),
+        ]),
+        Line::from(vec![
+            Span::styled("Note           ", theme.status_label),
+            Span::raw("Daemon socket not connected. Run `flightdeck-dashboard daemon start --session <name>` to populate daemon-side telemetry, then relaunch with `--socket $FD_STATE_DIR/dashboard-<key>.sock`."),
+        ]),
+    ];
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme.border_active)
+        .title(Span::styled(" daemon file-mode ", theme.title));
     frame.render_widget(
         Paragraph::new(lines).block(block).wrap(Wrap { trim: true }),
         area,

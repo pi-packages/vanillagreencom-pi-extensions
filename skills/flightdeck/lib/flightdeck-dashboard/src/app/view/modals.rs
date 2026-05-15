@@ -6,17 +6,12 @@ use ratatui::Frame;
 use crate::app::keymap::BINDINGS;
 use crate::app::model::Model;
 use crate::app::theme::Theme;
-use crate::app::view::fx;
 
-pub fn render_help(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
+pub fn render_help(frame: &mut Frame<'_>, area: Rect, _model: &Model, theme: Theme) {
     let popup = centered_rect(70, 70, area);
     frame.render_widget(Clear, popup);
     let mut lines = vec![
-        Line::from(vec![
-            Span::styled("Flightdeck dashboard help", theme.title),
-            Span::raw("  "),
-            Span::styled(fx::help_alpha_label(model), theme.muted),
-        ]),
+        Line::from(Span::styled("Flightdeck dashboard help", theme.title)),
         Line::from(""),
     ];
     for binding in BINDINGS {
@@ -25,6 +20,11 @@ pub fn render_help(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Them
             Span::raw(binding.description),
         ]));
     }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Counts: P=prompting W=waiting R=ready MR=merge-ready M=merged D=dead C=complete",
+        theme.muted,
+    )));
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         "Esc or ? closes this overlay",

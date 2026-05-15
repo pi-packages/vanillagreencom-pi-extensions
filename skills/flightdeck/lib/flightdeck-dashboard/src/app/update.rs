@@ -74,8 +74,9 @@ fn handle_snapshot_updated(
     model.read_source_state = source_state;
     model.refresh_now();
     model.refresh_tabs_enabled();
+    model.initialize_overview_selection();
     let mut commands = vec![Cmd::Render];
-    if pause_edge {
+    if pause_edge && model.motion.allows_rich_motion() {
         commands.push(Cmd::PauseSideEffects);
     }
     commands.extend(pending_reload);
@@ -150,12 +151,14 @@ fn handle_key(model: &mut Model, key: &KeyEvent) -> Vec<Cmd> {
         }
         Action::First => {
             model.set_selected_index(0);
+            model.mark_overview_selection_initialized();
             let target = EffectTarget::Row(model.selected_index());
             push_effect(model, EffectKind::SelectionHalo, target);
             vec![Cmd::Render]
         }
         Action::Last => {
             model.set_selected_index(model.max_selection_index());
+            model.mark_overview_selection_initialized();
             let target = EffectTarget::Row(model.selected_index());
             push_effect(model, EffectKind::SelectionHalo, target);
             vec![Cmd::Render]
@@ -181,7 +184,7 @@ fn handle_key(model: &mut Model, key: &KeyEvent) -> Vec<Cmd> {
         }
         Action::Reload => request_reload(model),
         Action::ToggleNoise => {
-            model.ui.show_noisy = !model.ui.show_noisy;
+            model.ui.hide_noise = !model.ui.hide_noise;
             vec![Cmd::Render]
         }
         Action::ToggleCompact => {
@@ -230,7 +233,7 @@ fn handle_filter_key(model: &mut Model, key: &KeyEvent) -> Vec<Cmd> {
             vec![Cmd::Render]
         }
         KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            model.ui.show_noisy = !model.ui.show_noisy;
+            model.ui.hide_noise = !model.ui.hide_noise;
             vec![Cmd::Render]
         }
         KeyCode::Char(ch) if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT => {
@@ -248,6 +251,7 @@ fn move_selection(model: &mut Model, delta: isize) {
         .saturating_add_signed(delta)
         .min(model.max_selection_index());
     model.set_selected_index(next);
+    model.mark_overview_selection_initialized();
     let target = EffectTarget::Row(model.selected_index());
     push_effect(model, EffectKind::SelectionHalo, target);
 }

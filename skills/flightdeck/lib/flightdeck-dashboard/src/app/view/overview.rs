@@ -7,7 +7,7 @@ use ratatui::Frame;
 use crate::app::model::{Model, ReadSourceState};
 use crate::app::theme::Theme;
 use crate::app::view::{fx, human_duration};
-use crate::state::snapshot::TrackedSession;
+use crate::state::snapshot::{SessionState, TrackedSession};
 use crate::state::tracked_entries::PRE_PURGE_BANNER;
 
 const RIGHT_RAIL_MIN_WIDTH: u16 = 100;
@@ -60,22 +60,6 @@ fn render_transition_banners(
     } else if let Some(error) = &model.snapshot.master_error {
         area = render_banner(frame, area, " state read error ", error, theme.error);
     }
-    if model.is_observer() {
-        let owner = model
-            .snapshot
-            .owner
-            .as_ref()
-            .and_then(|owner| owner.pane_id.as_deref())
-            .unwrap_or("unknown");
-        let current = model.current_pane_id.as_deref().unwrap_or("unknown");
-        area = render_banner(
-            frame,
-            area,
-            " observer mode ",
-            &format!("Read-only observer: owner pane {owner}, dashboard pane {current}."),
-            theme.warning,
-        );
-    }
     match model.read_source_state {
         ReadSourceState::Archive { archived_at } => {
             area = render_banner(
@@ -127,41 +111,84 @@ fn render_banner(
 
 fn render_single_column(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme) {
     let snapshot = &model.snapshot;
-    let mut lines = vec![
-        Line::from(vec![
-            Span::styled("Session ", theme.status_label),
-            Span::raw(snapshot.session_id.as_str()),
-        ]),
-        Line::from(vec![
-            Span::styled("Counts ", theme.status_label),
-            Span::raw(format!(
-                "AH:{} ISS:{} WF:{} total:{}",
-                snapshot.counts.adhoc,
-                snapshot.counts.issue,
-                snapshot.counts.workflow,
-                snapshot.counts.total
-            )),
-        ]),
-    ];
-    if let Some(started) = snapshot.started_at {
-        lines.push(Line::from(vec![
-            Span::styled("Elapsed ", theme.status_label),
-            Span::raw(human_duration(started, model.now)),
-        ]));
-    }
+    let elapsed = snapshot
+        .started_at
+        .map(|started| human_duration(started, model.now))
+        .unwrap_or_else(|| String::from("unknown"));
+    let mut lines = vec![Line::from(vec![
+        Span::styled("Session ", theme.status_label),
+        Span::raw(snapshot.session_id.clone()),
+        Span::raw("  ·  "),
+        Span::raw(format!(
+            "AH:{}  ISS:{}  WF:{}",
+            snapshot.counts.adhoc, snapshot.counts.issue, snapshot.counts.workflow
+        )),
+        Span::raw("  ·  "),
+        Span::raw(elapsed),
+    ])];
     if let Some(pause) = &snapshot.paused_for_user {
         lines.push(Line::from(vec![
-            Span::styled("PAUSED FOR USER ", theme.pause),
-            Span::raw(pause.reason.as_str()),
+            Span::styled("PAUSED ", theme.pause),
+            Span::raw(
+                pause
+                    .entry_id
+                    .as_deref()
+                    .unwrap_or("unknown-entry")
+                    .to_owned(),
+            ),
+            Span::raw("  "),
+            Span::raw(pause.reason.clone()),
+            pause
+                .prompt_text
+                .as_ref()
+                .map(|prompt| Span::raw(format!(" · {prompt}")))
+                .unwrap_or_else(|| Span::raw(String::new())),
         ]));
     }
     if snapshot.terminated {
         lines.push(Line::from(Span::styled("✔ session complete", theme.ok)));
     }
+    lines.push(Line::from(""));
+    for (idx, session) in snapshot.sessions.iter().enumerate() {
+        let cursor = if idx == model.selected_index() {
+            "›"
+        } else {
+            " "
+        };
+        let pr = session
+            .issue()
+            .and_then(|issue| issue.pr_number)
+            .map(|pr| format!("PR #{pr}"))
+            .unwrap_or_default();
+        let style = if idx == model.selected_index() {
+            theme.selection
+        } else {
+            theme.frame
+        };
+        lines.push(Line::from(vec![
+            Span::styled(format!("{cursor} "), style),
+            Span::styled(format!("{:<15}", session.id), style),
+            Span::styled(
+                format!("{:<12}", session.state.as_str()),
+                theme.state(&session.state),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                format!("{:<8}", session.harness.as_deref().unwrap_or("—")),
+                style,
+            ),
+            Span::raw(" "),
+            Span::styled(format!("{:<40}", truncate(&session.title, 40)), style),
+            Span::styled(pr, style),
+        ]));
+    }
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.border_active)
-        .title(Span::styled(" overview compact ", theme.title));
+        .title(Span::styled(
+            format!(" sessions ({} tracked) ", snapshot.counts.total),
+            theme.title,
+        ));
     frame.render_widget(
         Paragraph::new(lines).block(block).wrap(Wrap { trim: true }),
         area,
@@ -173,9 +200,9 @@ fn render_left_rail(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: The
     if model.snapshot.counts.by_state.is_empty() {
         lines.push(Line::from(Span::styled("no tracked entries", theme.muted)));
     } else {
-        for (state, count) in &model.snapshot.counts.by_state {
+        for (state, count) in ordered_state_counts(model) {
             lines.push(Line::from(vec![
-                Span::styled(format!("{state:<12}"), theme.state(state)),
+                Span::styled(format!("{:<12}", state.as_str()), theme.state(&state)),
                 Span::raw(format!(" {count}")),
             ]));
         }
@@ -217,8 +244,8 @@ fn render_session_table(frame: &mut Frame<'_>, area: Rect, model: &Model, theme:
         Cell::from("Title"),
         Cell::from("PR/worktree"),
         Cell::from("Age"),
-        Cell::from("Last decision"),
-        Cell::from("Last activity"),
+        Cell::from("Decision"),
+        Cell::from("Activity"),
     ])
     .style(theme.header);
 
@@ -257,7 +284,10 @@ fn render_session_table(frame: &mut Frame<'_>, area: Rect, model: &Model, theme:
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.border_active)
-        .title(Span::styled(" sessions ", theme.title));
+        .title(Span::styled(
+            format!(" sessions ({} tracked) ", model.snapshot.counts.total),
+            theme.title,
+        ));
     let table = Table::new(
         rows,
         [
@@ -285,7 +315,7 @@ fn render_detail(frame: &mut Frame<'_>, area: Rect, model: &Model, theme: Theme)
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.border)
-        .title(Span::styled(" selected detail ", theme.muted));
+        .title(Span::styled(" detail ", theme.muted));
     frame.render_widget(
         Paragraph::new(lines)
             .block(block)
@@ -357,17 +387,23 @@ fn detail_lines(session: &TrackedSession, model: &Model, theme: Theme) -> Vec<Li
         ]));
     }
     if let Some(pause) = &model.snapshot.paused_for_user {
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled("PAUSED FOR USER", theme.pause)));
-        lines.push(Line::from(vec![
-            Span::styled("reason ", theme.status_label),
-            Span::raw(pause.reason.clone()),
-        ]));
-        if let Some(prompt) = &pause.prompt_text {
+        if pause
+            .entry_id
+            .as_deref()
+            .is_some_and(|entry_id| entry_id == session.id)
+        {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled("PAUSED FOR USER", theme.pause)));
             lines.push(Line::from(vec![
-                Span::styled("prompt ", theme.status_label),
-                Span::raw(prompt.clone()),
+                Span::styled("reason ", theme.status_label),
+                Span::raw(pause.reason.clone()),
             ]));
+            if let Some(prompt) = &pause.prompt_text {
+                lines.push(Line::from(vec![
+                    Span::styled("prompt ", theme.status_label),
+                    Span::raw(prompt.clone()),
+                ]));
+            }
         }
     }
     if let Some(decision) = session.latest_decision() {
@@ -380,6 +416,33 @@ fn detail_lines(session: &TrackedSession, model: &Model, theme: Theme) -> Vec<Li
         ]));
     }
     lines
+}
+
+fn ordered_state_counts(model: &Model) -> Vec<(SessionState, usize)> {
+    let priority = [
+        SessionState::Prompting,
+        SessionState::Submitting,
+        SessionState::Waiting,
+        SessionState::Ready,
+        SessionState::MergeReady,
+        SessionState::Complete,
+        SessionState::Merged,
+        SessionState::Cancelled,
+        SessionState::Aborted,
+        SessionState::Dead,
+    ];
+    let mut rows = Vec::with_capacity(model.snapshot.counts.by_state.len());
+    for state in &priority {
+        if let Some(count) = model.snapshot.counts.by_state.get(state) {
+            rows.push((state.clone(), *count));
+        }
+    }
+    for (state, count) in &model.snapshot.counts.by_state {
+        if !priority.contains(state) {
+            rows.push((state.clone(), *count));
+        }
+    }
+    rows
 }
 
 fn optional_count(value: Option<u32>) -> String {
@@ -418,6 +481,16 @@ fn activity_label(session: &TrackedSession, now: DateTime<Utc>) -> String {
         .or(session.last_response_at)
         .or(session.spawned_at);
     age_label(activity, now)
+}
+
+fn truncate(value: &str, max_chars: usize) -> String {
+    let mut chars = value.chars();
+    let truncated = chars.by_ref().take(max_chars).collect::<String>();
+    if chars.next().is_some() {
+        format!("{truncated}…")
+    } else {
+        truncated
+    }
 }
 
 fn age_label(value: Option<DateTime<Utc>>, now: DateTime<Utc>) -> String {

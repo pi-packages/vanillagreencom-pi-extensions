@@ -469,7 +469,9 @@ fn parse_importance(value: &str) -> EventImportance {
 fn daemon_text_importance(tag: &str, body: &str) -> EventImportance {
     let tag = tag.to_ascii_lowercase();
     let body = body.to_ascii_lowercase();
-    if tag.contains("error")
+    if tag.contains("heartbeat") || body.contains("heartbeat") {
+        EventImportance::Low
+    } else if tag.contains("error")
         || tag.contains("err")
         || body.contains(" error")
         || body.contains("failed")
