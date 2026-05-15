@@ -34,7 +34,7 @@ function queueSessionSearchCommandAction(ctx: ExtensionContext, action: QolSessi
 	const id = nextSessionSearchPendingActionId();
 	qolSessionSearchPendingActions.set(id, action);
 	ctx.ui.setEditorText(`/search:resume-pending ${id}`);
-	ctx.ui.notify(`${sessionDisplayName(action.result!)} — press Enter to ${action.type === "fork" ? "fork" : "resume"}`, "info");
+	ctx.ui.notify(`${sessionDisplayName(action.result!)} — press enter to ${action.type === "fork" ? "fork" : "resume"}`, "info");
 }
 
 export async function runSessionSearchResumeOrFork(pi: ExtensionAPI, ctx: ExtensionContext, action: QolSessionPaletteAction): Promise<boolean> {

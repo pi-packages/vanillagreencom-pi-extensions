@@ -8,8 +8,8 @@ Dedicated skills manager. Browse, preview, create, edit, rename, delete, and tog
 
 - Project, global, and package skills shown separately.
 - Search by name, description, source, scope, and path.
-- Enter inserts the enabled skill as a native `/skill:<name>` command into the editor.
-- Tab previews frontmatter and rendered content.
+- enter inserts the enabled skill as a native `/skill:<name>` command into the editor.
+- tab previews frontmatter and rendered content.
 - Create new project or global skills using the current model. Falls back to a deterministic template when the model is unavailable.
 - Edit, rename, and delete your own top-level skills. Package skills stay preview/toggle/insert only.
 - Hides Pi's startup `[Skills]` block so skill discovery lives in the manager.

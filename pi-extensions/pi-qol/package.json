@@ -136,8 +136,8 @@
         },
         {
           "key": "newlineOnShiftEnter",
-          "label": "Shift+Enter inserts newline",
-          "description": "Intercept distinguishable Shift+Enter/Shift+Return in the prompt editor and insert a newline instead of submitting.",
+          "label": "shift+enter inserts newline",
+          "description": "Intercept distinguishable shift+enter/shift+return in the prompt editor and insert a newline instead of submitting.",
           "type": "boolean",
           "default": true,
           "category": "Input",
@@ -147,7 +147,7 @@
         {
           "key": "newlineFallbackKey",
           "label": "Fallback newline key",
-          "description": "Alternate newline key for terminals that cannot distinguish Shift+Enter. Alt+Enter is reserved for Pi follow-up messages.",
+          "description": "Alternate newline key for terminals that cannot distinguish shift+enter. alt+enter is reserved for Pi follow-up messages.",
           "type": "enum",
           "enumValues": [
             "ctrl+j",
@@ -161,7 +161,7 @@
         {
           "key": "pendingQueue.asciiGreen",
           "label": "Style pending queue preview",
-          "description": "Render Pi's built-in steering/follow-up queue preview in ANSI green with a heavy left queue bar, while keeping the Alt+Up restore hint in the theme hint color with a two-space indent.",
+          "description": "Render Pi's built-in steering/follow-up queue preview in ANSI green with a heavy left queue bar, while keeping the alt+up restore hint in the theme hint color with a two-space indent.",
           "type": "boolean",
           "default": true,
           "category": "Input",
@@ -350,7 +350,7 @@
         {
           "key": "sessionSearch.shortcutKey",
           "label": "Session search shortcut",
-          "description": "Keyboard shortcut to open the session search overlay. Default f2 avoids Pi's built-in Ctrl+F and Alt+F editor bindings. Set to none to disable.",
+          "description": "Keyboard shortcut to open the session search overlay. Default f2 avoids Pi's built-in ctrl+f and alt+f editor bindings. Set to none to disable.",
           "type": "string",
           "default": "f2",
           "category": "Session Search",

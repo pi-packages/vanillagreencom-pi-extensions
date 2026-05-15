@@ -94,7 +94,7 @@ The detector is mutually exclusive with the `context_length_exceeded` throw-path
 
 ## Dashboard widget internals
 
-`Alt+A` cycles the widget hidden → compact → expanded. `Alt+Shift+A` / `F3` opens the full `/agents` popup.
+`alt+a` cycles the widget hidden → compact → expanded. `alt+shift+a` / `f3` opens the full `/agents` popup.
 
 Each row shows agent name, kind (`pane`/`bg`), turn count, input/output tokens, cost, and (for working agents) a live tail of the latest tool/message truncated to card width.
 
@@ -110,12 +110,12 @@ Completed task records store the durable result summary in `PaneTaskRecord.summa
 
 ## Browser keys
 
-- `Tab` / `Shift+Tab` switches between **Agents** and **Monitor**.
-- `↑/↓`, `-/=`, `Home/End` navigate. `←/→` switches tree/detail focus and cycles task-detail subtabs. `Enter` expands/collapses Monitor Active/Completed/session rows or opens task detail.
-- `Enter` inserts `Use agent <name> to: ` into the editor.
-- `Alt+M` edits the selected agent's frontmatter.
-- Pane agents: `Alt+P`/`Ctrl+P` start or reuse, `Alt+O`/`Ctrl+O` attach, `Alt+X`/`Ctrl+X` stop.
-- `Esc` closes.
+- `tab` / `shift+tab` switches between **Agents** and **Monitor**.
+- `↑/↓`, `-/=`, `home/end` navigate. `←/→` switches tree/detail focus and cycles task-detail subtabs. `enter` expands/collapses Monitor Active/Completed/session rows or opens task detail.
+- `enter` inserts `Use agent <name> to: ` into the editor.
+- `alt+m` edits the selected agent's frontmatter.
+- Pane agents: `alt+p`/`ctrl+p` start or reuse, `alt+o`/`ctrl+o` attach, `alt+x`/`ctrl+x` stop.
+- `esc` closes.
 
 Status legend per row: live pane, startable, stale, background. Dashboard rows: queued, working, completed, needs completion, failed/blocked.
 

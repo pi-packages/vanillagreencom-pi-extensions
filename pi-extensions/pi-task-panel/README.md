@@ -55,7 +55,7 @@ Arguments support autocomplete, including task names.
 
 ## Manager keys
 
-`↑/↓` selects. `Enter`/`s` starts, `d` marks done, `x` drops, `r` removes, `c` clears completed, `e` opens bulk edit.
+`↑/↓` selects. `enter`/`s` starts, `d` marks done, `x` drops, `r` removes, `c` clears completed, `e` opens bulk edit.
 
 Bulk edit format:
 

@@ -126,13 +126,9 @@ export function panelBranch(theme: Theme, branch: "├" | "└" | "│", style: 
 // "agent is currently working" row.
 export const COG_GLYPH = "\uf013";
 
-// Title-case each `+`-separated chunk so `alt+f` renders as `Alt+F`,
-// matching pi-agents-tmux's mini dashboard hint formatting.
+// Keep shortcut hints lowercase (`ctrl+o`, `alt+f`, `f6`) to match other Pi tool output.
 export function formatShortcutHint(shortcut: string): string {
-	return shortcut
-		.split("+")
-		.map((part) => (part.length === 1 ? part.toUpperCase() : part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()))
-		.join("+");
+	return shortcut.toLowerCase();
 }
 
 export function stateColor(state: TrackedState | string | undefined | null): "success" | "warning" | "error" | "accent" | "muted" | "dim" {

@@ -115,7 +115,7 @@ function agentPad(text: string, width: number): string {
 
 function isAgentBrowserCancelInput(data: string): boolean {
 	// After terminal/tmux resize events, stdin can occasionally deliver raw control
-	// bytes in chunks that `matchesKey()` does not normalize. Always honor Ctrl+C
+	// bytes in chunks that `matchesKey()` does not normalize. Always honor ctrl+c
 	// if the byte is present anywhere in the input chunk so the popup cannot trap
 	// the session in raw-mode focus.
 	return data.includes("\x03") || matchesKey(data, "escape") || matchesKey(data, "ctrl+c");

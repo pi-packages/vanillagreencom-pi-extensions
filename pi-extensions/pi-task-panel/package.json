@@ -50,8 +50,8 @@
         },
         {
           "key": "takeoverCtrlT",
-          "label": "Use Ctrl+T for tasks",
-          "description": "Register Ctrl+T for task panel visibility. Pi normally uses Ctrl+T for thinking visibility, so this requires reload and explicit opt-in.",
+          "label": "Use ctrl+t for tasks",
+          "description": "Register ctrl+t for task panel visibility. Pi normally uses ctrl+t for thinking visibility, so this requires reload and explicit opt-in.",
           "type": "boolean",
           "default": false,
           "category": "Keyboard",
@@ -61,7 +61,7 @@
         {
           "key": "alternateShortcut",
           "label": "Alternate shortcut",
-          "description": "Always-available task panel shortcut when Ctrl+T is not taken over. Cycles hidden → show compact → show all.",
+          "description": "Always-available task panel shortcut when ctrl+t is not taken over. Cycles hidden → show compact → show all.",
           "type": "string",
           "default": "alt+t",
           "category": "Keyboard",

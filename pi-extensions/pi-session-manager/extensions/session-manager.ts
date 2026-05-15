@@ -15,7 +15,7 @@ function queueSessionManagerCommandAction(ctx: SessionManagerContext, action: Se
 	const id = `sm-${Date.now().toString(36)}-${(++pendingSessionManagerActionCounter).toString(36)}`;
 	pendingSessionManagerActions.set(id, action);
 	ctx.ui.setEditorText(`/sessions:resume-pending ${id}`);
-	ctx.ui.notify(`${action.title || basename(action.path)} — press Enter to resume`, "info");
+	ctx.ui.notify(`${action.title || basename(action.path)} — press enter to resume`, "info");
 }
 
 async function runSessionManagerAction(ctx: SessionManagerContext, pi: ExtensionAPI, action: SessionAction): Promise<boolean> {

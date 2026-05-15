@@ -127,10 +127,7 @@ export function normalizedCommand(command: string): string {
 }
 
 export function formatShortcutHint(shortcut: string): string {
-	return shortcut
-		.split("+")
-		.map((part) => (part.length === 1 ? part.toUpperCase() : part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()))
-		.join("+");
+	return shortcut.toLowerCase();
 }
 
 export function lineCount(text: string): number {

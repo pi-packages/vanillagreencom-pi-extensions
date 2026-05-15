@@ -80,7 +80,7 @@
         {
           "key": "forcedBackgroundNotifyOnOutput",
           "label": "Shortcut output wakeups",
-          "description": "When Alt+. or /bg next forces the next bash into the background, also wake the agent on new output. Exit wakeups are always enabled for forced background tasks.",
+          "description": "When alt+. or /bg next forces the next bash into the background, also wake the agent on new output. Exit wakeups are always enabled for forced background tasks.",
           "type": "boolean",
           "default": false,
           "category": "Wakeups",
@@ -89,7 +89,7 @@
         {
           "key": "forcedBackgroundWindowSeconds",
           "label": "Shortcut arming window",
-          "description": "Seconds after Alt+. or /bg next during which the next bash command is forced into the background.",
+          "description": "Seconds after alt+. or /bg next during which the next bash command is forced into the background.",
           "type": "number",
           "default": 300,
           "category": "Execution",

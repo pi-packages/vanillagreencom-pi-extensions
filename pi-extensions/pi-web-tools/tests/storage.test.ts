@@ -200,7 +200,7 @@ test("advanced Exa tools render compact provider-labeled summaries", () => {
 	assert.doesNotMatch(answerResult.split("\n")[0] ?? "", /· answer/);
 	assert.match(answerResult, /Ghostty is a fast terminal emulator\./);
 	assert.doesNotMatch(answerResult, /answer Ghostty/);
-	assert.match(answerResult, /Ctrl\+O to expand/);
+	assert.match(answerResult, /ctrl\+o to expand/);
 	assert.ok(expandedAnswerResult.length > answerResult.length);
 	assert.match(similarResult, /Web Find Similar \(Exa\) https:\/\/ghostty.org · 2 results/);
 	assert.match(similarResult, /Docs · https:\/\/ghostty.org\/docs/);

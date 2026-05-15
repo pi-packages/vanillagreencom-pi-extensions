@@ -363,7 +363,7 @@ class SkillsManagerDialog implements Focusable {
 		return renderFrame(this.theme, width, root.render(innerWidth));
 	}
 	private renderRenameDialog(width: number): string[] {
-		const lines = [skillEntityTitle(this.theme, "Rename skill"), "", this.theme.fg("dim", "Enter new skill name (lowercase letters, numbers, hyphens)"), "", ...this.renameInput.render(Math.max(1, Math.min(width - 4, 64)))];
+		const lines = [skillEntityTitle(this.theme, "Rename skill"), "", this.theme.fg("dim", "enter new skill name (lowercase letters, numbers, hyphens)"), "", ...this.renameInput.render(Math.max(1, Math.min(width - 4, 64)))];
 		if (this.renameError) lines.push("", toneText(this.theme, "error", this.renameError));
 		return renderCenteredDialog(this.theme, width, lines);
 	}

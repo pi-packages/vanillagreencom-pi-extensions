@@ -87,7 +87,7 @@ Clients receive events by default. Send `{"type":"subscribe","enabled":false}` t
 - Plain text keeps the normal `sendUserMessage` path.
 - `/skill:<name> ...` expands client-side from the loaded skill's `sourceInfo.path`, inlining the same `<skill ...>` block Pi's editor would produce. Large user-message bodies are expected and match interactive `/skill:<name>` behavior.
 - Prompt templates (`/<name> ...` from loaded prompt paths) expand client-side with Pi-compatible `$1`, `$@`, `$ARGUMENTS`, and `${@:N[:L]}` substitution.
-- Extension/TUI commands (for example `/bridge:ping`, `/tasks:add`, `/flightdeck`) are pasted into Pi's own tmux pane with `send-keys -l` + Enter after resolving the pane by walking parent processes from `process.pid`. This briefly shows text in the editor and always delivers immediately (`deliverAs` does not apply to this route).
+- Extension/TUI commands (for example `/bridge:ping`, `/tasks:add`, `/flightdeck`) are pasted into Pi's own tmux pane with `send-keys -l` + enter after resolving the pane by walking parent processes from `process.pid`. This briefly shows text in the editor and always delivers immediately (`deliverAs` does not apply to this route).
 - If tmux pane resolution or paste fails, the bridge falls back to the old raw `sendUserMessage` behavior instead of failing the request.
 
 ## Settings

@@ -303,7 +303,7 @@ export function renderDashboardLines(snapshot: FlightdeckSnapshot, theme: Theme,
 	const queueLen = snapshot.master?.merge_queue?.length ?? 0;
 	const queueBadge = queueLen > 0 ? ` ${theme.fg("muted", "·")} ${theme.fg("accent", `merge-queue ${queueLen}`)}` : "";
 	// Keyhints — same pattern as pi-agents-tmux dashboard header:
-	// `<title> <stats> · Alt+F toggle · F6 popup · <daemon-health>`. Both
+	// `<title> <stats> · alt+f toggle · f6 popup · <daemon-health>`. Both
 	// shortcuts read from extension settings so user overrides are reflected.
 	const toggleShortcut = settingString("dashboardShortcut", "alt+m", cwd);
 	const popupShortcut = settingString("popupShortcut", "f6", cwd);
