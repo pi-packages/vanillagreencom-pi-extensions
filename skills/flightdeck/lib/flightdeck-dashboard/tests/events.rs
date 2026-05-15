@@ -78,6 +78,62 @@ async fn jsonl_event_source_emits_existing_jsonl() {
 }
 
 #[tokio::test]
+async fn tail_handles_rotation() {
+    let dir = tempfile::tempdir().expect("tempdir creates");
+    let path = dir.path().join("fd-wake-events-s1.log");
+    tokio::fs::write(
+        &path,
+        "{\"ts\":\"2026-05-15T10:00:00Z\",\"message\":\"first\"}\n",
+    )
+    .await
+    .expect("fixture writes");
+
+    let source = JsonlEventSource::new(path.clone(), ActivitySource::Wake);
+    let mut rx = source.subscribe();
+    let first = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+        .await
+        .expect("first event arrives")
+        .expect("first event exists");
+    assert_eq!(first.message, "first");
+
+    tokio::fs::remove_file(&path)
+        .await
+        .expect("old file removed");
+    tokio::fs::write(
+        &path,
+        "{\"ts\":\"2026-05-15T10:00:01Z\",\"message\":\"rotated\"}\n",
+    )
+    .await
+    .expect("rotated fixture writes");
+
+    let rotated = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+        .await
+        .expect("rotated event arrives")
+        .expect("rotated event exists");
+    assert_eq!(rotated.message, "rotated");
+}
+
+#[tokio::test]
+async fn tail_handles_invalid_utf8() {
+    let dir = tempfile::tempdir().expect("tempdir creates");
+    let path = dir.path().join("fd-wake-events-s1.log");
+    tokio::fs::write(
+        &path,
+        b"\xff\xfe\n{\"ts\":\"2026-05-15T10:00:00Z\",\"message\":\"valid\"}\n",
+    )
+    .await
+    .expect("fixture writes");
+
+    let source = JsonlEventSource::new(path, ActivitySource::Wake);
+    let mut rx = source.subscribe();
+    let event = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+        .await
+        .expect("event arrives")
+        .expect("event exists");
+    assert_eq!(event.message, "valid");
+}
+
+#[tokio::test]
 async fn daemon_text_log_source_emits_existing_text_log() {
     let dir = tempfile::tempdir().expect("tempdir creates");
     let path = dir.path().join("fd-daemon-s1.log");

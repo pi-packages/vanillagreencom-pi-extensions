@@ -6,11 +6,13 @@
 //! and ring buffer do not need to change.
 
 use std::io;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use serde_json::Value;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::sync::mpsc;
 use tokio::time::MissedTickBehavior;
 
@@ -20,6 +22,7 @@ use crate::util::paths::{
 };
 
 const TAIL_POLL_MS: u64 = 250;
+const TAIL_MAX_BYTES: usize = 256 * 1024;
 
 pub trait EventSource: Send + 'static {
     fn subscribe(&self) -> mpsc::UnboundedReceiver<Event>;
@@ -182,32 +185,31 @@ where
 {
     let (tx, rx) = mpsc::unbounded_channel();
     tokio::spawn(async move {
-        let mut offset = 0usize;
+        let mut cursor = TailCursor::default();
         let mut last_error_kind = None;
         let mut tick = tokio::time::interval(Duration::from_millis(TAIL_POLL_MS));
         tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
         loop {
             tick.tick().await;
-            match tokio::fs::read_to_string(&path).await {
-                Ok(text) => {
+            match read_tail_chunk(&path, &mut cursor).await {
+                Ok(bytes) => {
                     last_error_kind = None;
-                    if text.len() < offset {
-                        offset = 0;
+                    if bytes.is_empty() {
+                        continue;
                     }
-                    let new_text = &text[offset..];
-                    offset = text.len();
-                    for event in parser(new_text, &mut |_| {}) {
+                    let text = String::from_utf8_lossy(&bytes);
+                    for event in parser(&text, &mut |_| {}) {
                         if tx.send(event).is_err() {
                             return;
                         }
                     }
                 }
                 Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                    offset = 0;
+                    cursor.reset();
                     last_error_kind = None;
                 }
                 Err(error) => {
-                    offset = 0;
+                    cursor.reset();
                     if let Some(event) = tail_read_error_event(&path, &error, &mut last_error_kind)
                     {
                         if tx.send(event).is_err() {
@@ -219,6 +221,66 @@ where
         }
     });
     rx
+}
+
+#[derive(Debug, Default)]
+struct TailCursor {
+    offset: u64,
+    identity: Option<FileIdentity>,
+    rotation_warned: bool,
+}
+
+impl TailCursor {
+    fn reset(&mut self) {
+        self.offset = 0;
+        self.identity = None;
+        self.rotation_warned = false;
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FileIdentity {
+    dev: u64,
+    ino: u64,
+    len: u64,
+}
+
+impl FileIdentity {
+    fn from_metadata(metadata: &std::fs::Metadata) -> Self {
+        Self {
+            dev: metadata.dev(),
+            ino: metadata.ino(),
+            len: metadata.len(),
+        }
+    }
+
+    const fn rotated_from(self, previous: Self, offset: u64) -> bool {
+        self.dev != previous.dev || self.ino != previous.ino || self.len < offset
+    }
+}
+
+async fn read_tail_chunk(path: &Path, cursor: &mut TailCursor) -> Result<Vec<u8>, io::Error> {
+    let metadata = tokio::fs::metadata(path).await?;
+    let identity = FileIdentity::from_metadata(&metadata);
+    if cursor
+        .identity
+        .is_some_and(|previous| identity.rotated_from(previous, cursor.offset))
+    {
+        cursor.offset = 0;
+        if !cursor.rotation_warned {
+            cursor.rotation_warned = true;
+            tracing::warn!(path = %path.display(), "activity source rotation detected; tail offset reset");
+        }
+    }
+    cursor.identity = Some(identity);
+
+    let mut file = tokio::fs::File::open(path).await?;
+    file.seek(std::io::SeekFrom::Start(cursor.offset)).await?;
+    let mut bytes = vec![0_u8; TAIL_MAX_BYTES];
+    let read = file.read(&mut bytes).await?;
+    bytes.truncate(read);
+    cursor.offset = cursor.offset.saturating_add(read as u64);
+    Ok(bytes)
 }
 
 pub fn tail_read_error_event(
