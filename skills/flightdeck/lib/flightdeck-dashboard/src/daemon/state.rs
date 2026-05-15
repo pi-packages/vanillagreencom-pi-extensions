@@ -5,7 +5,6 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use tokio::sync::{broadcast, mpsc, RwLock};
 
-use crate::app::command::SnapshotSource;
 use crate::state::snapshot::DashboardSnapshot;
 use crate::state::tracked_entries::{self, ArchiveError, SessionResolution, SnapshotError};
 use crate::watcher::{StateWatcher, WatcherEvent};
@@ -47,14 +46,6 @@ impl DaemonSnapshotSource {
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from(".")),
             Self::Session(resolution) => resolution.state_dir.clone(),
-        }
-    }
-
-    #[must_use]
-    pub fn as_snapshot_source(&self) -> SnapshotSource {
-        match self {
-            Self::File { path, .. } => SnapshotSource::File(path.clone()),
-            Self::Session(resolution) => SnapshotSource::Session(resolution.clone()),
         }
     }
 }

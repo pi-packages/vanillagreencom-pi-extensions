@@ -26,12 +26,15 @@ use flightdeck_dashboard::state::snapshot::{
 };
 use flightdeck_dashboard::state::tracked_entries::{self, ArchiveError, SnapshotError};
 use flightdeck_dashboard::util::logging;
+use flightdeck_dashboard::util::paths::{
+    dashboard_socket_file, fd_resolve_state_dir, fd_session_key_from_id, resolve_session_key,
+};
 use flightdeck_dashboard::watcher::{StateWatcher, WatcherEvent};
 use futures::StreamExt;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use tokio::sync::mpsc;
-use tokio::time::MissedTickBehavior;
+use tokio::time::{timeout, MissedTickBehavior};
 
 const ANIMATION_TICK_MS: u64 = 80;
 const CLOCK_TICK_MS: u64 = 1_000;
@@ -61,6 +64,7 @@ async fn run_tui(args: TuiArgs) -> Result<()> {
     if !matches!(initial.source, SnapshotSource::Socket(_)) {
         initial.snapshot.daemon = file_mode_daemon_status();
     }
+    tracing::info!(source = ?initial.source, "dashboard read mode selected");
     let mut model = Model::new(
         initial.snapshot,
         initial.source,
@@ -117,6 +121,61 @@ async fn initial_socket_snapshot(path: &Path) -> Result<InitialSnapshot> {
     })
 }
 
+async fn discover_socket_snapshot(args: &TuiArgs) -> Option<InitialSnapshot> {
+    if args.demo.is_some() || !args.wants_live_state() {
+        return None;
+    }
+    let session_key = match tui_session_key(args) {
+        Ok(Some(session_key)) => session_key,
+        Ok(None) => return None,
+        Err(error) => {
+            tracing::debug!(%error, "dashboard socket discovery skipped");
+            return None;
+        }
+    };
+    let socket = dashboard_socket_file(&fd_resolve_state_dir(), &session_key);
+    if !socket.exists() {
+        return None;
+    }
+    match timeout(Duration::from_millis(50), initial_socket_snapshot(&socket)).await {
+        Ok(Ok(snapshot)) => Some(snapshot),
+        Ok(Err(error)) => {
+            tracing::debug!(path = %socket.display(), %error, "dashboard socket discovery failed");
+            None
+        }
+        Err(_) => {
+            tracing::debug!(path = %socket.display(), "dashboard socket discovery timed out");
+            None
+        }
+    }
+}
+
+fn tui_session_key(args: &TuiArgs) -> Result<Option<String>> {
+    if let Some(session) = &args.session {
+        return Ok(Some(resolve_session_key(session)?));
+    }
+    if let Some(path) = &args.state_file {
+        return Ok(Some(file_session_key(
+            &tracked_entries::session_id_from_state_path(path),
+        )));
+    }
+    if args.wants_live_state() {
+        let resolution = tracked_entries::resolve_session_state(None)?;
+        return Ok(Some(resolve_session_key(&resolution.session)?));
+    }
+    Ok(None)
+}
+
+fn file_session_key(session: &str) -> String {
+    if session.starts_with('s') && session[1..].chars().all(|ch| ch.is_ascii_digit()) {
+        session.to_owned()
+    } else if session.starts_with('$') {
+        fd_session_key_from_id(session)
+    } else {
+        session.to_owned()
+    }
+}
+
 fn file_mode_daemon_status() -> SnapshotDaemonStatus {
     SnapshotDaemonStatus {
         label: String::from("daemon: file-mode"),
@@ -147,6 +206,9 @@ async fn initial_snapshot(args: &TuiArgs) -> Result<InitialSnapshot> {
     let now = utc_now();
     if let Some(path) = &args.socket {
         return initial_socket_snapshot(path).await;
+    }
+    if let Some(snapshot) = discover_socket_snapshot(args).await {
+        return Ok(snapshot);
     }
     if let Some(path) = &args.state_file {
         return Ok(match tracked_entries::snapshot_from_file(path, now) {
