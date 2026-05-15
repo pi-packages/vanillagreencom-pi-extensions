@@ -8,8 +8,8 @@ use chrono::{DateTime, Utc};
 
 use crate::app::command::SnapshotSource;
 use crate::app::motion::{EffectInstance, MotionLevel};
+use crate::app::reload::ReloadCoalescer;
 use crate::state::snapshot::{DashboardSnapshot, Event, EventImportance, TrackedSession};
-use crate::watcher::coalesce::ReloadCoalescer;
 
 pub type Clock = fn() -> DateTime<Utc>;
 

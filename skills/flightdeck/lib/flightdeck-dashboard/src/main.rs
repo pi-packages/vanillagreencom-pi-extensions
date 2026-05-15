@@ -15,14 +15,12 @@ use flightdeck_dashboard::app::model::{utc_now, Model, ReadSourceState};
 use flightdeck_dashboard::app::motion::{self, MotionLevel};
 use flightdeck_dashboard::app::{update, view};
 use flightdeck_dashboard::cli::{Cli, Command, TuiArgs};
-use flightdeck_dashboard::events::{
-    self, CompositeSource, DaemonLogSource, EventSource, PendingWakeSource,
-};
+use flightdeck_dashboard::events::{self, EventSource};
 use flightdeck_dashboard::fixtures;
 use flightdeck_dashboard::state::snapshot::DashboardSnapshot;
 use flightdeck_dashboard::state::tracked_entries::{self, ArchiveError, SnapshotError};
 use flightdeck_dashboard::util::logging;
-use flightdeck_dashboard::watcher::StateWatcher;
+use flightdeck_dashboard::watcher::{StateWatcher, WatcherEvent};
 use futures::StreamExt;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
@@ -166,7 +164,7 @@ fn initial_snapshot(args: &TuiArgs) -> Result<InitialSnapshot> {
 
 fn start_state_watcher(
     source: &SnapshotSource,
-    tx: mpsc::UnboundedSender<flightdeck_dashboard::app::msg::Msg>,
+    tx: mpsc::UnboundedSender<WatcherEvent>,
     model: &mut Model,
 ) -> Option<StateWatcher> {
     let (live_path, archive_dir) = match source {
@@ -205,12 +203,13 @@ fn start_event_sources(
         SnapshotSource::File(path) => tracked_entries::session_id_from_state_path(path),
         SnapshotSource::Session(resolution) => resolution.session.clone(),
     };
-    let state_dir = events::daemon_state_dir();
-    let session_key = events::session_key_from_name(&session);
-    let source = CompositeSource::new(vec![
-        Box::new(DaemonLogSource::for_session(&state_dir, &session_key)),
-        Box::new(PendingWakeSource::for_session(&state_dir, &session_key)),
-    ]);
+    let source = match events::default_sources(&session) {
+        Ok(source) => source,
+        Err(error) => {
+            tracing::warn!(%error, session, "activity sources disabled");
+            return None;
+        }
+    };
     let mut rx = source.subscribe();
     Some(tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
@@ -231,7 +230,8 @@ async fn run_app_loop(
     let (tx, mut rx) = mpsc::unbounded_channel();
     let effects = Effects::new(tx.clone(), model.clock);
     let source = model.snapshot_source.clone();
-    let _state_watcher = start_state_watcher(&source, tx.clone(), model);
+    let (watch_tx, mut watch_rx) = mpsc::unbounded_channel();
+    let _state_watcher = start_state_watcher(&source, watch_tx, model);
     let _event_task = start_event_sources(&source, tx.clone());
     let mut events = EventStream::new();
     let mut anim = tokio::time::interval(Duration::from_millis(ANIMATION_TICK_MS));
@@ -245,6 +245,10 @@ async fn run_app_loop(
             biased;
             Some(msg) = rx.recv() => {
                 let commands = update(model, msg);
+                effects.run_commands(commands);
+            }
+            Some(event) = watch_rx.recv() => {
+                let commands = update(model, flightdeck_dashboard::app::msg::Msg::WatcherEvent(event));
                 effects.run_commands(commands);
             }
             maybe_event = events.next() => {

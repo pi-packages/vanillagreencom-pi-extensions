@@ -5,6 +5,7 @@
 //! returns `mpsc::UnboundedReceiver<Event>` from `subscribe`; the TUI fan-in
 //! and ring buffer do not need to change.
 
+use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -14,6 +15,9 @@ use tokio::sync::mpsc;
 use tokio::time::MissedTickBehavior;
 
 use crate::state::snapshot::{ActivitySource, Event, EventImportance};
+use crate::util::paths::{
+    self, fd_events_file, fd_log_file, fd_wake_events_log, resolve_session_key, PathsError,
+};
 
 const TAIL_POLL_MS: u64 = 250;
 
@@ -22,48 +26,45 @@ pub trait EventSource: Send + 'static {
 }
 
 #[derive(Debug, Clone)]
-pub struct DaemonLogSource {
+pub struct JsonlEventSource {
     path: PathBuf,
+    default_source: ActivitySource,
 }
 
-impl DaemonLogSource {
+impl JsonlEventSource {
     #[must_use]
-    pub fn new(path: PathBuf) -> Self {
-        Self { path }
-    }
-
-    #[must_use]
-    pub fn for_session(state_dir: &Path, session_key: &str) -> Self {
-        Self::new(state_dir.join(format!("fd-daemon-{session_key}.log")))
+    pub fn new(path: PathBuf, default_source: ActivitySource) -> Self {
+        Self {
+            path,
+            default_source,
+        }
     }
 }
 
-impl EventSource for DaemonLogSource {
+impl EventSource for JsonlEventSource {
     fn subscribe(&self) -> mpsc::UnboundedReceiver<Event> {
-        subscribe_tail(self.path.clone(), ActivitySource::Daemon)
+        let default_source = self.default_source;
+        subscribe_tail(self.path.clone(), move |text, warn| {
+            parse_jsonl_str(text, default_source, warn)
+        })
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct PendingWakeSource {
+pub struct DaemonTextLogSource {
     path: PathBuf,
 }
 
-impl PendingWakeSource {
+impl DaemonTextLogSource {
     #[must_use]
     pub fn new(path: PathBuf) -> Self {
         Self { path }
     }
-
-    #[must_use]
-    pub fn for_session(state_dir: &Path, session_key: &str) -> Self {
-        Self::new(state_dir.join(format!("fd-wake-events-{session_key}.log")))
-    }
 }
 
-impl EventSource for PendingWakeSource {
+impl EventSource for DaemonTextLogSource {
     fn subscribe(&self) -> mpsc::UnboundedReceiver<Event> {
-        subscribe_tail(self.path.clone(), ActivitySource::Wake)
+        subscribe_tail(self.path.clone(), parse_daemon_text_log_str)
     }
 }
 
@@ -96,24 +97,40 @@ impl EventSource for CompositeSource {
     }
 }
 
-#[must_use]
-pub fn daemon_state_dir() -> PathBuf {
-    if let Some(path) = std::env::var_os("FD_STATE_DIR").filter(|value| !value.is_empty()) {
-        return PathBuf::from(path);
-    }
-    if let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR").filter(|value| !value.is_empty()) {
-        return PathBuf::from(runtime).join("flightdeck");
-    }
-    let uid = std::env::var("UID").unwrap_or_else(|_| "unknown".to_owned());
-    PathBuf::from(format!("/tmp/flightdeck-{uid}"))
+/// Build the default Phase 3 activity sources for a session.
+///
+/// File names intentionally mirror `skills/flightdeck/lib/flightdeck-core/src/paths/daemon.ts`:
+/// `fd-daemon-<sN>.log`, `fd-wake-events-<sN>.log`, and
+/// `fd-daemon-events-<sN>.jsonl`.
+pub fn default_sources(session_input: &str) -> Result<CompositeSource, PathsError> {
+    let state_dir = paths::fd_resolve_state_dir();
+    default_sources_in(&state_dir, session_input)
+}
+
+pub fn default_sources_in(
+    state_dir: &Path,
+    session_input: &str,
+) -> Result<CompositeSource, PathsError> {
+    let session_key = resolve_session_key(session_input)?;
+    Ok(CompositeSource::new(vec![
+        Box::new(JsonlEventSource::new(
+            fd_wake_events_log(state_dir, &session_key),
+            ActivitySource::Wake,
+        )),
+        Box::new(DaemonTextLogSource::new(fd_log_file(
+            state_dir,
+            &session_key,
+        ))),
+        Box::new(JsonlEventSource::new(
+            fd_events_file(state_dir, &session_key),
+            ActivitySource::Daemon,
+        )),
+    ]))
 }
 
 #[must_use]
-pub fn session_key_from_name(session: &str) -> String {
-    if session.starts_with('s') && session[1..].chars().all(|ch| ch.is_ascii_digit()) {
-        return session.to_owned();
-    }
-    session.to_owned()
+pub fn daemon_state_dir() -> PathBuf {
+    paths::fd_resolve_state_dir()
 }
 
 pub fn parse_jsonl_str(
@@ -137,31 +154,90 @@ pub fn parse_jsonl_str(
         .collect()
 }
 
-fn subscribe_tail(path: PathBuf, default_source: ActivitySource) -> mpsc::UnboundedReceiver<Event> {
+pub fn parse_daemon_text_log_str(text: &str, warn: &mut dyn FnMut(&str)) -> Vec<Event> {
+    let mut warned = false;
+    text.lines()
+        .enumerate()
+        .filter_map(|(idx, line)| match parse_daemon_text_line(line) {
+            Ok(event) => event,
+            Err(error) => {
+                if !warned {
+                    let message = format!(
+                        "Warning: invalid daemon log line {}: {error}; skipping.",
+                        idx + 1
+                    );
+                    tracing::warn!(message = %message, "daemon log parse warning");
+                    warn(&message);
+                    warned = true;
+                }
+                None
+            }
+        })
+        .collect()
+}
+
+fn subscribe_tail<F>(path: PathBuf, mut parser: F) -> mpsc::UnboundedReceiver<Event>
+where
+    F: FnMut(&str, &mut dyn FnMut(&str)) -> Vec<Event> + Send + 'static,
+{
     let (tx, rx) = mpsc::unbounded_channel();
     tokio::spawn(async move {
         let mut offset = 0usize;
+        let mut last_error_kind = None;
         let mut tick = tokio::time::interval(Duration::from_millis(TAIL_POLL_MS));
         tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
         loop {
             tick.tick().await;
-            let Ok(text) = tokio::fs::read_to_string(&path).await else {
-                offset = 0;
-                continue;
-            };
-            if text.len() < offset {
-                offset = 0;
-            }
-            let new_text = &text[offset..];
-            offset = text.len();
-            for event in parse_jsonl_str(new_text, default_source, &mut |_| {}) {
-                if tx.send(event).is_err() {
-                    return;
+            match tokio::fs::read_to_string(&path).await {
+                Ok(text) => {
+                    last_error_kind = None;
+                    if text.len() < offset {
+                        offset = 0;
+                    }
+                    let new_text = &text[offset..];
+                    offset = text.len();
+                    for event in parser(new_text, &mut |_| {}) {
+                        if tx.send(event).is_err() {
+                            return;
+                        }
+                    }
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    offset = 0;
+                    last_error_kind = None;
+                }
+                Err(error) => {
+                    offset = 0;
+                    if let Some(event) = tail_read_error_event(&path, &error, &mut last_error_kind)
+                    {
+                        if tx.send(event).is_err() {
+                            return;
+                        }
+                    }
                 }
             }
         }
     });
     rx
+}
+
+pub fn tail_read_error_event(
+    path: &Path,
+    error: &io::Error,
+    last_error_kind: &mut Option<io::ErrorKind>,
+) -> Option<Event> {
+    let kind = error.kind();
+    if *last_error_kind == Some(kind) {
+        return None;
+    }
+    *last_error_kind = Some(kind);
+    tracing::warn!(path = %path.display(), error = %error, "activity source read failed");
+    Some(Event::new(
+        Utc::now(),
+        ActivitySource::Error,
+        EventImportance::Important,
+        format!("activity source read failed: {} ({error})", path.display()),
+    ))
 }
 
 fn parse_jsonl_line(line: &str, default_source: ActivitySource) -> Result<Option<Event>, String> {
@@ -207,6 +283,36 @@ fn parse_jsonl_line(line: &str, default_source: ActivitySource) -> Result<Option
     Ok(Some(Event::new(ts, source, importance, message)))
 }
 
+fn parse_daemon_text_line(line: &str) -> Result<Option<Event>, String> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let (ts_raw, rest) = trimmed
+        .split_once(char::is_whitespace)
+        .ok_or_else(|| "missing timestamp separator".to_owned())?;
+    let ts = parse_ts(ts_raw).ok_or_else(|| "invalid timestamp".to_owned())?;
+    let rest = rest.trim_start();
+    let tag_start = rest.find('[').ok_or_else(|| "missing [tag]".to_owned())?;
+    let tag_end = rest[tag_start + 1..]
+        .find(']')
+        .map(|idx| tag_start + 1 + idx)
+        .ok_or_else(|| "missing closing ]".to_owned())?;
+    let tag = &rest[tag_start + 1..tag_end];
+    let body = rest[tag_end + 1..].trim();
+    let message = if tag.is_empty() {
+        body.to_owned()
+    } else {
+        format!("[{tag}] {body}")
+    };
+    Ok(Some(Event::new(
+        ts,
+        ActivitySource::Daemon,
+        daemon_text_importance(tag, body),
+        message,
+    )))
+}
+
 fn parse_ts(value: &str) -> Option<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(value)
         .ok()
@@ -230,6 +336,26 @@ fn parse_importance(value: &str) -> EventImportance {
         "important" | "high" | "error" | "err" => EventImportance::Important,
         "medium" | "warn" | "warning" => EventImportance::Medium,
         _ => EventImportance::Low,
+    }
+}
+
+fn daemon_text_importance(tag: &str, body: &str) -> EventImportance {
+    let tag = tag.to_ascii_lowercase();
+    let body = body.to_ascii_lowercase();
+    if tag.contains("error")
+        || tag.contains("err")
+        || body.contains(" error")
+        || body.contains("failed")
+    {
+        EventImportance::Important
+    } else if tag.contains("warn")
+        || tag.contains("wake")
+        || body.contains("warn")
+        || body.contains("wake")
+    {
+        EventImportance::Medium
+    } else {
+        EventImportance::Low
     }
 }
 

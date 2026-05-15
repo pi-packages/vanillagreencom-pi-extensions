@@ -1,5 +1,10 @@
+use std::io;
+
 use chrono::{TimeZone, Utc};
-use flightdeck_dashboard::events::{parse_jsonl_str, DaemonLogSource, EventSource};
+use flightdeck_dashboard::events::{
+    parse_daemon_text_log_str, parse_jsonl_str, tail_read_error_event, DaemonTextLogSource,
+    EventSource, JsonlEventSource,
+};
 use flightdeck_dashboard::state::snapshot::{ActivitySource, EventImportance};
 
 #[test]
@@ -30,10 +35,30 @@ not-json
     );
 }
 
+#[test]
+fn daemon_text_log_parses_known_lines() {
+    let source = "2026-05-15T00:06:41-07:00 [start] pid=31853 session_id=$3 session_key=s3\n2026-05-15T00:06:42-07:00 [wake] delivered prompt to master\n";
+    let mut warnings = Vec::new();
+    let mut warn = |message: &str| warnings.push(message.to_owned());
+
+    let events = parse_daemon_text_log_str(source, &mut warn);
+
+    assert!(warnings.is_empty());
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0].source, ActivitySource::Daemon);
+    assert_eq!(events[0].importance, EventImportance::Low);
+    assert_eq!(
+        events[0].message,
+        "[start] pid=31853 session_id=$3 session_key=s3"
+    );
+    assert_eq!(events[1].importance, EventImportance::Medium);
+    assert_eq!(events[1].message, "[wake] delivered prompt to master");
+}
+
 #[tokio::test]
-async fn daemon_log_source_emits_existing_jsonl() {
+async fn jsonl_event_source_emits_existing_jsonl() {
     let dir = tempfile::tempdir().expect("tempdir creates");
-    let path = dir.path().join("fd-daemon-s1.log");
+    let path = dir.path().join("fd-wake-events-s1.log");
     tokio::fs::write(
         &path,
         "{\"ts\":\"2026-05-15T10:00:00Z\",\"message\":\"tick\"}\ninvalid\n",
@@ -41,7 +66,29 @@ async fn daemon_log_source_emits_existing_jsonl() {
     .await
     .expect("fixture writes");
 
-    let source = DaemonLogSource::new(path);
+    let source = JsonlEventSource::new(path, ActivitySource::Wake);
+    let mut rx = source.subscribe();
+    let event = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+        .await
+        .expect("event arrives")
+        .expect("event exists");
+
+    assert_eq!(event.source, ActivitySource::Wake);
+    assert_eq!(event.message, "tick");
+}
+
+#[tokio::test]
+async fn daemon_text_log_source_emits_existing_text_log() {
+    let dir = tempfile::tempdir().expect("tempdir creates");
+    let path = dir.path().join("fd-daemon-s1.log");
+    tokio::fs::write(
+        &path,
+        "2026-05-15T00:06:41-07:00 [start] pid=31853 session_id=$3\n",
+    )
+    .await
+    .expect("fixture writes");
+
+    let source = DaemonTextLogSource::new(path);
     let mut rx = source.subscribe();
     let event = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
         .await
@@ -49,5 +96,25 @@ async fn daemon_log_source_emits_existing_jsonl() {
         .expect("event exists");
 
     assert_eq!(event.source, ActivitySource::Daemon);
-    assert_eq!(event.message, "tick");
+    assert_eq!(event.message, "[start] pid=31853 session_id=$3");
+}
+
+#[test]
+fn tail_read_error_event_emits_once_per_kind_transition() {
+    let path = std::path::Path::new("/tmp/nope.log");
+    let permission = io::Error::new(io::ErrorKind::PermissionDenied, "denied");
+    let interrupted = io::Error::new(io::ErrorKind::Interrupted, "interrupted");
+    let mut last_error_kind = None;
+
+    let first = tail_read_error_event(path, &permission, &mut last_error_kind)
+        .expect("first error emits event");
+    let second = tail_read_error_event(path, &permission, &mut last_error_kind);
+    let third = tail_read_error_event(path, &interrupted, &mut last_error_kind)
+        .expect("kind transition emits event");
+
+    assert_eq!(first.source, ActivitySource::Error);
+    assert_eq!(first.importance, EventImportance::Important);
+    assert!(first.message.contains("denied"));
+    assert!(second.is_none());
+    assert!(third.message.contains("interrupted"));
 }

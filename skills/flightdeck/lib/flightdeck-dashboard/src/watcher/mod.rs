@@ -1,5 +1,3 @@
-pub mod coalesce;
-
 use std::path::{Path, PathBuf};
 use std::sync::mpsc as std_mpsc;
 use std::thread;
@@ -9,8 +7,6 @@ use notify::{RecursiveMode, Watcher};
 use notify_debouncer_full::{new_debouncer, DebouncedEvent};
 use thiserror::Error;
 use tokio::sync::mpsc;
-
-use crate::app::msg::Msg;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WatcherEvent {
@@ -41,7 +37,7 @@ impl StateWatcher {
     pub fn spawn(
         live_path: PathBuf,
         archive_dir: PathBuf,
-        tx: mpsc::UnboundedSender<Msg>,
+        tx: mpsc::UnboundedSender<WatcherEvent>,
         debounce: Duration,
     ) -> Result<Self, WatcherError> {
         let watch_dir = live_path
@@ -101,7 +97,7 @@ fn run_thread(
     live_path: PathBuf,
     archive_dir: PathBuf,
     watch_dir: PathBuf,
-    tx: mpsc::UnboundedSender<Msg>,
+    tx: mpsc::UnboundedSender<WatcherEvent>,
     debounce: Duration,
     stop_rx: std_mpsc::Receiver<()>,
     init_tx: std_mpsc::Sender<Result<(), String>>,
@@ -142,7 +138,7 @@ fn run_thread(
                 if events
                     .iter()
                     .any(|event| event_matches(event, &live_path, &archive_dir))
-                    && tx.send(Msg::WatcherEvent(WatcherEvent::Reload)).is_err()
+                    && tx.send(WatcherEvent::Reload).is_err()
                 {
                     break;
                 }

@@ -1,6 +1,5 @@
 use std::time::{Duration, Instant};
 
-use flightdeck_dashboard::app::msg::Msg;
 use flightdeck_dashboard::watcher::{StateWatcher, WatcherEvent};
 use tokio::sync::mpsc;
 
@@ -26,8 +25,7 @@ fn rapid_edits_are_debounced() {
     let mut reloads = 0usize;
     while start.elapsed() < Duration::from_secs(2) {
         match rx.try_recv() {
-            Ok(Msg::WatcherEvent(WatcherEvent::Reload)) => reloads += 1,
-            Ok(_) => {}
+            Ok(WatcherEvent::Reload) => reloads += 1,
             Err(mpsc::error::TryRecvError::Empty) => std::thread::sleep(Duration::from_millis(25)),
             Err(mpsc::error::TryRecvError::Disconnected) => break,
         }
