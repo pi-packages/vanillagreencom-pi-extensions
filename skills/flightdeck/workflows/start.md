@@ -29,7 +29,9 @@ This is the issue-mode start workflow. For ad-hoc or workflow sessions that are 
 Run the Rust dashboard launch hook after session init and before the watch loop path. This is non-critical UI only: warn on failure, but do not block issue selection or launch.
 
 ```bash
-.agents/skills/flightdeck/scripts/flightdeck-dashboard launch
+if ! .agents/skills/flightdeck/scripts/flightdeck-dashboard launch 2>&1; then
+  echo "flightdeck-dashboard launch failed; continuing flightdeck startup without dashboard"
+fi
 ```
 
 ### 1.3 Select Work
