@@ -116,7 +116,7 @@ if [[ "\${1:-}" != "stream" ]]; then
   exit 0
 fi
 cat <<'JSON'
-{"type":"event","event":"message_end","data":{"message":{"role":"system","customType":"vstack-background-tasks:event","details":{"eventType":"exit","task":{"id":"bg-3","status":"failed","exitCode":null,"command":"bot-review-wait 81","outputBytes":89,"notifyOnExit":true,"notifyOnOutput":false,"exitNotified":true}}}}}
+{"type":"event","event":"message_end","data":{"message":{"role":"system","customType":"vstack-background-tasks:event","details":{"eventType":"exit","sequence":17,"task":{"id":"bg-3","status":"failed","exitCode":null,"command":"bot-review-wait 81","outputBytes":89,"notifyOnExit":true,"notifyOnOutput":false,"exitNotified":true}}}}}
 JSON
 # Hold the stream open like a real bridge so the watchdog has time to act.
 sleep 30
@@ -156,6 +156,7 @@ sleep 30
 			expect(ev.event_type).toBe("bg-task-exit");
 			expect(ev.task?.id).toBe("bg-3");
 			expect(ev.task?.status).toBe("failed");
+			expect(ev.sequence).toBe(17);
 			expect(ev.hash).toMatch(/^[0-9a-f]{12}$/);
 		} finally {
 			try { fakeParent.kill("SIGKILL"); } catch { /* */ }
@@ -175,7 +176,7 @@ sleep 30
 		const bridgeScript = `#!/usr/bin/env bash
 if [[ "\${1:-}" != "stream" ]]; then exit 0; fi
 cat <<'JSON'
-{"type":"event","event":"message_end","data":{"message":{"role":"system","customType":"vstack-background-tasks:event","details":{"eventType":"output","task":{"id":"bg-3","status":"running","exitCode":null}}}}}
+{"type":"event","event":"message_end","data":{"message":{"role":"system","customType":"vstack-background-tasks:event","details":{"eventType":"output","sequence":18,"task":{"id":"bg-3","status":"running","exitCode":null}}}}}
 JSON
 sleep 30
 `;
@@ -192,15 +193,12 @@ sleep 30
 				detached: true,
 			});
 			const subPid = sub.pid!;
-			// Watch the wake-events log for up to 1s; any pi-bg-task-exit
-			// row would have been written almost immediately after the
-			// stub emitted, so a short window catches the failure case
-			// without paying a 2s sleep.
-			const deadline = Date.now() + 1000;
+			const deadline = Date.now() + 3000;
+			let lines: string[] = [];
 			while (Date.now() < deadline) {
 				if (existsSync(wakeLog)) {
-					const peek = readFileSync(wakeLog, "utf8").split("\n").filter(Boolean);
-					if (peek.some((raw) => raw.includes("pi-bg-task-exit"))) break;
+					lines = readFileSync(wakeLog, "utf8").split("\n").filter(Boolean);
+					if (lines.some((raw) => raw.includes("pi-bg-task-activity"))) break;
 				}
 				await sleep(50);
 			}
@@ -208,14 +206,14 @@ sleep 30
 			try { process.kill(-subPid, "SIGTERM"); } catch { /* */ }
 			try { process.kill(subPid, "SIGTERM"); } catch { /* */ }
 
-			const lines = existsSync(wakeLog)
-				? readFileSync(wakeLog, "utf8").split("\n").filter(Boolean)
-				: [];
-			// Output events are filtered out by the jq select; no wake-events row.
-			for (const raw of lines) {
-				const ev = JSON.parse(raw);
-				expect(ev.classifier_tag).not.toBe("pi-bg-task-exit");
-			}
+			expect(lines).toHaveLength(1);
+			const ev = JSON.parse(lines[0]!);
+			expect(ev.classifier_tag).toBe("pi-bg-task-activity");
+			expect(ev.classifier_tag).not.toBe("pi-bg-task-exit");
+			expect(ev.event_type).toBe("bg-task-activity");
+			expect(ev.activity_event_type).toBe("output");
+			expect(ev.task?.id).toBe("bg-3");
+			expect(ev.sequence).toBe("18");
 		} finally {
 			try { fakeParent.kill("SIGKILL"); } catch { /* */ }
 			await sleep(50);

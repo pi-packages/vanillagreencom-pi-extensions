@@ -8,7 +8,9 @@ import {
 	emitActivityForWakeRow,
 	emitDaemonStarted,
 	emitDaemonStopped,
+	emitMaxLifetimeHandoff,
 	emitSubscriberDead,
+	emitSubscriberReattached,
 	emitSubscriberStarted,
 	type DaemonActivityContext,
 } from "../../src/daemon/activity.ts";
@@ -76,24 +78,26 @@ describe("daemon lifecycle activity", () => {
 
 	test("daemon.stopped severity follows reason", () => {
 		expect(daemonStoppedSeverity("master-gone")).toBe("warning");
+		expect(daemonStoppedSeverity("session-gone")).toBe("warning");
 		expect(daemonStoppedSeverity("signal-term")).toBe("warning");
 		expect(daemonStoppedSeverity("signal-int")).toBe("info");
 		expect(daemonStoppedSeverity("other")).toBe("error");
 		expect(daemonStoppedSeverity("crash")).toBe("error");
 
-		for (const [idx, reason] of ["master-gone", "signal-term", "signal-int", "other", "crash"].entries()) {
+		for (const [idx, reason] of ["master-gone", "session-gone", "signal-term", "signal-int", "other", "crash"].entries()) {
 			emitDaemonStopped(ctx(), { masterId: "%master", pid: 90 + idx, reason });
 		}
 		const rows = activityRows();
 		expect(rows.map((row) => [row.details?.reason, row.severity])).toEqual([
 			["master-gone", "warning"],
+			["session-gone", "warning"],
 			["signal-term", "warning"],
 			["signal-int", "info"],
 			["other", "error"],
 			["crash", "error"],
 		]);
-		expect(rows[2]).toMatchObject({ pane_id: "%master", severity: "info", type: "daemon.stopped" });
-		expect(rows[2]?.details).toMatchObject({ event_type: "daemon-exited", pid: 92, reason: "signal-int" });
+		expect(rows[3]).toMatchObject({ pane_id: "%master", severity: "info", type: "daemon.stopped" });
+		expect(rows[3]?.details).toMatchObject({ event_type: "daemon-exited", pid: 93, reason: "signal-int" });
 	});
 });
 
@@ -105,6 +109,20 @@ describe("subscriber lifecycle activity", () => {
 		expect(rows.map((row) => row.type)).toEqual(["subscriber.started", "subscriber.dead"]);
 		expect(rows[0]).toMatchObject({ harness: "pi", importance: "normal", pane_id: "%42", severity: "info" });
 		expect(rows[1]).toMatchObject({ harness: "pi", importance: "important", pane_id: "%42", severity: "warning" });
+	});
+
+	test("subscriber reattach emits daemon warning", () => {
+		emitSubscriberReattached(ctx(), "pi", "%42", 4242);
+		const rows = activityRows();
+		expect(rows[0]).toMatchObject({ harness: "pi", importance: "important", pane_id: "%42", severity: "warning", type: "daemon.warning" });
+		expect(rows[0]?.details).toMatchObject({ event_type: "subscriber-reattach", pid: 4242 });
+	});
+
+	test("max-lifetime handoff emits daemon warning", () => {
+		emitMaxLifetimeHandoff(ctx(), 5151);
+		const rows = activityRows();
+		expect(rows[0]).toMatchObject({ importance: "important", severity: "warning", type: "daemon.warning" });
+		expect(rows[0]?.details).toMatchObject({ event_type: "max-lifetime-handoff", successor_pid: 5151 });
 	});
 });
 
@@ -150,22 +168,33 @@ describe("subscriber wake row activity mapping", () => {
 		expect(rows[0]?.refs).toMatchObject({ task_id: "task-failed" });
 	});
 
-	test("pi-bg-task-exit maps status and preserves wake", () => {
-		const task = { command: "bot-review-wait 81", exitCode: null, id: "bg-3", outputBytes: 89, status: "failed" };
-		expect(appendWake("pi-bg-task-exit", JSON.stringify({ event_type: "bg-task-exit", harness: "pi", task }))).toBe(true);
+	test.each([
+		["completed", "bg-task-exit", "pi-bg-task-exit", "bg_task.completed", "success", "normal"],
+		["failed", "bg-task-exit", "pi-bg-task-exit", "bg_task.failed", "error", "important"],
+		["timed_out", "bg-task-exit", "pi-bg-task-exit", "bg_task.timed_out", "error", "important"],
+		["stopped", "bg-task-exit", "pi-bg-task-exit", "bg_task.stopped", "warning", "important"],
+		["running", "output", "pi-bg-task-activity", "bg_task.output_matched", "info", "noisy"],
+	] as const)("bg-task %s/%s maps to %s", (status, eventType, tag, expectedType, expectedSeverity, expectedImportance) => {
+		const task = { command: "bot-review-wait 81", exitCode: null, id: `bg-${status}`, outputBytes: 89, status };
+		if (tag === "pi-bg-task-exit") {
+			expect(appendWake(tag, JSON.stringify({ event_type: eventType, harness: "pi", sequence: 42, task }))).toBe(true);
+		}
 		emitActivityForWakeRow(ctx(), {
-			classifier_tag: "pi-bg-task-exit",
-			event_type: "bg-task-exit",
+			activity_event_type: eventType,
+			classifier_tag: tag,
+			event_type: eventType,
 			harness: "pi",
-			hash: "bgfail",
+			hash: `hash-${status}`,
 			pane_id: "%23",
+			sequence: 42,
 			task,
 		});
-		expect(wakeRows()).toHaveLength(1);
+		if (tag === "pi-bg-task-exit") expect(wakeRows()).toHaveLength(1);
+		else expect(wakeRows()).toHaveLength(0);
 		const rows = activityRows();
-		expect(rows[0]).toMatchObject({ importance: "important", severity: "error", type: "bg_task.failed" });
-		expect(rows[0]?.refs).toMatchObject({ bg_task_id: "bg-3" });
-		expect(rows[0]?.details).toMatchObject({ exit_code: null, output_bytes: 89, status: "failed" });
+		expect(rows[0]).toMatchObject({ importance: expectedImportance, severity: expectedSeverity, type: expectedType });
+		expect(rows[0]?.refs).toMatchObject({ bg_task_id: `bg-${status}` });
+		expect(rows[0]?.details).toMatchObject({ dedup_key: `%23:${expectedType}:bg-${status}:42`, exit_code: null, output_bytes: 89, status: expectedType === "bg_task.output_matched" ? "output_matched" : status });
 	});
 
 	test("domain mismatch emits daemon.warning activity", () => {
@@ -196,6 +225,39 @@ describe("subscriber wake row activity mapping", () => {
 });
 
 describe("wake delivery failure activity", () => {
+	test.each([
+		["load-buffer", "tmux-load-buffer-failed"],
+		["paste-buffer", "tmux-paste-buffer-failed"],
+		["send-keys", "tmux-send-keys-enter-failed"],
+	] as const)("tmux %s failure emits daemon.error and clears wake.pending", (failCommand, expectedReason) => {
+		const logs: string[] = [];
+		const ok = wakeMaster({
+			activity: ctx(),
+			busyFile: path("busy"),
+			combined: "adapter:%101:pi-question",
+			daemonPid: process.pid,
+			inFlightJson: JSON.stringify([{ hash: "h1", is_bell: false, pane_id: "%101", tag: "pi-question" }]),
+			isMasterBusy: () => false,
+			log: (tag, msg) => logs.push(`${tag}:${msg}`),
+			masterHarness: "claude",
+			masterId: "%master",
+			masterTurnTtl: 3600,
+			paneTargetFor: () => "S:1.0",
+			sessionKey: "sTest",
+			sessionLock: path("lock"),
+			spawnSyncOverride: (_command, args) => {
+				const arg0 = args[0] ?? "";
+				return { output: [], signal: null, status: arg0 === failCommand ? 1 : 0, stderr: "fail", stdout: "" };
+			},
+			wakePending: path("wake.pending"),
+		});
+		expect(ok).toBe(false);
+		expect(existsSync(path("wake.pending"))).toBe(false);
+		const rows = activityRows();
+		expect(rows[0]).toMatchObject({ importance: "important", severity: "error", type: "daemon.error" });
+		expect(rows[0]?.details).toMatchObject({ kind: "wake-delivery-failed", reason: expectedReason, target_master_pid: "%master" });
+	});
+
 	test("wake failure emits daemon.error and does not throw", () => {
 		const logs: string[] = [];
 		const ok = wakeMaster({

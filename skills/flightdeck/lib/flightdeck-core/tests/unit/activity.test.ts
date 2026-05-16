@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { appendActivityEvent } from "../../src/activity/append.ts";
+import { appendActivityEvent, tryAppendActivityEvent } from "../../src/activity/append.ts";
 import { formatActivityJsonl, formatActivityLine, formatActivityMarkdown } from "../../src/activity/format.ts";
 import { activityArchivePathFromStatePath, activityPathFromStatePath } from "../../src/activity/paths.ts";
 import { ActivityFilterError, readActivityEvents, tailActivityEvents } from "../../src/activity/read.ts";
@@ -13,6 +13,14 @@ import { archiveState } from "../../src/state/master-state.ts";
 
 let dir = "";
 function path(name: string): string { return join(dir, name); }
+
+async function waitForPath(file: string): Promise<void> {
+	const start = Date.now();
+	while (!existsSync(file)) {
+		if (Date.now() - start > 3000) throw new Error(`timed out waiting for ${file}`);
+		await Bun.sleep(5);
+	}
+}
 
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "fd-activity-")); });
 afterEach(() => { if (dir && existsSync(dir)) rmSync(dir, { force: true, recursive: true }); });
@@ -88,6 +96,28 @@ describe("activity event normalization", () => {
 });
 
 describe("activity append/read", () => {
+	test("nonblocking append returns lock-busy instead of waiting forever", async () => {
+		const file = path("activity-busy.jsonl");
+		const readyFile = path("activity-busy-ready");
+		const holder = Bun.spawn([
+			"bash", "-c",
+			"lock=\"$1\"; ready=\"$2\"; flock -x \"$lock\" bash -c 'printf ready > \"$1\"; sleep 2' _ \"$ready\"",
+			"_", `${file}.lock`, readyFile,
+		], { stderr: "pipe", stdout: "pipe" });
+		await waitForPath(readyFile);
+		const started = Date.now();
+		const result = tryAppendActivityEvent(file, {
+			entry_id: "BUSY",
+			natural_key: "busy",
+			source: "daemon",
+			summary: "busy append",
+			type: "daemon.warning",
+		}, { sessionId: "S1" });
+		expect(result).toMatchObject({ appended: false, reason: "lock-busy" });
+		expect(Date.now() - started).toBeLessThan(1800);
+		expect(await holder.exited).toBe(0);
+	});
+
 	test("append writes JSONL and dedupes duplicate ids", () => {
 		const file = path("activity.jsonl");
 		const first = appendActivityEvent(file, {

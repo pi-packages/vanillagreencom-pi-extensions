@@ -76,7 +76,7 @@ let handoffMode = false;
 export function setHandoffMode(on: boolean): void { handoffMode = on; }
 
 let daemonExitReason = "other";
-export function setDaemonExitReason(reason: "master-gone" | "signal-term" | "signal-int" | "other"): void {
+export function setDaemonExitReason(reason: "master-gone" | "session-gone" | "signal-term" | "signal-int" | "other"): void {
 	daemonExitReason = reason;
 }
 

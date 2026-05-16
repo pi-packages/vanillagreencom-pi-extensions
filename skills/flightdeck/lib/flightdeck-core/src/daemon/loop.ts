@@ -342,6 +342,7 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
 
 		if (!sessionAlive(opts.sessionId)) {
 			log("session-gone", `session_id=${opts.sessionId} gone; exiting`);
+			setDaemonExitReason("session-gone");
 			break;
 		}
 
@@ -365,6 +366,7 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
 		const tickReasons: string[] = [];
 		const tickPending: TickPending[] = [];
 		const tickBellWins: string[] = [];
+		const tickActivity: WakeEventRow[] = [];
 
 		// 1) Drain adapter subscriber events. Round-4 #8: fast-path the
 		// 'no wake-events log' case so we don't pay flock + bash + cat
@@ -403,7 +405,7 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
 				} else if (evTag === "pi-subagent-completion") {
 					extraJson = JSON.stringify({ event_type: ev.event_type, completion: ev.completion, harness: ev.harness });
 				} else if (evTag === BG_TASK_EXIT_CLASSIFIER_TAG) {
-					extraJson = JSON.stringify({ event_type: ev.event_type, task: ev.task, harness: ev.harness });
+					extraJson = JSON.stringify({ event_type: ev.event_type, harness: ev.harness, sequence: ev.sequence, task: ev.task });
 				}
 				// Round-4 #6: only record a wake reason when the event is
 				// actually durable. appendEvent returns false on dedup (no
@@ -416,7 +418,7 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
 				});
 				if (appended) {
 					log("classify", `${evPid} ${src} tag=${evTag} (canonical)`);
-					emitActivityForWakeRow(activity, ev);
+					tickActivity.push(ev);
 					tickReasons.push(`adapter:${evPid}:${evTag}`);
 					tickPending.push({ paneId: evPid, hash: evHash, tag: evTag, isBell: false });
 				}
@@ -507,7 +509,7 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
 					sessionLock, eventsFile, wakePending, lastEventKey,
 				});
 				if (appended) {
-					emitActivityForWakeRow(activity, { classifier_tag: tag, event_type: tag, hash, harness, pane_id: innerId });
+					tickActivity.push({ classifier_tag: tag, event_type: tag, hash, harness, pane_id: innerId });
 					tickReasons.push(`bell:${innerId}:${tag}`);
 					tickPending.push({ paneId: innerId, hash, tag, isBell: true });
 					if (winId) tickBellWins.push(winId);
@@ -541,7 +543,7 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
 					});
 					if (appended) {
 						log("classify", `${innerId} age=${age}s tag=${tag} (canonical)`);
-						emitActivityForWakeRow(activity, { classifier_tag: tag, event_type: tag, hash, harness, pane_id: innerId });
+						tickActivity.push({ classifier_tag: tag, event_type: tag, hash, harness, pane_id: innerId });
 						tickReasons.push(`stable:${innerId}:${tag}(${age}s)`);
 						tickPending.push({ paneId: innerId, hash, tag, isBell: false });
 					}
@@ -579,6 +581,7 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
 				isMasterBusy: () => isMasterBusy({ busyFile, masterId, masterTurnTtl: opts.masterTurnTtl }),
 				paneTargetFor: (pid) => paneCache.target(pid),
 			});
+			for (const row of tickActivity) emitActivityForWakeRow(activity, row);
 			if (ok) {
 				for (const p of tickPending) {
 					notifiedHash.set(p.paneId, p.hash);

@@ -44,7 +44,7 @@ JQ
 #   2 — malformed input (bg_details missing/null)
 emit_pi_bg_task_exit_event() {
   local pane_id="$1" line="$2" last_hash_var="$3" sub_log="${4:-/dev/null}"
-  local bg_details bg_task_id bg_status bg_exit_code bg_hash
+  local bg_details bg_task_id bg_status bg_exit_code bg_sequence bg_hash
   bg_details=$(jq -c '.data.message.details // {}' <<< "$line" 2>/dev/null)
   if [[ -z "$bg_details" || "$bg_details" == "null" ]]; then
     bg_details="{}"
@@ -52,7 +52,9 @@ emit_pi_bg_task_exit_event() {
   bg_task_id=$(jq -r '.task.id // ""' <<< "$bg_details" 2>/dev/null)
   bg_status=$(jq -r '.task.status // ""' <<< "$bg_details" 2>/dev/null)
   bg_exit_code=$(jq -r '.task.exitCode // "null"' <<< "$bg_details" 2>/dev/null)
-  bg_hash=$(printf '%s|%s|%s' "$bg_task_id" "$bg_status" "$bg_exit_code" | sha256sum | awk '{print substr($1,1,12)}')
+  bg_sequence=$(jq -c '.sequence // null' <<< "$bg_details" 2>/dev/null)
+  [[ -z "$bg_sequence" ]] && bg_sequence="null"
+  bg_hash=$(printf '%s|%s|%s|%s' "$bg_task_id" "$bg_status" "$bg_exit_code" "$bg_sequence" | sha256sum | awk '{print substr($1,1,12)}')
 
   if [[ -n "$last_hash_var" ]]; then
     # bash 4.3+ nameref; flightdeck-daemon already requires bash 4.x
@@ -73,8 +75,9 @@ emit_pi_bg_task_exit_event() {
            --arg harness "pi" \
            --arg tag "$BG_TASK_EXIT_CLASSIFIER_TAG" \
            --arg h "$bg_hash" \
+           --argjson sequence "$bg_sequence" \
            --argjson details "$bg_details" \
-           '{ts:$ts, pane_id:$pid, harness:$harness, event_type:"bg-task-exit", task:(($details).task // {}), classifier_tag:$tag, hash:$h}' \
+           '{ts:$ts, pane_id:$pid, harness:$harness, event_type:"bg-task-exit", sequence:$sequence, task:(($details).task // {}), classifier_tag:$tag, hash:$h}' \
            >> "$WAKE_EVENTS_LOG"
   )
 

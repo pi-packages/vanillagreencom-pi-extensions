@@ -21,13 +21,44 @@ export interface AppendActivityOptions extends NormalizeActivityOptions {
 	maxBytes?: number;
 }
 
+export type TryAppendActivityReason = "duplicate" | "archived" | "lock-busy" | "timeout" | "error";
+
 export interface AppendActivityResult {
 	event: FlightdeckActivityEventV1;
 	appended: boolean;
 	archived?: boolean;
 }
 
+export interface TryAppendActivityResult {
+	event?: FlightdeckActivityEventV1;
+	appended: boolean;
+	archived?: boolean;
+	reason?: TryAppendActivityReason;
+	error?: string;
+}
+
 export function appendActivityEvent(file: string, input: ActivityEventInput, opts: AppendActivityOptions = {}): AppendActivityResult {
+	const prepared = prepareActivityAppend(file, input, opts);
+	const status = lockedAppendJsonlDedup({
+		file,
+		id: prepared.event.id,
+		knownDuplicate: recentIds.has(prepared.recentKey),
+		line: prepared.line,
+		maxBytes: prepared.maxBytes,
+		maxEvents: opts.maxEvents ?? DEFAULT_ACTIVITY_MAX_EVENTS,
+	});
+	if (status === "appended") rememberId(prepared.recentKey);
+	return { appended: status === "appended", archived: status === "archived" ? true : undefined, event: prepared.event };
+}
+
+interface PreparedActivityAppend {
+	event: FlightdeckActivityEventV1;
+	line: string;
+	maxBytes: number;
+	recentKey: string;
+}
+
+function prepareActivityAppend(file: string, input: ActivityEventInput, opts: AppendActivityOptions): PreparedActivityAppend {
 	const event = normalizeActivityEvent(input, opts);
 	const line = stringifyEventForAppend(event, opts.detailsMaxBytes ?? DEFAULT_ACTIVITY_DETAILS_MAX_BYTES);
 	const maxBytes = opts.maxBytes ?? DEFAULT_ACTIVITY_MAX_BYTES;
@@ -35,17 +66,37 @@ export function appendActivityEvent(file: string, input: ActivityEventInput, opt
 	if (lineBytes > maxBytes) {
 		throw new ActivityValidationError(`activity event exceeds session byte cap (${lineBytes} > ${maxBytes})`);
 	}
-	const recentKey = `${file}\0${event.id}`;
-	const status = lockedAppendJsonlDedup({
-		file,
-		id: event.id,
-		knownDuplicate: recentIds.has(recentKey),
-		line,
-		maxBytes,
-		maxEvents: opts.maxEvents ?? DEFAULT_ACTIVITY_MAX_EVENTS,
-	});
-	if (status === "appended") rememberId(recentKey);
-	return { appended: status === "appended", archived: status === "archived" ? true : undefined, event };
+	return { event, line, maxBytes, recentKey: `${file}\0${event.id}` };
+}
+
+export function tryAppendActivityEvent(file: string, input: ActivityEventInput, opts: AppendActivityOptions = {}): TryAppendActivityResult {
+	let prepared: PreparedActivityAppend;
+	try {
+		prepared = prepareActivityAppend(file, input, opts);
+	} catch (error) {
+		return { appended: false, error: error instanceof Error ? error.message : String(error), reason: "error" };
+	}
+	let status: LockedAppendStatus;
+	try {
+		status = lockedAppendJsonlDedup({
+			file,
+			id: prepared.event.id,
+			knownDuplicate: recentIds.has(prepared.recentKey),
+			line: prepared.line,
+			maxBytes: prepared.maxBytes,
+			maxEvents: opts.maxEvents ?? DEFAULT_ACTIVITY_MAX_EVENTS,
+			nonblocking: true,
+		});
+	} catch (error) {
+		return { appended: false, error: error instanceof Error ? error.message : String(error), event: prepared.event, reason: "error" };
+	}
+	if (status === "appended") {
+		rememberId(prepared.recentKey);
+		return { appended: true, event: prepared.event };
+	}
+	if (status === "duplicate") return { appended: false, event: prepared.event, reason: "duplicate" };
+	if (status === "archived") return { appended: false, archived: true, event: prepared.event, reason: "archived" };
+	return { appended: false, error: status.error, event: prepared.event, reason: status.reason };
 }
 
 function stringifyEventForAppend(event: FlightdeckActivityEventV1, detailsMaxBytes: number): string {
@@ -82,9 +133,10 @@ interface LockedAppendOpts {
 	line: string;
 	maxEvents: number;
 	maxBytes: number;
+	nonblocking?: boolean;
 }
 
-type LockedAppendStatus = "appended" | "duplicate" | "archived";
+type LockedAppendStatus = "appended" | "duplicate" | "archived" | { error?: string; reason: "lock-busy" | "timeout" | "error" };
 
 function lockedAppendJsonlDedup(opts: LockedAppendOpts): LockedAppendStatus {
 	mkdirSync(dirname(opts.file), { recursive: true });
@@ -135,17 +187,24 @@ function lockedAppendJsonlDedup(opts: LockedAppendOpts): LockedAppendStatus {
 			mv "$tmp" "$file"
 		fi
 	`;
+	const flockArgs = opts.nonblocking ? ["-w", "1", lockFile] : ["-x", lockFile];
 	const r = spawnSync("flock", [
-		"-x", lockFile, "bash", "-c", script, "_",
+		...flockArgs, "bash", "-c", script, "_",
 		opts.file, idNeedle, String(opts.maxEvents), String(opts.maxBytes), opts.knownDuplicate ? "1" : "0",
-	], { encoding: "utf8", input: `${opts.line}\n` });
+	], { encoding: "utf8", input: `${opts.line}\n`, timeout: opts.nonblocking ? 2000 : undefined });
 	if (r.status === 10) return "duplicate";
 	if (r.status === 11) {
 		process.stderr.write(r.stderr || "activity file is archived; skipping append\n");
 		return "archived";
 	}
+	if (r.error && (r.error as NodeJS.ErrnoException).code === "ETIMEDOUT") {
+		if (opts.nonblocking) return { error: r.error.message, reason: "timeout" };
+		throw new Error(`activity append failed: ${r.error.message}`);
+	}
 	if (r.status !== 0) {
-		throw new Error(`activity append failed: ${r.stderr || `exit ${r.status ?? "unknown"}`}`);
+		const error = r.stderr || `exit ${r.status ?? "unknown"}`;
+		if (opts.nonblocking) return { error, reason: r.status === 1 ? "lock-busy" : "error" };
+		throw new Error(`activity append failed: ${error}`);
 	}
 	return "appended";
 }

@@ -78,6 +78,7 @@ export function emitDaemonStopped(ctx: DaemonActivityContext, details: { reason:
 export function daemonStoppedSeverity(reason: string): ActivitySeverity {
 	switch (reason) {
 		case "master-gone":
+		case "session-gone":
 		case "signal-term":
 			return "warning";
 		case "signal-int":
@@ -181,7 +182,7 @@ export function activityInputsForWakeRow(row: WakeEventRow): ActivityEventInput[
 }
 
 function emitDaemonActivity(ctx: DaemonActivityContext, event: ActivityEventInput): void {
-	emitActivityWithPath(ctx.activityPath, event, { sessionId: ctx.sessionId });
+	emitActivityWithPath(ctx.activityPath, event, { nonblocking: true, sessionId: ctx.sessionId });
 }
 
 function questionActivity(row: WakeEventRow, tag: string): ActivityEventInput {
@@ -237,7 +238,7 @@ function bgTaskActivities(row: WakeEventRow): ActivityEventInput[] {
 	const activityKind = firstString(row.activity_event_type, record(row.details)?.eventType, record(row.details)?.event_type, row.event_type) || "bg-task-exit";
 	const status = normalizeBgStatus(firstString(task.status, activityKind) || "completed", activityKind);
 	const type = bgTaskActivityType(status, activityKind);
-	const sequence = firstString(row.sequence, task.sequence, record(row.details)?.sequence, task.updatedAt, row.hash) || "0";
+	const sequence = firstString(row.sequence, task.sequence, record(row.details)?.sequence, task.updatedAt) ?? str(row.hash) ?? "0";
 	const dedup = `${taskId}:${sequence}`;
 	return [{
 		details: {
@@ -365,7 +366,7 @@ function subagentSummaryVerb(status: string): string {
 function normalizeBgStatus(status: string, activityKind: string): string {
 	const normalized = status.trim().toLowerCase().replace(/-/g, "_");
 	const kind = activityKind.trim().toLowerCase().replace(/-/g, "_");
-	if (kind.includes("output_matched")) return "output_matched";
+	if (kind === "output" || kind.includes("output_matched")) return "output_matched";
 	if (kind.includes("started")) return "started";
 	if (normalized === "success" || normalized === "complete") return "completed";
 	if (normalized === "timeout") return "timed_out";
@@ -373,7 +374,8 @@ function normalizeBgStatus(status: string, activityKind: string): string {
 }
 
 function bgTaskActivityType(status: string, activityKind: string): string {
-	if (status === "output_matched" || activityKind.includes("output_matched")) return "bg_task.output_matched";
+	const kind = activityKind.trim().toLowerCase().replace(/-/g, "_");
+	if (status === "output_matched" || kind === "output" || kind.includes("output_matched")) return "bg_task.output_matched";
 	if (status === "started" || status === "running") return "bg_task.started";
 	if (status === "timed_out") return "bg_task.timed_out";
 	if (status === "failed" || status === "error") return "bg_task.failed";
