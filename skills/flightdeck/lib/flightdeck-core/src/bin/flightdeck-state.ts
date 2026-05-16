@@ -190,7 +190,12 @@ function runActivity(args: string[]): void {
 			if (!payload || typeof payload !== "object" || Array.isArray(payload)) die("Error: json-event must be an object");
 			try {
 				const result = appendActivityEvent(activity, payload, { sessionId: session });
-				process.stdout.write(`${JSON.stringify({ deduped: !result.appended, id: result.event.id })}\n`);
+				const output: { id: string; deduped: boolean; archived?: true } = {
+					id: result.event.id,
+					deduped: !result.appended && !result.archived,
+				};
+				if (result.archived) output.archived = true;
+				process.stdout.write(`${JSON.stringify(output)}\n`);
 			} catch (error) {
 				dieActivityError(error);
 			}

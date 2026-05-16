@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -183,6 +183,28 @@ describe("activity archive", () => {
 		}), "utf8");
 	}
 
+	function appendSeed(activityFile: string, summary = "seed"): void {
+		appendActivityEvent(activityFile, {
+			natural_key: summary,
+			source: "flightdeck",
+			summary,
+			type: "session.started",
+		}, { sessionId: "SENTINEL", now: () => new Date("2026-05-15T00:00:00Z") });
+	}
+
+	function archiveScript(): string {
+		const stateModule = pathToFileURL(resolve(dirname(import.meta.path), "../../src/state/master-state.ts")).href;
+		return `import { archiveState } from ${JSON.stringify(stateModule)};\nconst archive = archiveState(process.env.STATE_FILE);\nif (archive) process.stdout.write(archive + "\\n");`;
+	}
+
+	async function waitForFile(file: string): Promise<void> {
+		const start = Date.now();
+		while (!existsSync(file)) {
+			if (Date.now() - start > 3000) throw new Error(`timed out waiting for ${file}`);
+			await Bun.sleep(5);
+		}
+	}
+
 	test("archive skips missing activity sidecar and clears activity pointers", () => {
 		const stateFile = path("flightdeck-state-MISSING.json");
 		const terminatedAt = "2026-05-15T00:01:00Z";
@@ -236,5 +258,86 @@ describe("activity archive", () => {
 		expect(archivedLines).toHaveLength(1);
 		expect(JSON.parse(archivedLines[0]!) as { summary: string }).toMatchObject({ summary: "race append" });
 		expect(existsSync(activityFile)).toBe(false);
+	});
+
+	test("append racing an archive sees the sentinel and does not recreate the live file", async () => {
+		const stateFile = path("flightdeck-state-SENTINEL.json");
+		const terminatedAt = "2026-05-15T00:04:00Z";
+		writeState(stateFile, terminatedAt);
+		const activityFile = activityPathFromStatePath(stateFile);
+		appendSeed(activityFile, "seed before race");
+		const wrapperDir = path("stub-bin");
+		mkdirSync(wrapperDir, { recursive: true });
+		const readyFile = path("archive-mv-ready");
+		const mvWrapper = join(wrapperDir, "mv");
+		writeFileSync(mvWrapper, `#!/usr/bin/env bash\nif [[ "$1" == "$ACTIVITY_FILE" ]]; then\n  : > "$ARCHIVE_READY_FILE"\n  sleep 0.3\nfi\nexec /usr/bin/mv "$@"\n`, "utf8");
+		chmodSync(mvWrapper, 0o755);
+		const archive = Bun.spawn(["bun", "--eval", archiveScript()], {
+			env: {
+				...(process.env as Record<string, string>),
+				ACTIVITY_FILE: activityFile,
+				ARCHIVE_READY_FILE: readyFile,
+				PATH: `${wrapperDir}:${process.env.PATH ?? ""}`,
+				STATE_FILE: stateFile,
+			},
+			stderr: "pipe",
+			stdout: "pipe",
+		});
+		await waitForFile(readyFile);
+		const append = appendActivityEvent(activityFile, {
+			natural_key: "after-archive-race",
+			source: "flightdeck",
+			summary: "after archive race",
+			type: "entry.registered",
+		}, { sessionId: "SENTINEL", now: () => new Date("2026-05-15T00:04:01Z") });
+		expect(await archive.exited).toBe(0);
+		expect(append).toMatchObject({ appended: false, archived: true });
+		const activityArchive = activityArchivePathFromStatePath(stateFile, terminatedAt);
+		expect(existsSync(activityArchive)).toBe(true);
+		expect(existsSync(activityFile)).toBe(false);
+		expect(existsSync(`${activityFile}.archived`)).toBe(true);
+		const archivedLines = readFileSync(activityArchive, "utf8").trim().split("\n");
+		expect(archivedLines).toHaveLength(1);
+		expect(readFileSync(activityArchive, "utf8")).toContain("seed before race");
+		expect(readFileSync(activityArchive, "utf8")).not.toContain("after archive race");
+	});
+
+	test("append queued after archive no-ops when sentinel exists", async () => {
+		const stateFile = path("flightdeck-state-QUEUED.json");
+		const terminatedAt = "2026-05-15T00:05:00Z";
+		writeState(stateFile, terminatedAt);
+		const activityFile = activityPathFromStatePath(stateFile);
+		appendSeed(activityFile, "seed before queued");
+		const readyFile = path("manual-lock-ready");
+		const releaseFile = path("manual-lock-release");
+		const holder = Bun.spawn([
+			"bash", "-c",
+			"lock=\"$1\"; ready=\"$2\"; release=\"$3\"; flock -x \"$lock\" bash -c 'printf ready > \"$1\"; while [[ ! -e \"$2\" ]]; do sleep 0.01; done' _ \"$ready\" \"$release\"",
+			"_", `${activityFile}.lock`, readyFile, releaseFile,
+		], { stderr: "pipe", stdout: "pipe" });
+		await waitForFile(readyFile);
+		const archive = Bun.spawn(["bun", "--eval", archiveScript()], {
+			env: { ...(process.env as Record<string, string>), STATE_FILE: stateFile },
+			stderr: "pipe",
+			stdout: "pipe",
+		});
+		await Bun.sleep(100);
+		writeFileSync(releaseFile, "go", "utf8");
+		expect(await holder.exited).toBe(0);
+		expect(await archive.exited).toBe(0);
+		const append = appendActivityEvent(activityFile, {
+			natural_key: "after-queued-archive",
+			source: "flightdeck",
+			summary: "after queued archive",
+			type: "entry.registered",
+		}, { sessionId: "SENTINEL", now: () => new Date("2026-05-15T00:05:01Z") });
+		expect(append).toMatchObject({ appended: false, archived: true });
+		const activityArchive = activityArchivePathFromStatePath(stateFile, terminatedAt);
+		expect(existsSync(activityArchive)).toBe(true);
+		expect(existsSync(activityFile)).toBe(false);
+		expect(existsSync(`${activityFile}.archived`)).toBe(true);
+		const archived = readFileSync(activityArchive, "utf8");
+		expect(archived).toContain("seed before queued");
+		expect(archived).not.toContain("after queued archive");
 	});
 });

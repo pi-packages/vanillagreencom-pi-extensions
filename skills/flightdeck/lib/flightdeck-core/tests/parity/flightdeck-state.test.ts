@@ -413,6 +413,26 @@ describe("flightdeck-state CLI", () => {
 		expect(archived.activity_archive_path).toMatch(/flightdeck-activity-PARITY-2026-05-11T000000Z\.jsonl\.archive$/);
 		expect(existsSync(archived.activity_archive_path!)).toBe(true);
 		expect(readFileSync(archived.activity_archive_path!, "utf8")).toContain("session.started");
+		expect(existsSync(join(repo, "tmp", `flightdeck-activity-${SESSION}.jsonl.archived`))).toBe(true);
+	});
+
+	test("activity append after archive reports archived without recreating live sidecar", () => {
+		run(repo, ["init"]);
+		run(repo, ["activity", "append", JSON.stringify({ natural_key: "start", source: "flightdeck", summary: "started", type: "session.started" })]);
+		run(repo, ["set", "terminated_at", '"2026-05-11T00:00:00Z"']);
+		const archive = run(repo, ["archive"]);
+		expect(archive.status).toBe(0);
+		const liveActivity = join(repo, "tmp", `flightdeck-activity-${SESSION}.jsonl`);
+		const append = run(repo, ["activity", "append", JSON.stringify({ natural_key: "after", source: "flightdeck", summary: "after archive", type: "entry.registered" })]);
+		expect(append.status).toBe(0);
+		const appendResult = JSON.parse(append.stdout) as { archived?: boolean; deduped?: boolean; id?: string };
+		expect(typeof appendResult.id).toBe("string");
+		expect(appendResult.deduped).toBe(false);
+		expect(appendResult.archived).toBe(true);
+		expect(append.stderr).toContain("activity file is archived; skipping append");
+		expect(existsSync(liveActivity)).toBe(false);
+		const archived = JSON.parse(readFileSync(archive.stdout.trim(), "utf8")) as { activity_archive_path?: string };
+		expect(readFileSync(archived.activity_archive_path!, "utf8")).not.toContain("after archive");
 	});
 
 	// Regression: issue #17. terminate.md § 5 previously ran

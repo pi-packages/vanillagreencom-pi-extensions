@@ -264,6 +264,7 @@ export function lockedArchiveStateAndActivity(
 				mv "$tmp" "$state"
 				mv "$state" "$state_archive"
 				mv "$activity" "$activity_archive"
+				: > "$activity.archived"
 			else
 				jq "del(.activity_path, .activity_archive_path)" "$state" > "$tmp"
 				mv "$tmp" "$state"

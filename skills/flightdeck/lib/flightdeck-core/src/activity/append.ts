@@ -24,6 +24,7 @@ export interface AppendActivityOptions extends NormalizeActivityOptions {
 export interface AppendActivityResult {
 	event: FlightdeckActivityEventV1;
 	appended: boolean;
+	archived?: boolean;
 }
 
 export function appendActivityEvent(file: string, input: ActivityEventInput, opts: AppendActivityOptions = {}): AppendActivityResult {
@@ -35,16 +36,16 @@ export function appendActivityEvent(file: string, input: ActivityEventInput, opt
 		throw new ActivityValidationError(`activity event exceeds session byte cap (${lineBytes} > ${maxBytes})`);
 	}
 	const recentKey = `${file}\0${event.id}`;
-	if (recentIds.has(recentKey)) return { appended: false, event };
-	const appended = lockedAppendJsonlDedup({
+	const status = lockedAppendJsonlDedup({
 		file,
 		id: event.id,
+		knownDuplicate: recentIds.has(recentKey),
 		line,
 		maxBytes,
 		maxEvents: opts.maxEvents ?? DEFAULT_ACTIVITY_MAX_EVENTS,
 	});
-	if (appended) rememberId(recentKey);
-	return { appended, event };
+	if (status === "appended") rememberId(recentKey);
+	return { appended: status === "appended", archived: status === "archived" ? true : undefined, event };
 }
 
 function stringifyEventForAppend(event: FlightdeckActivityEventV1, detailsMaxBytes: number): string {
@@ -77,19 +78,29 @@ function rememberId(key: string): void {
 interface LockedAppendOpts {
 	file: string;
 	id: string;
+	knownDuplicate: boolean;
 	line: string;
 	maxEvents: number;
 	maxBytes: number;
 }
 
-function lockedAppendJsonlDedup(opts: LockedAppendOpts): boolean {
+type LockedAppendStatus = "appended" | "duplicate" | "archived";
+
+function lockedAppendJsonlDedup(opts: LockedAppendOpts): LockedAppendStatus {
 	mkdirSync(dirname(opts.file), { recursive: true });
 	const lockFile = `${opts.file}.lock`;
 	const idNeedle = `"id":${JSON.stringify(opts.id)}`;
 	const script = `
 		set -euo pipefail
-		file="$1"; needle="$2"; max_events="$3"; max_bytes="$4"
+		file="$1"; needle="$2"; max_events="$3"; max_bytes="$4"; known_duplicate="$5"
 		mkdir -p "$(dirname "$file")"
+		if [[ -e "$file.archived" ]]; then
+			echo "activity file is archived; skipping append" >&2
+			exit 11
+		fi
+		if [[ "$known_duplicate" == "1" ]]; then
+			exit 10
+		fi
 		touch "$file"
 		if grep -Fq -- "$needle" "$file"; then
 			exit 10
@@ -126,11 +137,15 @@ function lockedAppendJsonlDedup(opts: LockedAppendOpts): boolean {
 	`;
 	const r = spawnSync("flock", [
 		"-x", lockFile, "bash", "-c", script, "_",
-		opts.file, idNeedle, String(opts.maxEvents), String(opts.maxBytes),
+		opts.file, idNeedle, String(opts.maxEvents), String(opts.maxBytes), opts.knownDuplicate ? "1" : "0",
 	], { encoding: "utf8", input: `${opts.line}\n` });
-	if (r.status === 10) return false;
+	if (r.status === 10) return "duplicate";
+	if (r.status === 11) {
+		process.stderr.write(r.stderr || "activity file is archived; skipping append\n");
+		return "archived";
+	}
 	if (r.status !== 0) {
 		throw new Error(`activity append failed: ${r.stderr || `exit ${r.status ?? "unknown"}`}`);
 	}
-	return true;
+	return "appended";
 }
