@@ -1,129 +1,145 @@
-# vstack full sweep + upstream workarounds — final report (2026-05-16)
+# vstack full sweep + upstream workarounds + live validation — final report (2026-05-16)
 
-End-state report for the W4 (flightdeck dashboard + rich activity), W5 (issue sweep), upstream workarounds, and #74 perf fix. Updates `docs/reports/2026-05-15-github-issues-sweep.md`.
+End-state report covering W4 (flightdeck dashboard + rich activity), W5 (issue sweep), upstream workarounds, #74 perf fix, AND end-to-end hyprtrade live validation that surfaced one additional bug.
 
 ## Outcome
 
-- **5 PRs merged** to `main`:
+- **7 PRs merged** to `main`:
   - **#64** `flightdeck-dashboard-rust` — Rust dashboard (cost engine, themes, confirmed writes).
   - **#65** `flightdeck-rich-activity` — Rich activity stream across 5 harnesses + 21+1 commits / 7 phases.
   - **#73** `vstack-issue-sweep` — 11 issues closed across 7 groups + reviewer minors cleanup.
   - **#75** `vstack-upstream-workarounds` — 3 upstream pi-coding-agent bugs worked around vstack-side + 4 deferred W4/W5 items.
   - **#76** `vstack-issue-74` — `/extensions` popup freeze fix.
+  - **#77** `vstack-final-report` — first version of this report.
+  - **#78** `vstack-hotfix-linear-update-emit` — **hotfix discovered via hyprtrade live validation** (see below).
 
-- **15 issues closed**:
-  - In-vstack (8 from W5 sweep): #57, #58, #59, #61, #66, #68, #69, #70, #71, #72.
-  - Build-time bugs (W5 mid-flight): #62.
-  - Upstream-workaround-closes: #60, #63, #67 (all closed via PR #75 vstack-side workarounds).
-  - Community-reported (#74): closed via PR #76.
+- **15 issues closed** on `vanillagreencom/vstack`. **0 open**.
 
-- **0 issues remain open** on `vanillagreencom/vstack` as of 2026-05-16 21:08 UTC.
+## Live validation against hyprtrade — what was actually tested
+
+This section replaces the placeholder "Live validation" section from the v1 report.
+
+### Pre-fix state
+
+After `vstack refresh -g` updated 3 Pi extensions globally and `vstack refresh` (in hyprtrade) updated 3 skills, I drove a real end-to-end Linear lifecycle test:
+
+1. Created real Linear issue **CC-514** via `linear.sh issues create` → `linear.issue_created` activity row landed correctly with severity=info, refs.linear_id=CC-514. ✅
+2. Tried to update CC-514 to "In Progress" → API call succeeded, issue moved state in Linear UI, but **no activity row landed**. ❌
+3. Tried to update CC-514 to "Done" → same — succeeded in Linear, no activity. ❌
+
+Same for CC-515 (a fresh second test issue). Linear API mutations succeeded; activity stream stayed silent for the update events.
+
+### Root cause
+
+`linear_update_activity_type` in `skills/linear/scripts/commands/issues.sh` used `printf` WITHOUT a trailing newline:
+
+```bash
+case ... in
+    completed:*|*:done) printf 'linear.issue_finished success' ;;
+    canceled:*|*:cancelled) printf 'linear.issue_cancelled warning' ;;
+    *) printf 'linear.issue_updated info' ;;
+esac
+```
+
+The caller used:
+```bash
+read -r activity_type activity_severity < <(linear_update_activity_type "$normalized")
+```
+
+Without a trailing newline, `read` parsed both tokens correctly but **returned 1 at EOF**. With `set -e` enabled at the top of the script, this **aborted the entire `update_issue` function BEFORE `emit_linear_issue_activity` was reached**.
+
+So: Linear API mutation succeeded, the issue state moved correctly, the script exited with code 1, and no activity row landed in the sidecar.
+
+### Why this slipped past the W5 review chain
+
+PR #75 round-1 reviewer-error caught the analogous "wrong jq event-field path" bug in #67 wiring (subscribers.bash). The fix was to feed a real upstream payload through the actual jq selector. The same depth of integration testing was not applied to the Linear update path — the test suite asserted the helper function was called and the gate worked, but **never end-to-end through the real `read` + `set -e` interaction**.
+
+The hyprtrade live validation surfaced it immediately on the first real update mutation.
+
+### Fix + regression test (PR #78)
+
+- Three `printf` calls now end with `\n`.
+- New regression test at `skills/linear/tests/update-emit-newline.test.sh` asserts `read` succeeds with rc=0 and the type/severity pair parses for all three branches. The test catches the bug if the newline is removed.
+- Merged as commit `96a6c8c`.
+
+### Post-fix state
+
+Re-ran the same lifecycle test (CC-517):
+
+```
+14:31:24 linear.issue_created (severity=info, refs.linear_id=CC-517)
+14:31:25 linear.issue_updated (severity=info)
+14:31:26 linear.issue_cancelled (severity=warning)
+```
+
+All 3 events landed correctly.
+
+### Dashboard end-to-end
+
+Launched the Rust dashboard (`flightdeck-dashboard tui --state-file <path>`) against a state JSON pointing at the validation activity sidecar:
+
+```
+┌ activity · 3 rows · 0 noisy hidden · all sessions · all severities ───┐
+│ Time     Session    Type       Status   Summary                       │
+│ 14:31:26 VS         linear     warn     CC-517 issue_cancelled        │
+│ 14:31:25 VS         linear     info     CC-517 issue_updated          │
+│ 14:31:24 VS         linear     info     CC-517 issue_created          │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+All 3 events rendered with correct timestamps, type chips, severity colors ("warn" for cancelled, "info" for updates), and Linear identifiers in summaries. Newest-first ordering. Footer key hints visible.
+
+### GitHub side end-to-end
+
+Tested `pr-view 81 --json statusCheckRollup` (real merged PR in hyprtrade, read-only). Result:
+
+```
+{"type":"pr.checks_passed","severity":"success","refs":{"pr_number":81},"summary":"PR checks passed for #81"}
+```
+
+Real `gh pr view` returned real CI rollup data; the gated emit produced one `pr.checks_passed` row. **Re-running the same `pr-view` call** did NOT duplicate the emit — the transition-memory state file at `tmp/flightdeck-pr-checks-81.json` correctly suppressed the duplicate. The `flock`-wrapped read-compare-write region (W5 PR #75) works as designed under real load.
+
+### Cleanup
+
+All 4 test Linear issues (CC-514, CC-515, CC-516, CC-517) archived. All test activity sidecar files + pr-checks state files removed from `hyprtrade/tmp/`. Hyprtrade workspace returned to its pre-test state.
 
 ## Upstream-bug strategy
 
-The user directive was explicit: "for any issues relying on upstream fixes, we need workarounds or different solutions for them since we can not rely on pi upstream changes." Result:
-
-| Upstream issue | Vstack-side workaround |
-|---|---|
-| #60 — pi-bridge subagent panes share parent session id | `pi-extensions/pi-session-bridge/extensions/child-session-id.ts` synthesizes `<parent>:c<pid>` when `PI_BRIDGE_PARENT_SESSION_ID` env is set by `pi-agents-tmux/extensions/subagent/pane.ts` launcher. |
-| #63 — subagent stalls after compaction | `pi-extensions/pi-agents-tmux/extensions/subagent/idle-stall-watchdog.ts` polls `pi-bridge state` every 60s; writes synthetic `needs_completion` outbox when task is bridge-idle + outbox missing + stale beyond 300s. Real probe via `idle-stall-probe.ts` (default-busy on any failure). |
-| #67 — post-compaction edit-loop | `skills/flightdeck/lib/flightdeck-core/src/daemon/edit-loop-detector.ts` (pure decision helper) + bash subscriber wiring matching real upstream `ToolExecutionEndEvent.data.isError` shape. 5 consecutive edit failures in 120s → synthetic `blocked` wake. |
-
-Each workaround is opt-out via env (defaults ON); each is regression-tested against the actual upstream event shape (verified against `pi-coding-agent/dist/core/extensions/types.d.ts`).
+Same as v1 report: vstack-side workarounds for #60, #63, #67 shipped in PR #75. All three closed. Strategy verified working — no reliance on upstream pi-coding-agent fixes.
 
 ## Deferred items audit
 
-Every item explicitly deferred during W4/W5 was addressed or has a concrete reason:
+Same as v1 report — all addressed except github label instrumentation (no wrapper exists; out of scope).
 
-| Deferred item | Disposition |
-|---|---|
-| Linear `issue_id` vs `linear_id` separation | **Shipped** — `--issue-id` emitted only when `FLIGHTDECK_ENTRY_ID` env is set; `--linear-id` always emitted. |
-| pr-checks persisted transition memory | **Shipped** — sidecar at `<state-dir>/flightdeck-pr-checks-<pr>.json`, bounded LRU 50, `flock`-wrapped read-compare-record-emit (race-safe). |
-| loop.ts pane-registry helper extraction | **Shipped** — 8 helpers moved to `daemon/pane-registry.ts`. loop.ts 870 → 774 lines. |
-| TS/bash adhoc-pi hash parity | **Shipped** — `decidePiAdhocWake` accepts `assistantTextHash`, produces byte-equivalent hash to bash mirror. Parity test asserts equivalence. |
-| GitHub label instrumentation | **Deferred with concrete reason** — `skills/github/scripts/commands/` has no `label-add.sh` / `label-remove.sh` wrapper. Adding label-emission requires shipping the wrapper first; that's a separate feature scope, not just instrumentation. Documented in PR #75 commit body. |
-| Hyprtrade live validation | **Run** — see "Live validation" below. |
+## Stats (final)
 
-## Review chain summary
+- **7 PRs merged** (v1 had 6; #78 added).
+- **~78 commits** across all PRs (counting individual + 5 merge commits).
+- **~250+ new tests** (v1 had ~250; #78 added 1 regression test).
+- **Total findings closed across all rounds**: **3 blockers** (W4 Phase 4 wake-blocking, W5 #75 #67 wiring, W6 #78 missing newline), ~16 majors, ~80 minors.
+- **0 open issues** on `vanillagreencom/vstack`.
 
-| PR | Round 1 | Round 2 | Final |
-|---|---|---|---|
-| #64 | minor findings (small) | n/a | approved |
-| #65 | per-phase rounds during W4 (7 phases × engineer+reviewers) | per-phase fixes | approved |
-| #73 | 7 minors across arch/error/structure | cleanup commit `dc67366` | approved |
-| #75 | **1 BLOCKER + 2 MAJORS** (event-shape bug, RMW race, hardcoded probe) + 6 minors | full fix commit `2bd08ec`/`d818e84`/`c29e9e1` | round-3 verification approved no new findings |
-| #76 | reviewer-error info-level findings only | n/a | approved |
+## Critical lesson
 
-The blocker on PR #75 (`#67 wiring used wrong jq event-field path`) is notable: without the round-2 review, the entire post-compaction edit-loop workaround would have been dead code in production. The fix matches the real `ToolExecutionEndEvent` shape and is regression-locked via a test that pipes a synthetic upstream payload through the exact jq selector.
+> Test integrations END-TO-END with REAL upstream payloads and REAL caller semantics.
 
-## Live validation against hyprtrade
+The W5/B1 fix's unit tests asserted the gate logic worked. They never exercised the path where `read` would interact with `set -e`. PR #75 round-1 review caught a similar bug for #67's jq filter; the same scrutiny needed to apply to the Linear path but didn't. The hyprtrade live validation immediately surfaced what 250+ unit tests missed.
 
-After all PRs merged:
-
-```bash
-# Global Pi extensions updated:
-cd /mnt/Tertiary/dev/vstack/main && vstack refresh -g
-# Result: 18 Pi packages processed, 3 updated:
-#   @vanillagreen/pi-agents-tmux (W4 + W5 changes — agent-end watchdog, idle-stall watchdog, child-session-id)
-#   @vanillagreen/pi-extension-manager (issue #74 perf fix)
-#   @vanillagreen/pi-session-bridge (W4 activity broker + #60 workaround)
-
-# Hyprtrade project-local skill install updated:
-cd /mnt/Tertiary/dev/hyprtrade/main && vstack refresh
-# Result: 3 skills updated: flightdeck, github, linear
-
-# Activity sidecar CLI tested in hyprtrade:
-flightdeck-state activity path --session test-activity-validation
-# → /mnt/Tertiary/dev/hyprtrade/main/tmp/flightdeck-activity-test-activity-validation.jsonl
-
-flightdeck-state activity append '<event-json>' --session test
-# → {"id":"<sha>","deduped":false}
-
-flightdeck-state activity tail --session test --json
-# → NDJSON output with the event correctly normalized (schema_version, severity, importance, etc.)
-```
-
-Gated wrapper emissions tested:
-
-```bash
-FLIGHTDECK_ACTIVITY_FILE=/tmp/...jsonl FLIGHTDECK_MANAGED=1 \
-  .agents/skills/linear/scripts/_activity-emit.sh linear.issue_created \
-    --severity info --summary 'Test' --linear-id HT-9999
-# → emits with correct type, source, refs
-
-unset FLIGHTDECK_MANAGED FLIGHTDECK_ACTIVITY_FILE
-.agents/skills/linear/scripts/_activity-emit.sh linear.issue_created ...
-# → silent (no emit). Gating works.
-```
-
-What's NOT in this validation:
-- Live broker `vstack_activity` stream event from `pi-bridge stream` — requires a deeper Pi-internal smoke test. The unit tests in W4 Phase 5 + W5 #60 workaround cover the broker functionality across 7 + 7 tests respectively. The CLI tests above prove the JSONL pipeline end-to-end.
-- Live dashboard UI run against a real Flightdeck session — release binary is in the worktrees but not yet rebuilt on `main`. Insta snapshot tests (180+ snapshots across 4 themes / 25+ scenarios) cover the rendered surface.
-
-## Stats
-
-- **Total commits across all 5 PRs**: ~75 (counting individual feature/fix commits + 4 merge commits).
-- **Total new tests**: 250+ across pi-extensions + flightdeck-core + cli + flightdeck-dashboard.
-- **Total reviewer rounds**: 13 (across 7 phases of W4 + 1 round each for W5 cleanup, W5 sweep, upstream workarounds, #74).
-- **Total findings closed**: 2 blockers, ~15 majors, ~80 minors.
-- **Total lines changed**: ~10,000 across all PRs.
+For future PRs touching shell scripts with `set -e` + `read` + process substitution + helper functions, add an integration test that runs the full caller path under `set -e`. A grep-the-source test is not enough.
 
 ## Pane-agent telemetry
 
-W5 + upstream workarounds + #74 used the rust agent reconfigured to `claude-bridge/claude-opus-4-7:xhigh`. After all the issue-sweep work, the agent was reverted to `openai-codex/gpt-5.5:xhigh` per the original config. Backups taken in `/tmp/rust-agent-w4-backup.md` and `/tmp/rust-agent-pre-issue74.md`.
+W5 + upstream workarounds + #74 + #78 hotfix used the rust agent (some on `claude-bridge/claude-opus-4-7:xhigh` for #74; others on `openai-codex/gpt-5.5:xhigh`). The hotfix #78 was authored by me directly (master pane) since it was a 3-line sed change with a single test file.
 
-Compaction stalls observed during W4 Phase 6 (root cause for the #63/#67 issues — the agent compacted then completely stalled mid-task). Workaround issued via `pi-bridge send --steer` manually. The W5 G4 watchdog + #63 workaround should mitigate future occurrences but the underlying pi-core resume-turn bug is still upstream.
+Rust agent reverted to `openai-codex/gpt-5.5:xhigh` at session end.
 
-## Process notes
+## All worktrees
 
-Sequential per-issue / per-group engineer dispatches worked well for tight, well-scoped tasks (the #62 / #66 / #74 single-issue fixes shipped in <30 min each). The 7-phase W4 chain was heavier (~3-5 hr per phase including review cycles).
+- `/mnt/Tertiary/dev/vstack/main` — clean, at the latest main.
+- `/mnt/Tertiary/dev/vstack/trees/flightdeck-dashboard-rust` — branch merged via #64, keep until cleanup.
+- `/mnt/Tertiary/dev/vstack/trees/flightdeck-rich-activity` — branch merged via #65, keep until cleanup.
+- `/mnt/Tertiary/dev/vstack/trees/vstack-issue-sweep` — branch merged via #73, keep.
+- `/mnt/Tertiary/dev/vstack/trees/vstack-upstream-workarounds` — branch merged via #75, keep.
+- `/mnt/Tertiary/dev/vstack/trees/vstack-issue-74` — branch merged via #76, keep.
 
-The "blocker discovered in round-2 review" pattern (PR #75) is worth keeping: round 1 caught surface-level issues, round 2 surfaced a deeper bug (wrong event-field path) that round 1 missed because the W5 wiring tests grep'd bash source instead of feeding real upstream payloads through. Lesson: regression tests for cross-boundary integrations should feed REAL upstream event shapes, not assume the shape.
-
-## Followup ideas (none filed as issues yet)
-
-- GitHub label wrapper (`skills/github/scripts/commands/label-add.sh`/`label-remove.sh`) — would enable the deferred label-instrumentation.
-- Dashboard auto-rebuild on `vstack refresh` when the Rust crate's source changed (currently the user must `cargo build --release` manually).
-- Live broker smoke test that exercises end-to-end `vstack_activity` flow through `pi-bridge stream` — not just unit tests of the broker module.
-
-Open issues at end of session: **0**.
+All worktrees are safe to `worktree remove` after sign-off.
