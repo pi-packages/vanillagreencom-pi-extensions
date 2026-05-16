@@ -196,6 +196,74 @@ describe("pane-registry activity instrumentation", () => {
 		expect(dead[0]?.details).toMatchObject({ reason: "reconcile-stale-pane" });
 	});
 
+	// vstack#85 Fix A: shell adhoc has no idle subscriber, so pane-gone
+	// IS the terminal signal. Reconcile transitions state to `complete`
+	// and emits `entry.completed` (success) instead of dropping the row
+	// with `entry.dead` (warning).
+	test("reconcile adhoc shell with gone pane transitions to complete and emits entry.completed", () => {
+		expect(run(["init-entry", "SHELL-1", "--title", "Adhoc Shell", "--kind", "adhoc", "--cwd", "/tmp/shell", "--window", "shell-win", "--harness", "shell", "--pane-id", "%999"]).status).toBe(0);
+		expect(run(["reconcile"]).status).toBe(0);
+		const completed = eventsOf("entry.completed").filter((event) => event.entry_id === "SHELL-1");
+		expect(completed).toHaveLength(1);
+		expect(completed[0]).toMatchObject({ importance: "important", severity: "success" });
+		expect(completed[0]?.details).toMatchObject({ reason: "reconcile-pane-gone", teardown: "shell-pane-gone" });
+		expect(eventsOf("entry.dead").filter((event) => event.entry_id === "SHELL-1")).toHaveLength(0);
+		const entry = JSON.parse(run(["get", "SHELL-1"]).stdout) as Record<string, unknown>;
+		expect(entry.state).toBe("complete");
+	});
+
+	test("reconcile adhoc shell is idempotent: second pass on terminal state does not re-emit", () => {
+		expect(run(["init-entry", "SHELL-IDEM", "--title", "Idempotent", "--kind", "adhoc", "--cwd", "/tmp/shell", "--window", "shell-win", "--harness", "shell", "--pane-id", "%998"]).status).toBe(0);
+		expect(run(["reconcile"]).status).toBe(0);
+		expect(run(["reconcile"]).status).toBe(0);
+		const completed = eventsOf("entry.completed").filter((event) => event.entry_id === "SHELL-IDEM");
+		expect(completed).toHaveLength(1);
+		expect(eventsOf("entry.dead").filter((event) => event.entry_id === "SHELL-IDEM")).toHaveLength(0);
+	});
+
+	test("reconcile adhoc pi with gone pane keeps legacy entry.dead drop (not-shell skip)", () => {
+		initEntry("PI-STALE", ["--pane-id", "%997"]);
+		expect(run(["reconcile"]).status).toBe(0);
+		const dead = eventsOf("entry.dead").filter((event) => event.entry_id === "PI-STALE");
+		expect(dead).toHaveLength(1);
+		expect(eventsOf("entry.completed").filter((event) => event.entry_id === "PI-STALE")).toHaveLength(0);
+	});
+
+	// vstack#85 Fix B: teardown-entry --force on a gone-pane waiting
+	// entry must drop the stale row and emit entry.cancelled. Without
+	// --force the existing #16 drift refusal (exit 3) must stand.
+	test("teardown-entry --force on gone-pane waiting entry drops row and emits entry.cancelled", () => {
+		expect(run(["init-entry", "FORCE-WAIT", "--title", "Stuck Waiting", "--kind", "adhoc", "--cwd", "/tmp/force", "--window", "force-win", "--harness", "shell", "--pane-id", "%996"]).status).toBe(0);
+		// Non-force path: existing drift refusal still applies.
+		const refused = run(["teardown-entry", "FORCE-WAIT"]);
+		expect(refused.status).toBe(3);
+		expect(refused.stderr).toContain("registry drift");
+		expect(refused.stderr).toContain("--force");
+		// --force path: drops row + emits entry.cancelled.
+		const forced = run(["teardown-entry", "FORCE-WAIT", "--force"]);
+		expect(forced.status).toBe(0);
+		expect(forced.stdout).toContain("removed stale entry 'FORCE-WAIT'");
+		const cancelled = eventsOf("entry.cancelled").filter((event) => event.entry_id === "FORCE-WAIT");
+		expect(cancelled).toHaveLength(1);
+		expect(cancelled[0]).toMatchObject({ importance: "important", severity: "warning" });
+		expect(cancelled[0]?.details).toMatchObject({ force: true, reason: "force-gone-pane", teardown: "force-gone-pane", prior_state: "waiting" });
+		// Entry is gone from the registry.
+		expect(run(["get", "FORCE-WAIT"]).status).toBe(1);
+	});
+
+	test("teardown-entry --force on gone-pane non-waiting entry emits entry.dead", () => {
+		expect(run(["init-entry", "FORCE-PROMPT", "--title", "Stuck Prompting", "--kind", "adhoc", "--cwd", "/tmp/force", "--window", "force-win", "--harness", "shell", "--pane-id", "%995"]).status).toBe(0);
+		expect(run(["set-state", "FORCE-PROMPT", "prompting"]).status).toBe(0);
+		const forced = run(["teardown-entry", "FORCE-PROMPT", "--force"]);
+		expect(forced.status).toBe(0);
+		const dead = eventsOf("entry.dead").filter((event) => event.entry_id === "FORCE-PROMPT");
+		expect(dead).toHaveLength(1);
+		expect(dead[0]).toMatchObject({ importance: "important", severity: "error" });
+		expect(dead[0]?.details).toMatchObject({ force: true, prior_state: "prompting", reason: "force-gone-pane" });
+		expect(eventsOf("entry.cancelled").filter((event) => event.entry_id === "FORCE-PROMPT")).toHaveLength(0);
+		expect(run(["get", "FORCE-PROMPT"]).status).toBe(1);
+	});
+
 	test("reconcile drift emits daemon.warning without dropping row", () => {
 		shimState = writeShimState({
 			panes: { "%500": { pane_index: 0, path: "/tmp/other", window_id: "@50", window_index: 1, window_name: "other-window" } },

@@ -16,6 +16,7 @@ import { emitCloseIssue, emitMergeAction, emitWorkflowDecision } from "../activi
 import type { ActivityEventInput } from "../activity/types.ts";
 import type { CloseIssueOutcome } from "../activity/workflow-emit.ts";
 import { cxAdapterIsFresh, cxSpawnFile } from "../paths/codex.ts";
+import { decideShellAdhocWake } from "../daemon/shell-adhoc-wake.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FD_STATE_SCRIPT = resolve(HERE, "../../../../scripts/flightdeck-state");
@@ -555,6 +556,13 @@ function emitReconcileDrop(entry: EntryRecord): void {
 	}, id);
 }
 
+function emitReconcileShellComplete(entry: EntryRecord): void {
+	emitCloseIssue(registryWorkflowContext(entry), "complete", {
+		details: { reason: "reconcile-pane-gone", teardown: "shell-pane-gone" },
+		severity: "success",
+	});
+}
+
 // Issue-mode metadata lives under `entry.domain.issue`. If a caller
 // passes one of those field names as a top-level set, redirect into the
 // nested object so downstream readers (`pane-registry list --format json`,
@@ -866,6 +874,7 @@ function cmdReconcile(): void {
 	const live = livePanesAndWindows();
 	const entries = readEntriesJson();
 	const dropped: string[] = [];
+	const completed: string[] = [];
 	const backfilled: string[] = [];
 	const drift: string[] = [];
 	for (const [issue, rec] of Object.entries(entries)) {
@@ -913,10 +922,37 @@ function cmdReconcile(): void {
 		const alive = paneId ? live.panes.has(paneId) : !win || live.windows.has(win);
 		if (!alive) {
 			const droppedEntry = rec;
+			const stateStr = String(rec.state ?? "");
+			// vstack#85: adhoc shell entries have no idle subscriber, so
+			// pane-gone IS their terminal signal. Transition state to
+			// `complete` and emit `entry.completed` instead of dropping +
+			// `entry.dead`. Non-shell-adhoc entries keep the legacy drop.
+			const wake = decideShellAdhocWake({
+				kind: String(rec.kind ?? ""),
+				harness: String(rec.harness ?? ""),
+				state: stateStr,
+				paneAlive: false,
+			});
+			if (wake.transition) {
+				const idJson = JSON.stringify(issue);
+				fdStateOrDie(["set", `.entries[${idJson}].state`, JSON.stringify(wake.nextState)]);
+				emitReconcileShellComplete(droppedEntry);
+				completed.push(issue);
+				continue;
+			}
 			fdStateOrDie(["set", ".entries", `(.entries | del(.["${issue}"]))`]);
-			emitReconcileDrop(droppedEntry);
+			// Already-terminal entries (e.g. an adhoc-shell row that was
+			// transitioned to `complete` on a prior reconcile tick, then
+			// observed pane-gone again on the next sweep) drop silently
+			// — the terminal-event was emitted at the original
+			// transition and re-emitting `entry.dead` would lie about the
+			// outcome.
+			if (!TERMINAL_STATES.has(stateStr.toLowerCase())) emitReconcileDrop(droppedEntry);
 			dropped.push(issue);
 		}
+	}
+	if (completed.length > 0) {
+		process.stdout.write(`reconciled: completed ${completed.length} adhoc shell entr${completed.length === 1 ? "y" : "ies"} (${completed.join(",")})\n`);
 	}
 	if (dropped.length > 0) {
 		process.stdout.write(`reconciled: dropped ${dropped.length} stale entr${dropped.length === 1 ? "y" : "ies"} (${dropped.join(",")})\n`);
@@ -1035,8 +1071,24 @@ function cmdTeardownWindow(args: string[]): void {
 		process.stdout.write(`teardown-window: window already closed (pane_id=${paneId || "<none>"} gone, state=${state})\n`);
 		return;
 	}
+	if (force) {
+		// vstack#85: --force is the operator explicitly saying "I know this
+		// entry is stuck and the pane is verifiably gone — drop it". The
+		// non-force path keeps the #16 drift refusal intact.
+		const outcome: "cancelled" | "dead" = state === "waiting" || state === "" ? "cancelled" : "dead";
+		fdStateOrDie(["set", ".entries", `(.entries | del(.["${issue}"]))`]);
+		emitTerminalEntry(rec, outcome, {
+			force: true,
+			pane_id: paneId || null,
+			prior_state: state || null,
+			reason: "force-gone-pane",
+			teardown: "force-gone-pane",
+		});
+		process.stdout.write(`teardown-window: removed stale entry '${issue}' (pane_id=${paneId || "<none>"} gone, prior_state=${state || "<none>"}, force=1, outcome=${outcome})\n`);
+		return;
+	}
 	process.stderr.write(
-		`teardown-window: registry drift — pane_id '${paneId || "<none>"}' is gone but state is '${state}' (not merged|aborted|dead|complete|cancelled); refusing to derive kill target from pane_target (#16)\n`,
+		`teardown-window: registry drift — pane_id '${paneId || "<none>"}' is gone but state is '${state}' (not merged|aborted|dead|complete|cancelled); refusing to derive kill target from pane_target (#16); rerun with --force to drop the stale entry\n`,
 	);
 	process.exit(3);
 }
