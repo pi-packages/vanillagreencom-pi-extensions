@@ -20,6 +20,7 @@
 //   VSTACK_EDIT_LOOP_WINDOW_SEC     time window in seconds (default 120).
 
 export const EDIT_LOOP_REASON = "post-compaction-edit-loop" as const;
+export const EDIT_LOOP_CLASSIFIER_TAG = "pi-edit-tool-loop" as const;
 export const EDIT_LOOP_DEFAULT_THRESHOLD_N = 5;
 export const EDIT_LOOP_DEFAULT_WINDOW_SEC = 120;
 
