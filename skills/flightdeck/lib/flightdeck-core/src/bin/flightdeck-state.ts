@@ -7,6 +7,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { appendActivityEvent } from "../activity/append.ts";
+import { emitActivity } from "../activity/emit.ts";
 import { formatActivityJsonl, formatActivityLine, formatActivityMarkdown } from "../activity/format.ts";
 import { activityPathForSession } from "../activity/paths.ts";
 import { ActivityFilterError, readActivityEvents, readActivityJsonlLines, tailActivityEvents } from "../activity/read.ts";
@@ -79,7 +80,9 @@ switch (action) {
 	case "set": {
 		if (rest.length < 2) die("Usage: set <field> <json-value>");
 		const field = normalizePath(rest[0]!);
+		const before = readDirectStateEntry(field);
 		updateState(file, `${field} = (${rest[1]})`);
+		emitDirectStateChange(field, before);
 		break;
 	}
 	case "append": {
@@ -148,6 +151,65 @@ function writeTrackedEntryFilter(id: string, entry: TrackedEntry): string {
 
 function readStateJson(): FlightdeckStateLike {
 	return JSON.parse(readFileSync(file, "utf8")) as FlightdeckStateLike;
+}
+
+function entryIdFromStateField(field: string): string | null {
+	const bracket = field.match(/^\.entries\[(.+)]\.state$/);
+	if (bracket) {
+		try {
+			const parsed = JSON.parse(bracket[1]!);
+			return typeof parsed === "string" && parsed ? parsed : null;
+		} catch {
+			return null;
+		}
+	}
+	const dotted = field.match(/^\.entries\.([A-Za-z0-9_-]+)\.state$/);
+	return dotted?.[1] ?? null;
+}
+
+function readDirectStateEntry(field: string): Record<string, unknown> | null {
+	const entryId = entryIdFromStateField(field);
+	if (!entryId || !existsSync(file)) return null;
+	try {
+		const state = JSON.parse(readFileSync(file, "utf8")) as unknown;
+		if (!state || typeof state !== "object" || Array.isArray(state)) return null;
+		const entries = (state as { entries?: unknown }).entries;
+		if (!entries || typeof entries !== "object" || Array.isArray(entries)) return null;
+		const entry = (entries as Record<string, unknown>)[entryId];
+		return entry && typeof entry === "object" && !Array.isArray(entry) ? entry as Record<string, unknown> : null;
+	} catch {
+		return null;
+	}
+}
+
+function emitDirectStateChange(field: string, before: Record<string, unknown> | null): void {
+	if (!before) return;
+	const entryId = entryIdFromStateField(field);
+	if (!entryId) return;
+	let after: Record<string, unknown> | null = null;
+	try { after = readDirectStateEntry(field); } catch { return; }
+	const nextState = after?.state;
+	if (typeof nextState !== "string" || before.state === nextState) return;
+	const domain = before.domain && typeof before.domain === "object" && !Array.isArray(before.domain) ? before.domain as Record<string, unknown> : {};
+	const issue = domain.issue && typeof domain.issue === "object" && !Array.isArray(domain.issue) ? domain.issue as Record<string, unknown> : {};
+	const refs: Record<string, unknown> = {};
+	if (typeof before.task_id === "string" && before.task_id) refs.task_id = before.task_id;
+	if (typeof issue.id === "string" && issue.id) refs.issue_id = issue.id;
+	if (typeof issue.pr_number === "number" && Number.isFinite(issue.pr_number)) refs.pr_number = Math.trunc(issue.pr_number);
+	emitActivity({ sessionId: session, stateFile: file, tmuxSession: session }, {
+		details: { dedup_key: `${entryId}:entry.state_changed:state:${nextState}`, new: nextState, old: before.state ?? null },
+		entry_id: typeof before.id === "string" && before.id ? before.id : entryId,
+		entry_kind: typeof before.kind === "string" ? before.kind : undefined,
+		entry_title: typeof before.title === "string" ? before.title : undefined,
+		harness: typeof before.harness === "string" ? before.harness : undefined,
+		importance: "normal",
+		pane_id: typeof before.pane_id === "string" ? before.pane_id : undefined,
+		refs: Object.keys(refs).length > 0 ? refs : undefined,
+		severity: "info",
+		source: "flightdeck",
+		summary: `${entryId} state: ${String(before.state ?? "null")} → ${nextState}`,
+		type: "entry.state_changed",
+	});
 }
 
 function warnLine(message: string): void {

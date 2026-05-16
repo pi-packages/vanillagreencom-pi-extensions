@@ -1,7 +1,18 @@
+import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
 const STATE_PREFIX = "flightdeck-state-";
 const ACTIVITY_PREFIX = "flightdeck-activity-";
+const RESOLVE_CACHE_TTL_MS = 5000;
+
+interface ActivityPathContext {
+	stateFile: string;
+	sessionId?: string;
+	tmuxSession?: string;
+	stateDir?: string;
+}
+
+const resolveCache = new Map<string, { expiresAt: number; path: string | null }>();
 
 export function activityPathForSession(session: string, stateBase: string): string {
 	return join(stateBase, `${ACTIVITY_PREFIX}${session}.jsonl`);
@@ -14,6 +25,33 @@ export function activityPathFromStatePath(stateFile: string): string {
 		return join(dirname(stateFile), `${ACTIVITY_PREFIX}${session}.jsonl`);
 	}
 	return `${stateFile}.activity.jsonl`;
+}
+
+export function resolveActivityPath(ctx: ActivityPathContext): string | null {
+	const key = [ctx.stateFile, ctx.stateDir ?? "", ctx.tmuxSession ?? "", ctx.sessionId ?? ""].join("\0");
+	const now = Date.now();
+	const cached = resolveCache.get(key);
+	if (cached && cached.expiresAt > now) return cached.path;
+	let path: string | null = null;
+	let stateSession = "";
+	if (ctx.stateFile && existsSync(ctx.stateFile)) {
+		try {
+			const parsed = JSON.parse(readFileSync(ctx.stateFile, "utf8")) as unknown;
+			if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+				const raw = parsed as Record<string, unknown>;
+				if (typeof raw.activity_path === "string" && raw.activity_path.trim()) path = raw.activity_path;
+				if (typeof raw.session_id === "string" && raw.session_id.trim()) stateSession = raw.session_id;
+			}
+		} catch {
+			path = null;
+		}
+	}
+	if (!path && ctx.stateDir) {
+		const session = ctx.tmuxSession || ctx.sessionId || stateSession;
+		if (session) path = activityPathForSession(session, ctx.stateDir);
+	}
+	resolveCache.set(key, { expiresAt: now + RESOLVE_CACHE_TTL_MS, path });
+	return path;
 }
 
 export function activityArchivePathFromStatePath(stateFile: string, terminatedAt: string): string {
