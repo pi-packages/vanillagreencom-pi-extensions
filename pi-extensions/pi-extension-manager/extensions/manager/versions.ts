@@ -6,6 +6,20 @@ import { NPM_CACHE_TTL_MS, type NpmCache, type Scope, type SettingsFile, type So
 
 let npmCheckInFlight = false;
 
+// `npm root [args]` is slow (Node + npm config bootstrap, typically 40-500ms each). The
+// answer is invariant for the process lifetime, so memoize. Without this, opening the
+// extension manager popup spawned 2-5 `npm root` invocations per npm-sourced package
+// (vstack#74).
+const npmRootMemo = new Map<string, string | undefined>();
+
+function npmRootCacheKey(args: string[], cwd?: string): string {
+	return `${args.join("\x00")}\x01${cwd ?? ""}`;
+}
+
+export function __resetNpmRootCacheForTests(): void {
+	npmRootMemo.clear();
+}
+
 export function loadSourceIndex(settingsFiles: SettingsFile[]): SourceIndex {
 	const merged: SourceIndex = {};
 	for (const file of settingsFiles) {
@@ -85,9 +99,12 @@ export function readSourceRepoVersion(repoRoot: string, packageName: string, sou
 }
 
 function npmRoot(args: string[], cwd?: string): string | undefined {
+	const key = npmRootCacheKey(args, cwd);
+	if (npmRootMemo.has(key)) return npmRootMemo.get(key);
 	const result = spawnSync("npm", ["root", ...args], { encoding: "utf8", cwd });
-	if (result.error || (result.status ?? 1) !== 0) return undefined;
-	return (result.stdout ?? "").trim() || undefined;
+	const value = result.error || (result.status ?? 1) !== 0 ? undefined : ((result.stdout ?? "").trim() || undefined);
+	npmRootMemo.set(key, value);
+	return value;
 }
 
 function npmPrefixRoot(): string | undefined {
@@ -99,27 +116,57 @@ export function npmPackageDir(root: string, npmName: string): string {
 	return join(root, ...npmName.split("/"));
 }
 
-export function npmPackageDirCandidates(npmName: string, scope: Scope, baseDir: string, cwd: string): string[] {
-	const roots = new Set<string>();
+// Two-tier lookup: cheap candidates first (filesystem + env), expensive `npm root`
+// spawns only as fallback. Returns ordered roots; the caller short-circuits on first
+// existing dir (see `resolveNpmPackageDir`).
+function cheapNpmRoots(scope: Scope, baseDir: string): string[] {
+	const roots: string[] = [];
 	if (scope === "project") {
-		roots.add(join(baseDir, "npm", "node_modules"));
-		const projectRoot = npmRoot(["--prefix", join(baseDir, "npm")], cwd);
-		if (projectRoot) roots.add(projectRoot);
-		const cwdRoot = npmRoot([], cwd);
-		if (cwdRoot) roots.add(cwdRoot);
+		roots.push(join(baseDir, "npm", "node_modules"));
 	} else if (scope === "user") {
 		const prefixRoot = npmPrefixRoot();
-		if (prefixRoot) roots.add(prefixRoot);
+		if (prefixRoot) roots.push(prefixRoot);
+		roots.push(join(baseDir, "npm", "node_modules"));
+	}
+	return roots;
+}
+
+function expensiveNpmRoots(scope: Scope, baseDir: string, cwd: string): string[] {
+	const roots: string[] = [];
+	if (scope === "project") {
+		const projectRoot = npmRoot(["--prefix", join(baseDir, "npm")], cwd);
+		if (projectRoot) roots.push(projectRoot);
+		const cwdRoot = npmRoot([], cwd);
+		if (cwdRoot) roots.push(cwdRoot);
+	} else if (scope === "user") {
 		const globalRoot = npmRoot(["-g"], cwd);
-		if (globalRoot) roots.add(globalRoot);
-		roots.add(join(baseDir, "npm", "node_modules"));
+		if (globalRoot) roots.push(globalRoot);
 	} else {
 		const localRoot = npmRoot([], cwd);
-		if (localRoot) roots.add(localRoot);
+		if (localRoot) roots.push(localRoot);
 		const globalRoot = npmRoot(["-g"], cwd);
-		if (globalRoot) roots.add(globalRoot);
+		if (globalRoot) roots.push(globalRoot);
 	}
-	return [...roots].map((root) => npmPackageDir(root, npmName));
+	return roots;
+}
+
+export function resolveNpmPackageDir(npmName: string, scope: Scope, baseDir: string, cwd: string): string | undefined {
+	const seen = new Set<string>();
+	const tryRoot = (root: string): string | undefined => {
+		const dir = npmPackageDir(root, npmName);
+		if (seen.has(dir)) return undefined;
+		seen.add(dir);
+		return existsSync(join(dir, "package.json")) ? dir : undefined;
+	};
+	for (const root of cheapNpmRoots(scope, baseDir)) {
+		const hit = tryRoot(root);
+		if (hit) return hit;
+	}
+	for (const root of expensiveNpmRoots(scope, baseDir, cwd)) {
+		const hit = tryRoot(root);
+		if (hit) return hit;
+	}
+	return undefined;
 }
 
 export function gitPackageDirCandidates(source: string, scope: Scope, baseDir: string): string[] {
