@@ -41,6 +41,14 @@ import { piSubscriberPidFile } from "../paths/pi.ts";
 import { cxSubscriberPidFile } from "../paths/codex.ts";
 import { isCanonicalTag, appendEvent } from "./events.ts";
 import { BG_TASK_EXIT_CLASSIFIER_TAG } from "../events/bg-task-exit.ts";
+import {
+	emitActivityForWakeRow,
+	emitSubscriberDead,
+	emitSubscriberReattached,
+	emitSubscriberStarted,
+	type DaemonActivityContext,
+	type WakeEventRow,
+} from "./activity.ts";
 import { clearStaleWakePending, isMasterBusy } from "./busy.ts";
 import { clearBellForWindow, wakeMaster, resolvePiMasterPid } from "./wake.ts";
 import { PaneCache, capturePane, captureHash12, classifyBuffer, resolvePaneId, sessionAlive, stabilityForHarness } from "./pane-meta.ts";
@@ -82,6 +90,7 @@ export interface RunLoopOpts {
 	scriptPath: string;
 	origArgs: string[];
 	paneRegistryBin: string;    // path to pane-registry executable for resolve_*_meta
+	activity?: DaemonActivityContext;
 }
 
 interface TickPending {
@@ -135,6 +144,7 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
 
 	const log = (tag: string, msg: string): void => daemonLog(logFile, tag, msg);
 	const warn = (tag: string, msg: string): void => daemonWarn(logFile, tag, msg);
+	const activity = opts.activity ?? { sessionId: opts.sessionName };
 
 	// State maps mirror the bash declare -A arrays.
 	const lastHash = new Map<string, string>();
@@ -211,9 +221,10 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
 				const url = extractFlag(meta, "--url");
 				const sid = extractFlag(meta, "--session");
 				if (url && sid) {
-					const { pid } = spawnOcSubscriber({ ...baseEnv, sessionKey: opts.sessionKey, paneId: id, ocUrl: url, sessionId: sid, ocLastAssistantJq: OC_LAST_ASSISTANT_JQ, log });
+					const { pid, reattached } = spawnOcSubscriber({ ...baseEnv, sessionKey: opts.sessionKey, paneId: id, ocUrl: url, sessionId: sid, ocLastAssistantJq: OC_LAST_ASSISTANT_JQ, log });
 					ocSubscribed.set(id, true);
 					subscriberPid.set(id, pid);
+					emitSubscriberLifecycle(activity, reattached, "opencode", id, pid);
 				}
 				break;
 			}
@@ -221,9 +232,10 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
 				const meta = resolveMeta(opts.paneRegistryBin, "cc-channel-args", target);
 				const transcript = extractFlag(meta, "--transcript");
 				if (transcript) {
-					const { pid } = spawnCcSubscriber({ ...baseEnv, sessionKey: opts.sessionKey, paneId: id, transcript, ccLastAssistantJq: CC_LAST_ASSISTANT_JQ, log });
+					const { pid, reattached } = spawnCcSubscriber({ ...baseEnv, sessionKey: opts.sessionKey, paneId: id, transcript, ccLastAssistantJq: CC_LAST_ASSISTANT_JQ, log });
 					ocSubscribed.set(id, true);
 					subscriberPid.set(id, pid);
+					emitSubscriberLifecycle(activity, reattached, "claude", id, pid);
 				}
 				break;
 			}
@@ -232,9 +244,10 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
 				const piPid = extractFlag(meta, "--pid");
 				const piSocket = extractFlag(meta, "--socket");
 				if (piPid || piSocket) {
-					const { pid } = spawnPiSubscriber({ ...baseEnv, sessionKey: opts.sessionKey, paneId: id, piPid, piSocket, piLastAssistantJq: PI_LAST_ASSISTANT_JQ, log });
+					const { pid, reattached } = spawnPiSubscriber({ ...baseEnv, sessionKey: opts.sessionKey, paneId: id, piPid, piSocket, piLastAssistantJq: PI_LAST_ASSISTANT_JQ, log });
 					ocSubscribed.set(id, true);
 					subscriberPid.set(id, pid);
+					emitSubscriberLifecycle(activity, reattached, "pi", id, pid);
 				}
 				break;
 			}
@@ -243,9 +256,10 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
 				const cxUrl = extractFlag(meta, "--url");
 				const threadId = extractFlag(meta, "--thread");
 				if (cxUrl && threadId) {
-					const { pid } = spawnCxSubscriber({ ...baseEnv, sessionKey: opts.sessionKey, paneId: id, cxUrl, threadId, cxLastAssistantJq: CX_LAST_ASSISTANT_JQ, log });
+					const { pid, reattached } = spawnCxSubscriber({ ...baseEnv, sessionKey: opts.sessionKey, paneId: id, cxUrl, threadId, cxLastAssistantJq: CX_LAST_ASSISTANT_JQ, log });
 					ocSubscribed.set(id, true);
 					subscriberPid.set(id, pid);
+					emitSubscriberLifecycle(activity, reattached, "codex", id, pid);
 				}
 				break;
 			}
@@ -322,12 +336,13 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
 			if (elapsed >= opts.maxLifetime) {
 				log("max-lifetime", `elapsed=${elapsed}s >= MAX_LIFETIME=${opts.maxLifetime}s; spawn successor (TS option-A divergence from bash's exec-in-place)`);
 				const { maxLifetimeExec } = require("./lifecycle.ts") as typeof import("./lifecycle.ts");
-				maxLifetimeExec({ scriptPath: opts.scriptPath, origArgs: opts.origArgs, logFile });
+				maxLifetimeExec({ activity, scriptPath: opts.scriptPath, origArgs: opts.origArgs, logFile });
 			}
 		}
 
 		if (!sessionAlive(opts.sessionId)) {
 			log("session-gone", `session_id=${opts.sessionId} gone; exiting`);
+			setDaemonExitReason("session-gone");
 			break;
 		}
 
@@ -351,6 +366,7 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
 		const tickReasons: string[] = [];
 		const tickPending: TickPending[] = [];
 		const tickBellWins: string[] = [];
+		const tickActivity: WakeEventRow[] = [];
 
 		// 1) Drain adapter subscriber events. Round-4 #8: fast-path the
 		// 'no wake-events log' case so we don't pay flock + bash + cat
@@ -366,11 +382,11 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
 			wakeDrain = drainOcWakeEvents(sessionLock, wakeEventsLog);
 		}
 		for (const line of wakeDrain.lines) {
-			let ev: { pane_id?: string; hash?: string; classifier_tag?: string; event_type?: string; request_id?: string; question?: unknown; harness?: string; completion?: unknown; task?: unknown };
-			try { ev = JSON.parse(line); } catch { continue; }
-			const evPid = ev.pane_id ?? "";
-			const evHash = ev.hash ?? "";
-			const evTag = ev.classifier_tag ?? "rendering";
+			let ev: WakeEventRow;
+			try { ev = JSON.parse(line) as WakeEventRow; } catch { continue; }
+			const evPid = typeof ev.pane_id === "string" ? ev.pane_id : "";
+			const evHash = typeof ev.hash === "string" ? ev.hash : "";
+			const evTag = typeof ev.classifier_tag === "string" ? ev.classifier_tag : "rendering";
 			if (!evPid || !evHash) continue;
 			if (!paneCache.alive(evPid)) continue;
 			if (!firstSeen.has(evPid)) firstSeen.set(evPid, now);
@@ -389,7 +405,7 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
 				} else if (evTag === "pi-subagent-completion") {
 					extraJson = JSON.stringify({ event_type: ev.event_type, completion: ev.completion, harness: ev.harness });
 				} else if (evTag === BG_TASK_EXIT_CLASSIFIER_TAG) {
-					extraJson = JSON.stringify({ event_type: ev.event_type, task: ev.task, harness: ev.harness });
+					extraJson = JSON.stringify({ event_type: ev.event_type, harness: ev.harness, sequence: ev.sequence, task: ev.task });
 				}
 				// Round-4 #6: only record a wake reason when the event is
 				// actually durable. appendEvent returns false on dedup (no
@@ -402,10 +418,12 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
 				});
 				if (appended) {
 					log("classify", `${evPid} ${src} tag=${evTag} (canonical)`);
+					tickActivity.push(ev);
 					tickReasons.push(`adapter:${evPid}:${evTag}`);
 					tickPending.push({ paneId: evPid, hash: evHash, tag: evTag, isBell: false });
 				}
 			} else {
+				emitActivityForWakeRow(activity, ev);
 				if (opts.verbose) log("classify", `${evPid} ${src} tag=${evTag} (non-canonical)`);
 				notifiedHash.set(evPid, evHash);
 			}
@@ -433,7 +451,9 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
 					}
 					continue;
 				}
-			log("subscriber-dead", `pane=${innerId} harness=${subHarness}; clearing OC_SUBSCRIBED and falling back to capture-pane`);
+				const deadPid = subscriberPid.get(innerId);
+				log("subscriber-dead", `pane=${innerId} harness=${subHarness}; clearing OC_SUBSCRIBED and falling back to capture-pane`);
+				emitSubscriberDead(activity, subHarness, innerId, deadPid);
 				ocSubscribed.delete(innerId);
 				subscriberPid.delete(innerId);
 				try { unlinkSync(pidFile); } catch { /* */ }
@@ -448,7 +468,7 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
 			const winId = paneCache.windowId(innerId);
 			const harness = paneHarness.get(innerId) ?? opts.defaultHarness;
 			const bell = paneCache.bell(innerId);
-			const activity = paneCache.activity(innerId);
+			const paneActivity = paneCache.activity(innerId);
 
 			// Round-4 #11: skip capture-pane subprocess on inactive
 			// panes. Activity = 0 + bell = 0 + cached hash present means
@@ -461,8 +481,8 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
 			const sweepNow = captureSweepCounter >= 30;
 			const prevActivity = lastActivityFlag.get(innerId) ?? -1;
 			const prevHashEntry = lastHash.get(innerId);
-			const canSkipCapture = !sweepNow && bell === 0 && activity === 0 && prevActivity === 0 && prevHashEntry !== undefined;
-			lastActivityFlag.set(innerId, activity);
+			const canSkipCapture = !sweepNow && bell === 0 && paneActivity === 0 && prevActivity === 0 && prevHashEntry !== undefined;
+			lastActivityFlag.set(innerId, paneActivity);
 			const buf = canSkipCapture ? "" : capturePane(target, opts.captureLines);
 			const hash = canSkipCapture ? prevHashEntry! : captureHash12(buf);
 			const stab = stabilityForHarness(harness, opts.stabilitySec);
@@ -489,6 +509,7 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
 					sessionLock, eventsFile, wakePending, lastEventKey,
 				});
 				if (appended) {
+					tickActivity.push({ classifier_tag: tag, event_type: tag, hash, harness, pane_id: innerId });
 					tickReasons.push(`bell:${innerId}:${tag}`);
 					tickPending.push({ paneId: innerId, hash, tag, isBell: true });
 					if (winId) tickBellWins.push(winId);
@@ -522,6 +543,7 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
 					});
 					if (appended) {
 						log("classify", `${innerId} age=${age}s tag=${tag} (canonical)`);
+						tickActivity.push({ classifier_tag: tag, event_type: tag, hash, harness, pane_id: innerId });
 						tickReasons.push(`stable:${innerId}:${tag}(${age}s)`);
 						tickPending.push({ paneId: innerId, hash, tag, isBell: false });
 					}
@@ -549,6 +571,7 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
 			const combined = tickReasons.join("|");
 			const inFlightJson = JSON.stringify(tickPending.map((p) => ({ pane_id: p.paneId, hash: p.hash, tag: p.tag, is_bell: p.isBell })));
 			const ok = wakeMaster({
+				activity,
 				masterId, masterHarness, sessionKey: opts.sessionKey,
 				sessionLock, wakePending, busyFile,
 				masterTurnTtl: opts.masterTurnTtl,
@@ -558,6 +581,7 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
 				isMasterBusy: () => isMasterBusy({ busyFile, masterId, masterTurnTtl: opts.masterTurnTtl }),
 				paneTargetFor: (pid) => paneCache.target(pid),
 			});
+			for (const row of tickActivity) emitActivityForWakeRow(activity, row);
 			if (ok) {
 				for (const p of tickPending) {
 					notifiedHash.set(p.paneId, p.hash);
@@ -578,4 +602,9 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
 
 function sweepResetNeeded(n: number): number {
 	return n >= 30 ? 0 : n + 1;
+}
+
+function emitSubscriberLifecycle(ctx: DaemonActivityContext, reattached: boolean, harness: string, paneId: string, pid: number): void {
+	if (reattached) emitSubscriberReattached(ctx, harness, paneId, pid);
+	else emitSubscriberStarted(ctx, harness, paneId, pid);
 }
