@@ -147,9 +147,9 @@ Decision rules grouped by domain. Each pattern doc under `patterns/` has the ful
 .agents/skills/flightdeck/scripts/<script> [args]
 ```
 
-**Implementation:** All scripts are TypeScript under
+**Implementation:** Most scripts are TypeScript under
 `skills/flightdeck/lib/flightdeck-core/`. Trampolines under `scripts/`
-exec `bun .../src/bin/<script>.ts`. `bun` is a hard runtime dependency.
+exec `bun .../src/bin/<script>.ts`; `flightdeck-dashboard` is the Rust dashboard trampoline under `lib/flightdeck-dashboard/`. `bun` remains a hard runtime dependency for the TypeScript scripts.
 Functional + integration tests live under `lib/flightdeck-core/tests/`.
 
 | Script | Purpose |
@@ -159,6 +159,7 @@ Functional + integration tests live under `lib/flightdeck-core/tests/`.
 | `parallel-groups` | Read/manage parallel issue groups. |
 | `flightdeck-state` | Atomic CRUD on `tmp/flightdeck-state-<TMUX_SESSION>.json` (`init`/`get`/`set`/`append`/`increment`/`tracked-entries`/`write-entry`/`archive`) and master-busy lock (`master-busy lock\|unlock\|check`). See `workflows/session-watch.md` § 1 for lock semantics. |
 | `flightdeck-daemon` | External wake driver. Polls inner panes, normalizes turn-end events, wakes master with a per-harness payload. Actions: `start \| stop \| status \| health \| events \| ack`. `start` exits `4` for stale `--master` (distinct from usage/missing dependency exit `2`). Master respawn trigger: `status --session <S>` says `no daemon` while live entries exist; source panes via `pane-registry list --format inner-panes-live` / `inner-harnesses-live`, re-resolve `$TMUX_PANE` and retry once on exit `4`, and do not yield on unresolved start failure. Full contract: `workflows/session-watch.md` § 1 / § 6; adapter freshness: `patterns/tmux-monitoring.md`. |
+| `flightdeck-dashboard` | Rust TUI dashboard binary. Subcommands: `tui`, `daemon {start,stop,status,health,tail}`, `launch`, `supervise`. The TUI has keyboard/mouse navigation, help/theme/filter/detail/confirm popups, dashboard badge/chip legend, cost/token totals, and two confirmation-gated writes that shell to canonical helpers (`pane-registry remove` for stale entries, `tmux select-window` for focus). Lives in `skills/flightdeck/lib/flightdeck-dashboard/`. See `DEVELOPMENT.md` for the build + test workflow. |
 | `codex-app-server-spawn` / `-stop` | Idempotent bring-up/teardown of the per-session codex `app-server --listen ws://...` shared by all `codex --remote` panes. |
 | `pane-registry` | TrackedEntry↔pane mapping CRUD. `init-entry` writes `.entries[id]`; `init <ISSUE>` is an alias for `init-entry --kind issue`. `find-by-pane` emits `{id,kind}` JSON. `list --format json\|inner-panes\|inner-harnesses\|inner-panes-live\|inner-harnesses-live` feeds `pane-poll --batch -` and `flightdeck-daemon start`; use the `*-live` pair for daemon respawn. |
 | `pane-poll` | Pane state read. Preferred: `--batch -` from `pane-registry list --format json` (one JSONL object per tracked entry). Passes `kind` to `prompt-classify` so issue-only tags on ad-hoc entries become `domain-mismatch`. Legacy single-pane mode for drift re-polls / manual debug. See `patterns/tmux-monitoring.md` for per-harness adapter routes. |
@@ -267,7 +268,29 @@ Master-loop env vars consulted by workflows:
 | `FLIGHTDECK_LAUNCH_MODEL` | unset | Default `open-terminal --model` override when the workflow/user does not pass `--model`. |
 | `FLIGHTDECK_LAUNCH_EFFORT` | unset | Default `open-terminal --effort` / thinking override when the workflow/user does not pass `--effort`. |
 
-Daemon tuning (`FD_*`) is in README.md. Most `FD_*` knobs run inside the
+Rust dashboard env vars:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `FLIGHTDECK_DASHBOARD` | `1` | When `0`, `flightdeck-dashboard launch` exits `0` silently. |
+| `FLIGHTDECK_DASHBOARD_WINDOW` | `flightdeck` | Tmux window name used by the dashboard launch hook. |
+| `FLIGHTDECK_DASHBOARD_MOTION` | `full` | Animation intensity: `full`, `reduced`, or `off`. `NO_MOTION` / `NO_COLOR` force `off` regardless of this setting. CLI `--motion` overrides it. |
+| `FLIGHTDECK_DASHBOARD_THEME` | `moon` | Color theme: `moon`, `dawn`, `pantera`, or `system`. CLI `--theme` overrides it; the theme picker popup changes the live theme for the current run. |
+| `FLIGHTDECK_DAEMON_RUST` | `0` | Opt-in to the Rust daemon wake side / subscriber absorption. Default off keeps the canonical TypeScript daemon in charge of wake delivery. |
+| `FLIGHTDECK_DASHBOARD_BELL` | `1` | Set to `0` to suppress the terminal bell on a new pause-for-user edge. The dashboard never auto-focuses tmux windows. |
+| `FLIGHTDECK_DASHBOARD_COST_POLL_SECS` | `5` | Cost-source poll interval in seconds. |
+| `FLIGHTDECK_DASHBOARD_PRICING_FILE` | bundled table | Optional pricing TOML override for dashboard cost calculations; malformed files warn and fall back to bundled rates. |
+| `FLIGHTDECK_DASHBOARD_QUICK_FOCUS` | `0` | Set to `1` to let `g` focus the selected tmux window without a confirmation popup. |
+| `TMUX_PROBE_TTL` | `5` | Cached `tmux list-panes` TTL used to mark stale dashboard rows. |
+| `FLIGHTDECK_DASHBOARD_STALE_WARN_SECS` | `30` | Stale-chip warning threshold in seconds. |
+| `FLIGHTDECK_DASHBOARD_STALE_DEAD_SECS` | `300` | Stale/dead chip threshold in seconds. |
+| `FLIGHTDECK_DASHBOARD_STOP_GRACE_MS` | `5000` | Advanced daemon stop grace before SIGKILL escalation, in milliseconds. Tests may lower it. |
+| `FLIGHTDECK_DASHBOARD_READY_FD` | internal | Readiness pipe fd used by detached daemon startup; not user-configurable. |
+| `FLIGHTDECK_DASHBOARD_TEST_WEDGE_SIGNALS` | unset | Test-only hook that wedges signal handling. Do not set in normal sessions. |
+| `FLIGHTDECK_DASHBOARD_TEST_SUBSCRIBE_PAUSE_FILE` | unset | Test-only socket subscribe interleaving hook. Do not set in normal sessions. |
+| `FLIGHTDECK_DASHBOARD_TEST_SUBSCRIBE_RELEASE_FILE` | unset | Test-only release file for the subscribe interleaving hook. Do not set in normal sessions. |
+
+Daemon tuning (`FD_*`) is in DEVELOPMENT.md. Most `FD_*` knobs run inside the
 daemon and do not affect master operation directly, but two are
 consulted on the master poll path through the TS `pane-poll`:
 `FD_ADAPTER_READ_TIMEOUT_SEC` (default `2`, fractional values honored)

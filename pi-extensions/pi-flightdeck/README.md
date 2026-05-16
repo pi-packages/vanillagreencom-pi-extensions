@@ -1,5 +1,7 @@
 # pi-flightdeck
 
+> **DEPRECATED for new sessions.** A first-class Rust dashboard ships with the flightdeck skill at `skills/flightdeck/lib/flightdeck-dashboard/`. Run `flightdeck-dashboard tui` (auto-launched by `workflows/start.md`) for the same surfaces with native motion, file-watched live updates, and a daemon read-shim. This extension remains supported for sessions that prefer in-pi mission control until parity is verified across all installs.
+
 > ⚠️ **WIP — not production ready.** APIs, settings, and UI may change without notice.
 
 Read-only, sessions-first dashboard for the [`flightdeck`](../../skills/flightdeck) skill. When Pi runs as the Flightdeck master agent in a tmux session, this extension surfaces the same owner-scoped on-disk tracked-session state the daemon and master maintain — without ever mutating it.
