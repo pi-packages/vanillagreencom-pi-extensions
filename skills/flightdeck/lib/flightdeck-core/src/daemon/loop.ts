@@ -130,23 +130,34 @@ function resolveMeta(bin: string, action: string, paneTarget: string): string {
 	return paneRegistryArgs(bin, action, issue);
 }
 
-function resolvePaneTargetForEntry(bin: string, paneId: string): string {
-	if (!paneId) return "";
+function paneRegistryRows(bin: string): Record<string, unknown>[] {
+	if (!bin) return [];
 	const r = spawnSync(bin, ["list", "--format", "json"], { encoding: "utf8" });
-	if (r.status !== 0) return "";
+	if (r.status !== 0) return [];
 	try {
 		const rows = JSON.parse(r.stdout ?? "[]") as unknown;
-		if (!Array.isArray(rows)) return "";
-		for (const row of rows) {
-			if (!row || typeof row !== "object") continue;
-			const r2 = row as Record<string, unknown>;
-			if (r2.pane_id === paneId) {
-				if (typeof r2.pane_target === "string" && r2.pane_target) return r2.pane_target;
-				return paneId;
-			}
+		if (!Array.isArray(rows)) return [];
+		return rows.filter((row): row is Record<string, unknown> => !!row && typeof row === "object" && !Array.isArray(row));
+	} catch { return []; }
+}
+
+function resolvePaneTargetForEntry(bin: string, paneId: string): string {
+	if (!paneId) return "";
+	for (const row of paneRegistryRows(bin)) {
+		if (row.pane_id === paneId) {
+			if (typeof row.pane_target === "string" && row.pane_target) return row.pane_target;
+			return paneId;
 		}
-	} catch { /* */ }
+	}
 	return paneId;
+}
+
+function entryKindForPane(bin: string, paneId: string): string {
+	if (!paneId) return "";
+	for (const row of paneRegistryRows(bin)) {
+		if (row.pane_id === paneId && typeof row.kind === "string" && row.kind.trim()) return row.kind.trim();
+	}
+	return "";
 }
 
 export function listTrackedEntriesForReconcile(bin: string, defaultHarness: string): ReconcileEntry[] {
@@ -284,7 +295,8 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
 				const piPid = extractFlag(meta, "--pid");
 				const piSocket = extractFlag(meta, "--socket");
 				if (!piPid && !piSocket) return false;
-				const { pid } = spawnPiSubscriber({ ...baseEnv, sessionKey: opts.sessionKey, paneId, piPid, piSocket, piLastAssistantJq: PI_LAST_ASSISTANT_JQ, log });
+				const entryKind = entryKindForPane(opts.paneRegistryBin, paneId);
+				const { pid } = spawnPiSubscriber({ ...baseEnv, sessionKey: opts.sessionKey, paneId, piPid, piSocket, piLastAssistantJq: PI_LAST_ASSISTANT_JQ, entryKind, entryHarness: "pi", log });
 				ocSubscribed.set(paneId, true);
 				subscriberPid.set(paneId, pid);
 				return true;
