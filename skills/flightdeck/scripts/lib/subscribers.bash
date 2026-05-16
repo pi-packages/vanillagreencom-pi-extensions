@@ -292,7 +292,7 @@ pi_subscriber_loop() {
         or
         (.type == "event" and .event == "message_end" and ((.data.message.customType // "") == "subagent-completion"))
         or
-        (.type == "event" and .event == "message_end" and ((.data.message.customType // "") == "vstack-background-tasks:event") and ((.data.message.details.eventType // "") == "exit"))
+        (.type == "event" and .event == "message_end" and ((.data.message.customType // "") == "vstack-background-tasks:event"))
         or
         (.type == "event" and .data.message.role == "assistant" and (.data.message.stopReason // "") != "")
       )' \
@@ -344,10 +344,16 @@ pi_subscriber_loop() {
       local custom_type
       custom_type=$(jq -r '.data.message.customType // ""' <<< "$line" 2>/dev/null)
       if [[ "$custom_type" == "$BG_TASK_EVENT_CUSTOM_TYPE" ]]; then
-        # vstack#15: dispatch the new branch via the shared
-        # daemon-bg-task-events.sh helper. Returns 0 on emit, 1 on
-        # dedup (caller `continue`s either way), 2 on malformed input.
-        emit_pi_bg_task_exit_event "$pane_id" "$line" last_hash "$sub_log"
+        local bg_event_type
+        bg_event_type=$(jq -r '.data.message.details.eventType // ""' <<< "$line" 2>/dev/null)
+        # vstack#15: terminal exits remain canonical wake rows. Other
+        # bg-task signals are activity-only rows drained by the TS daemon;
+        # they must not change wake routing.
+        if [[ "$bg_event_type" == "$BG_TASK_EXIT_EVENT_TYPE" ]]; then
+          emit_pi_bg_task_exit_event "$pane_id" "$line" last_hash "$sub_log"
+        else
+          emit_pi_bg_task_activity_event "$pane_id" "$line" last_hash "$sub_log"
+        fi
         continue
       fi
       if [[ "$custom_type" == "subagent-completion" ]]; then
@@ -364,19 +370,19 @@ pi_subscriber_loop() {
         printf '%s [pi-subagent-completion] pane=%s hash=%s bad=%s\n' \
           "$(date -Iseconds)" "$pane_id" "$hash" "$has_bad" \
           >> "$sub_log" 2>/dev/null || true
-        if [[ "$has_bad" == "1" ]]; then
-          ( exec 218>"$SESSION_LOCK"
-            flock 218
-            jq -nc --arg ts "$(date -Iseconds)" \
-                   --arg pid "$pane_id" \
-                   --arg harness "pi" \
-                   --arg tag "pi-subagent-completion" \
-                   --arg h "$hash" \
-                   --argjson details "$details" \
-                   '{ts:$ts, pane_id:$pid, harness:$harness, event_type:"subagent-completion", completion:$details, classifier_tag:$tag, hash:$h}' \
-                   >> "$WAKE_EVENTS_LOG"
-          )
-        fi
+        ( exec 218>"$SESSION_LOCK"
+          flock 218
+          local tag="pi-subagent-completion-ok"
+          [[ "$has_bad" == "1" ]] && tag="pi-subagent-completion"
+          jq -nc --arg ts "$(date -Iseconds)" \
+                 --arg pid "$pane_id" \
+                 --arg harness "pi" \
+                 --arg tag "$tag" \
+                 --arg h "$hash" \
+                 --argjson details "$details" \
+                 '{ts:$ts, pane_id:$pid, harness:$harness, event_type:"subagent-completion", completion:$details, classifier_tag:$tag, hash:$h}' \
+                 >> "$WAKE_EVENTS_LOG"
+        )
         last_hash="$hash"
         continue
       fi
