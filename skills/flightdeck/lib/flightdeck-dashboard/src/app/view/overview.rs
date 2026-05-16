@@ -540,10 +540,6 @@ fn detail_lines(
                 decision.prompt_tag, decision.answer
             )));
         }
-        lines.push(Line::from(Span::styled(
-            "Click any decision for full text",
-            theme.muted(),
-        )));
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled("Actions", theme.header())));
