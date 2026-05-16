@@ -142,6 +142,15 @@ case "$subcmd" in
       esac
     done
     if (( all == 1 )); then
+      # vstack#85 F1 regression hook: simulate a transient tmux probe
+      # failure (SIGPIPE, EAGAIN, mid-session restart) by returning
+      # non-zero. The destructive callers (reconcile, remove-merged,
+      # teardown --force) must bail instead of treating an empty set
+      # as "every pane is gone".
+      if [[ "${TMUX_SHIM_FAIL_LIST_PANES_A:-0}" == "1" ]]; then
+        echo "shim: list-panes -a refused (TMUX_SHIM_FAIL_LIST_PANES_A=1)" >&2
+        exit 1
+      fi
       jq -r '.panes | keys[]' "$STATE_FILE"
       exit 0
     fi

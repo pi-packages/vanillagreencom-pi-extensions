@@ -16,6 +16,7 @@ import { emitCloseIssue, emitMergeAction, emitWorkflowDecision } from "../activi
 import type { ActivityEventInput } from "../activity/types.ts";
 import type { CloseIssueOutcome } from "../activity/workflow-emit.ts";
 import { cxAdapterIsFresh, cxSpawnFile } from "../paths/codex.ts";
+import { decideShellAdhocWake } from "../daemon/shell-adhoc-wake.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FD_STATE_SCRIPT = resolve(HERE, "../../../../scripts/flightdeck-state");
@@ -72,14 +73,34 @@ function tmuxPaneExists(target: string): boolean {
 	return r.status === 0;
 }
 
-function tmuxLivePaneIds(): Set<string> {
+// vstack#85 F1: tmux probes return a tagged Result so callers that
+// drive destructive transitions (cmdReconcile, cmdRemoveMerged,
+// cmdTeardownWindow) can distinguish "verified empty" from "probe
+// failed" instead of silently treating a momentary tmux hiccup as
+// "every pane is gone".
+type TmuxLivePaneIdsResult =
+	| { ok: true; panes: Set<string> }
+	| { ok: false; error: string };
+
+function tmuxLivePaneIdsResult(): TmuxLivePaneIdsResult {
 	const r = spawnSync("tmux", ["list-panes", "-a", "-F", "#{pane_id}"], { encoding: "utf8" });
+	if (r.status !== 0) {
+		const stderr = (r.stderr ?? "").trim();
+		return { ok: false, error: `tmux list-panes -a failed (status=${r.status})${stderr ? `: ${stderr}` : ""}` };
+	}
 	const panes = new Set<string>();
-	if (r.status !== 0) return panes;
 	for (const line of (r.stdout ?? "").split("\n")) {
 		if (line) panes.add(line);
 	}
-	return panes;
+	return { ok: true, panes };
+}
+
+// Legacy adapter — preserves the historical empty-on-failure shape for
+// non-destructive callers (find-by-pane, list --format inner-panes-live).
+// Destructive callers must use tmuxLivePaneIdsResult() directly.
+function tmuxLivePaneIds(): Set<string> {
+	const r = tmuxLivePaneIdsResult();
+	return r.ok ? r.panes : new Set<string>();
 }
 
 function paneMatchIsLive(paneId: string, paneTarget: string): boolean {
@@ -555,6 +576,13 @@ function emitReconcileDrop(entry: EntryRecord): void {
 	}, id);
 }
 
+function emitReconcileShellComplete(entry: EntryRecord): void {
+	emitCloseIssue(registryWorkflowContext(entry), "complete", {
+		details: { reason: "reconcile-pane-gone", teardown: "shell-pane-gone" },
+		severity: "success",
+	});
+}
+
 // Issue-mode metadata lives under `entry.domain.issue`. If a caller
 // passes one of those field names as a top-level set, redirect into the
 // nested object so downstream readers (`pane-registry list --format json`,
@@ -831,19 +859,42 @@ function readEntriesJson(): Record<string, IssueRec> {
 	return out;
 }
 
-function livePanesAndWindows(): { panes: Set<string>; windows: Set<string> } {
-	const panes = new Set<string>();
-	const windows = new Set<string>();
+// vstack#85 F1: see tmuxLivePaneIdsResult above. cmdReconcile and
+// cmdRemoveMerged must bail on probe failure instead of mass-
+// transitioning every entry as "pane gone".
+type LivePanesAndWindowsResult =
+	| { ok: true; panes: Set<string>; windows: Set<string> }
+	| { ok: false; error: string };
+
+function livePanesAndWindowsResult(): LivePanesAndWindowsResult {
 	const session = tmuxCurrentSession();
 	const pp = spawnSync("tmux", ["list-panes", "-a", "-F", "#{pane_id}"], { encoding: "utf8" });
-	if (pp.status === 0) for (const line of (pp.stdout ?? "").split("\n")) { if (line) panes.add(line); }
+	if (pp.status !== 0) {
+		const stderr = (pp.stderr ?? "").trim();
+		return { ok: false, error: `tmux list-panes -a failed (status=${pp.status})${stderr ? `: ${stderr}` : ""}` };
+	}
 	const ww = spawnSync("tmux", ["list-windows", "-t", session, "-F", "#{window_name}"], { encoding: "utf8" });
-	if (ww.status === 0) for (const line of (ww.stdout ?? "").split("\n")) { if (line) windows.add(line); }
-	return { panes, windows };
+	if (ww.status !== 0) {
+		const stderr = (ww.stderr ?? "").trim();
+		return { ok: false, error: `tmux list-windows -t ${session} failed (status=${ww.status})${stderr ? `: ${stderr}` : ""}` };
+	}
+	const panes = new Set<string>();
+	const windows = new Set<string>();
+	for (const line of (pp.stdout ?? "").split("\n")) if (line) panes.add(line);
+	for (const line of (ww.stdout ?? "").split("\n")) if (line) windows.add(line);
+	return { ok: true, panes, windows };
 }
 
 function cmdRemoveMerged(): void {
-	const live = livePanesAndWindows();
+	const probe = livePanesAndWindowsResult();
+	if (!probe.ok) {
+		// vstack#85 F1: transient tmux probe failure must not mass-drop
+		// terminal-state entries (a hiccup would otherwise wipe every
+		// pane-gone row from the registry on a single tick).
+		process.stderr.write(`remove-merged: tmux probe failed; skipping tick (${probe.error})\n`);
+		return;
+	}
+	const live = { panes: probe.panes, windows: probe.windows };
 	const entries = readEntriesJson();
 	const dropped: string[] = [];
 	for (const [issue, rec] of Object.entries(entries)) {
@@ -863,9 +914,21 @@ function cmdRemoveMerged(): void {
 }
 
 function cmdReconcile(): void {
-	const live = livePanesAndWindows();
+	const probe = livePanesAndWindowsResult();
+	if (!probe.ok) {
+		// vstack#85 F1: transient tmux probe failure (SIGSTOP, SIGPIPE,
+		// EAGAIN, mid-session restart, momentary socket loss) must not
+		// be treated as "every pane is gone". A silent empty-set would
+		// mass-transition adhoc-shell rows to `complete` AND drop every
+		// other entry as `entry.dead` in a single tick. Bail early so
+		// the next tick can reconcile against a healthy probe.
+		process.stderr.write(`reconcile: tmux probe failed; skipping tick (${probe.error})\n`);
+		return;
+	}
+	const live = { panes: probe.panes, windows: probe.windows };
 	const entries = readEntriesJson();
 	const dropped: string[] = [];
+	const completed: string[] = [];
 	const backfilled: string[] = [];
 	const drift: string[] = [];
 	for (const [issue, rec] of Object.entries(entries)) {
@@ -913,10 +976,37 @@ function cmdReconcile(): void {
 		const alive = paneId ? live.panes.has(paneId) : !win || live.windows.has(win);
 		if (!alive) {
 			const droppedEntry = rec;
+			const stateStr = String(rec.state ?? "");
+			// vstack#85: adhoc shell entries have no idle subscriber, so
+			// pane-gone IS their terminal signal. Transition state to
+			// `complete` and emit `entry.completed` instead of dropping +
+			// `entry.dead`. Non-shell-adhoc entries keep the legacy drop.
+			const wake = decideShellAdhocWake({
+				kind: String(rec.kind ?? ""),
+				harness: String(rec.harness ?? ""),
+				state: stateStr,
+				paneAlive: false,
+			});
+			if (wake.transition) {
+				const idJson = JSON.stringify(issue);
+				fdStateOrDie(["set", `.entries[${idJson}].state`, JSON.stringify(wake.nextState)]);
+				emitReconcileShellComplete(droppedEntry);
+				completed.push(issue);
+				continue;
+			}
 			fdStateOrDie(["set", ".entries", `(.entries | del(.["${issue}"]))`]);
-			emitReconcileDrop(droppedEntry);
+			// Already-terminal entries (e.g. an adhoc-shell row that was
+			// transitioned to `complete` on a prior reconcile tick, then
+			// observed pane-gone again on the next sweep) drop silently
+			// — the terminal-event was emitted at the original
+			// transition and re-emitting `entry.dead` would lie about the
+			// outcome.
+			if (!TERMINAL_STATES.has(stateStr.toLowerCase())) emitReconcileDrop(droppedEntry);
 			dropped.push(issue);
 		}
+	}
+	if (completed.length > 0) {
+		process.stdout.write(`reconciled: completed ${completed.length} adhoc shell entr${completed.length === 1 ? "y" : "ies"} (${completed.join(",")})\n`);
 	}
 	if (dropped.length > 0) {
 		process.stdout.write(`reconciled: dropped ${dropped.length} stale entr${dropped.length === 1 ? "y" : "ies"} (${dropped.join(",")})\n`);
@@ -990,11 +1080,17 @@ function cmdTeardownWindow(args: string[]): void {
 	const state = String(rec.state ?? "");
 	const paneId = String(rec.pane_id ?? "");
 	const windowName = String(rec.window ?? "");
-	let paneAlive = false;
-	if (paneId) {
-		const live = tmuxLivePaneIds();
-		paneAlive = live.has(paneId);
+	// vstack#85 F1: probe panes AND windows in one shot so the F2 empty-
+	// paneId window fallback shares the same atomic snapshot. Probe
+	// failure aborts before any destructive branch.
+	const probe = livePanesAndWindowsResult();
+	if (!probe.ok) {
+		process.stderr.write(
+			`teardown-window: tmux probe failed; refusing to act (state of pane_id '${paneId || "<none>"}' / window '${windowName || "<none>"}' unknown): ${probe.error}\n`,
+		);
+		process.exit(5);
 	}
+	const paneAlive = paneId ? probe.panes.has(paneId) : false;
 	if (paneAlive) {
 		if (!TERMINAL_STATES.has(state) && !force) {
 			process.stderr.write(
@@ -1016,8 +1112,14 @@ function cmdTeardownWindow(args: string[]): void {
 		// Post-kill liveness check is authoritative — not the exit code
 		// (BLOCK #1). tmux can return non-zero for benign reasons such as
 		// the pane vanishing between the alive-check and the kill.
-		const stillAlive = tmuxLivePaneIds().has(paneId);
-		if (stillAlive) {
+		const stillProbe = tmuxLivePaneIdsResult();
+		if (!stillProbe.ok) {
+			process.stderr.write(
+				`teardown-window: post-kill tmux probe failed (status of pane_id '${paneId}' unknown after kill of ${kind}): ${stillProbe.error}\n`,
+			);
+			process.exit(5);
+		}
+		if (stillProbe.panes.has(paneId)) {
 			process.stderr.write(
 				`teardown-window: kill of ${kind} failed (status=${killResult.status}, pane_id=${paneId} still alive): ${killResult.stderr ?? ""}`,
 			);
@@ -1030,13 +1132,41 @@ function cmdTeardownWindow(args: string[]): void {
 		);
 		return;
 	}
+	// vstack#85 F2: when paneId is empty, fall back to the recorded
+	// window name. If tmux still lists the window, the pane state is
+	// unverifiable — refuse even with --force so the operator can
+	// reconcile/backfill instead of dropping a row whose pane may be
+	// alive. Empty paneId + empty/gone window is the operator's call
+	// (no way to verify; --force proceeds, non-force still hits drift).
+	if (!paneId && windowName && probe.windows.has(windowName)) {
+		process.stderr.write(
+			`teardown-window: refusing to drop '${issue}' — pane_id is empty but recorded window '${windowName}' is still alive in tmux; cannot verify pane state. Run \`pane-registry reconcile\` to backfill pane_id, then retry${force ? " (--force refused for safety)" : ""}\n`,
+		);
+		process.exit(3);
+	}
 	if (TERMINAL_STATES.has(state)) {
 		emitTerminalEntry(rec, state, { pane_id: paneId || null, teardown: "already-closed" });
 		process.stdout.write(`teardown-window: window already closed (pane_id=${paneId || "<none>"} gone, state=${state})\n`);
 		return;
 	}
+	if (force) {
+		// vstack#85: --force is the operator explicitly saying "I know this
+		// entry is stuck and the pane is verifiably gone — drop it". The
+		// non-force path keeps the #16 drift refusal intact.
+		const outcome: "cancelled" | "dead" = state === "waiting" || state === "" ? "cancelled" : "dead";
+		fdStateOrDie(["set", ".entries", `(.entries | del(.["${issue}"]))`]);
+		emitTerminalEntry(rec, outcome, {
+			force: true,
+			pane_id: paneId || null,
+			prior_state: state || null,
+			reason: "force-gone-pane",
+			teardown: "force-gone-pane",
+		});
+		process.stdout.write(`teardown-window: removed stale entry '${issue}' (pane_id=${paneId || "<none>"} gone, prior_state=${state || "<none>"}, force=1, outcome=${outcome})\n`);
+		return;
+	}
 	process.stderr.write(
-		`teardown-window: registry drift — pane_id '${paneId || "<none>"}' is gone but state is '${state}' (not merged|aborted|dead|complete|cancelled); refusing to derive kill target from pane_target (#16)\n`,
+		`teardown-window: registry drift — pane_id '${paneId || "<none>"}' is gone but state is '${state}' (not merged|aborted|dead|complete|cancelled); refusing to derive kill target from pane_target (#16); rerun with --force to drop the stale entry\n`,
 	);
 	process.exit(3);
 }
