@@ -60,6 +60,13 @@ import {
 	type ReconcileEntry,
 } from "./reconcile.ts";
 import { reapSubscriber } from "./subscribers/reap.ts";
+import {
+	bellWakeIntervalFromEnv,
+	makeBellWakeState,
+	recordBellWake,
+	shouldEmitBellWake,
+	shouldEmitBgTaskExitWake,
+} from "./wake-filter.ts";
 import { OC_LAST_ASSISTANT_JQ } from "../paths/oc.ts";
 import { CC_LAST_ASSISTANT_JQ } from "../paths/cc.ts";
 import { PI_LAST_ASSISTANT_JQ } from "../paths/pi.ts";
@@ -339,6 +346,13 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
 	const startEpoch = Math.floor(Date.now() / 1000);
 	const paneCache = new PaneCache();
 	void warn; void notifiedHash; void wakeEventsLog;
+
+	// vstack#68: per-pane bell-wake rate limit + non-canonical drop. The
+	// state is in-memory only (a daemon restart starts fresh, which is
+	// the right thing — the user wants to be re-notified about an unread
+	// canonical bell after a restart).
+	const bellWakeState = makeBellWakeState();
+	const bellWakeIntervalSec = bellWakeIntervalFromEnv();
 
 	// vstack#59: reconcile tracked entries every FD_RECONCILE_INTERVAL_SEC
 	// so the daemon picks up panes added mid-session without restart.
@@ -641,6 +655,25 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
 			if (bell === 1 && lastBellHash.get(innerId) !== hash) {
 				touchOcBellMarker(innerId);
 				const tag = classifyBuffer(buf, { classifierBin: opts.classifierBin });
+				// vstack#68: filter bell wakes. Non-canonical tags drop entirely
+				// (a plain BEL with no prompt visible is terminal noise);
+				// canonical tags are rate-limited per pane to suppress storms
+				// during normal agent iteration.
+				const bellDecision = shouldEmitBellWake(bellWakeState, {
+					paneId: innerId,
+					tag,
+					isCanonical: isCanonicalTag(tag),
+					intervalSec: bellWakeIntervalSec,
+					nowSec: now,
+				});
+				if (!bellDecision.emit) {
+					if (opts.verbose) log("bell-drop", `${innerId} tag=${tag} reason=${bellDecision.reason}`);
+					lastHash.set(innerId, hash);
+					hashSince.set(innerId, now);
+					lastBellHash.set(innerId, hash);
+					if (winId) clearBellForWindow(opts.sessionId, winId);
+					continue;
+				}
 				// Round-4 #6: gate wake-reason recording on append success.
 				const appended = appendEvent({
 					paneId: innerId, hash, tag, reason: "bell",
@@ -648,6 +681,7 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
 					sessionLock, eventsFile, wakePending, lastEventKey,
 				});
 				if (appended) {
+					recordBellWake(bellWakeState, innerId, now);
 					tickReasons.push(`bell:${innerId}:${tag}`);
 					tickPending.push({ paneId: innerId, hash, tag, isBell: true });
 					if (winId) tickBellWins.push(winId);
