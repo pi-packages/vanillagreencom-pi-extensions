@@ -1,5 +1,10 @@
 // Pi subscriber → adhoc terminal-state-reached wake decision (vstack#61).
 //
+// This module is intentionally NOT wired into the TS daemon loop; the
+// runtime emit path lives in `scripts/lib/subscribers.bash`
+// `pi_subscriber_loop`, which mirrors this function 1:1. The TS export
+// exists only as the canonical reference + unit-test surface.
+//
 // The bash Pi subscriber in scripts/lib/subscribers.bash sees assistant
 // message_end events with stopReason set. For ADHOC Pi entries we treat
 // those as `isIdle: false -> true` transitions and emit a wake-event

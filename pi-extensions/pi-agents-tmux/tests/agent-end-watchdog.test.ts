@@ -231,6 +231,52 @@ test("defaultWriteSyntheticOutbox writes payload when path is free", async () =>
 	assert.equal(onDisk.synthetic, true);
 });
 
+test("writeSyntheticOutbox EEXIST race -> skipped:outbox-present, no warn-log", async () => {
+	const harness = buildHarness({ graceMs: 50 });
+	// Stub the writer to mimic a real complete_subagent winning the race:
+	// fs.open(path, 'wx') threw EEXIST after the existence check raced.
+	harness.deps.writeSyntheticOutbox = async () => {
+		const err: NodeJS.ErrnoException = new Error("outbox already exists");
+		err.code = "EEXIST";
+		throw err;
+	};
+	harness.watchdog.onAgentEnd({ runtimeRoot: harness.runtimeRoot, agentName: harness.agentName, taskId: harness.taskId });
+	await harness.scheduler.advance();
+	assert.equal(harness.watchdog.hasFired(harness.taskId), false, "fired stays false on EEXIST race-loss");
+	assert.equal(harness.writes.length, 0);
+	assert.equal(harness.warnings.length, 0, "EEXIST is healthy race-loss; no warn-log");
+});
+
+test("writeSyntheticOutbox non-EEXIST error -> warn-log retained", async () => {
+	const harness = buildHarness({ graceMs: 50 });
+	harness.deps.writeSyntheticOutbox = async () => {
+		const err: NodeJS.ErrnoException = new Error("disk full");
+		err.code = "ENOSPC";
+		throw err;
+	};
+	harness.watchdog.onAgentEnd({ runtimeRoot: harness.runtimeRoot, agentName: harness.agentName, taskId: harness.taskId });
+	await harness.scheduler.advance();
+	assert.equal(harness.watchdog.hasFired(harness.taskId), false);
+	assert.ok(
+		harness.warnings.some((w) => w.includes("writeSyntheticOutbox failed") && w.includes("disk full")),
+		`expected disk-full warn-log, got: ${JSON.stringify(harness.warnings)}`,
+	);
+});
+
+test("defaultWriteSyntheticOutbox throws ErrnoException with code=EEXIST on race", async () => {
+	const runtimeRoot = tempRuntime();
+	const outboxFile = join(runtimeRoot, "outbox", "planner", "task-race.json");
+	mkdirSync(join(runtimeRoot, "outbox", "planner"), { recursive: true });
+	writeFileSync(outboxFile, JSON.stringify({ summary: "real" }));
+	const payload = buildSyntheticOutbox("planner", "task-race");
+	try {
+		await defaultWriteSyntheticOutbox(outboxFile, payload);
+		assert.fail("defaultWriteSyntheticOutbox should have thrown");
+	} catch (err) {
+		assert.equal((err as NodeJS.ErrnoException).code, "EEXIST", "rethrow must preserve code=EEXIST");
+	}
+});
+
 test("watchdogEnabledFromEnv parses VSTACK_AGENT_END_WATCHDOG truthy/falsy values", () => {
 	assert.equal(watchdogEnabledFromEnv({} as NodeJS.ProcessEnv), true);
 	assert.equal(watchdogEnabledFromEnv({ VSTACK_AGENT_END_WATCHDOG: "" } as any), true);

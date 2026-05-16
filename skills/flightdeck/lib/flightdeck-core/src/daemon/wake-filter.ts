@@ -44,6 +44,11 @@ export function makeBellWakeState(): BellWakeState {
 	return { lastBellWakeAt: new Map() };
 }
 
+// Rate-limit is keyed per-pane, not per-tag. Two distinct canonical bell-tagged
+// events on the same pane inside FD_BELL_WAKE_INTERVAL_SEC collapse to one wake.
+// The stable-age classifier still picks up new state on the next tick within
+// `stab` seconds, so events are delayed rather than lost. If per-tag granularity
+// becomes important, key lastBellWakeAt by `${paneId}:${tag}` instead.
 export function shouldEmitBellWake(state: BellWakeState, opts: BellWakeOptions): BellWakeDecision {
 	if (!opts.isCanonical) {
 		return { emit: false, reason: BELL_NON_CANONICAL_DROP_REASON };

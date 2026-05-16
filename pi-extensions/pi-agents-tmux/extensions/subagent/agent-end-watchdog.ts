@@ -118,6 +118,13 @@ export function createAgentEndWatchdog(deps: AgentEndWatchdogDeps): AgentEndWatc
 			try {
 				await deps.writeSyntheticOutbox(outboxFile, payload);
 			} catch (err) {
+				// EEXIST means a real complete_subagent (or a peer watchdog) raced
+				// us and won — that is the entire point of the O_EXCL writer, so
+				// treat it as healthy outbox-present and stay quiet. Only log
+				// when something genuinely went wrong (permission denied, disk
+				// full, etc.).
+				const code = (err as NodeJS.ErrnoException)?.code;
+				if (code === "EEXIST") return { fired: false, skipped: "outbox-present" };
 				const message = (err as Error)?.message ?? String(err);
 				deps.logWarn(`agent-end watchdog: writeSyntheticOutbox failed for ${agentName}/${taskId}: ${message}`);
 				return { fired: false, error: message };
@@ -201,7 +208,13 @@ export async function defaultWriteSyntheticOutbox(outboxFile: string, payload: S
 	} catch (err) {
 		const code = (err as NodeJS.ErrnoException)?.code;
 		if (code === "EEXIST") {
-			throw new Error(`outbox already exists at ${outboxFile}; refusing to overwrite`);
+			// Preserve the ErrnoException shape so runCheck can detect the race
+			// via err.code and treat it as healthy outbox-present (no warn-log).
+			const raceErr: NodeJS.ErrnoException = new Error(
+				`outbox already exists at ${outboxFile}; refusing to overwrite`,
+			);
+			raceErr.code = "EEXIST";
+			throw raceErr;
 		}
 		throw err;
 	}
