@@ -12,7 +12,9 @@ import { ocAdapterIsFresh, ocReleasePort, ocSpawnFile } from "../paths/oc.ts";
 import { ccAdapterIsFresh, ccMcpDir, ccReleasePort, ccSpawnFile } from "../paths/cc.ts";
 import { piBridgeIsFresh, piSpawnFile } from "../paths/pi.ts";
 import { emitActivity } from "../activity/emit.ts";
+import { emitCloseIssue, emitMergeAction, emitWorkflowDecision } from "../activity/workflow-emit.ts";
 import type { ActivityEventInput } from "../activity/types.ts";
+import type { CloseIssueOutcome } from "../activity/workflow-emit.ts";
 import { cxAdapterIsFresh, cxSpawnFile } from "../paths/codex.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -453,6 +455,18 @@ function emitRegistryActivity(entry: EntryRecord | null, event: ActivityEventInp
 	});
 }
 
+function registryWorkflowContext(entry: EntryRecord | null): { entry: EntryRecord | null; sessionId: string; stateFile: string; tmuxSession: string } {
+	return { entry, sessionId: registryTmuxSession(), stateFile: registryStateFile(), tmuxSession: registryTmuxSession() };
+}
+
+function emitIssueMergeState(entry: EntryRecord, state: string): void {
+	const issue = entryIssue(entry);
+	const pr = typeof issue.pr_number === "number" && Number.isFinite(issue.pr_number) ? Math.trunc(issue.pr_number) : undefined;
+	if (state === "merge-ready") emitMergeAction(registryWorkflowContext(entry), pr, "queued");
+	else if (state === "merged") emitMergeAction(registryWorkflowContext(entry), pr, "merged", { commit: entryString(issue, "merge_commit") ?? entryString(entry, "merge_commit") ?? "" });
+	else if (state === "aborted") emitMergeAction(registryWorkflowContext(entry), pr, "blocked", { reason: "aborted" });
+}
+
 function emitEntryRegistered(entry: EntryRecord): void {
 	const id = entryString(entry, "id") ?? "unknown";
 	const kind = entryString(entry, "kind") ?? "entry";
@@ -494,15 +508,11 @@ function decisionSummary(answer: string): string {
 }
 
 function emitDecisionRecorded(entry: EntryRecord, tag: string, answer: string, sequence: number): void {
-	const id = entryString(entry, "id") ?? "unknown";
-	const severity = answer.startsWith("BLOCKED:") || answer.startsWith("ESCALATED:") ? "warning" : "info";
-	emitRegistryActivity(entry, {
-		details: { answer, dedup_key: `${id}:decision.recorded:${sequence}`, prompt_tag: tag, sequence },
-		importance: "important",
-		severity,
+	emitWorkflowDecision(registryWorkflowContext(entry), tag, {
+		answer,
+		sequence,
 		summary: decisionSummary(answer),
-		type: "decision.recorded",
-	}, id);
+	});
 }
 
 function terminalActivity(state: string): { importance: "important"; severity: "success" | "warning" | "error"; summaryWord: string; type: string } | null {
@@ -517,13 +527,11 @@ function emitTerminalEntry(entry: EntryRecord, state: string, details: Record<st
 	if (!terminal) return;
 	const id = entryString(entry, "id") ?? "unknown";
 	const outcome = state === terminal.summaryWord ? "" : ` (${state})`;
-	emitRegistryActivity(entry, {
-		details: { dedup_key: `${id}:${terminal.type}:${state}`, outcome: state, ...details },
-		importance: terminal.importance,
+	emitCloseIssue(registryWorkflowContext(entry), state as CloseIssueOutcome, {
+		details,
 		severity: terminal.severity,
 		summary: `${id} ${terminal.summaryWord}${outcome}`,
-		type: terminal.type,
-	}, id);
+	});
 }
 
 function emitReconcileDrift(entry: EntryRecord, description: string, kind: string): void {
@@ -663,6 +671,7 @@ function cmdSetState(issue: string, state: string): void {
 	if (before.state === state) return;
 	setEntryField(issue, "state", JSON.stringify(state));
 	emitEntryStateChanged(before, before.state, state);
+	emitIssueMergeState(before, state);
 }
 
 function cmdSetSubstate(issue: string, sub: string): void {

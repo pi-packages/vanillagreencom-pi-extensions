@@ -10,6 +10,7 @@ import { appendActivityEvent } from "../activity/append.ts";
 import { emitActivity } from "../activity/emit.ts";
 import { formatActivityJsonl, formatActivityLine, formatActivityMarkdown } from "../activity/format.ts";
 import { activityPathForSession } from "../activity/paths.ts";
+import { emitMergePlanUpdated, emitSessionCompleted, emitSessionStarted } from "../activity/workflow-emit.ts";
 import { ActivityFilterError, readActivityEvents, readActivityJsonlLines, tailActivityEvents } from "../activity/read.ts";
 import {
 	archiveState,
@@ -69,6 +70,7 @@ switch (action) {
 	}
 	case "init": {
 		initState(file);
+		emitSessionStarted({ sessionId: session, stateFile: file, tmuxSession: session });
 		break;
 	}
 	case "get": {
@@ -83,6 +85,7 @@ switch (action) {
 		const before = readDirectStateEntry(field);
 		updateState(file, `${field} = (${rest[1]})`);
 		emitDirectStateChange(field, before);
+		emitMergePlanChange(field);
 		break;
 	}
 	case "append": {
@@ -121,6 +124,7 @@ switch (action) {
 		break;
 	}
 	case "archive": {
+		emitSessionCompleted({ sessionId: session, stateFile: file, tmuxSession: session });
 		const ap = archiveState(file);
 		if (ap) process.stdout.write(`${ap}\n`);
 		break;
@@ -212,6 +216,20 @@ function emitDirectStateChange(field: string, before: Record<string, unknown> | 
 	});
 }
 
+function emitMergePlanChange(field: string): void {
+	if (!field.startsWith(".merge_queue") && !field.startsWith(".conflict_graph")) return;
+	try {
+		const state = readStateJson() as Record<string, unknown>;
+		emitMergePlanUpdated(
+			{ sessionId: session, stateFile: file, tmuxSession: session },
+			state.merge_queue,
+			state.conflict_graph,
+		);
+	} catch {
+		// Best-effort activity must not break state writes.
+	}
+}
+
 function warnLine(message: string): void {
 	process.stderr.write(`${message}\n`);
 }
@@ -229,6 +247,8 @@ function dieActivityError(error: unknown): never {
 }
 
 function activityFile(): string {
+	const envActivity = process.env.FLIGHTDECK_ACTIVITY_FILE;
+	if (typeof envActivity === "string" && envActivity.trim()) return envActivity.trim();
 	return activityPathForSession(session, resolveStateBase());
 }
 
