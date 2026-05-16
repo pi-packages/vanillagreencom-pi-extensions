@@ -9,11 +9,11 @@ import {
 	isNewer,
 	loadNpmCache,
 	loadSourceIndex,
-	npmPackageDirCandidates,
 	npmInstalledVersion,
 	npmPackageNameFromSource,
 	readPackageVersionFromDir,
 	readSourceRepoVersion,
+	resolveNpmPackageDir,
 } from "./versions.js";
 import {
 	type Inventory,
@@ -34,6 +34,12 @@ function readPackageManifest(dir: string): { manifest?: PackageManifest; error?:
 	} catch (error) {
 		return { error: stringifyError(error) };
 	}
+}
+
+function readNpmPackageManifest(npmName: string, scope: Scope, baseDir: string, cwd: string): { dir?: string; manifest?: PackageManifest; error?: string } {
+	const dir = resolveNpmPackageDir(npmName, scope, baseDir, cwd);
+	if (!dir) return { error: `package source not found: npm:${npmName}` };
+	return { dir, ...readPackageManifest(dir) };
 }
 
 function readFirstPackageManifest(dirs: string[]): { dir?: string; manifest?: PackageManifest; error?: string } {
@@ -275,7 +281,7 @@ export function buildInventory(_pi: ExtensionAPI, ctx: ExtensionContext): Invent
 				manifest = read.manifest;
 				brokenError = read.error;
 			} else if (npmName) {
-				const read = readFirstPackageManifest(npmPackageDirCandidates(npmName, file.scope, file.baseDir, ctx.cwd));
+				const read = readNpmPackageManifest(npmName, file.scope, file.baseDir, ctx.cwd);
 				packageDir = read.dir ?? normalized.resolved;
 				manifest = read.manifest ?? { name: npmName, description: "External npm package source" };
 				brokenError = read.error;
@@ -295,6 +301,7 @@ export function buildInventory(_pi: ExtensionAPI, ctx: ExtensionContext): Invent
 				description: manifest?.description ?? "Pi package",
 				displayName: packageDisplayName(manifest ?? {}, packageName),
 				id: pkgId,
+				installedVersion: typeof manifest?.version === "string" ? manifest.version : undefined,
 				kind: "package",
 				packageDir,
 				packageName,
@@ -347,7 +354,10 @@ export function buildInventory(_pi: ExtensionAPI, ctx: ExtensionContext): Invent
 
 	for (const item of items) {
 		if (item.kind !== "package" || !item.packageName) continue;
-		item.installedVersion = readPackageVersionFromDir(item.packageDir);
+		// Manifest was already parsed above when building the inventory entry; the version
+		// is recorded on the item to avoid a second readFileSync+JSON.parse pass per
+		// package on popup open (vstack#74).
+		if (!item.installedVersion) item.installedVersion = readPackageVersionFromDir(item.packageDir);
 	}
 	applyUpdateMetadata(items, settingsFiles, ctx.cwd);
 
