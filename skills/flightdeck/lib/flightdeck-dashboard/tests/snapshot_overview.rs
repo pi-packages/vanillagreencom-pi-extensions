@@ -462,6 +462,141 @@ fn truncate_to_width_keeps_emoji_intact_at_one_cell_remaining() {
 }
 
 #[test]
+fn branch_row_renders_for_all_kinds_in_detail_rail() {
+    for entry_id in ["triage-sweep", "VST-201", "workflow-build"] {
+        let mut m = common::model_for_fixture("branched", MotionLevel::Off);
+        let idx = m
+            .snapshot
+            .sessions
+            .iter()
+            .position(|s| s.id == entry_id)
+            .expect("entry present");
+        m.set_selected_index(idx);
+        let expected = m
+            .snapshot
+            .sessions
+            .iter()
+            .find(|s| s.id == entry_id)
+            .and_then(|s| s.branch.clone())
+            .expect("branch present in fixture");
+        let rendered = common::render_model(&m);
+        assert!(
+            rendered.contains(&format!("branch  {expected}")),
+            "detail rail missing 'branch  {expected}' for {entry_id}:\n{rendered}"
+        );
+    }
+}
+
+#[test]
+fn adhoc_recent_activity_panel_renders_per_entry_events() {
+    use flightdeck_dashboard::activity::{ActivityEvent, ActivityType, Importance, Severity};
+    let mut model = common::model_for_fixture("branched", MotionLevel::Off);
+    let idx = model
+        .snapshot
+        .sessions
+        .iter()
+        .position(|s| s.id == "triage-sweep")
+        .expect("adhoc entry present");
+    model.set_selected_index(idx);
+    model.push_activity_event(ActivityEvent {
+        body: None,
+        details: None,
+        entry_id: Some("triage-sweep".to_owned()),
+        entry_kind: Some("adhoc".to_owned()),
+        entry_title: Some("Triage sweep".to_owned()),
+        event_type: ActivityType::new("pr.comments_left"),
+        harness: Some("pi".to_owned()),
+        id: "a1".to_owned(),
+        importance: Importance::Normal,
+        links: Vec::new(),
+        noisy: false,
+        pane_id: Some("%31".to_owned()),
+        refs: None,
+        schema_version: 1,
+        session_id: Some("demo-branched".to_owned()),
+        severity: Severity::Info,
+        source: "github".to_owned(),
+        summary: "Comment left on PR #42".to_owned(),
+        ts: common::fixed_now() - chrono::Duration::minutes(3),
+    });
+    model.push_activity_event(ActivityEvent {
+        body: None,
+        details: None,
+        entry_id: Some("triage-sweep".to_owned()),
+        entry_kind: Some("adhoc".to_owned()),
+        entry_title: Some("Triage sweep".to_owned()),
+        event_type: ActivityType::new("linear.issue_created"),
+        harness: Some("pi".to_owned()),
+        id: "a2".to_owned(),
+        importance: Importance::Normal,
+        links: Vec::new(),
+        noisy: false,
+        pane_id: Some("%31".to_owned()),
+        refs: None,
+        schema_version: 1,
+        session_id: Some("demo-branched".to_owned()),
+        severity: Severity::Info,
+        source: "linear".to_owned(),
+        summary: "Linear issue VST-901 created".to_owned(),
+        ts: common::fixed_now() - chrono::Duration::minutes(8),
+    });
+    let rendered = common::render_model(&model);
+    assert!(
+        rendered.contains("Recent activity"),
+        "Recent activity header missing:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("Comment left on PR #42"),
+        "latest activity row missing:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("Linear issue VST-901"),
+        "second activity row missing:\n{rendered}"
+    );
+    insta::assert_snapshot!("overview_adhoc_with_branch_and_activity", rendered);
+}
+
+#[test]
+fn issue_row_renders_branch_and_pr_in_pr_worktree_column() {
+    let mut model = common::model_for_fixture("branched", MotionLevel::Off);
+    let idx = model
+        .snapshot
+        .sessions
+        .iter()
+        .position(|s| s.id == "VST-201")
+        .expect("issue entry present");
+    model.set_selected_index(idx);
+    let rendered = common::render_model_with_size(&model, 220, common::SNAPSHOT_HEIGHT);
+    assert!(
+        rendered.contains("feature/vst-201 · PR #88"),
+        "PR/worktree column should compose '<branch> · PR #N':\n{rendered}"
+    );
+    insta::assert_snapshot!("overview_issue_with_branch_and_pr", rendered);
+}
+
+#[test]
+fn workflow_row_with_default_branch_keeps_legacy_column() {
+    let mut model = common::model_for_fixture("branched", MotionLevel::Off);
+    let idx = model
+        .snapshot
+        .sessions
+        .iter()
+        .position(|s| s.id == "workflow-build")
+        .expect("workflow entry present");
+    model.set_selected_index(idx);
+    let rendered = common::render_model(&model);
+    let workflow_row = rendered
+        .lines()
+        .find(|line| line.contains("workflow-build") || line.contains("Workflow rebuild on main"))
+        .expect("workflow row present");
+    assert!(
+        !workflow_row.contains("branch main"),
+        "default-branch entry must not compose 'branch <name>' in the PR/worktree column: {workflow_row}"
+    );
+    insta::assert_snapshot!("overview_workflow_default_branch", rendered);
+}
+
+#[test]
 fn observer_banner() {
     let mut model = common::model_for_fixture("observer", MotionLevel::Off);
     model.current_pane_id = Some("%99".to_owned());

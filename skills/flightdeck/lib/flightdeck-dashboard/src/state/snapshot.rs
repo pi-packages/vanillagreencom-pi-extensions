@@ -474,6 +474,10 @@ pub struct TrackedSession {
     pub last_polled_at: Option<DateTime<Utc>>,
     pub decisions_log: Vec<DecisionLogEntry>,
     pub stats: PaneStats,
+    /// Git branch captured at spawn time by `flightdeck-session start`
+    /// (vstack#101). Empty / None when the cwd is not a git repo or
+    /// HEAD was detached. Informational; staleness is acceptable.
+    pub branch: Option<String>,
 }
 
 impl TrackedSession {
@@ -504,6 +508,7 @@ impl TrackedSession {
             last_polled_at: entry.last_polled_at,
             decisions_log: entry.decisions_log,
             stats: PaneStats::default(),
+            branch: entry.branch.filter(|value| !value.trim().is_empty()),
         }
     }
 
