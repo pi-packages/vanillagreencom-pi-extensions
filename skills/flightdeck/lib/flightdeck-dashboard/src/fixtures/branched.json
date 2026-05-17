@@ -1,0 +1,89 @@
+{
+  "session_id": "demo-branched",
+  "started_at": "2026-05-15T07:45:00Z",
+  "updated_at": "2026-05-15T10:06:00Z",
+  "terminated": false,
+  "terminated_at": null,
+  "owner": {
+    "harness": "pi",
+    "pane_id": "%25",
+    "pane_target": "demo:1.0",
+    "cwd": "/repo/demo",
+    "pid": 2001,
+    "pi_session_id": "pi-demo-branched",
+    "pi_bridge_socket": "/run/user/1000/pi-demo.sock",
+    "discovery_error": null
+  },
+  "entries": {
+    "triage-sweep": {
+      "id": "triage-sweep",
+      "title": "Triage sweep + branch capture",
+      "kind": "adhoc",
+      "state": "waiting",
+      "harness": "pi",
+      "cwd": "/repo/demo",
+      "window": "triage",
+      "pane_target": "demo:2.0",
+      "pane_id": "%31",
+      "launch": { "model": "gpt-5.5", "effort": "medium", "cmd": "pi triage" },
+      "adapter": null,
+      "domain": null,
+      "branch": "feature/triage-spike",
+      "last_response_at": "2026-05-15T09:58:00Z",
+      "spawned_at": "2026-05-15T08:00:00Z",
+      "last_polled_at": "2026-05-15T10:06:00Z",
+      "decisions_log": []
+    },
+    "VST-201": {
+      "id": "VST-201",
+      "title": "Issue with branch + PR",
+      "kind": "issue",
+      "state": "prompting",
+      "harness": "opencode",
+      "cwd": "/repo/worktrees/vst-201",
+      "window": "VST-201",
+      "pane_target": "demo:3.0",
+      "pane_id": "%41",
+      "launch": { "model": "gpt-5.5", "effort": "xhigh", "cmd": "opencode run issue VST-201" },
+      "adapter": { "oc_url": "http://127.0.0.1:5050", "oc_session_id": "oc-vst-201" },
+      "domain": {
+        "issue": {
+          "id": "VST-201",
+          "worktree": "/repo/worktrees/vst-201",
+          "pr_number": 88,
+          "scope_files_declared": 4,
+          "scope_files_actual": 4,
+          "orchestration_started": true,
+          "merge_commit": null
+        }
+      },
+      "branch": "feature/vst-201",
+      "last_response_at": "2026-05-15T09:55:00Z",
+      "spawned_at": "2026-05-15T08:35:00Z",
+      "last_polled_at": "2026-05-15T10:06:00Z",
+      "decisions_log": []
+    },
+    "workflow-build": {
+      "id": "workflow-build",
+      "title": "Workflow rebuild on main",
+      "kind": "workflow",
+      "state": "submitting",
+      "harness": "codex",
+      "cwd": "/repo/demo",
+      "window": "build",
+      "pane_target": "demo:4.0",
+      "pane_id": "%51",
+      "launch": { "model": "gpt-5.5", "effort": "high", "cmd": "codex run build" },
+      "adapter": null,
+      "domain": null,
+      "branch": "main",
+      "last_response_at": "2026-05-15T10:01:00Z",
+      "spawned_at": "2026-05-15T09:12:00Z",
+      "last_polled_at": "2026-05-15T10:06:00Z",
+      "decisions_log": []
+    }
+  },
+  "merge_queue": ["VST-201"],
+  "conflict_graph": { "edges": [], "computed_at": "2026-05-15T10:04:00Z" },
+  "paused_for_user": null
+}

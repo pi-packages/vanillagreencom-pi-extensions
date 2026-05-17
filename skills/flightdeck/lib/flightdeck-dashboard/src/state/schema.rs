@@ -68,6 +68,7 @@ pub struct TrackedEntry {
     pub decisions_log: Vec<DecisionLogEntry>,
     pub unknown_since: Option<DateTime<Utc>>,
     pub merge_commit: Option<String>,
+    pub branch: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]

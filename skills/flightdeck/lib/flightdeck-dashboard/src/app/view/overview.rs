@@ -4,14 +4,18 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, Wrap};
 use ratatui::Frame;
 
+use crate::activity::format::event_chip_for;
+use crate::activity::ActivityEvent;
 use crate::app::hitmap::{ClickAction, HitMap, ScrollSource};
 use crate::app::labels::{kind_badge, kind_label_for, state_label_for};
 use crate::app::model::{Model, ReadSourceState};
 use crate::app::theme::Palette;
 use crate::app::view::{fx, human_duration};
 use crate::cost::{format_compact, format_cost, format_tokens};
-use crate::state::snapshot::{SessionState, TrackedSession};
+use crate::state::snapshot::{SessionKind, SessionState, TrackedSession};
 use crate::state::tracked_entries::PRE_PURGE_BANNER;
+
+const RECENT_ACTIVITY_LIMIT: usize = 5;
 use crate::util::display_width::{
     display_width, pad_end_to_width, truncate_start_to_width, truncate_to_width,
 };
@@ -495,6 +499,12 @@ fn detail_lines(
             Span::raw(cwd.display().to_string()),
         ]));
     }
+    if let Some(branch) = session.branch.as_deref().filter(|value| !value.is_empty()) {
+        lines.push(Line::from(vec![
+            Span::styled("branch  ", theme.status_label()),
+            Span::raw(branch.to_owned()),
+        ]));
+    }
 
     if let Some(issue) = session.issue() {
         lines.push(Line::from(""));
@@ -533,6 +543,29 @@ fn detail_lines(
 
     lines.push(Line::from(""));
     lines.extend(cost_lines(model, session, theme));
+
+    if matches!(session.kind, SessionKind::Adhoc | SessionKind::Workflow) {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled("Recent activity", theme.header())));
+        let mut rendered = 0usize;
+        for event in recent_activity_for_entry(model, &session.id, RECENT_ACTIVITY_LIMIT) {
+            let age = age_label(Some(event.ts), model.now);
+            let chip = event_chip_for(event);
+            let summary = truncate_end(&event.summary, 56);
+            lines.push(Line::from(vec![
+                Span::styled(format!("{age:<6} "), theme.muted()),
+                Span::styled(format!("{chip:<8} "), theme.info()),
+                Span::raw(summary),
+            ]));
+            rendered += 1;
+        }
+        if rendered == 0 {
+            lines.push(Line::from(Span::styled(
+                "no activity events yet",
+                theme.muted(),
+            )));
+        }
+    }
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled("Recent decisions", theme.header())));
@@ -682,20 +715,40 @@ fn scope_ratio(declared: Option<u32>, actual: Option<u32>) -> String {
 }
 
 fn issue_label(session: &TrackedSession) -> String {
+    let branch = session
+        .branch
+        .as_deref()
+        .filter(|name| !name.is_empty() && !is_default_branch(name));
     let Some(issue) = session.issue() else {
-        return String::from("—");
+        // Non-issue rows: surface branch alone when present + non-default.
+        return match branch {
+            Some(name) => format!("branch {name}"),
+            None => String::from("—"),
+        };
     };
-    let pr = issue
-        .pr_number
-        .map(|number| format!("PR #{number}"))
-        .unwrap_or_else(|| String::from("PR —"));
+    let pr = issue.pr_number.map(|number| format!("PR #{number}"));
     let worktree = issue
         .worktree
         .as_ref()
         .and_then(|path| path.file_name())
-        .and_then(|name| name.to_str())
-        .unwrap_or("worktree?");
-    format!("{pr} · {worktree}")
+        .and_then(|name| name.to_str());
+    match (branch, pr.as_deref(), worktree) {
+        // Branch + PR (non-default branch): compose "<branch> · PR #N".
+        (Some(b), Some(p), _) => format!("{b} · {p}"),
+        // Branch + worktree, no PR: "<branch> · <worktree>".
+        (Some(b), None, Some(w)) => format!("{b} · {w}"),
+        // Branch only.
+        (Some(b), None, None) => format!("branch {b}"),
+        // Default/missing branch: keep the legacy PR · worktree shape.
+        (None, Some(p), Some(w)) => format!("{p} · {w}"),
+        (None, Some(p), None) => p.to_owned(),
+        (None, None, Some(w)) => format!("PR — · {w}"),
+        (None, None, None) => String::from("PR —"),
+    }
+}
+
+fn is_default_branch(name: &str) -> bool {
+    matches!(name, "main" | "master" | "develop")
 }
 
 fn last_decision(session: &TrackedSession) -> String {
@@ -711,6 +764,30 @@ fn activity_label(session: &TrackedSession, now: DateTime<Utc>) -> String {
         .or(session.last_response_at)
         .or(session.spawned_at);
     age_label(activity, now)
+}
+
+/// Per-entry recent activity (vstack#100 Fix C): walks the in-memory
+/// activity buffer newest-first, filters to events tagged with the
+/// matching `entry_id`, and returns up to `limit` events. Empty when
+/// no rows match. Best-effort — events without an entry_id are
+/// skipped (those are session-wide rows like daemon.heartbeat).
+fn recent_activity_for_entry<'a>(
+    model: &'a Model,
+    entry_id: &str,
+    limit: usize,
+) -> Vec<&'a ActivityEvent> {
+    if entry_id.is_empty() {
+        return Vec::new();
+    }
+    let mut events: Vec<&ActivityEvent> = model
+        .activity
+        .events
+        .iter()
+        .filter(|event| event.entry_id.as_deref() == Some(entry_id))
+        .collect();
+    events.sort_by(|left, right| right.ts.cmp(&left.ts));
+    events.truncate(limit);
+    events
 }
 
 pub(crate) fn truncate_end(value: &str, max_width: u16) -> String {
