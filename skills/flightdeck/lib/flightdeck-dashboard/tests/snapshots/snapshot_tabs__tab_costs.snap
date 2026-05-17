@@ -20,7 +20,7 @@ expression: rendered
 "│dashboard-rust codex      —            error: codex usage not yet supported                                                                                                                           │"
 "│adhoc-logs     pi         —            no cost source                                                                                                                                                 │"
 "│                                                                                                                                                                                                      │"
-"│Pricing source: bundled @ 2026-05-15                                                                                                                                                                  │"
+"│Pricing source: bundled @ 2026-05-15  ([ p ] open detail)                                                                                                                                             │"
 "│Last polled: 10:10:00                                                                                                                                                                                 │"
 "│1 cost source unhealthy                                                                                                                                                                               │"
 "│                                                                                                                                                                                                      │"

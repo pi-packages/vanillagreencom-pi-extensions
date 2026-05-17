@@ -15,7 +15,7 @@ use crate::app::command::SnapshotSource;
 use crate::app::motion::{EffectInstance, MotionLevel};
 use crate::app::reload::ReloadCoalescer;
 use crate::app::theme::{Palette, Theme};
-use crate::cost::{CostMetrics, SessionTotals};
+use crate::cost::{CostMetrics, PricingTable, SessionTotals};
 use crate::state::snapshot::{
     DashboardSnapshot, Event, EventImportance, SessionKind, SessionState, TrackedSession,
 };
@@ -435,6 +435,7 @@ pub enum ModalState {
     ActivityFilter,
     FilterInput,
     ConfirmAction,
+    PricingDetail,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -481,6 +482,7 @@ pub struct Model {
     pub current_pane_id: Option<String>,
     pub tmux_panes: PaneSnapshot,
     pub cost_totals: SessionTotals,
+    pub pricing_table: PricingTable,
     pub confirm: Option<ConfirmDialog>,
     pub status_message: Option<ActionStatus>,
     pub quit_requested: bool,
@@ -547,6 +549,7 @@ impl Model {
                 .filter(|pane| !pane.is_empty()),
             tmux_panes: PaneSnapshot::default(),
             cost_totals: SessionTotals::default(),
+            pricing_table: PricingTable::load(),
             confirm: None,
             status_message: None,
             quit_requested: false,

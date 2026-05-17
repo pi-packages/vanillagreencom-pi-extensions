@@ -87,6 +87,9 @@ pub fn render_with_hitmap(frame: &mut Frame<'_>, model: &Model, hitmap: &mut Hit
         crate::app::model::ModalState::ConfirmAction => {
             modals::render_confirm(frame, area, model, theme, hitmap);
         }
+        crate::app::model::ModalState::PricingDetail => {
+            modals::render_pricing_detail(frame, area, model, theme, hitmap);
+        }
         crate::app::model::ModalState::None => {}
     }
 }
