@@ -36,7 +36,12 @@ flightdeck_activity_emit() {
             --linear-id) linear_id="${2:-}"; shift 2 ;;
             --commit) commit="${2:-}"; shift 2 ;;
             --check-name) check_name="${2:-}"; shift 2 ;;
-            --details-json) details_json="${2:-{}}"; shift 2 ;;
+            --details-json)
+                # Use a plain default fall-back so bash's ${VAR:-DEFAULT}
+                # brace-matching doesn't eat one of the JSON object's
+                # closing braces (e.g. {"a":1} would become {"a":1}}).
+                if [ -n "${2:-}" ]; then details_json="$2"; else details_json="{}"; fi
+                shift 2 ;;
             *) shift ;;
         esac
     done
