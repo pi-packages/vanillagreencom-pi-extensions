@@ -3,14 +3,18 @@ mod common;
 use std::fs;
 use std::path::PathBuf;
 
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use flightdeck_dashboard::app::command::SnapshotSource;
 use flightdeck_dashboard::app::model::{Model, ReadSourceState, Tab};
 use flightdeck_dashboard::app::motion::{self, MotionLevel};
+use flightdeck_dashboard::app::msg::Msg;
 use flightdeck_dashboard::app::theme::Theme;
+use flightdeck_dashboard::app::update;
 use flightdeck_dashboard::state::snapshot::{DashboardSnapshot, PauseInfo, SessionState};
 use flightdeck_dashboard::state::tracked_entries::{
     self, PRE_PURGE_BANNER, PRE_PURGE_STATE_MESSAGE,
 };
+use flightdeck_dashboard::tmux::panes::PaneSnapshot;
 
 fn render_fixture(name: &'static str) -> String {
     common::render_model(&common::model_for_fixture(name, MotionLevel::Off))
@@ -354,6 +358,47 @@ fn header_80_cols_drops_chips_before_base() {
         "session id must remain at 80 cols: {header_line}"
     );
     insta::assert_snapshot!("overview_header_80_cols", rendered);
+}
+
+#[test]
+fn stale_mixed_fixture_marks_row_stale() {
+    let mut model = common::model_for_fixture("stale-mixed", MotionLevel::Off);
+    model.set_tmux_panes(PaneSnapshot::from_panes([
+        String::from("%25"),
+        String::from("%41"),
+        String::from("%51"),
+    ]));
+    let rendered = common::render_model(&model);
+    assert!(
+        rendered.contains("(stale)"),
+        "stale-mixed fixture should render (stale) annotation:\n{rendered}"
+    );
+    insta::assert_snapshot!("overview_stale_mixed_fixture", rendered);
+}
+
+#[test]
+fn alt_m_keybind_toggles_compact_mode() {
+    let mut model = common::model_for_fixture("mixed", MotionLevel::Off);
+    assert!(!model.ui.compact, "compact starts off");
+    let key = KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT);
+    let _commands = update::update(&mut model, Msg::KeyPressed(key));
+    assert!(model.ui.compact, "Alt+M should toggle compact ON");
+    let _commands = update::update(&mut model, Msg::KeyPressed(key));
+    assert!(!model.ui.compact, "Alt+M should toggle compact OFF");
+}
+
+#[test]
+fn alt_m_renders_compact_overview() {
+    let mut model = common::model_for_fixture("mixed", MotionLevel::Off);
+    let key = KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT);
+    let _ = update::update(&mut model, Msg::KeyPressed(key));
+    assert!(model.ui.compact);
+    let rendered = common::render_model(&model);
+    assert!(
+        rendered.contains("AH:1") && rendered.contains("ISS:1"),
+        "compact mode summary missing:\n{rendered}"
+    );
+    insta::assert_snapshot!("overview_alt_m_compact", rendered);
 }
 
 #[test]
