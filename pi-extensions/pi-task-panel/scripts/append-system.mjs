@@ -9,17 +9,18 @@
 //
 // Resolves the scope-appropriate APPEND_SYSTEM.md by:
 //
-// 1. Walking up from the package dir until it finds a `packages/` segment;
-//    the parent of that segment is the Pi scope root (`~/.pi/agent` for
-//    global, `<project>/.pi` for project). This handles vstack-driven
-//    installs where the package is copied under `<scope>/packages/<name>`.
+// 1. Walking up from the package dir until it finds a vstack `packages/`
+//    segment or Pi's npm-managed `npm/node_modules/` segment; the parent of
+//    that install root is the Pi scope root (`~/.pi/agent` for user/global,
+//    `<project>/.pi` for project). This handles vstack-driven installs under
+//    `<scope>/packages/<name>` and Pi 0.75+ npm installs under
+//    `<scope>/npm/node_modules/<name>`.
 //
-// 2. If no `packages/` segment is found (e.g. `pi install npm:` runs
-//    `npm install -g`, which puts the package in npm's global prefix), we
-//    fall back to the conventional Pi global dir from `PI_CODING_AGENT_DIR`
-//    (or `~/.pi/agent`). We only act when that dir already exists — npm
-//    installing one of these packages on a machine without Pi must not
-//    create stray files.
+// 2. If neither managed segment is found (legacy npm global-prefix installs
+//    or manual `npm install`), we fall back to the conventional Pi user dir
+//    from `PI_CODING_AGENT_DIR` (or `~/.pi/agent`). We only act when that dir
+//    already exists — npm installing one of these packages on a machine
+//    without Pi must not create stray files.
 
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
@@ -37,16 +38,23 @@ const pkgDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 let pkg;
 try {
 	pkg = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8"));
-} catch {
+} catch (err) {
+	console.error(`append-system.mjs: unable to read package.json in ${pkgDir}: ${err?.message ?? err}`);
 	process.exit(0);
 }
 
 const name = typeof pkg?.name === "string" ? pkg.name : undefined;
 const rel = pkg?.pi?.appendSystem;
-if (!name || typeof rel !== "string") process.exit(0);
+if (!name || typeof rel !== "string") {
+	console.error(`append-system.mjs: package ${pkgDir} is missing name or pi.appendSystem`);
+	process.exit(0);
+}
 
 const scopeRoot = findScopeRoot(pkgDir);
-if (!scopeRoot) process.exit(0);
+if (!scopeRoot) {
+	console.error(`append-system.mjs: unable to resolve Pi scope for ${name} from ${pkgDir}`);
+	process.exit(0);
+}
 
 const target = join(scopeRoot, "APPEND_SYSTEM.md");
 const begin = `<!-- vstack:append-system ${name} begin -->`;
@@ -55,9 +63,15 @@ const end = `<!-- vstack:append-system ${name} end -->`;
 try {
 	if (action === "install") {
 		const sourcePath = resolve(pkgDir, rel);
-		if (!existsSync(sourcePath)) process.exit(0);
+		if (!existsSync(sourcePath)) {
+			console.error(`append-system.mjs: appendSystem source missing for ${name}: ${sourcePath}`);
+			process.exit(0);
+		}
 		const content = readFileSync(sourcePath, "utf8").trim();
-		if (!content) process.exit(0);
+		if (!content) {
+			console.error(`append-system.mjs: appendSystem source is empty for ${name}: ${sourcePath}`);
+			process.exit(0);
+		}
 		upsertBlock(target, begin, end, content);
 	} else {
 		removeBlock(target, begin, end);
@@ -74,15 +88,26 @@ function findScopeRoot(start) {
 		const parent = dirname(dir);
 		if (parent === dir) break;
 		if (basename(parent) === "packages") return dirname(parent);
+		if (basename(parent) === "node_modules" && basename(dirname(parent)) === "npm") {
+			const scopeRoot = dirname(dirname(parent));
+			if (isPiScopeRoot(scopeRoot)) return scopeRoot;
+		}
 		dir = parent;
 	}
-	// Fallback: the conventional Pi global dir, but only when it already
-	// exists. This catches `pi install npm:` (which uses `npm install -g`,
-	// placing the package outside any `<scope>/packages/` tree) without
-	// mutating arbitrary user state on machines without Pi installed.
+	// Fallback: the conventional Pi user dir, but only when it already exists.
+	// This catches legacy global-prefix installs without mutating arbitrary user
+	// state on machines without Pi installed.
 	const configured = process.env.PI_CODING_AGENT_DIR;
 	const piDir = configured ? resolve(configured.replace(/^~(?=\/|$)/, homedir())) : join(homedir(), ".pi", "agent");
 	return existsSync(piDir) ? piDir : undefined;
+}
+
+function isPiScopeRoot(scopeRoot) {
+	if (existsSync(join(scopeRoot, "settings.json"))) return true;
+	if (basename(scopeRoot) === ".pi") return true;
+	const configured = process.env.PI_CODING_AGENT_DIR;
+	const piDir = configured ? resolve(configured.replace(/^~(?=\/|$)/, homedir())) : join(homedir(), ".pi", "agent");
+	return resolve(scopeRoot) === resolve(piDir);
 }
 
 function escapeRegExp(s) {

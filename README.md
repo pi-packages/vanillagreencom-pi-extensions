@@ -221,7 +221,7 @@ Use `harnesses:` in a hook's frontmatter to scope it explicitly (e.g. `harnesses
 
 ### Pi Extensions
 
-Install [`pi-extension-manager`](pi-extensions/pi-extension-manager/README.md) to browse and configure these from inside Pi.
+Install [`pi-extension-manager`](pi-extensions/pi-extension-manager/README.md) to browse and configure these from inside Pi. Current packages target Pi 0.75+ and follow Pi 0.75's Node.js baseline by declaring `engines.node >=22.19.0`; Pi 0.73/0.74 installs should stay on older package releases if they must remain on Node 20.
 
 Extensions can ship an `instructions.md` (declared via `pi.appendSystem` in `package.json`); on install, vstack mirrors it into the scope's `APPEND_SYSTEM.md` (`<project>/.pi/APPEND_SYSTEM.md` or `~/.pi/agent/APPEND_SYSTEM.md`) so Pi loads tool-usage guidance into the system prompt. Removed/disabled extensions strip their block automatically.
 

@@ -211,12 +211,16 @@ function shellQuote(value: string): string {
 	return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
-function npmUpdateCommand(item: InventoryItem, npmName: string): string {
-	if (item.scope !== "project" || !item.packageDir) return `npm install -g ${npmName}@latest`;
+function npmRootFromPackageDir(packageDir: string | undefined): string | undefined {
+	if (!packageDir) return undefined;
 	const marker = `${sep}node_modules${sep}`;
-	const idx = item.packageDir.indexOf(marker);
-	const npmDir = idx >= 0 ? item.packageDir.slice(0, idx) : undefined;
-	return npmDir ? `(cd ${shellQuote(npmDir)} && npm install ${npmName}@latest)` : `npm install ${npmName}@latest`;
+	const idx = packageDir.indexOf(marker);
+	return idx >= 0 ? packageDir.slice(0, idx) : undefined;
+}
+
+function npmUpdateCommand(item: InventoryItem, npmName: string): string {
+	const npmDir = npmRootFromPackageDir(item.packageDir);
+	return npmDir ? `(cd ${shellQuote(npmDir)} && npm install ${npmName}@latest)` : `pi install npm:${npmName}@latest`;
 }
 
 export function applyUpdateMetadata(items: InventoryItem[], settingsFiles: SettingsFile[], cwd: string): void {

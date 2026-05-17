@@ -496,6 +496,10 @@ export default function sessionBridge(pi: ExtensionAPI) {
 				});
 				return;
 			}
+			if (expanded.error) {
+				sendResponse(client, id, commandName, false, undefined, `Slash expansion failed: ${expanded.error}`);
+				return;
+			}
 
 			try {
 				const exec = pi.exec.bind(pi) as ExecLike;
@@ -654,10 +658,11 @@ export function expandLoadedSlashContent(
 
 function parseSlashCommand(text: string): { commandName: string; argsString: string } | null {
 	if (!text.startsWith("/")) return null;
-	const spaceIndex = text.indexOf(" ");
-	const commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
+	const boundary = text.slice(1).search(/\s/);
+	const boundaryIndex = boundary === -1 ? -1 : boundary + 1;
+	const commandName = boundaryIndex === -1 ? text.slice(1) : text.slice(1, boundaryIndex);
 	if (!commandName) return null;
-	return { commandName, argsString: spaceIndex === -1 ? "" : text.slice(spaceIndex + 1) };
+	return { commandName, argsString: boundaryIndex === -1 ? "" : text.slice(boundaryIndex + 1) };
 }
 
 export function stripFrontmatter(content: string): string {
@@ -679,7 +684,7 @@ export function parseCommandArgs(argsString: string): string[] {
 			else current += char;
 		} else if (char === '"' || char === "'") {
 			inQuote = char;
-		} else if (char === " " || char === "\t") {
+		} else if (/\s/.test(char)) {
 			if (current) {
 				args.push(current);
 				current = "";

@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { mkdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { removeAppendSystemBlockForUninstall, syncAppendSystemForPackage } from "./append-system.js";
 import { stringifyError } from "./format.js";
 import { normalizePackageEntry } from "./inventory.js";
@@ -15,13 +16,44 @@ import {
 	type UpdatePlan,
 } from "./types.js";
 
+function npmRootFromPackageDir(packageDir: string | undefined): string | undefined {
+	if (!packageDir) return undefined;
+	const marker = `${sep}node_modules${sep}`;
+	const idx = packageDir.indexOf(marker);
+	return idx >= 0 ? packageDir.slice(0, idx) : undefined;
+}
+
 function npmWorkingDir(item: InventoryItem, inventory: Inventory, ctx: ExtensionCommandContext | ExtensionContext): string {
 	const file = findSettingsFile(inventory.settingsFiles, item.scope);
-	return item.scope === "project" ? join(file.baseDir, "npm") : ctx.cwd;
+	return npmRootFromPackageDir(item.packageDir) ?? (item.scope === "project" || item.scope === "user" ? join(file.baseDir, "npm") : ctx.cwd);
 }
 
 function shellQuote(value: string): string {
 	return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function shellJoin(argv: string[]): string {
+	return argv.map(shellQuote).join(" ");
+}
+
+function npmCommandForScope(files: SettingsFile[], scope: InventoryItem["scope"]): { command: string; argsPrefix: string[]; display: string; warning?: string } {
+	const file = findSettingsFile(files, scope);
+	const raw = file.json.npmCommand;
+	if (Array.isArray(raw)) {
+		const argv = raw.filter((value): value is string => typeof value === "string" && value.length > 0);
+		if (argv.length > 0) return { command: argv[0], argsPrefix: argv.slice(1), display: shellJoin(argv) };
+	}
+	if (raw !== undefined) return { command: "npm", argsPrefix: [], display: "npm", warning: `Warning: ${scope} settings.json has invalid npmCommand; falling back to npm.` };
+	return { command: "npm", argsPrefix: [], display: "npm" };
+}
+
+function ensureWorkingDir(cwd: string): { ok: true } | { ok: false; message: string } {
+	try {
+		mkdirSync(cwd, { recursive: true });
+		return { ok: true };
+	} catch (error) {
+		return { ok: false, message: `Failed to prepare npm working directory ${cwd}: ${stringifyError(error)}` };
+	}
 }
 
 export function planUninstall(item: InventoryItem, inventory: Inventory, ctx: ExtensionCommandContext | ExtensionContext): UninstallPlan | undefined {
@@ -38,13 +70,13 @@ export function planUninstall(item: InventoryItem, inventory: Inventory, ctx: Ex
 	}
 	const npmName = npmPackageNameFromSource(item.sourceName);
 	if (npmName) {
-		const gFlag = item.scope === "user" ? " -g" : "";
 		const cwd = npmWorkingDir(item, inventory, ctx);
+		const npm = npmCommandForScope(inventory.settingsFiles, item.scope);
 		return {
 			item,
-			method: { kind: "npm", npmName, scope: item.scope, cwd },
-			command: item.scope === "project" ? `(cd ${shellQuote(cwd)} && npm uninstall ${npmName})` : `npm uninstall${gFlag} ${npmName}`,
-			description: "Installed via npm — runs npm uninstall, then strips the npm: entry from Pi settings.json.",
+			method: { kind: "npm", npmName, scope: item.scope, cwd, command: npm.command, argsPrefix: npm.argsPrefix },
+			command: `(cd ${shellQuote(cwd)} && ${npm.display} uninstall ${npmName})`,
+			description: `${npm.warning ? `${npm.warning} ` : ""}Installed via npm — runs npm uninstall in Pi's scope-local npm directory, then strips the npm: entry from Pi settings.json.`,
 		};
 	}
 	return {
@@ -92,11 +124,11 @@ export function runUninstall(plan: UninstallPlan, inventory: Inventory): { ok: b
 		return { ok: true, message: `Removed via vstack: ${plan.item.displayName}.` };
 	}
 	if (plan.method.kind === "npm") {
-		const args = ["uninstall"];
-		if (plan.method.scope === "user") args.push("-g");
-		args.push(plan.method.npmName);
-		const result = spawnSync("npm", args, { encoding: "utf8", cwd: plan.method.cwd });
-		if (result.error) return { ok: false, message: `Failed to launch npm: ${stringifyError(result.error)}` };
+		const args = ["uninstall", plan.method.npmName];
+		const prepared = ensureWorkingDir(plan.method.cwd);
+		if (!prepared.ok) return prepared;
+		const result = spawnSync(plan.method.command, [...plan.method.argsPrefix, ...args], { encoding: "utf8", cwd: plan.method.cwd });
+		if (result.error) return { ok: false, message: `Failed to launch ${plan.method.command}: ${stringifyError(result.error)}` };
 		if ((result.status ?? 1) !== 0) {
 			const stderr = (result.stderr ?? "").trim() || (result.stdout ?? "").trim() || `exit ${result.status}`;
 			return { ok: false, message: `npm uninstall failed: ${stderr}` };
@@ -130,11 +162,12 @@ export function planUpdate(item: InventoryItem, inventory: Inventory, ctx: Exten
 	}
 	if (item.updateSource === "npm" && item.npmName) {
 		const cwd = npmWorkingDir(item, inventory, ctx);
+		const npm = npmCommandForScope(inventory.settingsFiles, item.scope);
 		return {
 			item,
-			method: { kind: "npm", npmName: item.npmName, scope: item.scope, cwd },
-			command: item.scope === "project" ? `(cd ${shellQuote(cwd)} && npm install ${item.npmName}@latest)` : `npm install -g ${item.npmName}@latest`,
-			description: "Installed via npm — installs the latest published package version, then Pi can load it after /reload or restart.",
+			method: { kind: "npm", npmName: item.npmName, scope: item.scope, cwd, command: npm.command, argsPrefix: npm.argsPrefix },
+			command: `(cd ${shellQuote(cwd)} && ${npm.display} install ${item.npmName}@latest)`,
+			description: `${npm.warning ? `${npm.warning} ` : ""}Installed via npm — installs the latest published package version in Pi's scope-local npm directory, then Pi can load it after /reload or restart.`,
 		};
 	}
 	return undefined;
@@ -153,9 +186,11 @@ export function runUpdate(plan: UpdatePlan): { ok: boolean; message: string } {
 		}
 		return { ok: true, message: `Updated via vstack: ${plan.item.displayName}.` };
 	}
-	const args = plan.method.scope === "user" ? ["install", "-g", `${plan.method.npmName}@latest`] : ["install", `${plan.method.npmName}@latest`];
-	const result = spawnSync("npm", args, { encoding: "utf8", cwd: plan.method.cwd });
-	if (result.error) return { ok: false, message: `Failed to launch npm: ${stringifyError(result.error)}` };
+	const args = ["install", `${plan.method.npmName}@latest`];
+	const prepared = ensureWorkingDir(plan.method.cwd);
+	if (!prepared.ok) return prepared;
+	const result = spawnSync(plan.method.command, [...plan.method.argsPrefix, ...args], { encoding: "utf8", cwd: plan.method.cwd });
+	if (result.error) return { ok: false, message: `Failed to launch ${plan.method.command}: ${stringifyError(result.error)}` };
 	if ((result.status ?? 1) !== 0) {
 		const stderr = (result.stderr ?? "").trim() || (result.stdout ?? "").trim() || `exit ${result.status}`;
 		return { ok: false, message: `npm update failed: ${stderr}` };

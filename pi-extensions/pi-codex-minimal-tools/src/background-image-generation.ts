@@ -3,6 +3,7 @@ import { extname, isAbsolute, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { supportsImageInput, type ModelLike } from "./capabilities.js";
 import { loadSettings } from "./settings.js";
 import {
 	buildGeneratedImageDisplayText,
@@ -19,6 +20,8 @@ const PANEL_BAR_COLOR = "borderAccent";
 const PANEL_TITLE_COLOR = "customMessageLabel";
 const PANEL_RULE_COLOR = "muted";
 const PANEL_CARD_PADDING_X = 1;
+const OPENAI_CODEX_PROVIDER = "openai-codex";
+const OPENAI_CODEX_MODEL_PROBE_IDS = ["gpt-5.5", "gpt-5.4", "gpt-5.3-codex", "gpt-5.2", "gpt-5.1", "gpt-5", "gpt-4.1", "o4-mini"];
 
 interface ActiveImageJob {
 	id: string;
@@ -56,6 +59,49 @@ interface ImageGenerationErrorDetails {
 	prompt?: string;
 	imageModel?: string;
 	referenceCount?: number;
+}
+
+interface ModelRegistryLike {
+	getAll?: () => unknown;
+	getAvailable?: () => unknown;
+	find?: (provider: string, id: string) => unknown;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isModelLike(value: unknown): value is ModelLike {
+	return isRecord(value) && typeof value.provider === "string" && (typeof value.id === "string" || typeof value.name === "string");
+}
+
+function registryModels(registry: ModelRegistryLike | undefined): ModelLike[] {
+	if (!registry) return [];
+	for (const method of [registry.getAll, registry.getAvailable]) {
+		if (typeof method !== "function") continue;
+		try {
+			const value = method.call(registry);
+			if (Array.isArray(value)) return value.filter(isModelLike);
+		} catch {
+			// Try the next registry shape.
+		}
+	}
+	return [];
+}
+
+function isOpenAiCodexImageModel(model: ModelLike | undefined): boolean {
+	return model?.provider === OPENAI_CODEX_PROVIDER && supportsImageInput(model);
+}
+
+export function selectCodexImageModel(currentModel: ModelLike | undefined, registry: ModelRegistryLike | undefined): ModelLike | undefined {
+	if (isOpenAiCodexImageModel(currentModel)) return currentModel;
+	const discovered = registryModels(registry).find(isOpenAiCodexImageModel);
+	if (discovered) return discovered;
+	for (const id of OPENAI_CODEX_MODEL_PROBE_IDS) {
+		const candidate = registry?.find?.(OPENAI_CODEX_PROVIDER, id);
+		if (isModelLike(candidate) && isOpenAiCodexImageModel(candidate)) return candidate;
+	}
+	return undefined;
 }
 
 function tokenizeArgs(input: string): string[] {
@@ -374,8 +420,8 @@ function renderImageGenError(details: ImageGenerationErrorDetails, theme: Theme)
 
 async function runBackgroundImageGeneration(pi: ExtensionAPI, ctx: ExtensionCommandContext, parsed: ParsedImageGenCommand): Promise<void> {
 	const settings = loadSettings(ctx.cwd);
-	const model = ctx.modelRegistry.find("openai-codex", "gpt-5.5") ?? (ctx.model?.provider === "openai-codex" ? ctx.model : undefined);
-	if (!model) throw new Error("No openai-codex/gpt-5.5 model is available.");
+	const model = selectCodexImageModel(ctx.model as ModelLike | undefined, ctx.modelRegistry as ModelRegistryLike | undefined) as Model<Api> | undefined;
+	if (!model) throw new Error("No image-capable openai-codex model is available. Update Pi's model registry or select an openai-codex image-capable model.");
 	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
 	if (!auth.ok) throw new Error(auth.error);
 	if (!auth.apiKey) throw new Error("No Codex OAuth token is configured. Run /login openai-codex.");

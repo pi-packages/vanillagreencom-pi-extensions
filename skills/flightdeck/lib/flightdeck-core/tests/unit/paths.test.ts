@@ -5,6 +5,9 @@ import { describe, expect, test } from "bun:test";
 import { ccEncodeCwd, ccUuidForIssue, ccTranscriptPath } from "../../src/paths/cc.ts";
 import { ocIssueFromPaneTarget, ocPaneIdSafe } from "../../src/paths/oc.ts";
 import { fdSessionKeyFromId } from "../../src/paths/daemon.ts";
+import { piBridgeExtensionCandidates } from "../../src/paths/pi.ts";
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -50,5 +53,22 @@ describe("daemon session key", () => {
 
 	test("fdSessionKeyFromId returns empty on empty input", () => {
 		expect(fdSessionKeyFromId("")).toBe("");
+	});
+});
+
+describe("pi helpers", () => {
+	test("piBridgeExtensionCandidates includes project/user vstack and Pi 0.75 npm install paths", () => {
+		const root = mkdtempSync(join(tmpdir(), "flightdeck-pi-paths-"));
+		try {
+			mkdirSync(join(root, ".pi"));
+			expect(piBridgeExtensionCandidates("/home/tester", join(root, "subdir"))).toEqual([
+				`${root}/.pi/packages/pi-session-bridge/extensions/session-bridge.ts`,
+				`${root}/.pi/npm/node_modules/@vanillagreen/pi-session-bridge/extensions/session-bridge.ts`,
+				"/home/tester/.pi/agent/packages/pi-session-bridge/extensions/session-bridge.ts",
+				"/home/tester/.pi/agent/npm/node_modules/@vanillagreen/pi-session-bridge/extensions/session-bridge.ts",
+			]);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
 	});
 });

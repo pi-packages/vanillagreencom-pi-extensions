@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Path resolvers + helper functions for the pi Session Bridge adapter.
 #
-# Pi bridge is a vstack-vendored pi-extension package living at
-# ~/.pi/agent/packages/pi-session-bridge with the `pi-bridge` CLI
-# symlinked at ~/.pi/agent/bin/pi-bridge. When a pi process starts
-# with the bridge package loaded (default vstack pi config), the
-# bridge writes:
+# Pi bridge is a pi-extension package living either at the vstack copy path
+# <scope>/packages/pi-session-bridge or, for Pi 0.75+ npm installs, at
+# <scope>/npm/node_modules/@vanillagreen/pi-session-bridge. User scope is
+# ~/.pi/agent; project scope is the nearest <project>/.pi. The `pi-bridge` CLI
+# is normally symlinked at ~/.pi/agent/bin/pi-bridge. When a pi process starts
+# with the bridge package loaded (default vstack pi config), the bridge writes:
 #   ${PI_BRIDGE_DIR:-/tmp/pi-session-bridge-$UID}/instances/<pid>.json
 #   ${PI_BRIDGE_DIR}/pi-<pid>.sock
 # Both 0700/0600 — single-user-on-machine isolation only.
@@ -68,6 +69,19 @@ pi_resolve_pi_bin() {
   return 1
 }
 
+pi_project_pi_dir() {
+  local dir
+  dir=$(pwd -P 2>/dev/null) || return 1
+  while true; do
+    if [[ -d "$dir/.pi" ]]; then
+      echo "$dir/.pi"
+      return 0
+    fi
+    [[ "$dir" == "/" ]] && return 1
+    dir=$(dirname "$dir")
+  done
+}
+
 # Resolve the path to the session-bridge extension. We pass this as
 # `-e <PATH>` to pi so the bridge auto-loads regardless of whether
 # the user's settings.json has the package registered (vstack install
@@ -77,11 +91,25 @@ pi_resolve_bridge_extension() {
     echo "$PI_SESSION_BRIDGE_EXTENSION"
     return 0
   fi
-  local p="$HOME/.pi/agent/packages/pi-session-bridge/extensions/session-bridge.ts"
-  if [[ -f "$p" ]]; then
-    echo "$p"
-    return 0
+  local candidates=()
+  local project_pi
+  if project_pi=$(pi_project_pi_dir); then
+    candidates+=(
+      "$project_pi/packages/pi-session-bridge/extensions/session-bridge.ts"
+      "$project_pi/npm/node_modules/@vanillagreen/pi-session-bridge/extensions/session-bridge.ts"
+    )
   fi
+  candidates+=(
+    "$HOME/.pi/agent/packages/pi-session-bridge/extensions/session-bridge.ts"
+    "$HOME/.pi/agent/npm/node_modules/@vanillagreen/pi-session-bridge/extensions/session-bridge.ts"
+  )
+  local p
+  for p in "${candidates[@]}"; do
+    if [[ -f "$p" ]]; then
+      echo "$p"
+      return 0
+    fi
+  done
   return 1
 }
 

@@ -124,9 +124,9 @@ function cheapNpmRoots(scope: Scope, baseDir: string): string[] {
 	if (scope === "project") {
 		roots.push(join(baseDir, "npm", "node_modules"));
 	} else if (scope === "user") {
+		roots.push(join(baseDir, "npm", "node_modules"));
 		const prefixRoot = npmPrefixRoot();
 		if (prefixRoot) roots.push(prefixRoot);
-		roots.push(join(baseDir, "npm", "node_modules"));
 	}
 	return roots;
 }

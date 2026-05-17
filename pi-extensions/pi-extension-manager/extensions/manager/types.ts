@@ -189,7 +189,7 @@ export interface InlineEditChar {
 
 export type UninstallMethod =
 	| { kind: "vstack"; packageName: string; scope: Scope }
-	| { kind: "npm"; npmName: string; scope: Scope; cwd: string }
+	| { kind: "npm"; npmName: string; scope: Scope; cwd: string; command: string; argsPrefix: string[] }
 	| { kind: "orphan"; packageName: string; scope: Scope };
 
 export interface UninstallPlan {
@@ -201,7 +201,7 @@ export interface UninstallPlan {
 
 export type UpdateMethod =
 	| { kind: "vstack"; packageName: string; sourceRepo: string; scope: Scope }
-	| { kind: "npm"; npmName: string; scope: Scope; cwd: string };
+	| { kind: "npm"; npmName: string; scope: Scope; cwd: string; command: string; argsPrefix: string[] };
 
 export interface UpdatePlan {
 	item: InventoryItem;

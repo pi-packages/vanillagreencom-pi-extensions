@@ -25,13 +25,16 @@
   },
   "scripts": {
     "test": "bun test tests/*.test.ts extensions/__tests__/*.test.ts",
-    "check": "node --check bin/pi-bridge.js && bun test tests/*.test.ts extensions/__tests__/*.test.ts"
+    "check": "node --check bin/pi-bridge.js && bun test tests/*.test.ts extensions/__tests__/*.test.ts",
+    "postinstall": "node scripts/append-system.mjs install",
+    "preuninstall": "node scripts/append-system.mjs remove"
   },
   "files": [
     "bin/",
     "extensions/",
     "tests/",
     "assets/",
+    "scripts/",
     "instructions.md",
     "README.md",
     "package.json"
@@ -122,5 +125,13 @@
   "author": "vanillagreen",
   "publishConfig": {
     "access": "public"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
   }
 }

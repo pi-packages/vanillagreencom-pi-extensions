@@ -77,5 +77,16 @@
   "author": "vanillagreen",
   "publishConfig": {
     "access": "public"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@earendil-works/pi-tui": {
+      "optional": true
+    }
   }
 }

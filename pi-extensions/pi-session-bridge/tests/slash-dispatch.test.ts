@@ -83,14 +83,30 @@ describe("slash expansion", () => {
 		expect(result.expanded).toBe(false);
 	});
 
+	test("prompt and skill read failures are surfaced as expansion errors", () => {
+		const prompt = expandLoadedSlashContent("/missing arg", [
+			{ name: "missing", source: "prompt", sourceInfo: { path: p("prompts/missing.md") } },
+		]);
+		expect(prompt.expanded).toBe(false);
+		expect(prompt.error).toContain("ENOENT");
+		const skill = expandLoadedSlashContent("/skill:missing arg", [
+			{ name: "skill:missing", source: "skill", sourceInfo: { path: p("skills/missing/SKILL.md") } },
+		]);
+		expect(skill.expanded).toBe(false);
+		expect(skill.error).toContain("ENOENT");
+	});
+
 	test("prompt argument substitution matches Pi prompt-template rules", () => {
 		expect(parseCommandArgs("one 'two words' \"three words\" four")).toEqual(["one", "two words", "three words", "four"]);
+		expect(parseCommandArgs("one\ntwo 'three\nfour'\tfive")).toEqual(["one", "two", "three\nfour", "five"]);
 		const promptPath = p("template.md");
 		writeFileSync(promptPath, "---\ndescription: Demo\n---\n$1|$2|$@|$ARGUMENTS|${@:2}|${@:2:2}");
-		const result = expandLoadedSlashContent('/template alpha "beta gamma" delta', [
-			{ name: "template", source: "prompt", sourceInfo: { path: promptPath } },
-		]);
+		const commands = [{ name: "template", source: "prompt", sourceInfo: { path: promptPath } }] as SlashCommandInfoLike[];
+		const result = expandLoadedSlashContent('/template alpha "beta gamma" delta', commands);
 		expect(result.text).toBe("alpha|beta gamma|alpha beta gamma delta|alpha beta gamma delta|beta gamma delta|beta gamma delta");
+		const multiline = expandLoadedSlashContent("/template\nalpha beta", commands);
+		expect(multiline.expanded).toBe(true);
+		expect(multiline.text).toBe("alpha|beta|alpha beta|alpha beta|beta|beta");
 	});
 });
 

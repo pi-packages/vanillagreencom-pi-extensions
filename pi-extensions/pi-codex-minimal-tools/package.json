@@ -1,7 +1,7 @@
 {
   "name": "@vanillagreen/pi-codex-minimal-tools",
   "version": "1.0.10",
-  "description": "Minimal Codex/OpenAI native tools for Pi: image_generation, view_image, apply_patch",
+  "description": "Minimal Codex/OpenAI native tools for Pi: Codex image_generation, view_image, apply_patch",
   "type": "module",
   "keywords": [
     "pi-package",
@@ -45,7 +45,7 @@
         {
           "key": "nativeProviderTools",
           "label": "Native image_generation on Codex",
-          "description": "Rewrite image_generation to OpenAI's Responses-API native tool when the model is openai-codex. Required for image generation to actually work. Does not affect view_image or apply_patch.",
+          "description": "Rewrite this package's image_generation function to OpenAI's Responses-API native tool when the model is openai-codex. Codex-specific; coexists with Pi 0.75's general image APIs. Does not affect view_image or apply_patch.",
           "type": "boolean",
           "default": true,
           "category": "Provider",
@@ -152,15 +152,18 @@
     }
   },
   "peerDependencies": {
-    "@earendil-works/pi-ai": "^0.74.0",
-    "@earendil-works/pi-coding-agent": "^0.74.0",
-    "@earendil-works/pi-tui": "^0.74.0",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
     "typebox": "*"
   },
+  "dependencies": {
+    "undici": "^7.25.0"
+  },
   "devDependencies": {
-    "@earendil-works/pi-ai": "^0.74.0",
-    "@earendil-works/pi-coding-agent": "^0.74.0",
-    "@earendil-works/pi-tui": "^0.74.0",
+    "@earendil-works/pi-ai": "^0.75.0",
+    "@earendil-works/pi-coding-agent": "^0.75.0",
+    "@earendil-works/pi-tui": "^0.75.0",
     "@types/node": "^24.10.1",
     "tsx": "^4.20.6",
     "typebox": "^1.1.24",
@@ -190,5 +193,19 @@
   "author": "vanillagreen",
   "publishConfig": {
     "access": "public"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@earendil-works/pi-tui": {
+      "optional": true
+    }
   }
 }

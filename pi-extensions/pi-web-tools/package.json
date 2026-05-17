@@ -186,9 +186,9 @@
   },
   "devDependencies": {
     "@types/node": "^24.10.1",
-    "@earendil-works/pi-ai": "^0.74.0",
-    "@earendil-works/pi-coding-agent": "^0.74.0",
-    "@earendil-works/pi-tui": "^0.74.0",
+    "@earendil-works/pi-ai": "^0.75.0",
+    "@earendil-works/pi-coding-agent": "^0.75.0",
+    "@earendil-works/pi-tui": "^0.75.0",
     "tsx": "^4.20.6",
     "typebox": "^1.1.24",
     "typescript": "^5.9.3"
@@ -196,11 +196,14 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "tsx --test tests/**/*.test.ts",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck && npm test",
+    "postinstall": "node scripts/append-system.mjs install",
+    "preuninstall": "node scripts/append-system.mjs remove"
   },
   "files": [
     "src/",
     "tests/",
+    "scripts/",
     "instructions.md",
     "README.md",
     "package.json",
@@ -218,5 +221,19 @@
   "author": "vanillagreen",
   "publishConfig": {
     "access": "public"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@earendil-works/pi-tui": {
+      "optional": true
+    }
   }
 }

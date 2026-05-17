@@ -5,7 +5,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { join } from "node:path";
 import { fdResolveStateDir } from "./daemon.ts";
 
@@ -44,11 +44,39 @@ export function piResolvePiBin(): string | null {
 	return null;
 }
 
+function projectPiDir(start = process.cwd()): string | null {
+	let current = resolve(start);
+	while (true) {
+		const candidate = join(current, ".pi");
+		if (existsSync(candidate)) return candidate;
+		const parent = dirname(current);
+		if (parent === current) return null;
+		current = parent;
+	}
+}
+
+export function piBridgeExtensionCandidates(home = homedir(), cwd = process.cwd()): string[] {
+	const projectPi = projectPiDir(cwd);
+	const candidates: string[] = [];
+	if (projectPi) {
+		candidates.push(
+			join(projectPi, "packages/pi-session-bridge/extensions/session-bridge.ts"),
+			join(projectPi, "npm/node_modules/@vanillagreen/pi-session-bridge/extensions/session-bridge.ts"),
+		);
+	}
+	candidates.push(
+		join(home, ".pi/agent/packages/pi-session-bridge/extensions/session-bridge.ts"),
+		join(home, ".pi/agent/npm/node_modules/@vanillagreen/pi-session-bridge/extensions/session-bridge.ts"),
+	);
+	return candidates;
+}
+
 export function piResolveBridgeExtension(): string | null {
 	const env = process.env.PI_SESSION_BRIDGE_EXTENSION;
 	if (env && existsSync(env)) return env;
-	const canonical = join(homedir(), ".pi/agent/packages/pi-session-bridge/extensions/session-bridge.ts");
-	if (existsSync(canonical)) return canonical;
+	for (const candidate of piBridgeExtensionCandidates()) {
+		if (existsSync(candidate)) return candidate;
+	}
 	return null;
 }
 

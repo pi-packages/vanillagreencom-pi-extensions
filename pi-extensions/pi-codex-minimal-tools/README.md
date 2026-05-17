@@ -4,11 +4,11 @@
 
 ![image_generation lifecycle](https://raw.githubusercontent.com/vanillagreencom/vstack/main/pi-extensions/pi-codex-minimal-tools/assets/image-generation.gif)
 
-Minimal Codex/OpenAI tools for Pi. Adds Codex-style tools without replacing Pi natives like `read`, `grep`, `find`, `ls`, `bash`, `edit`, or `write`.
+Minimal Codex/OpenAI tools for Pi. Adds Codex-style tools without replacing Pi natives like `read`, `grep`, `find`, `ls`, `bash`, `edit`, or `write`. Pi 0.75 ships general image-generation APIs and OpenRouter image models; this package keeps the Codex-specific in-chat `image_generation` bridge, `/image-gen` Codex OAuth flow, `view_image`, and `apply_patch`.
 
 ## Highlights
 
-- `image_generation` — native OpenAI Codex image generation on supported models.
+- `image_generation` — Codex-specific native image generation on supported `openai-codex` models, with saved local outputs.
 - `view_image` — return a local image as model image content (off by default).
 - `apply_patch` — local Codex-style patch application.
 - `/image-gen <prompt> [reference.png]` — background image generation/editing via Codex OAuth, with a live status card.
@@ -60,7 +60,7 @@ Open `/extensions:settings`; settings appear under the **Codex Minimal Tools** t
 
 | Setting | What it does |
 | --- | --- |
-| Native image_generation on Codex | Rewrite `image_generation` to OpenAI's Responses-API native tool on `openai-codex`. Required for image generation to actually work. |
+| Native image_generation on Codex | Rewrite this package's `image_generation` function into OpenAI's Responses-API native tool on `openai-codex`. This is Codex-specific and coexists with Pi 0.75's general image APIs. |
 
 ### Images
 

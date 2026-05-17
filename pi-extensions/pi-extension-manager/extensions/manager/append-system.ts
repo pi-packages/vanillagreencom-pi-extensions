@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import type { InventoryItem } from "./types.js";
 
@@ -9,8 +9,22 @@ export function findAppendSystemScopeRoot(packageDir: string): string | undefine
 		const parent = dirname(dir);
 		if (parent === dir) return undefined;
 		if (parent.endsWith("/packages") || parent.endsWith("\\packages")) return dirname(parent);
+		const grandparent = dirname(parent);
+		const isNodeModules = parent.endsWith("/node_modules") || parent.endsWith("\\node_modules");
+		const isPiNpmRoot = grandparent.endsWith("/npm") || grandparent.endsWith("\\npm");
+		if (isNodeModules && isPiNpmRoot) {
+			const scopeRoot = dirname(grandparent);
+			if (isPiScopeRoot(scopeRoot)) return scopeRoot;
+		}
 		dir = parent;
 	}
+}
+
+function isPiScopeRoot(scopeRoot: string): boolean {
+	if (existsSync(join(scopeRoot, "settings.json"))) return true;
+	if (basename(scopeRoot) === ".pi") return true;
+	const configuredUserRoot = resolve(process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent"));
+	return resolve(scopeRoot) === configuredUserRoot;
 }
 
 function appendSystemMarkers(name: string): { begin: string; end: string } {
@@ -92,14 +106,18 @@ export function syncAppendSystemForPackage(item: InventoryItem, willDisable: boo
 	let manifest: { pi?: { appendSystem?: unknown } } | undefined;
 	try {
 		manifest = JSON.parse(readFileSync(pkgJsonPath, "utf8"));
-	} catch {
+	} catch (error) {
+		console.warn(`pi-extension-manager: unable to read appendSystem manifest for ${item.packageName}: ${String(error)}`);
 		return;
 	}
 	const rel = manifest?.pi?.appendSystem;
 	if (typeof rel !== "string") return;
 
 	const scopeRoot = findAppendSystemScopeRoot(item.packageDir);
-	if (!scopeRoot) return;
+	if (!scopeRoot) {
+		console.warn(`pi-extension-manager: unable to resolve APPEND_SYSTEM.md scope for ${item.packageName}`);
+		return;
+	}
 	const target = join(scopeRoot, "APPEND_SYSTEM.md");
 
 	try {
@@ -107,13 +125,20 @@ export function syncAppendSystemForPackage(item: InventoryItem, willDisable: boo
 			appendSystemRemove(target, item.packageName);
 		} else {
 			const sourcePath = resolve(item.packageDir, rel);
-			if (!existsSync(sourcePath)) return;
+			if (!existsSync(sourcePath)) {
+				console.warn(`pi-extension-manager: appendSystem source missing for ${item.packageName}: ${sourcePath}`);
+				return;
+			}
 			const content = readFileSync(sourcePath, "utf8").trim();
-			if (!content) return;
+			if (!content) {
+				console.warn(`pi-extension-manager: appendSystem source is empty for ${item.packageName}: ${sourcePath}`);
+				return;
+			}
 			appendSystemUpsert(target, item.packageName, content);
 		}
-	} catch {
+	} catch (error) {
 		// Best-effort: never block toggle on APPEND_SYSTEM.md write errors.
+		console.warn(`pi-extension-manager: failed to update APPEND_SYSTEM.md for ${item.packageName}: ${String(error)}`);
 	}
 }
 
@@ -123,8 +148,9 @@ export function syncAppendSystemForPackage(item: InventoryItem, willDisable: boo
  * package's `pi.appendSystem` declaration here, since the marker block is
  * keyed by name and remove-by-name is idempotent. Tries the scope's Pi dir
  * (which is where settings.json lives), and additionally the conventional
- * global Pi dir as a backstop for `npm install -g` packages whose package
- * dir lives outside any `<scope>/packages/` tree.
+ * global Pi dir as a backstop for legacy global-prefix npm packages whose
+ * package dir lives outside any managed `<scope>/packages/` or
+ * `<scope>/npm/node_modules/` tree.
  */
 export function removeAppendSystemBlockForUninstall(item: InventoryItem): void {
 	if (!item.packageName) return;

@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-import { toggleItem } from "../extensions/manager/actions.ts";
-import { buildInventory } from "../extensions/manager/inventory.ts";
+import { findAppendSystemScopeRoot } from "../extensions/manager/append-system.ts";
+import { planUninstall, planUpdate, toggleItem } from "../extensions/manager/actions.ts";
+import { applyUpdateMetadata, buildInventory } from "../extensions/manager/inventory.ts";
+import { npmCachePath } from "../extensions/manager/paths.ts";
 
 const rootTmp = join(process.cwd(), "tmp", "pi-extension-manager-inventory-tests");
 const originalEnv = {
@@ -66,10 +68,10 @@ afterEach(() => {
 	rmSync(rootTmp, { force: true, recursive: true });
 });
 
-test("reads settings schemas from globally installed npm packages", () => {
+test("reads settings schemas from user-scoped Pi npm packages", () => {
 	const project = join(rootTmp, "project");
 	const userPi = process.env.PI_CODING_AGENT_DIR!;
-	const npmPackageDir = join(process.env.NPM_CONFIG_PREFIX!, "lib", "node_modules", "@scope", "user-settings");
+	const npmPackageDir = join(userPi, "npm", "node_modules", "@scope", "user-settings");
 	mkdirSync(join(project, ".pi"), { recursive: true });
 	writeJson(join(userPi, "settings.json"), { packages: ["npm:@scope/user-settings"] });
 	writePackage(npmPackageDir, "@scope/user-settings", "User Settings", "enabled");
@@ -84,11 +86,27 @@ test("reads settings schemas from globally installed npm packages", () => {
 	expect(inv.items.some((entry) => entry.kind === "extension module" && entry.sourcePath === join(npmPackageDir, "extensions", "index.ts"))).toBe(true);
 });
 
+test("reads settings schemas from legacy npm global prefix packages", () => {
+	const project = join(rootTmp, "project");
+	const userPi = process.env.PI_CODING_AGENT_DIR!;
+	const npmPackageDir = join(process.env.NPM_CONFIG_PREFIX!, "lib", "node_modules", "@scope", "legacy-settings");
+	mkdirSync(join(project, ".pi"), { recursive: true });
+	writeJson(join(userPi, "settings.json"), { packages: ["npm:@scope/legacy-settings"] });
+	writePackage(npmPackageDir, "@scope/legacy-settings", "Legacy Settings", "enabled");
+
+	const inv = inventory(project);
+	const item = inv.packages.find((pkg) => pkg.packageName === "@scope/legacy-settings");
+	expect(item?.scope).toBe("user");
+	expect(item?.state).toBe("active");
+	expect(item?.packageDir).toBe(npmPackageDir);
+	expect(item?.settingsSchema?.map((schema) => schema.key)).toEqual(["enabled"]);
+});
+
 test("project npm package settings override same global npm package", () => {
 	const project = join(rootTmp, "project");
 	const projectPi = join(project, ".pi");
 	const userPi = process.env.PI_CODING_AGENT_DIR!;
-	const userPackageDir = join(process.env.NPM_CONFIG_PREFIX!, "lib", "node_modules", "@scope", "dupe-settings");
+	const userPackageDir = join(userPi, "npm", "node_modules", "@scope", "dupe-settings");
 	const projectPackageDir = join(projectPi, "npm", "node_modules", "@scope", "dupe-settings");
 	writeJson(join(userPi, "settings.json"), { packages: ["npm:@scope/dupe-settings"] });
 	writeJson(join(projectPi, "settings.json"), { packages: ["npm:@scope/dupe-settings"] });
@@ -102,6 +120,57 @@ test("project npm package settings override same global npm package", () => {
 	expect(copies.find((pkg) => pkg.scope === "project")?.displayName).toBe("Project Copy");
 	expect(copies.find((pkg) => pkg.scope === "project")?.settingsSchema?.map((schema) => schema.key)).toEqual(["projectFlag"]);
 	expect(copies.find((pkg) => pkg.scope === "user")?.state).toBe("shadowed");
+});
+
+test("npm update and uninstall plans use Pi scope-local npm directories", () => {
+	const project = join(rootTmp, "project");
+	const userPi = process.env.PI_CODING_AGENT_DIR!;
+	const npmPackageDir = join(userPi, "npm", "node_modules", "@scope", "updatable");
+	mkdirSync(join(project, ".pi"), { recursive: true });
+	writeJson(join(userPi, "settings.json"), { packages: ["npm:@scope/updatable"] });
+	writePackage(npmPackageDir, "@scope/updatable", "Updatable", "enabled");
+	writeJson(npmCachePath(), {
+		"@scope/updatable": { version: "1.2.4", checkedAt: Date.now() },
+		"@scope/missing": { version: "1.2.4", checkedAt: Date.now() },
+	});
+
+	const inv = inventory(project);
+	const item = inv.packages.find((pkg) => pkg.packageName === "@scope/updatable")!;
+	expect(item.updateCommand).toBe(`(cd '${join(userPi, "npm")}' && npm install @scope/updatable@latest)`);
+	const missing = { ...item, id: "package:@scope/missing", sourceName: "npm:@scope/missing", packageName: "@scope/missing", packageDir: undefined, installedVersion: "1.0.0" };
+	applyUpdateMetadata([missing], inv.settingsFiles, project);
+	expect(missing.updateCommand).toBe("pi install npm:@scope/missing@latest");
+
+	const update = planUpdate(item, inv, { cwd: project } as never);
+	const uninstall = planUninstall(item, inv, { cwd: project } as never);
+	expect(update?.command).toBe(`(cd '${join(userPi, "npm")}' && npm install @scope/updatable@latest)`);
+	expect(uninstall?.command).toBe(`(cd '${join(userPi, "npm")}' && npm uninstall @scope/updatable)`);
+});
+
+test("append-system scope root resolves only Pi npm package directories", () => {
+	const userPi = process.env.PI_CODING_AGENT_DIR!;
+	expect(findAppendSystemScopeRoot(join(userPi, "npm", "node_modules", "@scope", "pkg"))).toBe(userPi);
+	expect(findAppendSystemScopeRoot(join(rootTmp, "not-pi", "npm", "node_modules", "@scope", "pkg"))).toBeUndefined();
+});
+
+test("vendored append-system script installs and removes from Pi npm scope", () => {
+	const userPi = process.env.PI_CODING_AGENT_DIR!;
+	const packageDir = join(userPi, "npm", "node_modules", "@scope", "append-test");
+	mkdirSync(join(packageDir, "scripts"), { recursive: true });
+	writeJson(join(packageDir, "package.json"), { name: "@scope/append-test", pi: { appendSystem: "instructions.md" } });
+	writeFileSync(join(packageDir, "instructions.md"), "Append instructions\n");
+	writeFileSync(
+		join(packageDir, "scripts", "append-system.mjs"),
+		readFileSync(join(import.meta.dir, "..", "..", "pi-session-bridge", "scripts", "append-system.mjs"), "utf8"),
+	);
+
+	const script = join(packageDir, "scripts", "append-system.mjs");
+	const childEnv = { ...process.env, PI_CODING_AGENT_DIR: userPi } as Record<string, string>;
+	expect(Bun.spawnSync(["node", script, "install"], { env: childEnv }).exitCode).toBe(0);
+	expect(readFileSync(join(userPi, "APPEND_SYSTEM.md"), "utf8")).toContain("Append instructions");
+	expect(Bun.spawnSync(["node", script, "remove"], { env: childEnv }).exitCode).toBe(0);
+	const target = join(userPi, "APPEND_SYSTEM.md");
+	expect(existsSync(target) ? readFileSync(target, "utf8") : "").not.toContain("Append instructions");
 });
 
 test("reads settings schemas from project git package clones", () => {

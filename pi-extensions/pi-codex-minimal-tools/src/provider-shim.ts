@@ -104,7 +104,7 @@ interface WebSocketLike {
 }
 
 interface WebSocketConstructorLike {
-	new (url: string, options?: { headers?: Record<string, string> } | string | string[]): WebSocketLike;
+	new (url: string, options?: { headers?: Record<string, string>; dispatcher?: unknown } | string | string[]): WebSocketLike;
 }
 
 interface SessionWebSocketCacheEntry {
@@ -655,6 +655,54 @@ function getWebSocketConstructor(): WebSocketConstructorLike | null {
 	return typeof ctor === "function" ? ctor : null;
 }
 
+function envFirst(names: string[]): string | undefined {
+	if (typeof process === "undefined") return undefined;
+	for (const name of names) {
+		const value = process.env[name];
+		if (value?.trim()) return value.trim();
+	}
+	return undefined;
+}
+
+function noProxyMatches(hostname: string, noProxy: string | undefined): boolean {
+	if (!noProxy) return false;
+	const host = hostname.toLowerCase();
+	for (const rawPart of noProxy.split(",")) {
+		const part = rawPart.trim().toLowerCase();
+		if (!part) continue;
+		if (part === "*") return true;
+		const normalized = part.startsWith(".") ? part.slice(1) : part;
+		if (host === normalized || host.endsWith(`.${normalized}`)) return true;
+	}
+	return false;
+}
+
+export function proxyForWebSocketUrl(rawUrl: string): string | undefined {
+	let url: URL;
+	try {
+		url = new URL(rawUrl);
+	} catch {
+		return undefined;
+	}
+	const noProxy = envFirst(["NO_PROXY", "no_proxy"]);
+	if (noProxyMatches(url.hostname, noProxy)) return undefined;
+	if (url.protocol === "wss:" || url.protocol === "https:") return envFirst(["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"]);
+	if (url.protocol === "ws:" || url.protocol === "http:") return envFirst(["HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy"]);
+	return undefined;
+}
+
+async function proxyDispatcherForUrl(rawUrl: string): Promise<unknown | undefined> {
+	const proxy = proxyForWebSocketUrl(rawUrl);
+	if (!proxy) return undefined;
+	const { ProxyAgent } = await import("undici");
+	return new ProxyAgent(proxy);
+}
+
+export async function webSocketOptionsForUrl(url: string, headers: Record<string, string>): Promise<{ headers: Record<string, string>; dispatcher?: unknown }> {
+	const dispatcher = await proxyDispatcherForUrl(url);
+	return dispatcher ? { headers, dispatcher } : { headers };
+}
+
 function getWebSocketReadyState(socket: WebSocketLike): number | undefined {
 	return typeof socket.readyState === "number" ? socket.readyState : undefined;
 }
@@ -713,13 +761,14 @@ async function connectWebSocket(url: string, headers: Headers, signal: AbortSign
 
 	const wsHeaders = headersToRecord(headers);
 	delete wsHeaders["OpenAI-Beta"];
+	const options = await webSocketOptionsForUrl(url, wsHeaders);
 
 	return new Promise((resolve, reject) => {
 		let settled = false;
 		let socket: WebSocketLike;
 
 		try {
-			socket = new WebSocketCtor(url, { headers: wsHeaders });
+			socket = new WebSocketCtor(url, options);
 		} catch (error) {
 			reject(error instanceof Error ? error : new Error(String(error)));
 			return;
@@ -1583,6 +1632,8 @@ function createCodexStream<TApi extends Api>(
 
 			let response: Response | undefined;
 			let lastError: Error | undefined;
+			const sseUrl = resolveCodexUrl(model.baseUrl);
+			const sseDispatcher = await proxyDispatcherForUrl(sseUrl);
 
 			for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
 				if (options?.signal?.aborted) {
@@ -1590,12 +1641,13 @@ function createCodexStream<TApi extends Api>(
 				}
 
 				try {
-					response = await fetch(resolveCodexUrl(model.baseUrl), {
+					response = await fetch(sseUrl, {
 						method: "POST",
 						headers: sseHeaders,
 						body: bodyJson,
 						signal: options?.signal,
-					});
+						...(sseDispatcher ? { dispatcher: sseDispatcher } : {}),
+					} as RequestInit);
 
 					await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
 

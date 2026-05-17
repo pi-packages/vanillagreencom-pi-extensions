@@ -74,11 +74,11 @@ async function loadFreshModules() {
 	return inventory;
 }
 
-test("buildInventory does not spawn npm when npm packages resolve via NPM_CONFIG_PREFIX", async () => {
+test("buildInventory does not spawn npm when packages resolve via Pi user npm dir", async () => {
 	const { buildInventory } = await loadFreshModules();
 	const project = join(rootTmp, "project");
 	const userPi = process.env.PI_CODING_AGENT_DIR!;
-	const npmRoot = join(process.env.NPM_CONFIG_PREFIX!, "lib", "node_modules");
+	const npmRoot = join(userPi, "npm", "node_modules");
 
 	mkdirSync(join(project, ".pi"), { recursive: true });
 	const names = Array.from({ length: 20 }, (_, i) => `@scope/perf-pkg-${i}`);
@@ -135,7 +135,7 @@ test("buildInventory wall-clock stays under 100ms for a realistic npm-heavy inve
 	const { buildInventory } = await loadFreshModules();
 	const project = join(rootTmp, "project");
 	const userPi = process.env.PI_CODING_AGENT_DIR!;
-	const npmRoot = join(process.env.NPM_CONFIG_PREFIX!, "lib", "node_modules");
+	const npmRoot = join(userPi, "npm", "node_modules");
 
 	mkdirSync(join(project, ".pi"), { recursive: true });
 	const names = Array.from({ length: 25 }, (_, i) => `@scope/wallclock-pkg-${i}`);
