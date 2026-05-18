@@ -20,16 +20,16 @@ import { decideShellAdhocWake } from "../daemon/shell-adhoc-wake.ts";
 import { validateTrackedEntryDomain } from "../state/tracked-entry.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const FD_STATE_SCRIPT = resolve(HERE, "../../../../scripts/flightdeck-state");
+const FD_STATE_SCRIPT = process.env.FLIGHTDECK_TEST_STATE_SCRIPT || resolve(HERE, "../../../../scripts/flightdeck-state");
 
 function die(msg: string, code = 2): never {
 	process.stderr.write(`${msg}\n`);
 	process.exit(code);
 }
 
-function fdState(args: string[]): { status: number | null; stdout: string; stderr: string } {
+function fdState(args: string[]): { status: number | null; stdout: string; stderr: string; error?: Error } {
 	const r = spawnSync(FD_STATE_SCRIPT, args, { encoding: "utf8" });
-	return { status: r.status, stderr: r.stderr ?? "", stdout: r.stdout ?? "" };
+	return { error: r.error, status: r.status, stderr: r.stderr ?? "", stdout: r.stdout ?? "" };
 }
 
 function fdStateOrDie(args: string[]): string {
@@ -102,6 +102,59 @@ function tmuxLivePaneIdsResult(): TmuxLivePaneIdsResult {
 function tmuxLivePaneIds(): Set<string> {
 	const r = tmuxLivePaneIdsResult();
 	return r.ok ? r.panes : new Set<string>();
+}
+
+type TmuxLivePaneSnapshotResult =
+	| { ok: true; panes: Set<string>; targets: Set<string> }
+	| { ok: false; error: string };
+
+function tmuxLivePaneSnapshotResult(): TmuxLivePaneSnapshotResult {
+	const r = spawnSync("tmux", ["list-panes", "-a", "-F", "#{pane_id}\t#{session_name}:#{window_index}.#{pane_index}"], { encoding: "utf8" });
+	if (r.error) return { ok: false, error: `tmux list-panes -a spawn failed: ${r.error.message}` };
+	if (r.status !== 0) {
+		const stderr = (r.stderr ?? "").trim();
+		return { ok: false, error: `tmux list-panes -a failed (status=${r.status})${stderr ? `: ${stderr}` : ""}` };
+	}
+	const panes = new Set<string>();
+	const targets = new Set<string>();
+	for (const line of (r.stdout ?? "").split("\n")) {
+		if (!line) continue;
+		const [paneId, paneTarget] = line.split("\t");
+		if (paneId) panes.add(paneId);
+		if (paneTarget) targets.add(paneTarget);
+	}
+	return { ok: true, panes, targets };
+}
+
+type TmuxWindowNameResult =
+	| { ok: true; present: true; name: string }
+	| { ok: true; present: false; reason: string }
+	| { ok: false; reason: string; message: string };
+
+function tmuxDisplayWindowName(target: string): TmuxWindowNameResult {
+	const r = spawnSync("tmux", ["display-message", "-p", "-t", target, "#W"], { encoding: "utf8" });
+	if (r.error) return { ok: false, reason: "tmux-display-message-spawn-failed", message: r.error.message };
+	if (r.status !== 0) {
+		const stderr = (r.stderr ?? "").trim();
+		return { ok: false, reason: "tmux-display-message-failed", message: `tmux display-message failed for ${target} (status=${r.status})${stderr ? `: ${stderr}` : ""}` };
+	}
+	const name = (r.stdout ?? "").trim();
+	if (!name) return { ok: false, reason: "tmux-window-name-empty", message: `tmux display-message returned an empty #W for ${target}` };
+	return { ok: true, present: true, name };
+}
+
+function tmuxCurrentWindowNameForEntry(entry: EntryRecord, snapshot: { panes: Set<string>; targets: Set<string> }): TmuxWindowNameResult {
+	const paneId = entryString(entry, "pane_id");
+	const paneTarget = entryString(entry, "pane_target");
+	if (paneId) {
+		if (!snapshot.panes.has(paneId)) return { ok: true, present: false, reason: "pane-id-missing" };
+		return tmuxDisplayWindowName(paneId);
+	}
+	if (paneTarget) {
+		if (!snapshot.targets.has(paneTarget)) return { ok: true, present: false, reason: "pane-target-missing" };
+		return tmuxDisplayWindowName(paneTarget);
+	}
+	return { ok: true, present: false, reason: "missing-target" };
 }
 
 function paneMatchIsLive(paneId: string, paneTarget: string): boolean {
@@ -379,6 +432,13 @@ function cmdInitEntry(entryId: string, args: string[], mode: "entry" | "issue" =
 	const paneTarget = fields.pane_target || `${session}:${fields.window}.${fields.pane_index}`;
 	let paneId = fields.pane_id;
 	if (!paneId && tmuxPaneExists(paneTarget)) paneId = tmuxField(paneTarget, "#{pane_id}");
+	const windowSnapshot = tmuxLivePaneSnapshotResult();
+	const windowNameCurrent = windowSnapshot.ok
+		? (() => {
+			const result = tmuxCurrentWindowNameForEntry({ pane_id: paneId || null, pane_target: paneTarget || null }, windowSnapshot);
+			return result.ok && result.present ? result.name : null;
+		})()
+		: null;
 
 	const launchArgv = parseArgvJson(fields.launch_argv_json);
 	const launch = (fields.launch_model || fields.launch_effort || fields.launch_cmd || fields.launch_requested_model || fields.launch_requested_effort || fields.launch_resolved_model || fields.launch_resolved_effort || fields.launch_reasoning_status || fields.launch_unsupported_reason || launchArgv)
@@ -464,6 +524,7 @@ function cmdInitEntry(entryId: string, args: string[], mode: "entry" | "issue" =
 		window: fields.window,
 		window_id: strOrNull(fields.window_id),
 		window_index: numOrNull(fields.window_index),
+		window_name_current: windowNameCurrent,
 	};
 	if (fields.kind !== "issue") {
 		const pr = numOrNull(fields.pr);
@@ -500,6 +561,26 @@ function trackedEntries(): Record<string, Record<string, unknown>> {
 		return entries;
 	} catch {
 		return {};
+	}
+}
+
+function trackedEntriesForRefresh(): Record<string, Record<string, unknown>> {
+	const r = fdState(["tracked-entries"]);
+	if (r.error || r.status === null) {
+		die(`pane-registry: refresh-window-names flightdeck-state-spawn-failed: ${r.error?.message ?? "process exited without status"}`);
+	}
+	const status = r.status;
+	if (status !== 0) die(`pane-registry: refresh-window-names failed to read tracked entries (flightdeck-state exit=${status}): ${r.stderr.trim() || "no stderr"}`);
+	if (r.stderr.trim()) process.stderr.write(r.stderr.endsWith("\n") ? r.stderr : `${r.stderr}\n`);
+	try {
+		const parsed = JSON.parse(r.stdout || "{}") as unknown;
+		if (!isRecord(parsed)) die("pane-registry: refresh-window-names got invalid tracked-entries JSON: expected object");
+		const entries: Record<string, Record<string, unknown>> = {};
+		for (const [key, value] of Object.entries(parsed)) if (isRecord(value)) entries[key] = value;
+		return entries;
+	} catch (error) {
+		if (error instanceof SyntaxError) die(`pane-registry: refresh-window-names got invalid tracked-entries JSON: ${error.message}`);
+		throw error;
 	}
 }
 
@@ -873,6 +954,40 @@ function cmdList(args: string[]): void {
 		default:
 			die(`Unknown format: ${format} (supported: json, inner-panes, inner-harnesses, inner-panes-live, inner-harnesses-live, inner-live-json)`);
 	}
+}
+
+function cmdRefreshWindowNames(args: string[]): void {
+	if (args.length > 0) die("Usage: refresh-window-names");
+	const updated: string[] = [];
+	const cleared: string[] = [];
+	const warnings: Array<{ id?: string; reason: string; message: string }> = [];
+	const entries = trackedEntriesForRefresh();
+	const windowSnapshot = tmuxLivePaneSnapshotResult();
+	if (!windowSnapshot.ok) {
+		warnings.push({ reason: "tmux-list-panes-failed", message: windowSnapshot.error });
+		process.stdout.write(`${JSON.stringify({ updated, cleared, warnings })}\n`);
+		return;
+	}
+	for (const [id, entry] of Object.entries(entries)) {
+		const current = tmuxCurrentWindowNameForEntry(entry, windowSnapshot);
+		const previous = entry.window_name_current;
+		if (!current.ok) {
+			warnings.push({ id, reason: current.reason, message: current.message });
+			continue;
+		}
+		if (!current.present) {
+			if (previous !== undefined && previous !== null) {
+				setEntryField(id, "window_name_current", "null");
+				cleared.push(id);
+			}
+			continue;
+		}
+		if (previous !== current.name) {
+			setEntryField(id, "window_name_current", JSON.stringify(current.name));
+			updated.push(id);
+		}
+	}
+	process.stdout.write(`${JSON.stringify({ updated, cleared, warnings })}\n`);
 }
 
 // ----- get / set-state / set-substate / set / log-decision -----------------
@@ -1392,6 +1507,7 @@ switch (action) {
 	case "init":          cmdInit(argv.shift() ?? "", argv); break;
 	case "init-entry":    cmdInitEntry(argv.shift() ?? "", argv); break;
 	case "list":          cmdList(argv); break;
+	case "refresh-window-names": cmdRefreshWindowNames(argv); break;
 	case "get":           cmdGet(argv[0] ?? ""); break;
 	case "set-state":     cmdSetState(argv[0] ?? "", argv[1] ?? ""); break;
 	case "set-substate":  cmdSetSubstate(argv[0] ?? "", argv[1] ?? ""); break;
@@ -1408,5 +1524,5 @@ switch (action) {
 	case "teardown-window":
 	case "teardown-entry":  cmdTeardownWindow(argv); break;
 	default:
-		die(`Unknown action: ${action}\nActions: init-entry | init | list | get | set-state | set-substate | set | log-decision | remove | remove-merged | reconcile | teardown-window | teardown-entry | oc-attach-args | cc-channel-args | pi-bridge-args | cx-bridge-args | find-by-pane`);
+		die(`Unknown action: ${action}\nActions: init-entry | init | list | refresh-window-names | get | set-state | set-substate | set | log-decision | remove | remove-merged | reconcile | teardown-window | teardown-entry | oc-attach-args | cc-channel-args | pi-bridge-args | cx-bridge-args | find-by-pane`);
 }
