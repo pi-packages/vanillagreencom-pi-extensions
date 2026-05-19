@@ -106,7 +106,7 @@ describe("reapSubscriber SIGTERM->grace->SIGKILL with mocked deps (vstack#58)", 
 			},
 		);
 		expect(result.outcome).toBe("term-ok");
-		expect(signals.some((s) => s.sig === "SIGTERM" && s.pid === 42)).toBe(true);
+		expect(signals.some((s) => s.sig === "SIGTERM" && s.pid === -42)).toBe(true);
 		expect(scheduled.length).toBe(1);
 		expect(scheduled[0]?.ms).toBe(50);
 		// Run the deferred check: pid is now "dead" (mocked), so no SIGKILL.
@@ -114,8 +114,93 @@ describe("reapSubscriber SIGTERM->grace->SIGKILL with mocked deps (vstack#58)", 
 		expect(signals.some((s) => s.sig === "SIGKILL")).toBe(false);
 		expect(existsSync(pidFile)).toBe(false);
 		expect(existsSync(logFile)).toBe(false);
-		const reapLog = lines.find((l) => l.tag === "reap");
+		const reapLog = lines.find((l) => l.tag === "reap" && l.msg.includes("outcome=term-ok"));
 		expect(reapLog?.msg).toContain("outcome=term-ok");
+	});
+
+	test("deferred cleanup preserves replacement subscriber pid/log when pidfile changed", () => {
+		const { pidFile, logFile } = mkPidLogFiles(42);
+		const { lines, log } = buildLog();
+		const scheduled: Array<{ ms: number; fn: () => void }> = [];
+		let stillAlive = true;
+		const result = reapSubscriber(
+			{ paneId: "%7", reason: "pi-session-mismatch", pidFile, logFile, graceMs: 50, harness: "pi" },
+			{
+				log,
+				signal: (_pid, sig) => {
+					if (sig === 0) { if (!stillAlive) { const e: NodeJS.ErrnoException = new Error("ESRCH"); e.code = "ESRCH"; throw e; } return; }
+					if (sig === "SIGTERM") { stillAlive = false; return; }
+				},
+				scheduleAfter: (ms, fn) => { scheduled.push({ ms, fn }); return { cancel: () => undefined }; },
+			},
+		);
+		expect(result.outcome).toBe("term-ok");
+		writeFileSync(pidFile, "4242\n");
+		writeFileSync(logFile, "replacement subscriber log\n");
+		scheduled[0]?.fn();
+		expect(readFileSync(pidFile, "utf8").trim()).toBe("4242");
+		expect(readFileSync(logFile, "utf8")).toContain("replacement subscriber log");
+		expect(result.pidFileRemoved).toBe(false);
+		expect(result.logFileRemoved).toBe(false);
+		expect(lines.some((l) => l.msg.includes("cleanup=skipped-current-pid") && l.msg.includes("current_pid=4242"))).toBe(true);
+	});
+
+	test("process-group ESRCH never falls back to positive pid", () => {
+		const { pidFile, logFile } = mkPidLogFiles(42);
+		const { lines, log } = buildLog();
+		const signals: Array<{ pid: number; sig: NodeJS.Signals | 0 }> = [];
+		const result = reapSubscriber(
+			{ paneId: "%7", reason: "pane-gone", pidFile, logFile, graceMs: 50 },
+			{
+				log,
+				signal: (pid, sig) => {
+					signals.push({ pid, sig });
+					if (pid > 0) throw new Error(`unsafe positive pid signal ${pid}`);
+					const e: NodeJS.ErrnoException = new Error("ESRCH");
+					e.code = "ESRCH";
+					throw e;
+				},
+				scheduleAfter: (_ms, _fn) => ({ cancel: () => undefined }),
+			},
+		);
+		expect(result.outcome).toBe("already-gone");
+		expect(signals).toEqual([{ pid: -42, sig: 0 }]);
+		expect(lines.some((l) => l.msg.includes("outcome=already-gone"))).toBe(true);
+	});
+
+	test("grace SIGKILL path never falls back to positive pid when pidfile now points at replacement", () => {
+		const { pidFile, logFile } = mkPidLogFiles(42);
+		const { lines, log } = buildLog();
+		const signals: Array<{ pid: number; sig: NodeJS.Signals | 0 }> = [];
+		const scheduled: Array<{ ms: number; fn: () => void }> = [];
+		const result = reapSubscriber(
+			{ paneId: "%7", reason: "pi-session-mismatch", pidFile, logFile, graceMs: 50, harness: "pi" },
+			{
+				log,
+				signal: (pid, sig) => {
+					signals.push({ pid, sig });
+					if (pid > 0) throw new Error(`unsafe positive pid signal ${pid}`);
+					if (sig === 0 || sig === "SIGTERM") return;
+					if (sig === "SIGKILL") {
+						const e: NodeJS.ErrnoException = new Error("ESRCH");
+						e.code = "ESRCH";
+						throw e;
+					}
+				},
+				scheduleAfter: (ms, fn) => { scheduled.push({ ms, fn }); return { cancel: () => undefined }; },
+			},
+		);
+		expect(result.outcome).toBe("term-ok");
+		writeFileSync(pidFile, "4242\n");
+		writeFileSync(logFile, "replacement subscriber log\n");
+		scheduled[0]?.fn();
+		expect(signals.every((s) => s.pid < 0)).toBe(true);
+		expect(signals.some((s) => s.sig === "SIGKILL" && s.pid === -42)).toBe(true);
+		expect(readFileSync(pidFile, "utf8").trim()).toBe("4242");
+		expect(readFileSync(logFile, "utf8")).toContain("replacement subscriber log");
+		expect(result.pidFileRemoved).toBe(false);
+		expect(result.logFileRemoved).toBe(false);
+		expect(lines.some((l) => l.msg.includes("cleanup=skipped-current-pid") && l.msg.includes("current_pid=4242"))).toBe(true);
 	});
 
 	test("stubborn process: SIGKILL fires after grace, logged kill-required", () => {
@@ -138,7 +223,7 @@ describe("reapSubscriber SIGTERM->grace->SIGKILL with mocked deps (vstack#58)", 
 		expect(result.outcome).toBe("term-ok");
 		expect(signals.find((s) => s.sig === "SIGTERM")).toBeDefined();
 		scheduled[0]?.fn();
-		expect(signals.find((s) => s.sig === "SIGKILL" && s.pid === 99)).toBeDefined();
+		expect(signals.find((s) => s.sig === "SIGKILL" && s.pid === -99)).toBeDefined();
 		const reapLog = lines.find((l) => l.tag === "reap" && l.msg.includes("kill-required"));
 		expect(reapLog).toBeDefined();
 		expect(reapLog?.msg).toContain("pane=%9");
@@ -203,6 +288,38 @@ describe("reapSubscriber against a real bash sleep process (vstack#58)", () => {
 		const reapLog = lines.find((l) => l.tag === "reap");
 		expect(reapLog?.msg).toContain("pane=%real");
 		expect(reapLog?.msg).toContain("reason=pane-gone");
+	});
+
+	test("process-group reap kills subscriber pipeline child", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "fd-reap-group-"));
+		const pidFile = join(dir, "fd-pi-subscriber-group.pid");
+		const logFile = join(dir, "fd-daemon.log.pi-sub-group");
+		const childPidFile = join(dir, "child.pid");
+		const child = spawn("bash", ["-c", "sleep 60 & echo $! > \"$1\"; wait", "fd-reap-group", childPidFile], { stdio: "ignore", detached: true });
+		child.unref();
+		const pid = child.pid!;
+		try {
+			const childPidReady = await waitFor(() => existsSync(childPidFile), 2000);
+			expect(childPidReady).toBe(true);
+			const pipelineChildPid = Number.parseInt(readFileSync(childPidFile, "utf8").trim(), 10);
+			expect(pidAlive(pipelineChildPid)).toBe(true);
+			writeFileSync(pidFile, `${pid}\n`);
+			writeFileSync(logFile, "x");
+			const { lines, log } = buildLog();
+			const result = reapSubscriber(
+				{ paneId: "%group", reason: "pi-session-mismatch", pidFile, logFile, graceMs: 50, harness: "pi" },
+				{ log },
+			);
+			expect(result.outcome).toBe("term-ok");
+			const groupGone = await waitFor(() => !pidAlive(pid) && !pidAlive(pipelineChildPid), 2000);
+			expect(groupGone).toBe(true);
+			const cleanupDone = await waitFor(() => !existsSync(pidFile), 1000);
+			expect(cleanupDone).toBe(true);
+			expect(lines.some((l) => l.msg.includes("scope=process-group") || l.msg.includes("outcome=term-ok"))).toBe(true);
+		} finally {
+			try { process.kill(-pid, "SIGKILL"); } catch { /* */ }
+			try { process.kill(pid, "SIGKILL"); } catch { /* */ }
+		}
 	});
 });
 

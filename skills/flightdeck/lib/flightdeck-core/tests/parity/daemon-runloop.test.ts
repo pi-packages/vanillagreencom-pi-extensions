@@ -12,10 +12,12 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { runLoop } from "../../src/daemon/loop.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = resolve(HERE, "../../../../scripts/flightdeck-daemon");
@@ -34,6 +36,16 @@ function pidAlive(pid: number): boolean {
 	if (!Number.isFinite(pid) || pid <= 0) return false;
 	try { process.kill(pid, 0); return true; }
 	catch (e) { return (e as NodeJS.ErrnoException).code === "EPERM"; }
+}
+function activeProcessGroupPids(pgid: number): number[] {
+	if (!Number.isFinite(pgid) || pgid <= 0) return [];
+	const r = spawnSync("ps", ["-eo", "pid=,pgid=,stat="], { encoding: "utf8" });
+	if (r.status !== 0) return [];
+	return (r.stdout ?? "").split("\n")
+		.map((line) => line.trim().split(/\s+/, 3))
+		.filter(([pid, group, stat]) => pid && group && stat && Number.parseInt(group, 10) === pgid && !stat.includes("Z"))
+		.map(([pid]) => Number.parseInt(pid!, 10))
+		.filter((pid) => Number.isFinite(pid) && pid > 0);
 }
 function sleep(ms: number): Promise<void> { return new Promise((res) => setTimeout(res, ms)); }
 
@@ -284,6 +296,272 @@ describe("daemon run-loop (TS)", () => {
 		const subFiles = entries.filter((e) => e.includes(`subscriber-${SESSION_KEY}-`));
 		expect(subFiles).toEqual([]);
 	});
+
+	test("pi session mismatch quarantines same-batch rows and respawns without stale reattach", async () => {
+		const masterPane = tmuxNewWindow(SESSION, `fd-pi-mismatch-master-${Date.now()}`);
+		const testSessionKey = `${SESSION_KEY}-pimismatch-${Date.now()}`;
+		const activityPath = join(stateDir, "activity.jsonl");
+		const fakeDir = join(stateDir, "fake-bin");
+		mkdirSync(fakeDir, { recursive: true });
+		const streamCountFile = join(stateDir, "stream-count");
+		const fakeSocket = join(stateDir, "pi.sock");
+		const bridgeBin = join(fakeDir, "pi-bridge");
+		const cwdJson = JSON.stringify(process.cwd());
+		const socketJson = JSON.stringify(fakeSocket);
+		writeFileSync(bridgeBin, `#!/usr/bin/env bash
+count_file=${JSON.stringify(streamCountFile)}
+case "\${1:-}" in
+  list)
+    printf '%s\n' '[{"pid":${process.pid},"cwd":${cwdJson},"sessionId":"pi-new","socketPath":${socketJson}}]'
+    ;;
+  state)
+    printf '%s\n' '{"data":{"protocol":"pi-session-bridge.v1","sessionId":"pi-new","socketPath":${socketJson}}}'
+    ;;
+  questions)
+    printf '{"success":true,"data":{"questions":[]}}\n'
+    ;;
+  stream)
+    count=0
+    [[ -f "$count_file" ]] && count=$(cat "$count_file")
+    count=$((count + 1))
+    printf '%s\n' "$count" > "$count_file"
+    if (( count == 1 )); then
+      printf '%s\n' '{"type":"bridge_hello","protocol":"pi-session-bridge.v1","state":{"sessionId":"pi-old","socketPath":${socketJson}}}'
+      printf '{"type":"event","event":"question","data":{"action":"opened","requestId":"stale-q","request":{"id":"stale-q","header":"Wrong session","questions":[]}}}\n'
+      sleep 30
+    else
+      printf '%s\n' '{"type":"bridge_hello","protocol":"pi-session-bridge.v1","state":{"sessionId":"pi-new","socketPath":${socketJson}}}'
+      sleep 30
+    fi
+    ;;
+esac
+exit 0
+`);
+		chmodSync(bridgeBin, 0o755);
+		const registryBin = join(fakeDir, "pane-registry");
+		const rows = JSON.stringify([{ pane_id: innerPaneId, pane_target: innerPaneId, harness: "pi", kind: "workflow", cwd: process.cwd(), pi_bridge_pid: process.pid, pi_bridge_socket: fakeSocket, pi_session_id: "pi-new" }]);
+		writeFileSync(registryBin, `#!/usr/bin/env bash
+if [[ "\${1:-}" == "list" ]]; then
+  printf '%s\n' ${JSON.stringify(rows)}
+  exit 0
+fi
+if [[ "\${1:-}" == "find-by-pane" ]]; then
+  printf '{"id":"pi-entry","kind":"workflow"}\n'
+  exit 0
+fi
+if [[ "\${1:-}" == "pi-bridge-args" ]]; then
+  printf -- '--pid %s --socket %s\n' ${process.pid} ${JSON.stringify(fakeSocket)}
+  exit 0
+fi
+exit 1
+`);
+		chmodSync(registryBin, 0o755);
+		writeFileSync(join(stateDir, `fd-wake-events-${testSessionKey}.log`), [
+			JSON.stringify({ ts: new Date().toISOString(), pane_id: innerPaneId, harness: "pi", event_type: "pi_session_connected", classifier_tag: "pi-session-connected", hash: "badc0ffee001", pi_session_id: "pi-old", expected_pi_session_id: "pi-new", pi_pid: String(process.pid), pi_socket: fakeSocket }),
+			JSON.stringify({ ts: new Date().toISOString(), pane_id: innerPaneId, harness: "pi", event_type: "question", request_id: "stale-q", question: { id: "stale-q", header: "Wrong session", questions: [] }, classifier_tag: "pi-question", hash: "badc0ffee002" }),
+		].join("\n") + "\n");
+
+		const savedBridge = process.env.PI_BRIDGE_BIN;
+		const savedStateDir = process.env.FD_STATE_DIR;
+		process.env.PI_BRIDGE_BIN = bridgeBin;
+		process.env.FD_STATE_DIR = stateDir;
+		const loopPromise = runLoop({
+			activity: { activityPath, sessionId: "pi-mismatch-test" },
+			captureLines: 20,
+			classifierBin: "",
+			debugPane: "",
+			defaultHarness: "pi",
+			fromHandoff: false,
+			graceSec: 0,
+			heartbeatTicks: 60,
+			innerHarnesses: ["pi"],
+			innerTargets: [innerPaneId],
+			masterHarness: "pi",
+			masterTarget: masterPane,
+			masterTurnTtl: 60,
+			maxLifetime: 0,
+			origArgs: [],
+			paneRegistryBin: registryBin,
+			pollSec: 0.1,
+			scriptPath: SCRIPT,
+			sessionId: SESSION,
+			sessionKey: testSessionKey,
+			sessionName: SESSION_NAME,
+			stabilitySec: 999,
+			stateDir,
+			verbose: true,
+			wakePendingTtl: 60,
+		});
+		try {
+			const subLogFile = join(stateDir, `fd-daemon-${testSessionKey}.log.pi-sub-${innerPaneId.replace(/^%/, "")}`);
+			const pidFile = join(stateDir, `fd-pi-subscriber-${testSessionKey}-${innerPaneId.replace(/^%/, "")}.pid`);
+			const sawExpectedSessionArg = await waitFor(() => existsSync(subLogFile) && readFileSync(subLogFile, "utf8").includes("[pi-sub-start]") && readFileSync(subLogFile, "utf8").includes("expected_session=pi-new"), 3000);
+			expect(sawExpectedSessionArg).toBe(true);
+			const sawRespawn = await waitFor(() => {
+				if (!existsSync(streamCountFile)) return false;
+				return Number.parseInt(readFileSync(streamCountFile, "utf8").trim() || "0", 10) >= 2;
+			}, 8000);
+			expect(sawRespawn).toBe(true);
+			const logFile = join(stateDir, `fd-daemon-${testSessionKey}.log`);
+			const readSpawnPids = (): number[] => {
+				if (!existsSync(logFile)) return [];
+				return Array.from(readFileSync(logFile, "utf8").matchAll(/\[pi-subscriber-spawn\][^\n]*\spid=(\d+)/g))
+					.map((m) => Number.parseInt(m[1]!, 10));
+			};
+			const sawTwoSpawnPids = await waitFor(() => readSpawnPids().length >= 2, 3000);
+			expect(sawTwoSpawnPids).toBe(true);
+			const spawnPids = readSpawnPids();
+			const replacementPid = Number.parseInt(readFileSync(pidFile, "utf8").trim(), 10);
+			const oldPids = spawnPids.filter((pid) => pid !== replacementPid);
+			expect(oldPids.length).toBeGreaterThan(0);
+			expect(Number.isFinite(replacementPid) && replacementPid > 0).toBe(true);
+			await sleep(5200);
+			for (const oldPid of oldPids) expect(activeProcessGroupPids(oldPid)).toEqual([]);
+			expect(readFileSync(pidFile, "utf8").trim()).toBe(String(replacementPid));
+			expect(existsSync(subLogFile)).toBe(true);
+			const sawMismatchLog = await waitFor(() => existsSync(logFile) && readFileSync(logFile, "utf8").includes("[pi-subscriber-mismatch]") && readFileSync(logFile, "utf8").includes("force-spawn requested"), 3000);
+			expect(sawMismatchLog).toBe(true);
+			const activity = readFileSync(activityPath, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+			expect(activity.some((row) => row.type === "subscriber.mismatch" && row.pane_id === innerPaneId)).toBe(true);
+			const eventsFile = join(stateDir, `fd-daemon-events-${testSessionKey}.jsonl`);
+			const eventText = existsSync(eventsFile) ? readFileSync(eventsFile, "utf8") : "";
+			expect(eventText).not.toContain("stale-q");
+		} finally {
+			tmuxKillPaneFor(masterPane);
+			const loopExited = await Promise.race([loopPromise.then(() => true), sleep(5000).then(() => false)]);
+			expect(loopExited).toBe(true);
+			const pidFile = join(stateDir, `fd-pi-subscriber-${testSessionKey}-${innerPaneId.replace(/^%/, "")}.pid`);
+			if (existsSync(pidFile)) {
+				const pid = Number.parseInt(readFileSync(pidFile, "utf8").trim(), 10);
+				if (pid) {
+					try { process.kill(-pid, "SIGTERM"); } catch { /* */ }
+					try { process.kill(pid, "SIGTERM"); } catch { /* */ }
+				}
+			}
+			if (savedBridge === undefined) delete process.env.PI_BRIDGE_BIN;
+			else process.env.PI_BRIDGE_BIN = savedBridge;
+			if (savedStateDir === undefined) delete process.env.FD_STATE_DIR;
+			else process.env.FD_STATE_DIR = savedStateDir;
+		}
+	}, 22000);
+
+	test("pi mismatch force-respawn uses registry harness when default harness is not pi", async () => {
+		const masterPane = tmuxNewWindow(SESSION, `fd-pi-harness-respawn-master-${Date.now()}`);
+		const testSessionKey = `${SESSION_KEY}-piharness-${Date.now()}`;
+		const activityPath = join(stateDir, "activity-harness.jsonl");
+		const fakeDir = join(stateDir, "fake-bin-harness");
+		mkdirSync(fakeDir, { recursive: true });
+		const streamCountFile = join(stateDir, "stream-count-harness");
+		const fakeSocket = join(stateDir, "pi-harness.sock");
+		const bridgeBin = join(fakeDir, "pi-bridge");
+		const cwdJson = JSON.stringify(process.cwd());
+		const socketJson = JSON.stringify(fakeSocket);
+		writeFileSync(bridgeBin, `#!/usr/bin/env bash
+count_file=${JSON.stringify(streamCountFile)}
+case "\${1:-}" in
+  list)
+    printf '%s\n' '[{"pid":${process.pid},"cwd":${cwdJson},"sessionId":"pi-new","socketPath":${socketJson}}]'
+    ;;
+  state)
+    printf '%s\n' '{"data":{"protocol":"pi-session-bridge.v1","sessionId":"pi-new","socketPath":${socketJson}}}'
+    ;;
+  questions)
+    printf '{"success":true,"data":{"questions":[]}}\n'
+    ;;
+  stream)
+    count=0
+    [[ -f "$count_file" ]] && count=$(cat "$count_file")
+    count=$((count + 1))
+    printf '%s\n' "$count" > "$count_file"
+    printf '%s\n' '{"type":"bridge_hello","protocol":"pi-session-bridge.v1","state":{"sessionId":"pi-new","socketPath":${socketJson}}}'
+    sleep 30
+    ;;
+esac
+exit 0
+`);
+		chmodSync(bridgeBin, 0o755);
+		const registryBin = join(fakeDir, "pane-registry");
+		const rows = JSON.stringify([{ pane_id: innerPaneId, pane_target: innerPaneId, harness: "pi", kind: "workflow", cwd: process.cwd(), pi_bridge_pid: process.pid, pi_bridge_socket: fakeSocket, pi_session_id: "pi-new" }]);
+		writeFileSync(registryBin, `#!/usr/bin/env bash
+if [[ "\${1:-}" == "list" ]]; then
+  printf '%s\n' ${JSON.stringify(rows)}
+  exit 0
+fi
+if [[ "\${1:-}" == "find-by-pane" ]]; then
+  printf '{"id":"pi-entry","kind":"workflow"}\n'
+  exit 0
+fi
+if [[ "\${1:-}" == "pi-bridge-args" ]]; then
+  printf -- '--pid %s --socket %s\n' ${process.pid} ${JSON.stringify(fakeSocket)}
+  exit 0
+fi
+exit 1
+`);
+		chmodSync(registryBin, 0o755);
+		writeFileSync(join(stateDir, `fd-wake-events-${testSessionKey}.log`), JSON.stringify({ ts: new Date().toISOString(), pane_id: innerPaneId, harness: "pi", event_type: "pi_session_connected", classifier_tag: "pi-session-connected", hash: "badc0ffee101", pi_session_id: "pi-old", expected_pi_session_id: "pi-new", pi_pid: String(process.pid), pi_socket: fakeSocket }) + "\n");
+
+		const savedBridge = process.env.PI_BRIDGE_BIN;
+		const savedStateDir = process.env.FD_STATE_DIR;
+		process.env.PI_BRIDGE_BIN = bridgeBin;
+		process.env.FD_STATE_DIR = stateDir;
+		const loopPromise = runLoop({
+			activity: { activityPath, sessionId: "pi-harness-respawn-test" },
+			captureLines: 20,
+			classifierBin: "",
+			debugPane: "",
+			defaultHarness: "opencode",
+			fromHandoff: false,
+			graceSec: 0,
+			heartbeatTicks: 60,
+			innerHarnesses: [""],
+			innerTargets: [innerPaneId],
+			masterHarness: "pi",
+			masterTarget: masterPane,
+			masterTurnTtl: 60,
+			maxLifetime: 0,
+			origArgs: [],
+			paneRegistryBin: registryBin,
+			pollSec: 0.1,
+			scriptPath: SCRIPT,
+			sessionId: SESSION,
+			sessionKey: testSessionKey,
+			sessionName: SESSION_NAME,
+			stabilitySec: 999,
+			stateDir,
+			verbose: true,
+			wakePendingTtl: 60,
+		});
+		try {
+			const subLogFile = join(stateDir, `fd-daemon-${testSessionKey}.log.pi-sub-${innerPaneId.replace(/^%/, "")}`);
+			const daemonLogFile = join(stateDir, `fd-daemon-${testSessionKey}.log`);
+			const pidFile = join(stateDir, `fd-pi-subscriber-${testSessionKey}-${innerPaneId.replace(/^%/, "")}.pid`);
+			const sawPiRespawn = await waitFor(() => existsSync(subLogFile) && readFileSync(subLogFile, "utf8").includes("[pi-sub-start]") && readFileSync(subLogFile, "utf8").includes("expected_session=pi-new"), 5000);
+			expect(sawPiRespawn).toBe(true);
+			expect(existsSync(pidFile)).toBe(true);
+			const logText = existsSync(daemonLogFile) ? readFileSync(daemonLogFile, "utf8") : "";
+			expect(logText).toContain("[pi-subscriber-spawn]");
+			expect(logText).not.toContain("[oc-subscriber-spawn]");
+			const streamed = await waitFor(() => existsSync(streamCountFile) && Number.parseInt(readFileSync(streamCountFile, "utf8").trim() || "0", 10) >= 1, 5000);
+			expect(streamed).toBe(true);
+			const activity = readFileSync(activityPath, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+			expect(activity.some((row) => row.type === "subscriber.mismatch" && row.pane_id === innerPaneId)).toBe(true);
+		} finally {
+			tmuxKillPaneFor(masterPane);
+			const loopExited = await Promise.race([loopPromise.then(() => true), sleep(5000).then(() => false)]);
+			expect(loopExited).toBe(true);
+			const pidFile = join(stateDir, `fd-pi-subscriber-${testSessionKey}-${innerPaneId.replace(/^%/, "")}.pid`);
+			if (existsSync(pidFile)) {
+				const pid = Number.parseInt(readFileSync(pidFile, "utf8").trim(), 10);
+				if (pid) {
+					try { process.kill(-pid, "SIGTERM"); } catch { /* */ }
+				}
+			}
+			if (savedBridge === undefined) delete process.env.PI_BRIDGE_BIN;
+			else process.env.PI_BRIDGE_BIN = savedBridge;
+			if (savedStateDir === undefined) delete process.env.FD_STATE_DIR;
+			else process.env.FD_STATE_DIR = savedStateDir;
+		}
+	}, 22000);
 
 	test("PID lock held externally → start fails within 6.1s grace (round-4 #2)", async () => {
 		// Pre-fix bug: withInprocFlock blocked on LOCK_EX so the daemon's

@@ -7,7 +7,7 @@
 # Usage:
 #   bash subscribers.bash oc <pane_id> <oc_url> <session_id> <parent_pid>
 #   bash subscribers.bash cc <pane_id> <transcript> <parent_pid>
-#   bash subscribers.bash pi <pane_id> <pi_pid> <pi_socket> <parent_pid>
+#   bash subscribers.bash pi <pane_id> <pi_pid> <pi_socket> <parent_pid> [expected_pi_session_id]
 #   bash subscribers.bash cx <pane_id> <cx_url> <thread_id> <parent_pid>
 #
 # Required env (the TS daemon exports these before spawning):
@@ -244,15 +244,41 @@ cc_subscriber_loop() {
     done
 }
 
+pi_subscriber_emit_session_connected() {
+  local pane_id="$1" connected_session_id="$2" expected_session_id="$3" pi_pid="$4" pi_socket="$5"
+  [[ -n "$expected_session_id" ]] || return 0
+  local connected_hash
+  connected_hash=$(printf '%s|pi-session-connected|%s|%s|%s|%s' "$pane_id" "$connected_session_id" "$expected_session_id" "$pi_pid" "$pi_socket" | sha256sum | awk '{print substr($1,1,12)}')
+  ( exec 211>"$SESSION_LOCK"
+    flock 211
+    jq -nc --arg ts "$(date -Iseconds)" \
+           --arg pid "$pane_id" \
+           --arg harness "pi" \
+           --arg event "pi_session_connected" \
+           --arg tag "pi-session-connected" \
+           --arg h "$connected_hash" \
+           --arg session "$connected_session_id" \
+           --arg expected "$expected_session_id" \
+           --arg pi_pid "$pi_pid" \
+           --arg socket "$pi_socket" \
+           '{ts:$ts, pane_id:$pid, harness:$harness, event_type:$event, classifier_tag:$tag, hash:$h, pi_session_id:$session, expected_pi_session_id:$expected, pi_pid:$pi_pid, pi_socket:$socket}' \
+           >> "$WAKE_EVENTS_LOG"
+  )
+}
+
+pi_subscriber_extract_session_id() {
+  jq -r '.state.sessionId // .state.session_id // .data.sessionId // .data.session_id // .sessionId // .session_id // ""' 2>/dev/null
+}
+
 pi_subscriber_loop() {
   exec 200<&- 2>/dev/null || true
-  local pane_id="$1" pi_pid="$2" pi_socket="${3:-}" parent_pid="${4:-}"
+  local pane_id="$1" pi_pid="$2" pi_socket="${3:-}" parent_pid="${4:-}" expected_pi_session_id="${5:-}"
   local last_hash=""
   local last_activity_hash=""
   local seen_qids=","
   local sub_log; sub_log="${LOG}.pi-sub-$(pi_pane_id_safe "$pane_id")"
-  printf '%s [pi-sub-start] pane=%s pi_pid=%s socket=%s parent=%s\n' \
-    "$(date -Iseconds)" "$pane_id" "$pi_pid" "$pi_socket" "$parent_pid" \
+  printf '%s [pi-sub-start] pane=%s pi_pid=%s socket=%s parent=%s expected_session=%s\n' \
+    "$(date -Iseconds)" "$pane_id" "$pi_pid" "$pi_socket" "$parent_pid" "$expected_pi_session_id" \
     >> "$sub_log" 2>/dev/null || true
 
   local pi_bin; pi_bin=$(pi_resolve_bridge_bin) || {
@@ -267,6 +293,60 @@ pi_subscriber_loop() {
     pi_target_args=(--pid "$pi_pid")
   fi
 
+  local pi_session_verified=0
+  if [[ -z "$expected_pi_session_id" ]]; then
+    pi_session_verified=1
+  else
+    local preflight_state_rc preflight_state preflight_session_id preflight_timeout preflight_err_file preflight_stderr_tail
+    preflight_timeout="${FD_ADAPTER_READ_TIMEOUT_SEC:-2}"
+    preflight_err_file=$(mktemp -t fd-pi-state-err.XXXXXX)
+    preflight_state=$(timeout "${preflight_timeout}s" "$pi_bin" state "${pi_target_args[@]}" 2>"$preflight_err_file")
+    preflight_state_rc=$?
+    if (( preflight_state_rc != 0 )); then
+      preflight_stderr_tail=$(tail -c 200 "$preflight_err_file" 2>/dev/null | tr '\n' ' ' || true)
+      rm -f "$preflight_err_file"
+      printf '%s [pi-sub-session-preflight-error] pane=%s rc=%s stderr=%s expected_session=%s; skip initial drain until bridge_hello\n' \
+        "$(date -Iseconds)" "$pane_id" "$preflight_state_rc" "${preflight_stderr_tail:-<empty>}" "$expected_pi_session_id" \
+        >> "$sub_log" 2>/dev/null || true
+    elif [[ -n "${preflight_state//[[:space:]]/}" ]]; then
+      rm -f "$preflight_err_file"
+      if ! jq -e 'type == "object"' <<< "$preflight_state" >/dev/null 2>&1; then
+        local preflight_excerpt
+        preflight_excerpt=$(printf '%s' "$preflight_state" | head -c 200 | tr '\n' ' ')
+        printf '%s [pi-sub-session-preflight-malformed] pane=%s expected_session=%s excerpt=%s; skip initial drain until bridge_hello\n' \
+          "$(date -Iseconds)" "$pane_id" "$expected_pi_session_id" "${preflight_excerpt:-<empty>}" \
+          >> "$sub_log" 2>/dev/null || true
+      else
+        preflight_session_id=$(pi_subscriber_extract_session_id <<< "$preflight_state")
+        if [[ -z "$preflight_session_id" || "$preflight_session_id" == "null" ]]; then
+          local preflight_excerpt
+          preflight_excerpt=$(printf '%s' "$preflight_state" | head -c 200 | tr '\n' ' ')
+          printf '%s [pi-sub-session-preflight-malformed] pane=%s expected_session=%s reason=missing-session excerpt=%s; skip initial drain until bridge_hello\n' \
+            "$(date -Iseconds)" "$pane_id" "$expected_pi_session_id" "${preflight_excerpt:-<empty>}" \
+            >> "$sub_log" 2>/dev/null || true
+        else
+          printf '%s [pi-sub-session-preflight] pane=%s pi_session_id=%s expected_session=%s\n' \
+            "$(date -Iseconds)" "$pane_id" "$preflight_session_id" "$expected_pi_session_id" \
+            >> "$sub_log" 2>/dev/null || true
+          pi_subscriber_emit_session_connected "$pane_id" "$preflight_session_id" "$expected_pi_session_id" "$pi_pid" "$pi_socket"
+          if [[ "$preflight_session_id" == "$expected_pi_session_id" ]]; then
+            pi_session_verified=1
+          else
+            printf '%s [pi-sub-session-mismatch] pane=%s pi_session_id=%s expected_session=%s phase=preflight; exiting before drain\n' \
+              "$(date -Iseconds)" "$pane_id" "$preflight_session_id" "$expected_pi_session_id" \
+              >> "$sub_log" 2>/dev/null || true
+            return 1
+          fi
+        fi
+      fi
+    else
+      rm -f "$preflight_err_file"
+      printf '%s [pi-sub-session-preflight-empty] pane=%s expected_session=%s; skip initial drain until bridge_hello\n' \
+        "$(date -Iseconds)" "$pane_id" "$expected_pi_session_id" \
+        >> "$sub_log" 2>/dev/null || true
+    fi
+  fi
+
   # Issue #37(D): drain pi-questions that were opened before the
   # subscriber attached. `pi-bridge stream` only delivers future
   # events, so a question opened before daemon startup is invisible
@@ -274,8 +354,12 @@ pi_subscriber_loop() {
   # the bridge state, not the tmux buffer). Synthesize the same
   # pi-question-emit log + WAKE_EVENTS_LOG append the live-stream
   # path emits, then seed seen_qids so the future stream event
-  # dedupes.
-  pi_subscriber_drain_questions "$pane_id" "$pi_bin" "$sub_log" pi_target_args seen_qids
+  # dedupes. When the daemon supplies an expected Pi session id, this
+  # drain is gated on a matching `pi-bridge state` preflight so a
+  # wrongly-bound subscriber cannot forward stale questions.
+  if [[ "$pi_session_verified" == "1" ]]; then
+    pi_subscriber_drain_questions "$pane_id" "$pi_bin" "$sub_log" pi_target_args seen_qids
+  fi
 
   # Issue #37 round-1 reviewer-arch major: re-drain after stream
   # connect closes the race where a question opens between the
@@ -370,10 +454,29 @@ pi_subscriber_loop() {
       local msg_type
       msg_type=$(jq -r '.type // ""' <<< "$line" 2>/dev/null)
       if [[ "$msg_type" == "bridge_hello" ]]; then
-        printf '%s [pi-sub-stream-connected] pane=%s\n' \
-          "$(date -Iseconds)" "$pane_id" \
+        local connected_pi_session_id
+        connected_pi_session_id=$(pi_subscriber_extract_session_id <<< "$line")
+        printf '%s [pi-sub-stream-connected] pane=%s pi_session_id=%s expected_session=%s\n' \
+          "$(date -Iseconds)" "$pane_id" "$connected_pi_session_id" "$expected_pi_session_id" \
           >> "$sub_log" 2>/dev/null || true
+        if [[ -n "$expected_pi_session_id" ]]; then
+          pi_subscriber_emit_session_connected "$pane_id" "$connected_pi_session_id" "$expected_pi_session_id" "$pi_pid" "$pi_socket"
+          if [[ "$connected_pi_session_id" != "$expected_pi_session_id" ]]; then
+            printf '%s [pi-sub-session-mismatch] pane=%s pi_session_id=%s expected_session=%s phase=stream; exiting before drain/events\n' \
+              "$(date -Iseconds)" "$pane_id" "$connected_pi_session_id" "$expected_pi_session_id" \
+              >> "$sub_log" 2>/dev/null || true
+            exit 1
+          fi
+        fi
+        pi_session_verified=1
         pi_subscriber_drain_questions "$pane_id" "$pi_bin" "$sub_log" pi_target_args seen_qids
+        continue
+      fi
+
+      if [[ -n "$expected_pi_session_id" && "$pi_session_verified" != "1" ]]; then
+        printf '%s [pi-sub-session-unverified-drop] pane=%s expected_session=%s\n' \
+          "$(date -Iseconds)" "$pane_id" "$expected_pi_session_id" \
+          >> "$sub_log" 2>/dev/null || true
         continue
       fi
 

@@ -7,11 +7,13 @@
 // reaper leaves the bash process running.
 //
 // Policy (from the brief, non-negotiable):
-//   1. SIGTERM the pid.
+//   1. SIGTERM the captured pid's process group.
 //   2. Wait up to graceMs (default 5s) for clean exit.
-//   3. If still alive: SIGKILL.
-//   4. Remove the pid file (after the signal sequence resolves).
-//   5. Remove the matching log file if known.
+//   3. If still alive: SIGKILL the captured process group.
+//   4. Remove the pid file (after the signal sequence resolves) only
+//      if it still points at the reaped pid.
+//   5. Remove the matching log file if known and the pidfile guard did
+//      not detect a replacement subscriber.
 //
 // Failures (permission denied, missing pid file, malformed pid) warn-log
 // and continue — never throw. The reap is best-effort cleanup.
@@ -79,11 +81,30 @@ function defaultScheduleAfter(ms: number, fn: () => void): { cancel(): void } {
 	return { cancel: () => clearTimeout(handle) };
 }
 
-function pidAlive(signal: (pid: number, sig: NodeJS.Signals | 0) => void, pid: number): boolean {
-	try { signal(pid, 0); return true; }
+function targetAlive(signal: (pid: number, sig: NodeJS.Signals | 0) => void, target: number): boolean {
+	try { signal(target, 0); return true; }
 	catch (e) {
 		const code = (e as NodeJS.ErrnoException).code;
 		return code === "EPERM";
+	}
+}
+
+function subscriberGroupAlive(signal: (pid: number, sig: NodeJS.Signals | 0) => void, pid: number): boolean {
+	return targetAlive(signal, -pid);
+}
+
+type SubscriberSignalResult =
+	| { sent: true; target: number; scope: "process-group" }
+	| { sent: false; target: number; scope: "process-group"; error?: Error };
+
+function signalSubscriber(signal: (pid: number, sig: NodeJS.Signals | 0) => void, pid: number, sig: NodeJS.Signals): SubscriberSignalResult {
+	try {
+		signal(-pid, sig);
+		return { sent: true, target: -pid, scope: "process-group" };
+	} catch (e) {
+		const code = (e as NodeJS.ErrnoException).code;
+		if (code !== "ESRCH") return { sent: false, target: -pid, scope: "process-group", error: e as Error };
+		return { sent: false, target: -pid, scope: "process-group" };
 	}
 }
 
@@ -97,6 +118,27 @@ function tryRemove(rm: (path: string) => void, path: string | undefined, log: (t
 		if (code !== "ENOENT") log("reap-warn", `${label}=${path} remove failed: ${(e as Error).message}`);
 		return false;
 	}
+}
+
+function cleanupIfPidStillMatches(opts: {
+	pid: number;
+	pidFile: string;
+	logFile?: string;
+	rm: (path: string) => void;
+	readPidFile: (path: string) => number | null;
+	log: (tag: string, msg: string) => void;
+	harnessLabel: string;
+	paneId: string;
+	reason: string;
+}): { pidFileRemoved: boolean; logFileRemoved: boolean } {
+	const currentPid = opts.readPidFile(opts.pidFile);
+	if (currentPid !== null && currentPid !== opts.pid) {
+		opts.log("reap", `${opts.harnessLabel} pid=${opts.pid} pane=${opts.paneId} reason=${opts.reason} cleanup=skipped-current-pid current_pid=${currentPid}`);
+		return { pidFileRemoved: false, logFileRemoved: false };
+	}
+	const pidFileRemoved = tryRemove(opts.rm, opts.pidFile, opts.log, "pid-file");
+	const logFileRemoved = tryRemove(opts.rm, opts.logFile, opts.log, "log-file");
+	return { pidFileRemoved, logFileRemoved };
 }
 
 /**
@@ -127,9 +169,18 @@ export function reapSubscriber(input: ReapSubscriberInput, deps: ReapSubscriberD
 			logFileRemoved,
 		};
 	}
-	if (!pidAlive(signal, pid)) {
-		const pidFileRemoved = tryRemove(rm, input.pidFile, deps.log, "pid-file");
-		const logFileRemoved = tryRemove(rm, input.logFile, deps.log, "log-file");
+	if (!subscriberGroupAlive(signal, pid)) {
+		const { pidFileRemoved, logFileRemoved } = cleanupIfPidStillMatches({
+			pid,
+			pidFile: input.pidFile,
+			logFile: input.logFile,
+			rm,
+			readPidFile,
+			log: deps.log,
+			harnessLabel,
+			paneId: input.paneId,
+			reason: input.reason,
+		});
 		deps.log("reap", `${harnessLabel} pid=${pid} pane=${input.paneId} reason=${input.reason} outcome=already-gone`);
 		return {
 			paneId: input.paneId,
@@ -141,14 +192,13 @@ export function reapSubscriber(input: ReapSubscriberInput, deps: ReapSubscriberD
 	}
 	let outcome: ReapOutcome = "term-ok";
 	let signalError: string | undefined;
-	try {
-		signal(pid, "SIGTERM");
-	} catch (e) {
-		const code = (e as NodeJS.ErrnoException).code;
-		if (code !== "ESRCH") {
-			signalError = (e as Error).message;
-			deps.log("reap-warn", `${harnessLabel} pid=${pid} pane=${input.paneId} reason=${input.reason} SIGTERM failed: ${signalError}`);
-		}
+	const term = signalSubscriber(signal, pid, "SIGTERM");
+	if (term.sent) {
+		deps.log("reap", `${harnessLabel} pid=${pid} pane=${input.paneId} reason=${input.reason} signal=SIGTERM target=${term.target} scope=${term.scope}`);
+	}
+	if (!term.sent && term.error) {
+		signalError = term.error.message;
+		deps.log("reap-warn", `${harnessLabel} pid=${pid} pane=${input.paneId} reason=${input.reason} SIGTERM failed target=${term.target} scope=${term.scope}: ${signalError}`);
 		outcome = "signal-error";
 	}
 	const result: ReapSubscriberResult = {
@@ -161,24 +211,30 @@ export function reapSubscriber(input: ReapSubscriberInput, deps: ReapSubscriberD
 	};
 	scheduleAfter(graceMs, () => {
 		try {
-			if (pidAlive(signal, pid)) {
-				try {
-					signal(pid, "SIGKILL");
-					deps.log("reap", `${harnessLabel} pid=${pid} pane=${input.paneId} reason=${input.reason} outcome=kill-required (SIGTERM grace expired)`);
-				} catch (e) {
-					const code = (e as NodeJS.ErrnoException).code;
-					if (code === "ESRCH") {
-						deps.log("reap", `${harnessLabel} pid=${pid} pane=${input.paneId} reason=${input.reason} outcome=term-ok-race`);
-					} else {
-						deps.log("reap-warn", `${harnessLabel} pid=${pid} pane=${input.paneId} reason=${input.reason} SIGKILL failed: ${(e as Error).message}`);
-					}
+			if (subscriberGroupAlive(signal, pid)) {
+				const kill = signalSubscriber(signal, pid, "SIGKILL");
+				if (kill.sent) {
+					deps.log("reap", `${harnessLabel} pid=${pid} pane=${input.paneId} reason=${input.reason} outcome=kill-required target=${kill.target} scope=${kill.scope} (SIGTERM grace expired)`);
+				} else if (kill.error) {
+					deps.log("reap-warn", `${harnessLabel} pid=${pid} pane=${input.paneId} reason=${input.reason} SIGKILL failed target=${kill.target} scope=${kill.scope}: ${kill.error.message}`);
+				} else {
+					deps.log("reap", `${harnessLabel} pid=${pid} pane=${input.paneId} reason=${input.reason} outcome=term-ok-race`);
 				}
 			} else {
 				deps.log("reap", `${harnessLabel} pid=${pid} pane=${input.paneId} reason=${input.reason} outcome=term-ok`);
 			}
 		} finally {
-			const pidFileRemoved = tryRemove(rm, input.pidFile, deps.log, "pid-file");
-			const logFileRemoved = tryRemove(rm, input.logFile, deps.log, "log-file");
+			const { pidFileRemoved, logFileRemoved } = cleanupIfPidStillMatches({
+				pid,
+				pidFile: input.pidFile,
+				logFile: input.logFile,
+				rm,
+				readPidFile,
+				log: deps.log,
+				harnessLabel,
+				paneId: input.paneId,
+				reason: input.reason,
+			});
 			result.pidFileRemoved = pidFileRemoved;
 			result.logFileRemoved = logFileRemoved;
 		}
