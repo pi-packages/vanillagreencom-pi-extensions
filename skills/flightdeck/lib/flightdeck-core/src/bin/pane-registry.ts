@@ -977,12 +977,14 @@ function cmdRefreshWindowNames(args: string[]): void {
 		}
 		if (!current.present) {
 			if (previous !== undefined && previous !== null) {
+				if (!registryHasEntry(id)) continue;
 				setEntryField(id, "window_name_current", "null");
 				cleared.push(id);
 			}
 			continue;
 		}
 		if (previous !== current.name) {
+			if (!registryHasEntry(id)) continue;
 			setEntryField(id, "window_name_current", JSON.stringify(current.name));
 			updated.push(id);
 		}

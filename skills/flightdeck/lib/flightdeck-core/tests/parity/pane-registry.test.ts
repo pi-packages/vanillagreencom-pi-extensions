@@ -753,6 +753,40 @@ describe("pane-registry teardown-window (#16, shim-driven)", () => {
 		expect(entries["name-verified-missing"].window_name_current).toBeNull();
 	});
 
+	test("refresh-window-names does not recreate an entry removed after snapshot read", () => {
+		const statePath = makeShimState(tsRepo, baseShim("test-session"));
+		const fakeState = join(tsRepo, "fake-flightdeck-state.sh");
+		const setLog = join(tsRepo, "set-called.log");
+		writeFileSync(fakeState, `#!/usr/bin/env bash
+set -euo pipefail
+case "\${1:-}" in
+  tracked-entries)
+    printf '%s\n' '{"ghost":{"pane_id":"%999","window_name_current":"Old title"}}'
+    ;;
+  get)
+    if [[ "\${2:-}" == *'!= null'* ]]; then printf 'false\n'; else printf 'null\n'; fi
+    ;;
+  set)
+    printf '%s\n' "$*" >> "\${FD_REFRESH_SET_LOG:?}"
+    ;;
+  *)
+    echo "unexpected fake flightdeck-state args: $*" >&2
+    exit 2
+    ;;
+esac
+`);
+		chmodSync(fakeState, 0o755);
+
+		const refresh = runShim(tsRepo, statePath, ["refresh-window-names"], {
+			FD_REFRESH_SET_LOG: setLog,
+			FLIGHTDECK_TEST_STATE_SCRIPT: fakeState,
+		});
+
+		expect(refresh.status).toBe(0);
+		expect(JSON.parse(refresh.stdout).cleared).toEqual([]);
+		expect(existsSync(setLog)).toBe(false);
+	});
+
 	test("pane_id alive + terminal + single-pane window → kills the window", () => {
 		for (const repo of [tsRepo]) {
 			const statePath = makeShimState(repo, {
