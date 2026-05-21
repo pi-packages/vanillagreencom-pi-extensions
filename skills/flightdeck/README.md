@@ -1,4 +1,5 @@
 # Flightdeck
+![alt text](assets/flightdeck-skill-app.png)
 
 Flightdeck supervises AI agent sessions in tmux windows. It can track generic panes, run Linear issue cycles, run GitHub issue cycles, or orchestrate multi-item markdown plan files while routing prompts, showing progress, and summarizing completion.
 

@@ -1,5 +1,8 @@
 # pi-flightdeck
 
+![Flightdeck mini-dashboard](https://raw.githubusercontent.com/vanillagreencom/vstack/main/pi-extensions/pi-flightdeck/assets/pi-mini-dashboard.png)
+![Flightdeck skill app](https://raw.githubusercontent.com/vanillagreencom/vstack/main/pi-extensions/pi-flightdeck/assets/flightdeck-skill-app.png)
+
 Optional Pi UI support for the [`flightdeck`](../../skills/flightdeck) skill. The Rust app (`flightdeck-dashboard`) is the canonical full Flightdeck UI; this Pi extension adds inline status near chat and a `/flightdeck` command that focuses the Rust app or launches it when missing.
 
 The Flightdeck skill and Rust dashboard work without this extension.
