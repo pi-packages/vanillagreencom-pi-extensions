@@ -33,7 +33,6 @@
 rust = [
     "github",
     "linear",
-    "worktree",
 ]
 
 iced = ["iced-rs"]
@@ -91,7 +90,7 @@ researcher = [
 # Skills given to all agents of a role
 [role-skills]
 analyst = ["linear", "github"]
-engineer = ["linear-dev", "github", "worktree", "decider", "linear"]
+engineer = ["linear-dev", "github", "decider", "linear"]
 manager = ["linear-dev", "github", "worktree", "project-management", "linear", "decider"]
 reviewer = ["reviewer"]
 
