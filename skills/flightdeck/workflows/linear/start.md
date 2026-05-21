@@ -22,7 +22,7 @@ This is the issue-mode start workflow. For ad-hoc or workflow sessions that are 
 
 3. **If build errors or auth failures** → fix locally before proceeding to § 1.3.
 
-4. **If preflight status shows "Worktree session"** → STOP. Wrong workflow. Use the linear-orch workflow from the worktree pane instead: [`../../../linear-orch/workflows/start.md`](../../../linear-orch/workflows/start.md).
+4. **If preflight status shows "Worktree session"** → STOP. Wrong workflow. Use the linear-orch workflow from the worktree pane instead: [`../../../linear-orch/workflows/start-worktree.md`](../../../linear-orch/workflows/start-worktree.md).
 
 ### 1.2.1 Rust Dashboard Verification
 

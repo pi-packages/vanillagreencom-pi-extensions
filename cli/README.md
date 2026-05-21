@@ -2,7 +2,7 @@
 
 Rust CLI that installs vstack skills, agents, hooks, and Pi extensions into Claude Code, Cursor, OpenCode, Codex, and Pi.
 
-Architecture, conventions, and per-harness translation rules live in [`AGENTS.md`](../AGENTS.md) and the project [`CLAUDE.md`](../CLAUDE.md). This file documents how to build and test the CLI itself.
+Architecture, conventions, and per-harness translation rules live in [`AGENTS.md`](../AGENTS.md) (also exposed as `.claude/CLAUDE.md` via symlink). This file documents how to build and test the CLI itself.
 
 ## Build
 
