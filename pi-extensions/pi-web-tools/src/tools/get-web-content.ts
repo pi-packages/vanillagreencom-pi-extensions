@@ -43,6 +43,8 @@ function missingContentGuidance(id: string | undefined): string {
 	const value = String(id ?? "").trim();
 	if (/^\d+$/.test(value)) return "Result numbers from web_search are not content ids; use web_fetch with the result URL first.";
 	if (/^https?:\/\//i.test(value)) return "URLs are not content ids; use web_fetch with the URL first.";
+	if (/^(toolu_|call_|tool_)/i.test(value) || /[\\/]tool-results?[\\/].+\.json$/i.test(value))
+		return "Looks like a host tool-call/result id or sidecar path, not a web content id. To continue a truncated read, re-call the originating tool with `offset:`; don't open the sidecar. Content ids look like web-... from web_search/web_fetch.";
 	return "Use a content id returned by web_search or web_fetch; content ids look like web-...";
 }
 

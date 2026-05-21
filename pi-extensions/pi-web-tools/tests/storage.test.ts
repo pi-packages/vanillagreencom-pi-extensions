@@ -44,6 +44,17 @@ test("get_web_content renderer flags result numbers as non-content ids", () => {
 	assert.match(text, /web_fetch with the result URL/);
 });
 
+test("get_web_content renderer redirects tool-call id misroutes to read offset", () => {
+	const tool = createGetWebContentToolDefinition();
+	for (const id of ["toolu_01ABC", "call_abc123", "/home/u/.somehost/tool-results/toolu_01ABC.json"]) {
+		const component = tool.renderResult({ content: [{ type: "text", text: `Stored content id not found: ${id}` }] }, {}, theme, { isError: true, args: { id } });
+		const text = component.render(200).join("\n");
+		assert.match(text, /host tool-call\/result id or sidecar path/);
+		assert.match(text, /re-call the originating tool with `offset:`/);
+		assert.doesNotMatch(text, /Result numbers from web_search/);
+	}
+});
+
 test("get_web_content renderer separates session retrieval from source provider", () => {
 	const tool = createGetWebContentToolDefinition();
 	const component = tool.renderResult({ details: { id: "web-123", title: "Example", url: "https://example.com", contentLength: 42, metadata: { provider: "exa" } } }, {}, theme, { args: { id: "web-123" } });
