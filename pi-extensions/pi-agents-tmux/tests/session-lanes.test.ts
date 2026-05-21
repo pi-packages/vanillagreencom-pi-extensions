@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -59,7 +59,7 @@ function testAgent(): AgentConfig {
 	};
 }
 
-function installMockSpawn(scenarios: Array<{ code?: number; stderr?: string; stdout?: string }>) {
+function installMockSpawn(scenarios: Array<{ code?: number | null; error?: Error | string; signal?: string; stderr?: string; stdout?: string }>) {
 	const calls: Array<{ args: string[] }> = [];
 	setSingleAgentSpawnForTests(((command: string, args: string[]) => {
 		void command;
@@ -76,7 +76,11 @@ function installMockSpawn(scenarios: Array<{ code?: number; stderr?: string; std
 		queueMicrotask(() => {
 			if (scenario?.stdout) proc.stdout.emit("data", Buffer.from(scenario.stdout));
 			if (scenario?.stderr) proc.stderr.emit("data", Buffer.from(scenario.stderr));
-			proc.emit("close", scenario?.code ?? 0);
+			if (scenario?.error) {
+				proc.emit("error", scenario.error instanceof Error ? scenario.error : new Error(scenario.error));
+				return;
+			}
+			proc.emit("close", scenario?.signal ? (scenario.code ?? null) : (scenario?.code ?? 0), scenario?.signal ?? null);
 		});
 		return proc;
 	}) as any);
@@ -89,6 +93,31 @@ function bridgeStdout(events: unknown[]): string {
 
 function bridgeEvent(event: string, data: Record<string, unknown> = {}): Record<string, unknown> {
 	return { type: "event", event, data };
+}
+
+type StreamShape = "nested-event" | "bridge-event" | "top-level";
+
+function shapedStreamEvent(shape: StreamShape, event: string, data: Record<string, unknown> = {}): Record<string, unknown> {
+	if (shape === "nested-event") return { event: { type: event, ...data } };
+	if (shape === "bridge-event") return { type: "event", event, data };
+	return { type: event, ...data };
+}
+
+function transcriptEventName(event: any): string | undefined {
+	if (typeof event?.event === "string") return event.event;
+	if (event?.event && typeof event.event === "object" && typeof event.event.type === "string") return event.event.type;
+	if (typeof event?.type === "string") return event.type;
+	return undefined;
+}
+
+function findAgentStartTranscriptPayload(records: any[]): any {
+	for (const record of records) {
+		const event = record.event;
+		if (event?.event && typeof event.event === "object" && event.event.type === "agent_start") return event.event;
+		if (event?.type === "event" && event.event === "agent_start") return event.data;
+		if (event?.type === "agent_start") return event;
+	}
+	return undefined;
 }
 
 function mockPiEvents(events: Array<{ name: string; payload: any }>) {
@@ -145,6 +174,187 @@ test("oneshot default mints unique lane per call in clean and polluted env", () 
 		assert.notEqual(pollutedFirst.key, pollutedSecond.key);
 		assert.match(pollutedFirst.key, new RegExp(`^${ONESHOT_SESSION_PREFIX}`));
 	});
+});
+
+test("oneshot transcript filters message_update and enriches agent_start for supported stream shapes", async () => {
+	const previousFull = process.env.PI_AGENTS_TMUX_TRANSCRIPT_FULL;
+	const shapes: StreamShape[] = ["nested-event", "bridge-event", "top-level"];
+	for (const shape of shapes) {
+		delete process.env.PI_AGENTS_TMUX_TRANSCRIPT_FULL;
+		installMockSpawn([{ code: 0, stdout: bridgeStdout([
+			shapedStreamEvent(shape, "agent_start"),
+			shapedStreamEvent(shape, "message_start"),
+			shapedStreamEvent(shape, "message_update", { message: { role: "assistant", content: [{ type: "text", text: `partial ${shape}` }] } }),
+			shapedStreamEvent(shape, "message_end", { message: { role: "assistant", content: [{ type: "text", text: `final ${shape}` }], usage: { input: 3, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 5 }, model: "openai-codex/gpt-5.5:xhigh" } }),
+		]) }]);
+		try {
+			const agent = { ...testAgent(), model: "openai-codex/gpt-5.5:xhigh" };
+			const result = await runSingleAgent(
+				tempRuntime(),
+				tempRuntime(),
+				[agent],
+				agent.name,
+				`review task ${shape}`,
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+				mockPiEvents([]),
+				undefined,
+				undefined,
+				makeDetails,
+			);
+
+			assert.equal(result.exitCode, 0, shape);
+			assert.equal(result.messages.at(-1)?.role, "assistant", shape);
+			const content = readFileSync(result.transcriptPath!, "utf8");
+			assert.equal(content.includes("message_update"), false, shape);
+			assert.match(content, /message_start/, shape);
+			assert.match(content, /message_end/, shape);
+			const records = content.trim().split(/\r?\n/).map((line) => JSON.parse(line));
+			const agentStart = findAgentStartTranscriptPayload(records);
+			assert.equal(agentStart.agent, "reviewer-test", shape);
+			assert.equal(agentStart.model, "openai-codex/gpt-5.5:xhigh", shape);
+			assert.ok(Array.isArray(agentStart.args), shape);
+			assert.ok(agentStart.args.includes("--model"), shape);
+			assert.ok(agentStart.args.includes("openai-codex/gpt-5.5:xhigh"), shape);
+			assert.equal(agentStart.args.some((arg: string) => arg.startsWith("Task: ")), false, shape);
+		} finally {
+			setSingleAgentSpawnForTests();
+		}
+	}
+	if (previousFull === undefined) delete process.env.PI_AGENTS_TMUX_TRANSCRIPT_FULL;
+	else process.env.PI_AGENTS_TMUX_TRANSCRIPT_FULL = previousFull;
+});
+
+test("failed oneshot transcript flushes latest filtered message_update after the last message_end", async () => {
+	const previousFull = process.env.PI_AGENTS_TMUX_TRANSCRIPT_FULL;
+	const shapes: StreamShape[] = ["nested-event", "bridge-event", "top-level"];
+	const failurePaths: Array<{ code?: number | null; error?: Error; expectedExitCode: number; kind: "nonzero_exit" | "process_error"; signal?: string }> = [
+		{ code: 1, expectedExitCode: 1, kind: "nonzero_exit" },
+		{ code: null, expectedExitCode: 1, kind: "nonzero_exit", signal: "SIGTERM" },
+		{ error: new Error("mock process error"), expectedExitCode: 1, kind: "process_error" },
+	];
+	for (const shape of shapes) {
+		for (const failure of failurePaths) {
+			delete process.env.PI_AGENTS_TMUX_TRANSCRIPT_FULL;
+			installMockSpawn([{ code: failure.code, error: failure.error, signal: failure.signal, stdout: bridgeStdout([
+				shapedStreamEvent(shape, "message_update", { message: { role: "assistant", content: [{ type: "text", text: `pre-end partial ${shape} ${failure.kind}` }] } }),
+				shapedStreamEvent(shape, "message_end", { message: { role: "assistant", content: [{ type: "text", text: `pre-end final ${shape} ${failure.kind}` }], usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 } } }),
+				shapedStreamEvent(shape, "message_update", { message: { role: "assistant", content: [{ type: "text", text: `stale failure ${shape} ${failure.kind}` }] } }),
+				shapedStreamEvent(shape, "message_update", { message: { role: "assistant", content: [{ type: "text", text: `latest failure ${shape} ${failure.kind}` }] } }),
+			]) }]);
+			try {
+				const result = await runSingleAgent(
+					tempRuntime(),
+					tempRuntime(),
+					[testAgent()],
+					"reviewer-test",
+					`review task ${shape} ${failure.kind}`,
+					undefined,
+					undefined,
+					undefined,
+					undefined,
+					mockPiEvents([]),
+					undefined,
+					undefined,
+					makeDetails,
+				);
+				const content = readFileSync(result.transcriptPath!, "utf8");
+				const label = `${shape} ${failure.kind}`;
+				assert.equal(result.exitCode, failure.expectedExitCode, label);
+				assert.match(content, /message_update/, label);
+				assert.equal(content.includes(`pre-end partial ${label}`), false, label);
+				assert.equal(content.includes(`stale failure ${label}`), false, label);
+				assert.match(content, new RegExp(`latest failure ${label}`), label);
+				assert.match(content, /"buffered":true/, label);
+				assert.match(content, new RegExp(`"reason":"${failure.kind}"`), label);
+				if (failure.signal) assert.match(content, new RegExp(`"signal":"${failure.signal}"`), label);
+				const updateRecords = content.trim().split(/\r?\n/).map((line) => JSON.parse(line)).filter((record) => record.event && transcriptEventName(record.event) === "message_update");
+				assert.equal(updateRecords.length, 1, label);
+			} finally {
+				setSingleAgentSpawnForTests();
+			}
+		}
+	}
+	if (previousFull === undefined) delete process.env.PI_AGENTS_TMUX_TRANSCRIPT_FULL;
+	else process.env.PI_AGENTS_TMUX_TRANSCRIPT_FULL = previousFull;
+});
+
+test("failed oneshot transcript does not flush a message_update finalized by message_end", async () => {
+	const previousFull = process.env.PI_AGENTS_TMUX_TRANSCRIPT_FULL;
+	const failurePaths: Array<{ code?: number; error?: Error; kind: "nonzero_exit" | "process_error" }> = [
+		{ code: 1, kind: "nonzero_exit" },
+		{ error: new Error("mock process error"), kind: "process_error" },
+	];
+	for (const failure of failurePaths) {
+		delete process.env.PI_AGENTS_TMUX_TRANSCRIPT_FULL;
+		installMockSpawn([{ code: failure.code, error: failure.error, stdout: bridgeStdout([
+			shapedStreamEvent("top-level", "message_update", { message: { role: "assistant", content: [{ type: "text", text: `finalized partial ${failure.kind}` }] } }),
+			shapedStreamEvent("top-level", "message_end", { message: { role: "assistant", content: [{ type: "text", text: `finalized final ${failure.kind}` }], usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 } } }),
+		]) }]);
+		try {
+			const result = await runSingleAgent(
+				tempRuntime(),
+				tempRuntime(),
+				[testAgent()],
+				"reviewer-test",
+				`review task finalized ${failure.kind}`,
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+				mockPiEvents([]),
+				undefined,
+				undefined,
+				makeDetails,
+			);
+			const content = readFileSync(result.transcriptPath!, "utf8");
+			assert.equal(result.exitCode, 1, failure.kind);
+			assert.equal(content.includes("message_update"), false, failure.kind);
+			assert.equal(content.includes(`finalized partial ${failure.kind}`), false, failure.kind);
+			assert.match(content, new RegExp(`finalized final ${failure.kind}`), failure.kind);
+			assert.equal(content.includes('"buffered":true'), false, failure.kind);
+		} finally {
+			setSingleAgentSpawnForTests();
+		}
+	}
+	if (previousFull === undefined) delete process.env.PI_AGENTS_TMUX_TRANSCRIPT_FULL;
+	else process.env.PI_AGENTS_TMUX_TRANSCRIPT_FULL = previousFull;
+});
+
+test("oneshot transcript keeps message_update snapshots when full stream env is enabled", async () => {
+	const previousFull = process.env.PI_AGENTS_TMUX_TRANSCRIPT_FULL;
+	process.env.PI_AGENTS_TMUX_TRANSCRIPT_FULL = "1";
+	installMockSpawn([
+		{ code: 0, stdout: bridgeStdout([
+			{ type: "message_update", message: { role: "assistant", content: [{ type: "text", text: "partial" }] } },
+			{ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "final" }], usage: { input: 1, output: 1, totalTokens: 2 } } },
+		]) },
+	]);
+	try {
+		const result = await runSingleAgent(
+			tempRuntime(),
+			tempRuntime(),
+			[testAgent()],
+			"reviewer-test",
+			"review task",
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			mockPiEvents([]),
+			undefined,
+			undefined,
+			makeDetails,
+		);
+		const content = readFileSync(result.transcriptPath!, "utf8");
+		assert.match(content, /message_update/);
+	} finally {
+		setSingleAgentSpawnForTests();
+		if (previousFull === undefined) delete process.env.PI_AGENTS_TMUX_TRANSCRIPT_FULL;
+		else process.env.PI_AGENTS_TMUX_TRANSCRIPT_FULL = previousFull;
+	}
 });
 
 test("parallel tasks for same agent get distinct ephemeral lanes", () => {
@@ -256,7 +466,9 @@ test("context_length_exceeded text in normal tool output does not trigger retry"
 
 test("aborted oneshot emits failed event with summary", async () => {
 	const emitted: Array<{ name: string; payload: any }> = [];
-	const calls = installMockSpawn([{ code: 0 }]);
+	const calls = installMockSpawn([{ code: 0, stdout: bridgeStdout([
+		shapedStreamEvent("top-level", "message_update", { message: { role: "assistant", content: [{ type: "text", text: "aborted partial" }] } }),
+	]) }]);
 	const controller = new AbortController();
 	controller.abort();
 	try {
@@ -283,6 +495,12 @@ test("aborted oneshot emits failed event with summary", async () => {
 		assert.ok(failed);
 		assert.equal(failed.payload.summary, "Agent was aborted before completion.");
 		assert.equal(failed.payload.error, "Agent was aborted");
+		const content = readFileSync(failed.payload.transcriptPath, "utf8");
+		assert.match(content, /message_update/);
+		assert.match(content, /aborted partial/);
+		assert.match(content, /"buffered":true/);
+		const updateRecords = content.trim().split(/\r?\n/).map((line) => JSON.parse(line)).filter((record) => record.event && transcriptEventName(record.event) === "message_update");
+		assert.equal(updateRecords.length, 1);
 	} finally {
 		setSingleAgentSpawnForTests();
 	}

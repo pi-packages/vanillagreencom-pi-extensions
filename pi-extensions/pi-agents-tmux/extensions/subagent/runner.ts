@@ -39,6 +39,7 @@ import {
 	type BgSessionSelection,
 } from "./sessions.js";
 import { createTaskId, emitSubagentEvent, tryEmitSubagentEvent } from "./tasks.js";
+import { normalizePiStreamEvent } from "./transcripts.js";
 import {
 	DETAIL_STRING_MAX_CHARS,
 	type CwdSnapshot,
@@ -151,14 +152,41 @@ async function snapshotCwdGitState(cwd: string | undefined, addDiagnostic: (diag
 	};
 }
 
-function streamEventName(event: any): string | undefined {
-	if (typeof event?.event === "string") return event.event;
-	if (typeof event?.type === "string") return event.type;
-	return undefined;
+function transcriptFullStreamEnabled(): boolean {
+	return /^(1|true|yes|on)$/i.test(process.env.PI_AGENTS_TMUX_TRANSCRIPT_FULL?.trim() ?? "");
 }
 
-function streamEventPayload(event: any): any {
-	if (event?.type === "event" && event?.data && typeof event.data === "object") return event.data;
+function shouldAppendTranscriptEvent(eventName: string | undefined, fullStream = transcriptFullStreamEnabled()): boolean {
+	return fullStream || eventName !== "message_update";
+}
+
+interface AgentStartTranscriptMetadata {
+	agent: string;
+	model?: string;
+	args: string[];
+}
+
+function transcriptMetadataArgs(args: string[]): string[] {
+	const sanitized = [...args];
+	if (sanitized.at(-1)?.startsWith("Task: ")) sanitized.pop();
+	return sanitized;
+}
+
+function withAgentStartTranscriptMetadata(event: any, metadata: AgentStartTranscriptMetadata): any {
+	if (!event || typeof event !== "object" || Array.isArray(event)) return event;
+	const enriched = {
+		agent: metadata.agent,
+		model: metadata.model ?? null,
+		args: transcriptMetadataArgs(metadata.args),
+	};
+	if (event.event && typeof event.event === "object" && !Array.isArray(event.event) && event.event.type === "agent_start") {
+		return { ...event, event: { ...event.event, ...enriched } };
+	}
+	if (event.type === "event" && event.event === "agent_start") {
+		const data = event.data && typeof event.data === "object" && !Array.isArray(event.data) ? event.data : {};
+		return { ...event, data: { ...data, ...enriched } };
+	}
+	if (event.type === "agent_start") return { ...event, ...enriched };
 	return event;
 }
 
@@ -625,23 +653,44 @@ async function runSingleAgentAttempt(
 				shell: false,
 				stdio: ["ignore", "pipe", "pipe"],
 			});
+			const keepFullTranscript = transcriptFullStreamEnabled();
 			let buffer = "";
 			let sawSessionCompact = false;
 			let compactThenEmptyAgentEnd = false;
 			let postCompactAssistantHasText = false;
+			let latestFilteredMessageUpdate: any;
+
+			const flushFilteredMessageUpdate = (reason: "nonzero_exit" | "process_error") => {
+				if (keepFullTranscript || !latestFilteredMessageUpdate) return;
+				appendTranscript({
+					stream: "stdout",
+					raw: JSON.stringify(latestFilteredMessageUpdate),
+					event: latestFilteredMessageUpdate,
+					buffered: true,
+					reason,
+				});
+				latestFilteredMessageUpdate = undefined;
+			};
 
 			const processLine = (line: string) => {
 				if (!line.trim()) return;
 				let event: any;
 				try {
 					event = JSON.parse(line);
-					appendTranscript({ stream: "stdout", raw: line, event });
 				} catch {
 					appendTranscript({ stream: "stdout", raw: line, parseError: true });
 					return;
 				}
-				const eventName = streamEventName(event);
-				const payload = streamEventPayload(event);
+				const normalized = normalizePiStreamEvent(event);
+				const eventName = normalized.name;
+				if (eventName === "message_update" && !keepFullTranscript) latestFilteredMessageUpdate = normalized.event;
+				if (shouldAppendTranscriptEvent(eventName, keepFullTranscript)) {
+					const transcriptEvent = eventName === "agent_start"
+						? withAgentStartTranscriptMetadata(normalized.event, { agent: agent.name, model: selectedModel, args })
+						: normalized.event;
+					appendTranscript({ stream: "stdout", raw: JSON.stringify(transcriptEvent), event: transcriptEvent });
+				}
+				const payload = normalized.payload;
 
 				if (eventName === "session_compact") {
 					sawSessionCompact = true;
@@ -655,6 +704,7 @@ async function runSingleAgentAttempt(
 					compactThenEmptyAgentEnd = sawSessionCompact && !postCompactAssistantHasText && agentEndHasTextlessContent(payload);
 				}
 
+				if (eventName === "message_end") latestFilteredMessageUpdate = undefined;
 				if (eventName === "message_end" && payload.message) {
 					const msg = payload.message as Message;
 					currentResult.messages.push(msg);
@@ -706,15 +756,20 @@ async function runSingleAgentAttempt(
 				appendTranscript({ stream: "stderr", text });
 			});
 
-			proc.on("close", (code) => {
+			proc.on("close", (code, closeSignal) => {
 				if (buffer.trim()) processLine(buffer);
 				if (compactThenEmptyAgentEnd) currentResult.needsCompletionReason = "compact-then-empty";
-				appendTranscript({ type: "exit", code: code ?? 0, attempt });
-				Promise.allSettled(transcriptWrites).finally(() => resolve(code ?? 0));
+				const signalName = typeof closeSignal === "string" && closeSignal ? closeSignal : undefined;
+				const exitCode = signalName || wasAborted ? (code && code !== 0 ? code : 1) : (code ?? 0);
+				if (signalName && !currentResult.errorMessage) currentResult.errorMessage = `Agent process terminated by signal ${signalName}`;
+				if (exitCode !== 0) flushFilteredMessageUpdate("nonzero_exit");
+				appendTranscript({ type: "exit", code: exitCode, ...(signalName ? { signal: signalName } : {}), attempt });
+				Promise.allSettled(transcriptWrites).finally(() => resolve(exitCode));
 			});
 
 			proc.on("error", (error) => {
 				currentResult.errorMessage = stringifyError(error);
+				flushFilteredMessageUpdate("process_error");
 				appendTranscript({ type: "process_error", error: stringifyError(error), attempt });
 				Promise.allSettled(transcriptWrites).finally(() => resolve(1));
 			});
