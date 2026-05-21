@@ -1,6 +1,6 @@
 ---
 name: linear
-description: "Linear API CLI for issues, projects, cycles, milestones, initiatives, labels, and comments."
+description: "Use for ANY Linear interaction: read, view, list, search, create, edit, update, comment on, label, block, unblock, or activate any Linear issue, project, cycle, milestone, initiative, or label. Bash CLI over Linear's GraphQL API with local cache and mutation syncing."
 license: MIT
 user-invocable: true
 metadata:
