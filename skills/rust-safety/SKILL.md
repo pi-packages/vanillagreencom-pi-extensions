@@ -211,7 +211,7 @@ let value = {
 let guard = epoch::pin();
 let value = shared.load(Ordering::Acquire, &guard);
 process(value); // guard still live
-drop(guard);    // safe: value no longer used
+drop(guard);    // safe: value unused after this point
 ```
 
 #### Deferred Destruction for Cleanup
