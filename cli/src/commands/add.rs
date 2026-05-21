@@ -14,6 +14,30 @@ use anyhow::Result;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+/// Merge a project-side skill list with the upstream/source-derived list.
+/// Returns (merged, added_names). If the project list is None, the source
+/// list is taken as-is. Mirrors the helper used by `vstack refresh` so
+/// `vstack add --skill <new>` and refresh agree on agent skill regeneration.
+fn merge_skill_lists<T: Clone>(
+    project_list: Option<&[T]>,
+    source_list: &[T],
+    key: impl Fn(&T) -> String,
+) -> (Vec<T>, Vec<String>) {
+    let Some(project_list) = project_list else {
+        return (source_list.to_vec(), Vec::new());
+    };
+    let mut merged: Vec<T> = project_list.to_vec();
+    let existing: std::collections::HashSet<String> = merged.iter().map(&key).collect();
+    let prev_len = merged.len();
+    for s in source_list {
+        if !existing.contains(&key(s)) {
+            merged.push(s.clone());
+        }
+    }
+    let added: Vec<String> = merged[prev_len..].iter().map(&key).collect();
+    (merged, added)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn print_install_summary(
     global: bool,
@@ -993,28 +1017,53 @@ source (e.g. switching vstack repos, or starting clean), pass --clobber:
         Vec<crate::mapping::OptionalSkill>,
     > = std::collections::HashMap::new();
 
+    // Available skill names for role-skills merging during agent regen:
+    // UNION of skills already in the lock (from prior installs) with the skills
+    // being installed in this run. Using only `selected_skills` here caused
+    // `vstack add --skill <new>` to drop the just-added skill from role-skills
+    // merges when the existing project [agent-skills] list was authoritative
+    // for affected agents (the new skill never propagated until a follow-up
+    // `vstack refresh`).
+    let available_skill_names: Vec<String> = {
+        let mut set: std::collections::HashSet<String> = pre_lock
+            .entries
+            .iter()
+            .filter(|(_, e)| e.kind == config::ItemKind::Skill)
+            .map(|(n, _)| n.clone())
+            .collect();
+        for s in &selected_skills {
+            set.insert(s.name.clone());
+        }
+        let mut v: Vec<String> = set.into_iter().collect();
+        v.sort();
+        v
+    };
+
     for harness in &harnesses {
         for a in &selected_agents {
-            // Use project [agent-skills] if present (authoritative); otherwise
-            // compute from source mapping and seed the project toml with it.
-            let available_skill_names: Vec<String> =
-                selected_skills.iter().map(|s| s.name.clone()).collect();
-            let skill_names: Vec<String> =
-                if let Some(project_list) = project_config.agent_skills_for(&a.name) {
-                    project_list.clone()
-                } else {
-                    mapping.skills_for_agent(&a.name, &a.role, &available_skill_names)
-                };
+            // Merge project [agent-skills] (authoritative) with role-skills from
+            // source so newly-added upstream skills (e.g. `vstack add --skill X`
+            // where X is referenced by [role-skills] for the agent's role)
+            // propagate into the agent's skill list in this same install pass.
+            let source_skills = mapping.skills_for_agent(&a.name, &a.role, &available_skill_names);
+            let project_required = project_config.agent_skills_for(&a.name);
+            let (skill_names, _added) = merge_skill_lists(
+                project_required.map(|v| v.as_slice()),
+                &source_skills,
+                |s| s.clone(),
+            );
 
             let skill_pairs = crate::resolve::resolve_skill_pairs(&skill_names, &selected_skills);
 
-            // Use project [agent-skills-optional] if present, else source mapping
-            let optional_entries =
-                if let Some(project_list) = project_config.agent_skills_optional.get(&a.name) {
-                    project_list.clone()
-                } else {
-                    mapping.optional_skills_for_agent(&a.name, &available_skill_names)
-                };
+            // Same merge for optional skills.
+            let source_optional =
+                mapping.optional_skills_for_agent(&a.name, &available_skill_names);
+            let project_optional = project_config.agent_skills_optional.get(&a.name);
+            let (optional_entries, _) = merge_skill_lists(
+                project_optional.map(|v| v.as_slice()),
+                &source_optional,
+                |e| e.skill.clone(),
+            );
             let optional_pairs = crate::resolve::resolve_optional_skill_pairs(&optional_entries);
 
             agent_skill_map
