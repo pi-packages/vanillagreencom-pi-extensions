@@ -162,12 +162,12 @@ Rust and performance reference material now lives directly in the `rust`, `revie
 |---|---|
 | [`decider`](skills/decider/)* | Architectural decision document management and indexing. |
 | [`deep-research`](skills/deep-research/) | Exa-powered deep research and portable findings report generation. |
-| [`flightdeck`](skills/flightdeck/)* | Generic tmux session supervisor for AI harness panes; optional Linear/GitHub/plan-file modes with structured activity JSONL and Rust dashboard. |
+| [`flightdeck`](skills/flightdeck/)* | Primary-agent tmux session supervisor for AI harness panes; runs Linear/GitHub issue and plan-file lanes with structured activity JSONL and Rust dashboard. Sub-agents do NOT load this directly. |
 | [`github`](skills/github/)* | Bash CLI over the GitHub API for PR operations: threads, comments, reviews, CI logs, merging, and cross-PR analysis. |
 | [`html-artifact`](skills/html-artifact/) | Standalone HTML artifacts for plans, reports, reviews, explainers, prototypes, and custom editors. |
 | [`linear-dev`](skills/linear-dev/)* | Delegated implementation and review-fix issue workflows for dev agents. |
 | [`linear`](skills/linear/)* | Bash CLI over Linear's GraphQL API with local cache, mutation syncing, and structured output (issues, cycles, milestones, projects). |
-| [`linear-orch`](skills/linear-orch/)* | Primary-agent orchestrator for the per-issue Linear lifecycle inside a worktree (dev → review → submit → merge); spawns specialist sub-agents and review pipelines. Sub-agents do NOT load this directly. |
+| [`linear-orch`](skills/linear-orch/)* | Primary-agent orchestrator for the per-issue Linear lifecycle (dev → review → submit → merge); spawns specialist sub-agents and review pipelines from inside a worktree. Sub-agents do NOT load this directly. |
 | [`project-management`](skills/project-management/)* | TPM-driven planning, audits, roadmaps, and research-backed decomposition. |
 | [`reviewer`](skills/reviewer/)* | Code-review and QA-review workflows + the canonical finding/verdict JSON schema. Loaded by any `reviewer-*` agent. |
 | [`second-opinion`](skills/second-opinion/) | Cross-model review via the opposite AI CLI (Claude ↔ Codex). |

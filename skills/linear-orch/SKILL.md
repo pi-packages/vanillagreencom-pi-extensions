@@ -1,6 +1,6 @@
 ---
 name: linear-orch
-description: "PRIMARY/MAIN AGENT ONLY — do NOT load as a sub-agent. Per-issue inside-worktree orchestrator for the full Linear lifecycle (dev → review → submit → merge); spawns and supervises specialist sub-agents and review pipelines. Sub-agents receive scoped delegations from this skill and must not load it directly."
+description: "PRIMARY/MAIN AGENT ONLY — do NOT load as a sub-agent. Per-issue Linear lifecycle orchestrator (dev → review → submit → merge) that spawns specialist sub-agents and review pipelines from inside a worktree."
 license: MIT
 user-invocable: true
 dependencies:

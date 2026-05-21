@@ -1,6 +1,6 @@
 ---
 name: flightdeck
-description: "Generic tmux session manager for AI harness panes; optional issue mode supervises issue/PR workflows, prompt handling, merge planning, and unwind."
+description: "PRIMARY/MAIN AGENT ONLY — do NOT load as a sub-agent. tmux session supervisor for AI harness panes; runs Linear/GitHub issue and plan-file lanes with structured activity JSONL and Rust dashboard."
 license: MIT
 user-invocable: true
 dependencies:
