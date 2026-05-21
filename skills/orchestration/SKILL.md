@@ -91,17 +91,6 @@ When invoked with `<command> [args]`, route to the corresponding workflow.
 | `fix-reconcile` | — | `workflows/fix-reconcile.md` | Internal (not user-invocable) |
 | `post-summary` | `[ISSUE_ID]` | `workflows/post-summary.md` | Post summary comments |
 
-### Master-side commands (moved)
-
-The following commands moved to other skills:
-
-| Command | Now in |
-|---------|--------|
-| `linear start` (from main), `linear start new`, `linear parallel-check` | `flightdeck` |
-| `audit-issues`, `cycle-plan`, `roadmap plan`/`create`, `research-spike`, `research-complete` | `project-management` |
-
-These are still callable when their owning skill is loaded.
-
 ### Execution Mode
 
 When executing a command's workflow, follow ALL [Workflow Execution](#workflow-execution) rules:
