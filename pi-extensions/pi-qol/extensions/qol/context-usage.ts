@@ -2,6 +2,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import type { TranscriptRiskResult } from "./budget-guard.js";
+import { DEFAULT_TRANSCRIPT_RISK_WARN_CHARS } from "./constants.js";
+import { settingNumber } from "./settings.js";
+import { transcriptRiskState } from "./transcript-risk.js";
+
+type TranscriptRiskState = TranscriptRiskResult;
 
 type QolContextColor = "accent" | "success" | "warning" | "error" | "muted" | "dim" | "borderMuted" | "text";
 
@@ -53,6 +59,7 @@ export interface QolContextUsageMessageDetails {
 		user: number;
 	};
 	compactSummaries: QolContextDetailItem[];
+	transcriptRisk?: TranscriptRiskState;
 	note?: string;
 }
 
@@ -319,6 +326,14 @@ function qcuExtractProjectAgents(systemPrompt: string): { agents: QolContextDeta
 	return { agents: qcuUniqDetails(agents), tokens: qcuEstimateTokens(section) };
 }
 
+function qcuMessagesForRisk(ctx: ExtensionCommandContext): any[] {
+	const sm = ctx.sessionManager as any;
+	const built = typeof sm.buildSessionContext === "function" ? sm.buildSessionContext() : undefined;
+	if (Array.isArray(built?.messages)) return built.messages;
+	const branch = Array.isArray(sm.getBranch?.()) ? sm.getBranch() : [];
+	return branch.filter((entry: any) => entry?.type === "message").map((entry: any) => entry.message);
+}
+
 export function buildQolContextUsageDetails(pi: ExtensionAPI, ctx: ExtensionCommandContext, promptOptions: unknown): QolContextUsageMessageDetails | undefined {
 	const usage = ctx.getContextUsage?.() as { contextWindow?: unknown; percent?: unknown; tokens?: unknown } | undefined;
 	const tokens = Number(usage?.tokens);
@@ -355,6 +370,8 @@ export function buildQolContextUsageDetails(pi: ExtensionAPI, ctx: ExtensionComm
 	const modelId = typeof model.id === "string" ? model.id : typeof model.model === "string" ? model.model : "unknown";
 	const modelName = typeof model.name === "string" ? model.name : modelId;
 	const thinking = typeof (pi as any).getThinkingLevel === "function" ? (pi as any).getThinkingLevel() : undefined;
+	const transcriptThreshold = Math.floor(settingNumber("compaction.transcriptRiskWarnChars", DEFAULT_TRANSCRIPT_RISK_WARN_CHARS, ctx.cwd));
+	const transcriptRisk = transcriptRiskState(qcuMessagesForRisk(ctx), transcriptThreshold);
 	return {
 		builtinTools,
 		categories,
@@ -365,6 +382,7 @@ export function buildQolContextUsageDetails(pi: ExtensionAPI, ctx: ExtensionComm
 		freeTokens: safeContextWindow ? Math.max(0, safeContextWindow - tokens) : undefined,
 		mcpTools,
 		messageStats: stats,
+		transcriptRisk: transcriptRisk.chars > 0 || transcriptRisk.error ? transcriptRisk : undefined,
 		model: {
 			contextWindow: safeContextWindow,
 			id: modelId,
@@ -486,6 +504,23 @@ export function renderQolContextUsageMessage(message: any, _options: any, theme:
 			qcuRenderDetailSection(lines, "Context / memory files", details.contextFiles, theme, { limit: 12, showDescriptions: false });
 			qcuRenderDetailSection(lines, "Skills · /skills", details.skills, theme, { empty: "No skill commands discovered.", limit: 14, showDescriptions: false });
 			qcuRenderDetailSection(lines, "Compact buffer", details.compactSummaries, theme, { limit: 6, showDescriptions: false });
+			if (details.transcriptRisk?.error) {
+				const r = details.transcriptRisk;
+				const safe = r.error.replace(/[\x00-\x1f]+/g, " ").slice(0, 200);
+				lines.push("");
+				lines.push(`${theme.fg("warning", theme.bold("Transcript risk"))}`);
+				lines.push(`${qcuBranch(theme, "└")}${theme.fg("warning", `risk calculation failed: ${safe}`)}`);
+			} else if (details.transcriptRisk?.exceeded) {
+				const r = details.transcriptRisk;
+				lines.push("");
+				lines.push(`${theme.fg("warning", theme.bold("Transcript risk"))}`);
+				lines.push(`${qcuBranch(theme, "├")}${theme.fg("warning", `serialized payload ${qcuFormatTokens(Math.ceil(r.chars / 4))} tokens (${r.chars.toLocaleString()} chars) >= ${r.threshold.toLocaleString()} char warn budget`)}`);
+				lines.push(`${qcuBranch(theme, "└")}${theme.fg("muted", "compact soon or raise compaction.transcriptRiskWarnChars to silence")}`);
+			} else if (details.transcriptRisk && details.transcriptRisk.chars > 0) {
+				const r = details.transcriptRisk;
+				lines.push("");
+				lines.push(`${theme.fg("muted", `Transcript payload: ${qcuFormatTokens(Math.ceil(r.chars / 4))} tokens (${r.chars.toLocaleString()} chars / ${r.threshold.toLocaleString()} warn budget).`)}`);
+			}
 			return lines.map((line) => truncateToWidth(line, safeWidth, ""));
 		},
 	};

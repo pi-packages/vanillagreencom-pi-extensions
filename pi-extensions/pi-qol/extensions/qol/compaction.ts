@@ -2,11 +2,30 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { complete, type Message } from "@earendil-works/pi-ai";
 import { convertToLlm, serializeConversation, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
+	DEFAULT_BUDGET_GUARD_PERCENT,
+	DEFAULT_BUDGET_GUARD_TOKENS,
+	DEFAULT_BUDGET_MAX_INPUT_CHARS,
 	DEFAULT_COMPACTION_MAX_TOKENS,
 	DEFAULT_COMPACTION_MODEL,
 	DEFAULT_IDLE_COMPACTION_THRESHOLD_TOKENS,
 	QOL_COMPACTION_SYSTEM_PROMPT,
 } from "./constants.js";
+import {
+	chunkConversationText as chunkConversationTextRaw,
+	computeBudgetTrigger,
+	isBudgetGuardCompaction,
+	orchestrateChunkedSummary,
+	type BudgetTrigger,
+	type SummarizeOutcome,
+	type SummarizeRequest,
+	type TranscriptRiskResult,
+} from "./budget-guard.js";
+import {
+	buildBudgetHandoff as buildBudgetHandoffData,
+	writeBudgetHandoffArtifact as writeBudgetHandoffArtifactRaw,
+	type HandoffWriteResult,
+	type QolBudgetHandoff,
+} from "./compaction-handoff.js";
 import { settingBoolean, settingNumber, settingString } from "./settings.js";
 import { stringifyError } from "./util.js";
 
@@ -111,20 +130,20 @@ export function modelLabel(model: any): string {
 	return model ? `${model.provider}/${model.id}` : "unknown model";
 }
 
-export async function generateQolSummary(ctx: ExtensionContext, options: {
-	conversationText: string;
-	customInstructions?: string;
-	previousSummary?: string;
-	maxTokens?: number;
-	model?: string;
-	purpose: QolSummaryPurpose;
-	signal?: AbortSignal;
-}): Promise<{ model: string; summary: string; via: "model" | "remote" }> {
-	const maxTokens = Math.max(256, Math.floor(options.maxTokens ?? settingNumber("compaction.maxTokens", DEFAULT_COMPACTION_MAX_TOKENS, ctx.cwd)));
+export function budgetMaxInputChars(ctx: ExtensionContext): number {
+	const raw = Math.floor(settingNumber("compaction.maxInputChars", DEFAULT_BUDGET_MAX_INPUT_CHARS, ctx.cwd));
+	// 0 or negative disables chunking. Anything above the hard floor is honored.
+	return raw <= 0 ? 0 : Math.max(20_000, raw);
+}
+
+export const chunkConversationText = chunkConversationTextRaw;
+export type { QolBudgetHandoff } from "./compaction-handoff.js";
+
+async function singleShotSummary(ctx: ExtensionContext, request: SummarizeRequest, options: { maxTokens: number; model?: string; purpose: QolSummaryPurpose; signal?: AbortSignal }): Promise<SummarizeOutcome> {
 	const promptText = buildSummaryPrompt({
-		conversationText: options.conversationText,
-		customInstructions: options.customInstructions,
-		previousSummary: settingBoolean("compaction.includePreviousSummary", true, ctx.cwd) ? options.previousSummary : undefined,
+		conversationText: request.text,
+		customInstructions: request.customInstructions,
+		previousSummary: settingBoolean("compaction.includePreviousSummary", true, ctx.cwd) ? request.previousSummary : undefined,
 		profile: compactionProfile(ctx.cwd),
 		purpose: options.purpose,
 	});
@@ -132,7 +151,7 @@ export async function generateQolSummary(ctx: ExtensionContext, options: {
 	const remoteEndpoint = settingString("compaction.remoteEndpoint", "", ctx.cwd);
 	if (settingBoolean("compaction.remoteEnabled", false, ctx.cwd) && remoteEndpoint) {
 		try {
-			const summary = await summarizeWithRemote(remoteEndpoint, QOL_COMPACTION_SYSTEM_PROMPT, promptText, maxTokens, options.signal);
+			const summary = await summarizeWithRemote(remoteEndpoint, QOL_COMPACTION_SYSTEM_PROMPT, promptText, options.maxTokens, options.signal);
 			return { model: remoteEndpoint, summary, via: "remote" };
 		} catch (error) {
 			compactionNotify(ctx, `Remote compaction failed, trying model fallback: ${stringifyError(error)}`, "warning");
@@ -154,7 +173,7 @@ export async function generateQolSummary(ctx: ExtensionContext, options: {
 	const response = await complete(
 		model,
 		{ messages: [message], systemPrompt: QOL_COMPACTION_SYSTEM_PROMPT },
-		{ apiKey: auth.apiKey, headers: auth.headers, maxTokens, signal: options.signal },
+		{ apiKey: auth.apiKey, headers: auth.headers, maxTokens: options.maxTokens, signal: options.signal },
 	);
 	const summary = response.content
 		.filter((content): content is { type: "text"; text: string } => content.type === "text")
@@ -164,13 +183,79 @@ export async function generateQolSummary(ctx: ExtensionContext, options: {
 	return { model: modelLabel(model), summary, via: "model" };
 }
 
+export async function generateQolSummary(ctx: ExtensionContext, options: {
+	conversationText: string;
+	customInstructions?: string;
+	previousSummary?: string;
+	maxTokens?: number;
+	model?: string;
+	purpose: QolSummaryPurpose;
+	signal?: AbortSignal;
+	/** Internal: set true on recursive summary-of-summaries pass to skip rechunking. */
+	skipChunking?: boolean;
+}): Promise<{ model: string; summary: string; via: "model" | "remote"; chunkCount?: number; reduceLevels?: number; requestCount?: number }> {
+	const maxTokens = Math.max(256, Math.floor(options.maxTokens ?? settingNumber("compaction.maxTokens", DEFAULT_COMPACTION_MAX_TOKENS, ctx.cwd)));
+	const maxInputChars = budgetMaxInputChars(ctx);
+	const summarize = (request: SummarizeRequest) => singleShotSummary(ctx, request, {
+		maxTokens,
+		model: options.model,
+		purpose: options.purpose,
+		signal: options.signal,
+	});
+	if (options.skipChunking || maxInputChars <= 0 || options.conversationText.length <= maxInputChars) {
+		return summarize({
+			customInstructions: options.customInstructions,
+			previousSummary: options.previousSummary,
+			skipChunking: true,
+			text: options.conversationText,
+		});
+	}
+	const orchestrated = await orchestrateChunkedSummary({
+		customInstructions: options.customInstructions,
+		maxInputChars,
+		notify: (message, level = "info") => compactionNotify(ctx, message, level),
+		previousSummary: options.previousSummary,
+		signal: options.signal,
+		summarize,
+		text: options.conversationText,
+	});
+	return orchestrated;
+}
+
+export function buildBudgetHandoff(ctx: ExtensionContext, options: {
+	reason: string;
+	preparation?: { messagesToSummarize?: AgentMessage[]; turnPrefixMessages?: AgentMessage[]; previousSummary?: string; tokensBefore?: number };
+}): QolBudgetHandoff {
+	return buildBudgetHandoffData({
+		preparation: options.preparation,
+		reason: options.reason,
+		sessionManager: ctx.sessionManager as any,
+	});
+}
+
+export function writeBudgetHandoffArtifact(ctx: ExtensionContext, handoff: QolBudgetHandoff): HandoffWriteResult {
+	const enabled = settingBoolean("compaction.handoffArtifactEnabled", true, ctx.cwd);
+	const result = writeBudgetHandoffArtifactRaw(handoff, { enabled });
+	if (result.error) {
+		compactionNotify(ctx, `QOL handoff artifact write failed: ${result.error}`, "warning");
+	}
+	return result;
+}
+
 export async function handleQolCompaction(event: any, ctx: ExtensionContext): Promise<any> {
-	if (!settingBoolean("compaction.customEnabled", false, ctx.cwd)) return undefined;
+	const isBudgetGuard = isBudgetGuardCompaction(event?.customInstructions);
+	// Budget-guard-triggered compactions force the QOL bounded path so the
+	// chunked summarizer + handoff artifact always run, even when the user
+	// has not flipped compaction.customEnabled on.
+	if (!isBudgetGuard && !settingBoolean("compaction.customEnabled", false, ctx.cwd)) return undefined;
 	const preparation = event.preparation ?? {};
 	const messages = [...(preparation.messagesToSummarize ?? []), ...(preparation.turnPrefixMessages ?? [])];
 	if (messages.length === 0) return undefined;
 	const tokensBefore = typeof preparation.tokensBefore === "number" ? preparation.tokensBefore : 0;
-	compactionNotify(ctx, `QOL compaction: summarizing ${messages.length} message(s), ${tokensBefore.toLocaleString()} token(s).`, "info");
+	const handoff = buildBudgetHandoff(ctx, { preparation, reason: event.customInstructions ?? "session_before_compact" });
+	const handoffResult = writeBudgetHandoffArtifact(ctx, handoff);
+	const sourceLabel = isBudgetGuard ? "pi-qol budget-guard" : "pi-qol";
+	compactionNotify(ctx, `QOL compaction: summarizing ${messages.length} message(s), ${tokensBefore.toLocaleString()} token(s)${isBudgetGuard ? " (budget guard)" : ""}.`, "info");
 	try {
 		const conversationText = serializeMessagesForSummary(messages);
 		const result = await generateQolSummary(ctx, {
@@ -181,14 +266,22 @@ export async function handleQolCompaction(event: any, ctx: ExtensionContext): Pr
 			signal: event.signal,
 		});
 		if (!result.summary.trim()) throw new Error("Compaction summary was empty");
-		compactionNotify(ctx, `QOL compaction complete via ${result.via}: ${result.model}`, "info");
+		const chunkSuffix = result.chunkCount && result.chunkCount > 1 ? ` (${result.chunkCount} chunks, ${result.reduceLevels ?? 1} reduce level${(result.reduceLevels ?? 1) === 1 ? "" : "s"})` : "";
+		compactionNotify(ctx, `QOL compaction complete via ${result.via}: ${result.model}${chunkSuffix}`, "info");
 		return {
 			compaction: {
 				details: {
+					chunkCount: result.chunkCount,
+					handoffArtifact: handoffResult.path,
+					handoffArtifactLatest: handoffResult.latestPath,
+					handoffArtifactError: handoffResult.error,
 					messageCount: messages.length,
 					model: result.model,
 					profile: compactionProfile(ctx.cwd),
-					source: "pi-qol",
+					reduceLevels: result.reduceLevels,
+					requestCount: result.requestCount,
+					source: sourceLabel,
+					trigger: isBudgetGuard ? "budget-guard" : "session_before_compact",
 					via: result.via,
 				},
 				firstKeptEntryId: preparation.firstKeptEntryId,
@@ -261,4 +354,26 @@ export function compactionTriggerReason(ctx: ExtensionContext): string | undefin
 	const idleLimit = settingNumber("compaction.idleThresholdTokens", DEFAULT_IDLE_COMPACTION_THRESHOLD_TOKENS, ctx.cwd);
 	if (usage.tokens >= idleLimit) return `${usage.tokens.toLocaleString()} tokens >= ${Math.floor(idleLimit).toLocaleString()} idle threshold`;
 	return undefined;
+}
+
+export type BudgetGuardTrigger = BudgetTrigger;
+export type TranscriptRiskState = TranscriptRiskResult;
+
+/**
+ * Budget guard fires on agent_end (no idle wait) when context usage crosses a
+ * percent of the model window or an absolute token limit. Returns a stable key
+ * per crossing so the caller can suppress repeated triggers while usage stays
+ * above the threshold.
+ */
+export function budgetGuardTrigger(ctx: ExtensionContext): BudgetGuardTrigger | undefined {
+	if (!settingBoolean("compaction.budgetGuardEnabled", true, ctx.cwd)) return undefined;
+	const usage = contextUsage(ctx);
+	if (!usage) return undefined;
+	return computeBudgetTrigger({
+		contextWindow: usage.contextWindow,
+		enabled: true,
+		percentLimit: settingNumber("compaction.budgetPercent", DEFAULT_BUDGET_GUARD_PERCENT, ctx.cwd),
+		tokenLimit: settingNumber("compaction.budgetTokens", DEFAULT_BUDGET_GUARD_TOKENS, ctx.cwd),
+		tokens: usage.tokens,
+	});
 }

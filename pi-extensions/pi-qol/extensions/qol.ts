@@ -2,7 +2,9 @@ import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@e
 import type { TUI } from "@earendil-works/pi-tui";
 import { criticalInfo, lastAssistantTextFromAgentEnd, needsDirection, taskStats } from "./qol/agent-end.js";
 import { getQuestionService, readCavemanBridge, type QuestionOpenedEventLike } from "./qol/bridges.js";
+import { BudgetGuardDriver } from "./qol/budget-guard-runtime.js";
 import {
+	budgetGuardTrigger,
 	compactionTriggerReason,
 	handleQolBranchSummary,
 	handleQolCompaction,
@@ -257,6 +259,35 @@ export default function qol(pi: ExtensionAPI): void {
 		idleCompactionTimer = undefined;
 	};
 
+	const budgetGuardDriver = new BudgetGuardDriver();
+
+	const resetBudgetGuard = () => {
+		budgetGuardDriver.reset();
+	};
+
+	const maybeFireBudgetGuard = (ctx: ExtensionContext) => {
+		let trigger;
+		try {
+			trigger = budgetGuardTrigger(ctx);
+		} catch (error) {
+			if (isStaleCtxError(error)) return;
+			throw error;
+		}
+		const notifySafely = (message: string, level: "info" | "warning" | "error") => {
+			try {
+				if (ctx.hasUI && settingBoolean("compaction.notify", true, ctx.cwd)) ctx.ui.notify(message, level);
+			} catch (error) {
+				if (isStaleCtxError(error)) return;
+				throw error;
+			}
+		};
+		budgetGuardDriver.dispatch({
+			compact: typeof ctx.compact === "function" ? ctx.compact.bind(ctx) : undefined,
+			notify: notifySafely,
+			trigger,
+		});
+	};
+
 	const scheduleIdleCompaction = (ctx: ExtensionContext) => {
 		clearIdleCompactionTimer();
 		if (!settingBoolean("compaction.idleEnabled", false, ctx.cwd)) return;
@@ -509,6 +540,7 @@ export default function qol(pi: ExtensionAPI): void {
 		subscribeCavemanBridge();
 		latestSystemPromptOptions = undefined;
 		resetAutoRename();
+		resetBudgetGuard();
 		resetThinkingTimer(ctx);
 		void consumePendingSessionSearchContext(pi, ctx, event.reason);
 		installAutocompleteHintStyling(ctx);
@@ -569,6 +601,7 @@ export default function qol(pi: ExtensionAPI): void {
 		cavemanUnsubscribe?.();
 		cavemanUnsubscribe = undefined;
 		resetAutoRename();
+		resetBudgetGuard();
 		clearIdleCompactionTimer();
 		clearQuestionSubscribeTimer();
 		if (sessionSearchWarmupTimer) clearTimeout(sessionSearchWarmupTimer);
@@ -637,6 +670,7 @@ export default function qol(pi: ExtensionAPI): void {
 			void refreshStatusline(ctx);
 			requestRender();
 		}
+		maybeFireBudgetGuard(ctx);
 		scheduleIdleCompaction(ctx);
 		void attemptAutoRename(ctx);
 		const text = lastAssistantTextFromAgentEnd(event, ctx);
@@ -660,6 +694,9 @@ export default function qol(pi: ExtensionAPI): void {
 		sendQolNotification(ctx, "ready", settingString("notification.readyMessage", "Ready for input", ctx.cwd), "info", "ready");
 	});
 	pi.on("session_compact", (_event, ctx) => {
+		// After a successful compaction usage drops below the budget, so reset the
+		// crossing key so the next threshold crossing re-fires the guard.
+		budgetGuardDriver.noteSessionCompacted();
 		if (!ctx.hasUI) return;
 		void refreshStatusline(ctx);
 		requestRender();
