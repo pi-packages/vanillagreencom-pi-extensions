@@ -1016,9 +1016,10 @@ export function renderMutationCallPreview(kind: "Edit" | "Write" | "Create", tar
 	for (let index = 0; index < maxShown; index++) {
 		const diff = diffs[index]!;
 		if (diffs.length > 1) text += `\n${treeConnector(theme, "├", cwd)}${theme.fg("muted", `edit ${index + 1}/${diffs.length}`)} ${diffSummary(diff, theme, cwd)}`;
-		const stem = treeConnector(theme, "│", cwd);
-		const rendered = renderStructuredDiff(diff, theme, Boolean(context?.expanded), cwd, perDiffLimit, targetPath, visibleWidth(stem));
-		text += `\n${rendered.split(/\r?\n/).map((line) => `${stem}${line}`).join("\n")}`;
+		// Keep the table itself flush-left. Prefixing every frame row with a
+		// tree stem made single edit/write previews look like the diff border had
+		// a mismatched colored left edge.
+		text += `\n${renderStructuredDiff(diff, theme, Boolean(context?.expanded), cwd, perDiffLimit, targetPath)}`;
 	}
 	const hidden = diffs.length - maxShown;
 	if (hidden > 0) text += `\n${treeConnector(theme, "└", cwd)}${theme.fg("muted", `… ${hidden} more edit block${hidden === 1 ? "" : "s"} · ctrl+o to expand`)}`;
