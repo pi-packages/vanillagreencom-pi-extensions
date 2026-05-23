@@ -66,5 +66,6 @@ export function toolLabel(theme: any, label: string): string {
 }
 
 export function stackPrefix(theme: any, cwd?: string): string {
-	return theme.fg("accent", glyphs(cwd).bullet);
+	const bullet = glyphs(cwd).bullet;
+	return fgToken(theme, "toolBullet", bullet, true) ?? fgToken(theme, "accent", bullet, true) ?? theme.fg("accent", bullet);
 }
