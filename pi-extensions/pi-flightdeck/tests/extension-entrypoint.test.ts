@@ -133,11 +133,11 @@ test("extension registers only status-shell commands and toggle shortcut", async
 
 		assert.deepEqual([...commands.keys()].sort(), ["flightdeck", "flightdeck:toggle"]);
 		assert.equal([...commands.keys()].some((name) => /popup|watch|prune/i.test(name)), false);
-		assert.deepEqual([...shortcuts.keys()], ["alt+m"]);
+		assert.deepEqual([...shortcuts.keys()], ["alt+f"]);
 
 		const ctx = makeContext(project);
 		await commands.get("flightdeck:toggle")?.handler("", ctx);
-		await shortcuts.get("alt+m")?.handler(ctx);
+		await shortcuts.get("alt+f")?.handler(ctx);
 		assert.deepEqual(ctx.notifications.map((note) => note.message), ["Flightdeck dashboard expanded", "Flightdeck dashboard hidden"]);
 		assert.equal(ctx.widgets.some((widget) => widget.key.includes("popup")), false);
 	} finally {
