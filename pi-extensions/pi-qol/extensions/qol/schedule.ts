@@ -307,7 +307,7 @@ export function createScheduleController(pi: ExtensionAPI, clock: ScheduleClock 
 		renderPreviewLines(width: number): string[] {
 			const pending = [...jobs.values()].sort((a, b) => a.dueAt - b.dueAt);
 			const shown = pending.slice(0, 3).map((job) => {
-				const line = `┃ Scheduled ${job.id}: ${formatDueTime(job.dueAt)} — ${previewMessage(job.message, 120)}`;
+				const line = `┃ Scheduled ${formatDueTime(job.dueAt)} — ${previewMessage(job.message, 120)}`;
 				return truncateToWidth(ansiGreen(line), width, "");
 			});
 			if (pending.length > shown.length) shown.push(truncateToWidth(ansiGreen(`┃ Scheduled: +${pending.length - shown.length} more`), width, ""));

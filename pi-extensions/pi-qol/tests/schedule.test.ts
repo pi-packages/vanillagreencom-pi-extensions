@@ -114,6 +114,7 @@ test("renderPreviewLines uses queued-message style and caps visible rows", async
 	expect(lines).toHaveLength(4);
 	expect(lines[0]).toContain("┃ Scheduled");
 	expect(lines[0]).toContain("first");
+	expect(lines[0]).not.toContain("-1");
 	expect(lines[3]).toContain("+1 more");
 });
 
