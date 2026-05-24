@@ -1,9 +1,10 @@
-use anyhow::{Context, Result, bail};
-use serde_json::Value;
+use anyhow::{bail, Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 pub const COLOR_THEME_KEY: &str = "workbench.colorTheme";
+pub const ICON_THEME_KEY: &str = "workbench.iconTheme";
+pub const DEFAULT_ICON_THEME_ID: &str = "rose-pine-icons";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VscodeEditor {
@@ -94,21 +95,18 @@ pub fn patch_settings_text(original: &str, theme_name: &str) -> Result<String> {
         original
     };
 
-    if has_comment_outside_string(text) {
-        bail!(
-            "settings.json appears to be JSONC with comments; vstack will not rewrite it because comment preservation is not implemented"
-        );
-    }
+    // VS Code-family settings.json is JSONC in practice. Preserve comments,
+    // trailing commas, and user formatting by doing targeted top-level edits
+    // instead of serde round-tripping.
+    root_object_bounds(text)?;
 
-    let parsed: Value = serde_json::from_str(text).context(
-        "settings.json must be valid JSON; JSONC/trailing commas are not rewritten to avoid destructive formatting loss",
-    )?;
-    let object = parsed
-        .as_object()
-        .ok_or_else(|| anyhow::anyhow!("settings.json root must be a JSON object"))?;
+    let patched = upsert_top_level_string_key(text, COLOR_THEME_KEY, theme_name)?;
+    upsert_top_level_string_key(&patched, ICON_THEME_KEY, DEFAULT_ICON_THEME_ID)
+}
 
-    let replacement = serde_json::to_string(theme_name)?;
-    if let Some((start, end)) = find_top_level_key_value_span(text, COLOR_THEME_KEY)? {
+fn upsert_top_level_string_key(text: &str, key: &str, value: &str) -> Result<String> {
+    let replacement = serde_json::to_string(value)?;
+    if let Some((start, end)) = find_top_level_key_value_span(text, key)? {
         if text[start..end].trim() == replacement {
             return Ok(text.to_string());
         }
@@ -117,15 +115,16 @@ pub fn patch_settings_text(original: &str, theme_name: &str) -> Result<String> {
         return Ok(patched);
     }
 
-    insert_color_theme_key(text, object.is_empty(), &replacement)
+    insert_top_level_string_key(text, key, &replacement)
 }
 
-fn insert_color_theme_key(text: &str, object_is_empty: bool, replacement: &str) -> Result<String> {
+fn insert_top_level_string_key(text: &str, key: &str, replacement: &str) -> Result<String> {
     let (open, close) = root_object_bounds(text)?;
     let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
     let closing_indent = line_indent_at(text, close);
+    let object_is_empty = root_object_is_empty(text)?;
     let key_indent = first_property_indent(text).unwrap_or_else(|| format!("{closing_indent}  "));
-    let quoted_key = serde_json::to_string(COLOR_THEME_KEY)?;
+    let quoted_key = serde_json::to_string(key)?;
 
     if object_is_empty {
         let mut patched = String::new();
@@ -148,7 +147,10 @@ fn insert_color_theme_key(text: &str, object_is_empty: bool, replacement: &str) 
 
     let mut patched = String::new();
     patched.push_str(&text[..insert_pos]);
-    patched.push(',');
+    let has_trailing_comma = insert_pos > open + 1 && text.as_bytes()[insert_pos - 1] == b',';
+    if !has_trailing_comma {
+        patched.push(',');
+    }
     patched.push_str(newline);
     patched.push_str(&key_indent);
     patched.push_str(&quoted_key);
@@ -213,6 +215,20 @@ fn json_value_end(text: &str, start: usize) -> Result<usize> {
     while index < bytes.len() {
         match bytes[index] {
             b'"' => index = string_span_end(text, index)?,
+            b'/' if index + 1 < bytes.len() && bytes[index + 1] == b'/' => {
+                index += 2;
+                while index < bytes.len() && !matches!(bytes[index], b'\n' | b'\r') {
+                    index += 1;
+                }
+            }
+            b'/' if index + 1 < bytes.len() && bytes[index + 1] == b'*' => {
+                index += 2;
+                while index + 1 < bytes.len() && !(bytes[index] == b'*' && bytes[index + 1] == b'/')
+                {
+                    index += 1;
+                }
+                index = (index + 2).min(bytes.len());
+            }
             b'{' | b'[' => {
                 depth += 1;
                 index += 1;
@@ -245,6 +261,20 @@ fn root_object_bounds(text: &str) -> Result<(usize, usize)> {
     while index < bytes.len() {
         match bytes[index] {
             b'"' => index = string_span_end(text, index)?,
+            b'/' if index + 1 < bytes.len() && bytes[index + 1] == b'/' => {
+                index += 2;
+                while index < bytes.len() && !matches!(bytes[index], b'\n' | b'\r') {
+                    index += 1;
+                }
+            }
+            b'/' if index + 1 < bytes.len() && bytes[index + 1] == b'*' => {
+                index += 2;
+                while index + 1 < bytes.len() && !(bytes[index] == b'*' && bytes[index + 1] == b'/')
+                {
+                    index += 1;
+                }
+                index = (index + 2).min(bytes.len());
+            }
             b'{' => {
                 depth += 1;
                 index += 1;
@@ -298,41 +328,6 @@ fn line_indent_at(text: &str, index: usize) -> String {
     text[line_start..end].to_string()
 }
 
-fn has_comment_outside_string(text: &str) -> bool {
-    let bytes = text.as_bytes();
-    let mut index = 0usize;
-    let mut in_string = false;
-    let mut escape = false;
-    while index < bytes.len() {
-        let byte = bytes[index];
-        if in_string {
-            if escape {
-                escape = false;
-            } else if byte == b'\\' {
-                escape = true;
-            } else if byte == b'"' {
-                in_string = false;
-            }
-            index += 1;
-            continue;
-        }
-
-        if byte == b'"' {
-            in_string = true;
-            index += 1;
-            continue;
-        }
-        if byte == b'/' && index + 1 < bytes.len() {
-            let next = bytes[index + 1];
-            if next == b'/' || next == b'*' {
-                return true;
-            }
-        }
-        index += 1;
-    }
-    false
-}
-
 fn string_span_end(text: &str, start: usize) -> Result<usize> {
     let bytes = text.as_bytes();
     if start >= bytes.len() || bytes[start] != b'"' {
@@ -354,11 +349,35 @@ fn string_span_end(text: &str, start: usize) -> Result<usize> {
     bail!("unterminated JSON string")
 }
 
+fn root_object_is_empty(text: &str) -> Result<bool> {
+    let bytes = text.as_bytes();
+    let (open, _) = root_object_bounds(text)?;
+    let index = skip_ws(bytes, open + 1);
+    Ok(index < bytes.len() && bytes[index] == b'}')
+}
+
 fn skip_ws(bytes: &[u8], mut index: usize) -> usize {
-    while index < bytes.len() && is_json_ws(bytes[index]) {
-        index += 1;
+    loop {
+        while index < bytes.len() && is_json_ws(bytes[index]) {
+            index += 1;
+        }
+        if index + 1 < bytes.len() && bytes[index] == b'/' && bytes[index + 1] == b'/' {
+            index += 2;
+            while index < bytes.len() && !matches!(bytes[index], b'\n' | b'\r') {
+                index += 1;
+            }
+            continue;
+        }
+        if index + 1 < bytes.len() && bytes[index] == b'/' && bytes[index + 1] == b'*' {
+            index += 2;
+            while index + 1 < bytes.len() && !(bytes[index] == b'*' && bytes[index + 1] == b'/') {
+                index += 1;
+            }
+            index = (index + 2).min(bytes.len());
+            continue;
+        }
+        return index;
     }
-    index
 }
 
 fn trim_json_ws_end(bytes: &[u8], start: usize, mut end: usize) -> usize {
@@ -375,6 +394,7 @@ fn is_json_ws(byte: u8) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Value;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn sandbox(label: &str) -> PathBuf {
@@ -431,7 +451,7 @@ mod tests {
     }
 
     #[test]
-    fn settings_patcher_changes_only_workbench_color_theme_value() {
+    fn settings_patcher_changes_color_theme_and_icon_theme_values() {
         let input = r#"{
   "editor.fontFamily": "JetBrains Mono",
   "workbench.colorTheme": "Old Theme",
@@ -444,10 +464,12 @@ mod tests {
         let patched = patch_settings_text(input, "Ghibli Serene Nature").unwrap();
         let mut expected: Value = serde_json::from_str(input).unwrap();
         expected[COLOR_THEME_KEY] = Value::String("Ghibli Serene Nature".to_string());
+        expected[ICON_THEME_KEY] = Value::String(DEFAULT_ICON_THEME_ID.to_string());
         let actual: Value = serde_json::from_str(&patched).unwrap();
 
         assert_eq!(actual, expected);
         assert!(patched.contains("\"workbench.colorTheme\": \"Ghibli Serene Nature\""));
+        assert!(patched.contains("\"workbench.iconTheme\": \"rose-pine-icons\""));
         assert!(patched.contains("\"editor.fontFamily\": \"JetBrains Mono\""));
         assert!(patched.contains("\"terminal.integrated.fontFamily\": \"CommitMono\""));
         assert!(patched.contains("\"nested\": { \"keep\": true }"));
@@ -456,7 +478,7 @@ mod tests {
     }
 
     #[test]
-    fn settings_patcher_inserts_color_theme_when_missing() {
+    fn settings_patcher_inserts_color_theme_and_icon_theme_when_missing() {
         let input = r#"{
   "editor.fontFamily": "JetBrains Mono"
 }
@@ -467,25 +489,47 @@ mod tests {
 
         assert_eq!(parsed["editor.fontFamily"], "JetBrains Mono");
         assert_eq!(parsed[COLOR_THEME_KEY], "Forest");
+        assert_eq!(parsed[ICON_THEME_KEY], DEFAULT_ICON_THEME_ID);
         assert!(patched.contains("\"editor.fontFamily\": \"JetBrains Mono\","));
     }
 
     #[test]
-    fn settings_patcher_on_jsonc_comments_fails_without_writing() {
+    fn settings_patcher_replaces_existing_color_and_icon_theme() {
+        let input = r#"{
+  // editor theme
+  "workbench.colorTheme": "Old Theme",
+  "workbench.iconTheme": "old-icons",
+}
+"#;
+
+        let patched = patch_settings_text(input, "Forest").unwrap();
+
+        assert!(patched.contains("// editor theme"));
+        assert!(patched.contains("\"workbench.colorTheme\": \"Forest\""));
+        assert!(patched.contains("\"workbench.iconTheme\": \"rose-pine-icons\""));
+        assert!(!patched.contains("Old Theme"));
+        assert!(!patched.contains("old-icons"));
+    }
+
+    #[test]
+    fn settings_patcher_preserves_jsonc_comments_while_writing() {
         let root = sandbox("jsonc");
         let settings = root.join("settings.json");
         let original = r#"{
   // keep this comment
-  "editor.fontFamily": "JetBrains Mono"
+  "editor.fontFamily": "JetBrains Mono",
 }
 "#;
         fs::write(&settings, original).unwrap();
 
-        let err = patch_settings_file(&settings, "Forest").unwrap_err();
-        let msg = format!("{err:#}");
+        let changed = patch_settings_file(&settings, "Forest").unwrap();
+        let patched = fs::read_to_string(&settings).unwrap();
 
-        assert!(msg.contains("JSONC with comments"), "{msg}");
-        assert_eq!(fs::read_to_string(&settings).unwrap(), original);
+        assert!(changed);
+        assert!(patched.contains("// keep this comment"));
+        assert!(patched.contains("\"workbench.colorTheme\": \"Forest\""));
+        assert!(patched.contains("\"workbench.iconTheme\": \"rose-pine-icons\""));
+        assert!(patched.contains("\"editor.fontFamily\": \"JetBrains Mono\","));
         let _ = fs::remove_dir_all(root);
     }
 }

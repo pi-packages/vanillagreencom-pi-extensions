@@ -83,6 +83,7 @@ struct VscodeThemePlan {
     extension_root: PathBuf,
     package_json: PathBuf,
     theme_name: String,
+    icon_theme_id: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -268,16 +269,11 @@ fn pi_settings_theme_will_change(plan: &ApplyPlan) -> Result<bool> {
         if !target.config_file.exists() {
             return Ok(true);
         }
-        let text = fs::read_to_string(&target.config_file).with_context(|| {
-            format!("reading {}", target.config_file.display())
-        })?;
-        let value: serde_json::Value = serde_json::from_str(&text).unwrap_or_else(|_| {
-            serde_json::Value::Object(serde_json::Map::new())
-        });
-        let prior = value
-            .get("theme")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let text = fs::read_to_string(&target.config_file)
+            .with_context(|| format!("reading {}", target.config_file.display()))?;
+        let value: serde_json::Value = serde_json::from_str(&text)
+            .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()));
+        let prior = value.get("theme").and_then(|v| v.as_str()).unwrap_or("");
         return Ok(prior != change.value);
     }
     Ok(false)
@@ -295,14 +291,15 @@ pub fn active_theme_id(extra_name: &str) -> Option<String> {
 }
 
 fn active_theme_marker_path(env: &ApplyEnvironment, extra_name: &str) -> PathBuf {
-    let cache = env
-        .home_dir
-        .join(".cache")
-        .join("vstack-extras");
+    let cache = env.home_dir.join(".cache").join("vstack-extras");
     cache.join(format!("{extra_name}.active"))
 }
 
-fn write_active_theme_marker(env: &ApplyEnvironment, extra_name: &str, theme_id: &str) -> Result<()> {
+fn write_active_theme_marker(
+    env: &ApplyEnvironment,
+    extra_name: &str,
+    theme_id: &str,
+) -> Result<()> {
     let path = active_theme_marker_path(env, extra_name);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
@@ -430,13 +427,11 @@ fn apply_ghostty_target(extra_name: &str, target: &TargetPlan, silent: bool) -> 
                 .and_then(|e| e.to_str())
                 .is_some_and(|e| e.eq_ignore_ascii_case("glsl"));
         if needs_flip {
-            let src = fs::read_to_string(&copy.source).with_context(|| {
-                format!("reading shader {}", copy.source.display())
-            })?;
+            let src = fs::read_to_string(&copy.source)
+                .with_context(|| format!("reading shader {}", copy.source.display()))?;
             let flipped = flip_shader_y_for_metal(&src);
-            fs::write(&copy.destination, flipped).with_context(|| {
-                format!("writing shader {}", copy.destination.display())
-            })?;
+            fs::write(&copy.destination, flipped)
+                .with_context(|| format!("writing shader {}", copy.destination.display()))?;
         } else {
             fs::copy(&copy.source, &copy.destination).with_context(|| {
                 format!(
@@ -759,7 +754,8 @@ fn build_plan_for_source(
             if request.targets.is_some() {
                 bail!(
                     "theme `{}` does not define settings for target `{}`",
-                    theme.id, target.name
+                    theme.id,
+                    target.name
                 );
             }
             warnings.push(format!(
@@ -1094,6 +1090,7 @@ fn build_vscode_family_plan(
             extension_root,
             package_json,
             theme_name: vscode.theme_name.clone(),
+            icon_theme_id: crate::vscode_apply::DEFAULT_ICON_THEME_ID.to_string(),
         }),
         commands,
     })
@@ -1204,7 +1201,9 @@ fn reload_running_ghostty_processes() -> GhosttyReloadResult {
             return result;
         }
         for line in String::from_utf8_lossy(&output.stdout).lines() {
-            let Ok(pid) = line.trim().parse::<i32>() else { continue };
+            let Ok(pid) = line.trim().parse::<i32>() else {
+                continue;
+            };
             // SIGUSR2 number diverges between Linux (12) and macOS/BSD (31)
             // -- POSIX does not nail the value down.
             let sig = SIGUSR2;
@@ -1288,12 +1287,10 @@ fn apply_pi_target(target: &TargetPlan, silent: bool) -> Result<()> {
         if let Some(parent) = copy.destination.parent() {
             fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
         }
-        let raw = fs::read_to_string(&copy.source).with_context(|| {
-            format!("reading {}", copy.source.display())
-        })?;
-        let mut value: serde_json::Value = serde_json::from_str(&raw).with_context(|| {
-            format!("parsing {}", copy.source.display())
-        })?;
+        let raw = fs::read_to_string(&copy.source)
+            .with_context(|| format!("reading {}", copy.source.display()))?;
+        let mut value: serde_json::Value = serde_json::from_str(&raw)
+            .with_context(|| format!("parsing {}", copy.source.display()))?;
         if let Some(obj) = value.as_object_mut() {
             obj.insert(
                 "name".to_string(),
@@ -1301,9 +1298,8 @@ fn apply_pi_target(target: &TargetPlan, silent: bool) -> Result<()> {
             );
         }
         let rewritten = serde_json::to_string_pretty(&value)? + "\n";
-        fs::write(&copy.destination, rewritten).with_context(|| {
-            format!("writing {}", copy.destination.display())
-        })?;
+        fs::write(&copy.destination, rewritten)
+            .with_context(|| format!("writing {}", copy.destination.display()))?;
     }
 
     let change = target
@@ -1735,7 +1731,19 @@ fn render_plan(plan: &ApplyPlan, env: &ApplyEnvironment, dry_run: bool) -> Strin
             }
         }
 
-        if let Some(json_change) = &target.json_change {
+        if let Some(vscode) = &target.vscode {
+            out.push_str("  JSON settings change:\n");
+            out.push_str(&format!(
+                "    {} = {}\n",
+                crate::vscode_apply::COLOR_THEME_KEY,
+                serde_json::Value::String(vscode.theme_name.clone())
+            ));
+            out.push_str(&format!(
+                "    {} = {}\n",
+                crate::vscode_apply::ICON_THEME_KEY,
+                serde_json::Value::String(vscode.icon_theme_id.clone())
+            ));
+        } else if let Some(json_change) = &target.json_change {
             out.push_str("  JSON settings change:\n");
             out.push_str(&format!(
                 "    {} = {}\n",
@@ -1844,16 +1852,16 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 
         let out = flip_shader_y_for_metal(src);
 
-        assert!(out.contains(
-            "void mainImage(out vec4 fragColor, in vec2 _vstack_screen_fragCoord)"
-        ));
+        assert!(
+            out.contains("void mainImage(out vec4 fragColor, in vec2 _vstack_screen_fragCoord)")
+        );
         assert!(out.contains(
             "vec2 fragCoord = vec2(_vstack_screen_fragCoord.x, iResolution.y - _vstack_screen_fragCoord.y);"
         ));
-        assert!(out.contains(
-            "texture(iChannel0, _vstack_screen_fragCoord.xy / iResolution.xy)"
-        ));
-        assert!(out.contains("float bg_delta = min(len3(term.rgb - bg_lin), len3(term.rgb - BG_COL));"));
+        assert!(out.contains("texture(iChannel0, _vstack_screen_fragCoord.xy / iResolution.xy)"));
+        assert!(
+            out.contains("float bg_delta = min(len3(term.rgb - bg_lin), len3(term.rgb - BG_COL));")
+        );
         assert!(out.contains("float text_amt = step(0.000144, bg_delta);"));
         assert!(out.contains("vec2 p = fragCoord.xy;"));
     }
@@ -2026,7 +2034,11 @@ theme-file = "ghostty/themes/forest.conf"
 
         assert_eq!(ghostty.config_file, visible_ghostty_dir.join("config"));
         assert!(ghostty.copies.iter().any(|copy| {
-            copy.destination == dotfiles_ghostty_dir.join("themes").join("vstack").join("forest")
+            copy.destination
+                == dotfiles_ghostty_dir
+                    .join("themes")
+                    .join("vstack")
+                    .join("forest")
         }));
         assert!(ghostty.copies.iter().any(|copy| {
             copy.destination
@@ -2036,7 +2048,11 @@ theme-file = "ghostty/themes/forest.conf"
                     .join("forest.glsl")
         }));
         assert!(ghostty.copies.iter().any(|copy| {
-            copy.destination == visible_ghostty_dir.join("themes").join("vstack").join("forest")
+            copy.destination
+                == visible_ghostty_dir
+                    .join("themes")
+                    .join("vstack")
+                    .join("forest")
         }));
         assert!(ghostty.copies.iter().any(|copy| {
             copy.destination

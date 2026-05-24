@@ -8,7 +8,7 @@ Optional non-agent packages distributed by [vstack](../README.md). Currently one
 
 > some of the shaders/animations are better than others.. feel free to improve them and submit a PR!
 
-24 color themes + 1 file/folder icon theme shipped as a single VS Code extension (`vanillagreen.vstack-themes`), with per-theme Ghostty palette + ambient shader pairs, per-theme tmux color block, and per-theme Pi (coding-agent) theme JSON. One `vstack apply` call installs the editor extension, switches the active editor theme, swaps the live Ghostty palette, swaps the Ghostty `custom-shader`, rewrites the tmux color block (then reloads any live tmux servers), and registers + activates the matching Pi theme.
+24 color themes + 1 file/folder icon theme shipped as a single VS Code extension (`vanillagreen.vstack-themes`), with per-theme Ghostty palette + ambient shader pairs, per-theme tmux color block, and per-theme Pi (coding-agent) theme JSON. One `vstack apply` call installs the editor extension, switches the active editor + icon themes, swaps the live Ghostty palette, swaps the Ghostty `custom-shader`, rewrites the tmux color block (then reloads any live tmux servers), and registers + activates the matching Pi theme.
 
 ### Themes
 
@@ -56,14 +56,14 @@ vstack apply vanillagreen-themes --theme dracula --dry-run
 
 Targets: `ghostty`, `vscode`, `vscodium`, `cursor`, `tmux`, `pi`. Add `--target` to restrict; omit to apply to every detected target.
 
-There is no "installed vs not" — only **active vs not**. `vstack apply <theme>` is idempotent: it (re)installs the extension VSIX and switches the active theme. Settings.json (VS Code-family and Pi), `~/.config/ghostty/config`, and `~/.tmux.conf` (or `~/.config/tmux/tmux.conf`, whichever exists) are backed up before every mutation.
+There is no "installed vs not" — only **active vs not**. `vstack apply <theme>` is idempotent: it (re)installs the extension VSIX and switches the active color + icon themes. Settings.json (VS Code-family and Pi), `~/.config/ghostty/config`, and `~/.tmux.conf` (or `~/.config/tmux/tmux.conf`, whichever exists) are backed up before every mutation.
 
 ### What each target writes
 
 | Target | Writes | Reload |
 |---|---|---|
 | `ghostty` | per-theme `themes/vstack/<id>` + shaders under `shaders/vstack/`; managed `config-file =` / `alpha-blending = linear-corrected` / `custom-shader =` block in the live Ghostty config. | macOS triggers Ghostty's **Reload Configuration** menu via AppleScript (fallback: SIGUSR2); Unix sends SIGUSR2 to running ghostty processes. |
-| `vscode` / `vscodium` / `cursor` | per-call VSIX install of `vanillagreen.vstack-themes`; flips `workbench.colorTheme` in user `settings.json`. | Editor picks the new theme up live; reload window if it lingers. |
+| `vscode` / `vscodium` / `cursor` | per-call VSIX install of `vanillagreen.vstack-themes`; flips `workbench.colorTheme` and `workbench.iconTheme` in user `settings.json` (JSONC comments preserved). | Editor picks the new theme up live; reload window if it lingers. |
 | `tmux` | per-theme `vstack-active-theme.conf` under `~/.config/tmux/`; one-line managed `source-file -q "…"` block in your `tmux.conf`. | `vstack apply` runs `tmux -S … source-file <conf>` against every live server it finds. |
 | `pi` | per-theme `vanillagreen-<id>.json` under `~/.pi/agent/themes/`; flips top-level `theme` key in `~/.pi/settings.json`. | New Pi sessions pick up the theme on launch; in a live Pi session use `/theme` to switch or `/settings reload`. |
 
