@@ -60,6 +60,7 @@ class SessionManagerOverlay implements Focusable {
 	private notice: { kind: "info" | "error"; text: string } | undefined;
 	private queryError: string | undefined;
 	private loadingProgress: { loaded: number; total: number } | undefined;
+	private readonly modelLabelCache = new Map<string, string | undefined>();
 	private loadSeq = 0;
 	private scope: Scope;
 	private sortMode: SortMode;
@@ -141,6 +142,7 @@ class SessionManagerOverlay implements Focusable {
 			});
 			if (seq !== this.loadSeq) return;
 			sessionUserMessagesCache.clear();
+			this.modelLabelCache.clear();
 			this.sessions = sessions.sort((a, b) => b.modified.getTime() - a.modified.getTime());
 			this.mode = "browse";
 			this.applyFilter(false);
@@ -278,6 +280,14 @@ class SessionManagerOverlay implements Focusable {
 			return;
 		}
 		this.done(this.resumeAction(session, false));
+	}
+
+	private sessionModelLabel(session: SessionInfo): string | undefined {
+		if (this.modelLabelCache.has(session.path)) return this.modelLabelCache.get(session.path);
+		const model = sessionModelInfo(session.path);
+		const label = model ? modelLabel(model) : undefined;
+		this.modelLabelCache.set(session.path, label);
+		return label;
 	}
 
 	private confirmModelResume(): void {
@@ -900,8 +910,17 @@ class SessionManagerOverlay implements Focusable {
 		}
 
 		const locationPrefix = ui.dim("Session CWD: ");
-		const location = selected.cwd || selected.path;
-		lines.push(ui.row(locationPrefix + ui.muted(truncateToWidth(shortenPath(location), Math.max(10, inner - visibleWidth(locationPrefix)), "…"))));
+		const location = shortenPath(selected.cwd || selected.path);
+		const model = this.sessionModelLabel(selected);
+		if (model) {
+			const separator = ui.dim(" · ");
+			const modelBudget = Math.max(8, Math.min(44, Math.floor(inner * 0.4), inner - visibleWidth(locationPrefix) - visibleWidth(separator) - 10));
+			const modelText = truncateToWidth(model, modelBudget, "…");
+			const locationBudget = Math.max(10, inner - visibleWidth(locationPrefix) - visibleWidth(separator) - visibleWidth(modelText));
+			lines.push(ui.row(locationPrefix + ui.muted(truncateToWidth(location, locationBudget, "…")) + separator + ui.muted(modelText)));
+		} else {
+			lines.push(ui.row(locationPrefix + ui.muted(truncateToWidth(location, Math.max(10, inner - visibleWidth(locationPrefix)), "…"))));
+		}
 
 		const state = `${shown} shown · ${scope} · ${this.sortMode} sort · ${this.nameFilter === "named" ? "named only" : "all names"}${search ? ` · query “${truncateToWidth(search, 28, "…")}”` : ""}`;
 		lines.push(ui.row(ui.dim(state)));

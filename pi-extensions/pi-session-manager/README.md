@@ -9,6 +9,7 @@ Polished session manager overlay. Complements Pi's built-in `/resume` with searc
 - Browse current-project sessions or all sessions.
 - Search by tokens, quoted phrases, or `re:<regex>`.
 - Threaded lineage view follows Pi `parentSession` relationships.
+- Detail pane shows each session CWD plus its saved model.
 - Resume preserves the session's saved model. If your active model differs, a confirmation lets you pick either.
 - Inline rename and delete with confirmation. Optional `trash` CLI fallback so deletes are recoverable.
 - Deleting a session also clears its per-extension data.
