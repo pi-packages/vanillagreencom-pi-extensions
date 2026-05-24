@@ -37,7 +37,7 @@ Requires Rust. If you don't have it, install [rustup](https://rustup.rs) (Linux/
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-Then:
+Then, open new terminal and:
 
 ```bash
 cargo install --git https://github.com/vanillagreencom/vstack.git vstack
