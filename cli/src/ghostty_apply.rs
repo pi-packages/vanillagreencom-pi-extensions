@@ -77,6 +77,13 @@ pub fn managed_block(extra_name: &str, theme_id: &str, shader_file_names: &[Stri
         // supports paths relative to the selected config file and validates across live
         // and isolated XDG_CONFIG_HOME smoke tests.
         format!("config-file = themes/vstack/{theme_id}"),
+        // Custom shaders receive terminal colors in Ghostty's configured
+        // alpha-blending color space. Linux defaults to linear-corrected;
+        // macOS defaults to native/Display-P3. The shipped shaders compare
+        // iChannel0 against linearized theme colors, so force the Linux
+        // space everywhere or ambient scene layers get classified as text
+        // and disappear on macOS.
+        "alpha-blending = linear-corrected".to_string(),
     ];
     for file_name in shader_file_names {
         lines.push(format!("custom-shader = shaders/vstack/{file_name}"));
@@ -259,7 +266,7 @@ mod tests {
 
         assert_eq!(
             out,
-            "font-size = 14\n\n# vstack:begin vanillagreen-themes\n# Managed by vstack. Edit source extras or remove this block to opt out.\nconfig-file = themes/vstack/ghibli-serene-nature\ncustom-shader = shaders/vstack/ghibli-serene-nature-ambient.glsl\ncustom-shader-animation = always\n# vstack:end vanillagreen-themes\n"
+            "font-size = 14\n\n# vstack:begin vanillagreen-themes\n# Managed by vstack. Edit source extras or remove this block to opt out.\nconfig-file = themes/vstack/ghibli-serene-nature\nalpha-blending = linear-corrected\ncustom-shader = shaders/vstack/ghibli-serene-nature-ambient.glsl\ncustom-shader-animation = always\n# vstack:end vanillagreen-themes\n"
         );
     }
 
@@ -271,7 +278,7 @@ mod tests {
 
         assert_eq!(
             out,
-            "font-size = 14\n\n# vstack:begin vanillagreen-themes\n# Managed by vstack. Edit source extras or remove this block to opt out.\nconfig-file = themes/vstack/new-theme\n# vstack:end vanillagreen-themes\nwindow-padding-x = 8\n"
+            "font-size = 14\n\n# vstack:begin vanillagreen-themes\n# Managed by vstack. Edit source extras or remove this block to opt out.\nconfig-file = themes/vstack/new-theme\nalpha-blending = linear-corrected\n# vstack:end vanillagreen-themes\nwindow-padding-x = 8\n"
         );
     }
 

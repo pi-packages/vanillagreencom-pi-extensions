@@ -316,16 +316,24 @@ fn apply_plan(plan: &ApplyPlan, silent: bool) -> Result<()> {
         match target.kind {
             TargetKind::Ghostty => {
                 apply_ghostty_target(&plan.extra_name, target, silent)?;
-                let reloaded = reload_running_ghostty_processes();
+                let reload = reload_running_ghostty_processes();
                 if !silent {
-                    if reloaded > 0 {
+                    if reload.applescript_menu {
                         println!(
-                            "Ghostty config updated; sent SIGUSR2 live-reload to {reloaded} running ghostty process(es)."
+                            "Ghostty config updated; triggered macOS Reload Configuration menu."
+                        );
+                    } else if reload.signaled > 0 {
+                        println!(
+                            "Ghostty config updated; sent SIGUSR2 live-reload to {} running ghostty process(es).",
+                            reload.signaled
                         );
                     } else {
                         println!(
                             "Ghostty config updated. No live ghostty process detected; the new theme will load on next launch."
                         );
+                    }
+                    if let Some(warning) = reload.warning.as_deref() {
+                        eprintln!("warning: {warning}");
                     }
                 }
             }
@@ -351,8 +359,9 @@ fn apply_plan(plan: &ApplyPlan, silent: bool) -> Result<()> {
 ///
 /// The transform renames the original `fragCoord` parameter to a unique
 /// shim name, then declares a local `vec2 fragCoord` re-bound to the
-/// y-flipped value. All references in the function body resolve to the
-/// local, so no other edits are needed.
+/// y-flipped value. Positional references in the function body resolve to
+/// that local, while the terminal framebuffer sample is routed to the
+/// unflipped screen coordinate so text remains correctly oriented.
 fn flip_shader_y_for_metal(src: &str) -> String {
     let needle = "void mainImage(out vec4 fragColor, in vec2 fragCoord)";
     let Some(idx) = src.find(needle) else {
@@ -386,9 +395,19 @@ fn flip_shader_y_for_metal(src: &str) -> String {
     // coord. Every shipped shader uses exactly this one sample pattern;
     // route it to the unflipped param so the terminal text doesn't render
     // upside down on top of the corrected positional rendering.
-    out.replace(
+    out = out.replace(
         "texture(iChannel0, fragCoord.xy / iResolution.xy)",
         "texture(iChannel0, _vstack_screen_fragCoord.xy / iResolution.xy)",
+    );
+
+    // If Ghostty is still running with macOS's native color space for this
+    // frame, the terminal background may arrive as raw theme RGB instead of
+    // linear RGB. Accept either value in the text-mask test so ambient
+    // layers are not hidden everywhere while the just-written config reloads
+    // alpha-blending=linear-corrected.
+    out.replace(
+        "float text_amt = step(0.000144, len3(term.rgb - bg_lin));",
+        "float bg_delta = min(len3(term.rgb - bg_lin), len3(term.rgb - BG_COL));\n    float text_amt = step(0.000144, bg_delta);",
     )
 }
 
@@ -1107,11 +1126,54 @@ fn strip_stray_shader_lines(input: &str, extra_name: &str) -> String {
     out
 }
 
-/// Send Ghostty's live-reload signal (SIGUSR2) to every running ghostty
-/// process owned by this user. Mirrors Ghostty's default `super+shift+,`
-/// keybind so the user sees the new theme without manual reload. Unix-only;
-/// no-op on other platforms.
-fn reload_running_ghostty_processes() -> usize {
+#[derive(Debug, Default)]
+struct GhosttyReloadResult {
+    applescript_menu: bool,
+    signaled: usize,
+    warning: Option<String>,
+}
+
+/// Reload running Ghostty instances after rewriting config.
+///
+/// Linux/BSD generally works via SIGUSR2. macOS currently has a Ghostty bug
+/// where SIGUSR2 may not reload when Ghostty is focused, so use the native
+/// "Reload Configuration" menu item first via AppleScript/System Events,
+/// then fall back to SIGUSR2 if that fails (for example, no Accessibility
+/// permission for automation yet).
+fn reload_running_ghostty_processes() -> GhosttyReloadResult {
+    let mut result = GhosttyReloadResult::default();
+
+    #[cfg(target_os = "macos")]
+    {
+        match Command::new("osascript")
+            .args([
+                "-e",
+                r#"tell application "Ghostty" to activate"#,
+                "-e",
+                r#"tell application "System Events" to tell process "Ghostty" to click menu item "Reload Configuration" of menu "Ghostty" of menu bar 1"#,
+            ])
+            .output()
+        {
+            Ok(output) if output.status.success() => {
+                result.applescript_menu = true;
+                return result;
+            }
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                if !stderr.is_empty() {
+                    result.warning = Some(format!(
+                        "macOS menu reload failed ({stderr}); falling back to SIGUSR2. Grant Accessibility permission to the app that runs vstack if this keeps happening."
+                    ));
+                }
+            }
+            Err(err) => {
+                result.warning = Some(format!(
+                    "macOS menu reload unavailable ({err}); falling back to SIGUSR2"
+                ));
+            }
+        }
+    }
+
     #[cfg(unix)]
     {
         // On macOS the binary inside Ghostty.app shows up as `ghostty` from
@@ -1124,12 +1186,11 @@ fn reload_running_ghostty_processes() -> usize {
             .output()
         {
             Ok(out) => out,
-            Err(_) => return 0,
+            Err(_) => return result,
         };
         if !output.status.success() {
-            return 0;
+            return result;
         }
-        let mut count = 0usize;
         for line in String::from_utf8_lossy(&output.stdout).lines() {
             let Ok(pid) = line.trim().parse::<i32>() else { continue };
             // SIGUSR2 number diverges between Linux (12) and macOS/BSD (31)
@@ -1138,15 +1199,12 @@ fn reload_running_ghostty_processes() -> usize {
             // SAFETY: kill is a thread-safe libc call.
             let rc = unsafe { libc_kill(pid, sig) };
             if rc == 0 {
-                count += 1;
+                result.signaled += 1;
             }
         }
-        count
     }
-    #[cfg(not(unix))]
-    {
-        0
-    }
+
+    result
 }
 
 #[cfg(all(unix, target_os = "linux"))]
@@ -1737,6 +1795,35 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn macos_shader_transform_flips_position_but_not_terminal_sample() {
+        let src = r#"#define BG_COL vec3(0.1, 0.2, 0.3)
+float len3(vec3 v) { return length(v); }
+void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+    vec4 term = texture(iChannel0, fragCoord.xy / iResolution.xy);
+    vec3 bg_lin = pow(BG_COL, vec3(2.2));
+    float text_amt = step(0.000144, len3(term.rgb - bg_lin));
+    vec2 p = fragCoord.xy;
+    fragColor = vec4(p, text_amt, term.a);
+}
+"#;
+
+        let out = flip_shader_y_for_metal(src);
+
+        assert!(out.contains(
+            "void mainImage(out vec4 fragColor, in vec2 _vstack_screen_fragCoord)"
+        ));
+        assert!(out.contains(
+            "vec2 fragCoord = vec2(_vstack_screen_fragCoord.x, iResolution.y - _vstack_screen_fragCoord.y);"
+        ));
+        assert!(out.contains(
+            "texture(iChannel0, _vstack_screen_fragCoord.xy / iResolution.xy)"
+        ));
+        assert!(out.contains("float bg_delta = min(len3(term.rgb - bg_lin), len3(term.rgb - BG_COL));"));
+        assert!(out.contains("float text_amt = step(0.000144, bg_delta);"));
+        assert!(out.contains("vec2 p = fragCoord.xy;"));
     }
 
     fn write_sample_extra(root: &Path) -> PathBuf {
