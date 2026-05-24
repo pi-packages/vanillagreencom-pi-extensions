@@ -74,7 +74,7 @@ Glyph style: each package exposes `glyphStyle` (`unicode` default, `ascii` for t
 
 | Setting | What it does |
 | --- | --- |
-| Dashboard cycle shortcut | Configurable; defaults to `alt+f`. Restores the last visible mode when toggled back in. Use `none` to disable. |
+| Dashboard cycle shortcut | Configurable; defaults to `f6`. Restores the last visible mode when toggled back in. Use `none` to disable. |
 
 ### Refresh
 

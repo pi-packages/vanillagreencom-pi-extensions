@@ -269,8 +269,8 @@ export function renderDashboardLines(snapshot: FlightdeckSnapshot, theme: Theme,
 	const queueLen = snapshot.master?.merge_queue?.length ?? 0;
 	const queueBadge = queueLen > 0 ? ` ${theme.fg("muted", "·")} ${theme.fg("accent", `merge-queue ${queueLen}`)}` : "";
 	// Keyhints — same pattern as pi-agents-tmux dashboard header:
-	// `<title> <stats> · alt+f toggle · /flightdeck app · <daemon-health>`.
-	const toggleShortcut = settingString("dashboardShortcut", "alt+f", cwd);
+	// `<title> <stats> · f6 toggle · /flightdeck app · <daemon-health>`.
+	const toggleShortcut = settingString("dashboardShortcut", "f6", cwd);
 	const toggleHint = toggleShortcut === "none" ? "" : theme.fg("dim", ` · ${formatShortcutHint(toggleShortcut)} ${terminated ? "dismiss" : "toggle"}`);
 	const appHint = theme.fg("dim", " · /flightdeck app");
 	const hints = `${toggleHint}${appHint}`;
@@ -593,7 +593,7 @@ export default function flightdeck(pi: ExtensionAPI): void {
 		handler: async (_args, ctx) => cycleDashboard(ctx as ExtensionContext),
 	});
 
-	const dashboardShortcut = settingString("dashboardShortcut", "alt+f");
+	const dashboardShortcut = settingString("dashboardShortcut", "f6");
 	if (dashboardShortcut !== "none") {
 		pi.registerShortcut(dashboardShortcut as Parameters<typeof pi.registerShortcut>[0], {
 			description: "Cycle the flightdeck dashboard widget",

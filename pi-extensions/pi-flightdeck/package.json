@@ -48,7 +48,7 @@
           "label": "Dashboard cycle shortcut",
           "description": "Keyboard shortcut that cycles the persistent mini-dashboard widget and restores the last visible mode when toggled back in. Use none to disable.",
           "type": "string",
-          "default": "alt+f",
+          "default": "f6",
           "category": "Keyboard",
           "apply": "reload",
           "requiresReload": true
