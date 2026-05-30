@@ -320,6 +320,7 @@ export interface PaneTaskRecord {
 	completionSourcePath?: string;
 	completionArchivePath?: string;
 	transcriptPath?: string;
+	deliverAs?: string;
 	usage?: UsageStats;
 	model?: string;
 	effort?: string;
@@ -359,6 +360,7 @@ export interface SubagentDashboardItem {
 	task?: string;
 	taskId: string;
 	transcriptPath?: string;
+	deliverAs?: string;
 	updatedAt: string;
 	usage?: UsageStats;
 	model?: string;
@@ -460,7 +462,7 @@ export interface TraceViewerItem {
 	ref?: string;
 	status?: string;
 	text: string;
-	type?: "index" | "summary" | "completion";
+	type?: "index" | "summary" | "completion" | "transcript";
 }
 
 export interface TraceViewerState {

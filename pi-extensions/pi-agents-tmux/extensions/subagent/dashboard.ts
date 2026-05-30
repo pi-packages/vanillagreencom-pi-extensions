@@ -32,7 +32,7 @@ import {
 	type UsageStats,
 } from "./types.js";
 import { glyphs, glyphStyle } from "./glyphs.js";
-import { normalizeTranscriptRecordEvent } from "./transcripts.js";
+import { inputDeliveryLabel, normalizeTranscriptRecordEvent } from "./transcripts.js";
 
 export function dashboardKindLabel(kind: DashboardKind): string {
 	return kind === "oneshot" ? "bg" : kind;
@@ -201,15 +201,16 @@ function outgoingDashboardMessage(item: SubagentDashboardItem): string | undefin
 }
 
 function expandedDashboardMessageLines(item: SubagentDashboardItem, stem: string, theme: Theme, width: number, cwd?: string): string[] {
-	const entries: Array<{ direction: "->" | "<-"; text: string }> = [];
-	if (item.task?.trim()) entries.push({ direction: "->", text: item.task });
+	const entries: Array<{ direction: "->" | "<-"; text: string; delivery?: string }> = [];
+	if (item.task?.trim()) entries.push({ direction: "->", text: item.task, delivery: inputDeliveryLabel(item.deliverAs) });
 	const outgoing = outgoingDashboardMessage(item);
 	if (outgoing) entries.push({ direction: "<-", text: outgoing });
 	const maxChars = Math.max(48, width - 24);
 	return entries.map((entry, index) => {
 		const branch = subagentBranch(theme, index === entries.length - 1 ? "└" : "├", cwd);
 		const direction = entry.direction === "->" ? ansiYellow("->") : ansiGreen("<-");
-		return `${stem}${branch}${direction} ${theme.fg("toolOutput", oneLinePreview(entry.text, maxChars))}`;
+		const delivery = entry.delivery ? `${theme.fg("muted", `${entry.delivery} `)}` : "";
+		return `${stem}${branch}${direction} ${delivery}${theme.fg("toolOutput", oneLinePreview(entry.text, maxChars))}`;
 	});
 }
 

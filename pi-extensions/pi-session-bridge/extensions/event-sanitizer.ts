@@ -1,7 +1,7 @@
 /**
  * Bridge event sanitizer.
  *
- * Compacts noisy Pi events (message_update, tool_execution_*, agent_end)
+ * Compacts noisy Pi events (input, message_update, tool_execution_*, agent_end)
  * to small descriptors before they are pushed to history or broadcast to
  * bridge clients. Caps every envelope at a configured byte budget; raw
  * payloads spill to a per-session JSONL sidecar so `pi-bridge history --raw`
@@ -16,6 +16,7 @@ export const DEFAULT_MAX_HISTORY_RESPONSE_BYTES = 1 * 1024 * 1024;
 export const DEFAULT_PREVIEW_BYTES = 256;
 
 const COMPACTED_EVENT_NAMES = new Set([
+	"input",
 	"message_update",
 	"tool_execution_start",
 	"tool_execution_update",
@@ -92,6 +93,8 @@ interface CompactResult {
 
 function compactKnownEvent(eventName: string, payload: unknown, previewBytes: number): CompactResult {
 	switch (eventName) {
+		case "input":
+			return compactInputEvent(payload, previewBytes);
 		case "message_update":
 			return compactMessageUpdate(payload, previewBytes);
 		case "tool_execution_start":
@@ -106,6 +109,35 @@ function compactKnownEvent(eventName: string, payload: unknown, previewBytes: nu
 		default:
 			return { compact: payload, truncated: false };
 	}
+}
+
+function compactInputEvent(payload: unknown, previewBytes: number): CompactResult {
+	const source = asRecord(payload);
+	if (!source) return { compact: payload, truncated: false };
+
+	const text = pickString(source, "text") ?? "";
+	const sourceName = pickString(source, "source");
+	const streamingBehavior = normalizeStreamingBehavior(source.streamingBehavior ?? source.streaming_behavior);
+	const imagesCount = Array.isArray(source.images) ? source.images.length : undefined;
+	const previewed = previewString(text, previewBytes);
+
+	const compact: Record<string, unknown> = {
+		textBytes: Buffer.byteLength(text, "utf8"),
+		textLength: text.length,
+		textPreview: previewed.preview,
+	};
+	if (sourceName !== undefined) compact.source = sourceName;
+	if (streamingBehavior !== undefined) compact.streamingBehavior = streamingBehavior;
+	if (imagesCount !== undefined) compact.imagesCount = imagesCount;
+	if (previewed.truncated) compact.textTruncated = true;
+
+	return { compact, truncated: true };
+}
+
+function normalizeStreamingBehavior(value: unknown): "steer" | "followUp" | undefined {
+	if (value === "steer") return "steer";
+	if (value === "followUp" || value === "follow-up" || value === "follow_up") return "followUp";
+	return undefined;
 }
 
 function compactMessageUpdate(payload: unknown, previewBytes: number): CompactResult {

@@ -304,7 +304,7 @@ function steerDiagnostics(details: SteerSubagentDetails): string[] {
 	].filter(Boolean);
 }
 
-async function createFollowUpTask(runtimeRoot: string, agentName: string, entry: { paneId: string; sessionFile: string }, message: string): Promise<FollowUpTask> {
+async function createFollowUpTask(runtimeRoot: string, agentName: string, entry: { paneId: string; sessionFile: string }, message: string, deliverAs = "follow-up"): Promise<FollowUpTask> {
 	const taskId = createTaskId(agentName);
 	const outboxFile = completionPath(runtimeRoot, agentName, taskId);
 	await upsertTaskRecord(runtimeRoot, {
@@ -317,6 +317,7 @@ async function createFollowUpTask(runtimeRoot: string, agentName: string, entry:
 		paneId: entry.paneId,
 		outboxFile,
 		transcriptPath: entry.sessionFile,
+		deliverAs,
 		createdAt: new Date().toISOString(),
 		updatedAt: new Date().toISOString(),
 	});
@@ -332,7 +333,7 @@ async function queueSteeringFallback(runtimeRoot: string, agentName: string, mes
 	if (followUpTask) {
 		await updateTaskRegistry(runtimeRoot, (records) => {
 			const existing = records[followUpTask.taskId];
-			if (existing) records[followUpTask.taskId] = { ...existing, kind: "pane", status: "queued", inboxFile: filePath, updatedAt: new Date().toISOString() };
+			if (existing) records[followUpTask.taskId] = { ...existing, kind: "pane", status: "queued", inboxFile: filePath, deliverAs, updatedAt: new Date().toISOString() };
 		});
 		followUpTask.taskFile = filePath;
 	}
@@ -643,6 +644,7 @@ export default function (pi: ExtensionAPI) {
 			const sessionKey = normalizeEventSessionKey(event.sessionKey) ?? existing?.sessionKey;
 			const cwdSnapshot = sanitizeCwdSnapshot(event.cwdSnapshot) ?? sanitizeCwdSnapshot(existing?.cwdSnapshot);
 			const diagnostics = diagnosticsFromEvent(event, existing?.diagnostics);
+			const deliverAs = typeof event.deliverAs === "string" ? event.deliverAs : existing?.deliverAs;
 			records[taskId] = {
 				...existing,
 				taskId,
@@ -660,6 +662,7 @@ export default function (pi: ExtensionAPI) {
 				completionSourcePath: kind === "pane" ? existing?.completionSourcePath : undefined,
 				completionArchivePath: kind === "pane" ? existing?.completionArchivePath : undefined,
 				transcriptPath: typeof event.transcriptPath === "string" ? event.transcriptPath : existing?.transcriptPath,
+				deliverAs,
 				usage,
 				model,
 				effort,
@@ -860,6 +863,7 @@ export default function (pi: ExtensionAPI) {
 			task: record.task,
 			taskId: record.taskId,
 			transcriptPath: record.transcriptPath ?? existing?.transcriptPath,
+			deliverAs: record.deliverAs ?? existing?.deliverAs,
 			updatedAt: record.updatedAt ?? record.completedAt ?? record.createdAt,
 			usage: record.usage ?? existing?.usage,
 		});
@@ -1088,10 +1092,20 @@ export default function (pi: ExtensionAPI) {
 	pi.events.on("subagents:steered", (payload: unknown) => {
 		if (!payload || typeof payload !== "object") return;
 		const event = payload as Record<string, unknown>;
-		patchDashboard(typeof event.taskId === "string" ? event.taskId : undefined, {
+		const taskId = typeof event.taskId === "string" ? event.taskId : undefined;
+		const deliverAs = typeof event.deliverAs === "string" ? event.deliverAs : undefined;
+		patchDashboard(taskId, {
 			bridge: Boolean(event.bridge),
 			paneId: typeof event.paneId === "string" ? event.paneId : undefined,
+			deliverAs,
 		});
+		const runtimeRoot = typeof event.runtimeRoot === "string" ? event.runtimeRoot : undefined;
+		if (runtimeRoot && taskId && deliverAs) {
+			void updateTaskRegistry(runtimeRoot, (records) => {
+				const existing = records[taskId];
+				if (existing) records[taskId] = { ...existing, deliverAs, updatedAt: new Date().toISOString() };
+			});
+		}
 	});
 
 	pi.registerTool({

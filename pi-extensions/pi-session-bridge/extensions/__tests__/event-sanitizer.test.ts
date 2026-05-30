@@ -85,6 +85,38 @@ describe("sanitizeBridgeEvent", () => {
 		expect("messages" in data).toBe(false);
 	});
 
+	test("input events retain source and streaming behavior while compacting prompt text", () => {
+		const payload = {
+			text: "please adjust the current plan " + "x".repeat(200),
+			source: "extension",
+			streamingBehavior: "followUp",
+			images: [{ source: { type: "base64", data: "image-data" } }],
+		};
+		const result = sanitizeBridgeEvent("input", payload, { ...baseConfig, previewBytes: 48 });
+		const data = result.data as Record<string, unknown>;
+
+		expect(data.source).toBe("extension");
+		expect(data.streamingBehavior).toBe("followUp");
+		expect(data.imagesCount).toBe(1);
+		expect(data.textBytes).toBe(Buffer.byteLength(payload.text, "utf8"));
+		expect(data.textLength).toBe(payload.text.length);
+		expect((data.textPreview as string).length).toBeLessThanOrEqual(48);
+		expect(data.textTruncated).toBe(true);
+		expect("text" in data).toBe(false);
+		expect("images" in data).toBe(false);
+		expect(result.truncated).toBe(true);
+		expect(result.raw).toEqual(payload);
+	});
+
+	test("input event compaction treats idle prompts as undefined streaming behavior", () => {
+		const result = sanitizeBridgeEvent("input", { text: "idle prompt", source: "interactive" }, baseConfig);
+		const data = result.data as Record<string, unknown>;
+
+		expect(data.textPreview).toBe("idle prompt");
+		expect(data.source).toBe("interactive");
+		expect("streamingBehavior" in data).toBe(false);
+	});
+
 	test("unknown events pass through when under per-event budget", () => {
 		const payload = { ok: true, count: 3 };
 		const result = sanitizeBridgeEvent("bridge_pong", payload, baseConfig);
@@ -96,7 +128,7 @@ describe("sanitizeBridgeEvent", () => {
 	test("unknown events over per-event budget collapse to a descriptor", () => {
 		const blob = "z".repeat(1_500_000);
 		const payload = { blob };
-		const result = sanitizeBridgeEvent("input", payload, { ...baseConfig, maxEventBytes: 1024 });
+		const result = sanitizeBridgeEvent("custom_heavy_event", payload, { ...baseConfig, maxEventBytes: 1024 });
 		const data = result.data as Record<string, unknown>;
 		expect(result.truncated).toBe(true);
 		expect(data.truncated).toBe(true);

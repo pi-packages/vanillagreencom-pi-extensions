@@ -10,7 +10,7 @@ Delegate work to specialized agents from a running Pi session. Agents run either
 - `delegate_subagent` is a restricted, single-mode variant child agents can call without gaining full orchestration controls. Engineer agents installed by vstack default to `allowed-subagents: scout` so they can dispatch read-only reconnaissance into a fresh bg lane.
 - Agents with `pane: true` open a visible tmux pane that persists across turns. Other agents run in the background. Spawned Pi sessions use the agent name as the Pi session display name.
 - `/agents` browser lists agents for the selected scope with static detail, Monitor task traces, and one-key launch.
-- Monitor groups tasks by session (pane, bg lane, bg one-shot) under expandable Active and Completed sections, with active sessions first and newest invocations first inside each section; repeated same-agent launches get session numbers and task numbers reset per session.
+- Monitor groups tasks by session (pane, bg lane, bg one-shot) under expandable Active and Completed sections, with active sessions first and newest invocations first inside each section; repeated same-agent launches get session numbers and task numbers reset per session. Steering/follow-up delivery mode is shown in expanded rows and trace metadata.
 - Chat completion rows show actual results, never a repeat of the original request.
 - Task detail shows Summary and Completion tabs; Summary contains task metadata, artifacts, and task text, while Completion contains result summary, files changed, and validation.
 - Bg one-shot transcripts keep start/end/tool audit events but omit successful streaming `message_update` snapshots by default to avoid large duplicate JSONL files. Failed runs preserve the latest unfinalized update as `buffered: true`; set `PI_AGENTS_TMUX_TRANSCRIPT_FULL=1` before launching Pi to retain every stream snapshot for debugging.
@@ -18,7 +18,7 @@ Delegate work to specialized agents from a running Pi session. Agents run either
 - Dashboard widget shows live state, turns, tokens, and cost for every spawned agent; working agents stay above attention/completed agents, newest invocations lead each bucket, and activity updates do not reshuffle rows. Once you hide it, lifecycle updates do not reopen it until you toggle it back in.
 - Grouped completion notifications batch multiple agents finishing together.
 - When `pi-session-bridge` is loaded, spawn/queue/start/steer/completion lifecycle points publish structured `agent.*` activity broker events without adding chat messages (`agent.spawned`, `agent.task_queued`, `agent.task_started`, `agent.steered`, `agent.task_completed`, `agent.task_blocked`, `agent.task_failed`, `agent.needs_completion`, `agent.empty_after_compact`, `agent.pane_cwd_stale`).
-- `taskId` retrieval, mid-run steering, and pane stop without losing memory.
+- `taskId` retrieval, mid-run steering, and pane stop without losing memory. When `pi-session-bridge` provides compact input events, trace views humanize `steer` vs `followUp` input records instead of showing raw JSON only.
 - Stop kills the tmux process but preserves the session — next launch resumes it.
 - Bg agents get fresh sessions per call by default; opt into shared memory with an explicit `sessionKey`.
 - Inventory-aware launch guard rejects unknown agent names with the available list.

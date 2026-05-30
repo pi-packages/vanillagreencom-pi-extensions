@@ -11,6 +11,7 @@ import {
 	highlightInlinePreview,
 } from "../format.js";
 import { readTextFileIfExists, recordTraceRef } from "../renderers.js";
+import { formatTranscriptForDisplay, inputDeliveryLabel } from "../transcripts.js";
 import {
 	MONITOR_SUBTAB_LABELS,
 	type AgentBrowserUiState,
@@ -74,12 +75,12 @@ export function renderTraceContentLine(raw: string, type: TraceViewerItem["type"
 	const line = raw.replace(/\t/g, "  ");
 	const trimmed = line.trim();
 	if (!trimmed) return [""];
-	if (/^── .+ ──$/.test(trimmed)) return wrapTextWithAnsi(theme.fg("muted", trimmed.replace(/(assistant|user|tool call|tool start|tool end|turn start|turn end|exit)/i, (match) => theme.fg("accent", theme.bold(match)))), width);
+	if (/^── .+ ──$/.test(trimmed)) return wrapTextWithAnsi(theme.fg("muted", trimmed.replace(/(input|assistant|user|tool call|tool start|tool end|turn start|turn end|agent end|exit)/i, (match) => theme.fg("accent", theme.bold(match)))), width);
 	if (/^-{3,}$/.test(trimmed)) return [];
 	if (/^(Overview|Metadata|Summary|Files changed|Validation|Notes|Task|Artifacts|Session|Task list|System Prompt)$/i.test(trimmed)) {
 		return wrapTextWithAnsi(ansiMagenta(theme.bold(trimmed)), width);
 	}
-	const labelMatch = line.match(/^(Ref|Agent|Session #|Task #|Status|Task ID|Task file|Created|Done|Model|Effort|Session|Session type|Start|Latest|Duration|Tasks|Usage|Pane ID|SessionKey|Transcript|Completion|Archive|Source)\s{2,}(.+)$/);
+	const labelMatch = line.match(/^(Ref|Agent|Session #|Task #|Status|Task ID|Task file|Created|Done|Model|Effort|Session|Session type|Start|Latest|Duration|Tasks|Usage|Delivery|Pane ID|SessionKey|Transcript|Completion|Archive|Source)\s{2,}(.+)$/);
 	if (labelMatch) return wrapTextWithAnsi(colorTraceValue(labelMatch[1], labelMatch[2], theme), width);
 	if (traceLineLooksJsonLike(line, type)) return wrapTextWithAnsi(highlightInlinePreview(line, theme), width);
 	const bullet = line.match(/^(\s*)([-*]|\d+\.)\s+(.*)$/);
@@ -191,6 +192,7 @@ export async function traceViewerItems(record: PaneTaskRecord, taskNumber?: numb
 	const BLANK = " ";
 	const completionPath = record.completionArchivePath ?? record.completionSourcePath;
 	const completion = await readTextFileIfExists(completionPath, 24_000);
+	const delivery = inputDeliveryLabel(record.deliverAs);
 	const artifactLines = [
 		record.transcriptPath ? `Transcript  ${record.transcriptPath}` : "",
 		record.completionArchivePath ? `Archive   ${record.completionArchivePath}` : record.completionSourcePath ? `Completion  ${record.completionSourcePath}` : "",
@@ -205,6 +207,7 @@ export async function traceViewerItems(record: PaneTaskRecord, taskNumber?: numb
 		`Status   ${record.status}`,
 		`Task ID  ${record.taskId}`,
 		usage ? `Usage    ${usage}` : "",
+		delivery ? `Delivery  ${delivery}` : "",
 		`Created  ${record.createdAt}`,
 		record.completedAt ? `Done     ${record.completedAt}` : "",
 		artifactLines.length ? BLANK : "",
@@ -240,8 +243,13 @@ export async function traceViewerItems(record: PaneTaskRecord, taskNumber?: numb
 		...completionJsonSection,
 	].filter(Boolean).join("\n");
 	const common = { agent: record.agent, createdAt: record.completedAt ?? record.createdAt, ref, status: record.status, summary: summaryText };
+	const transcript = await readTextFileIfExists(record.transcriptPath, 24_000);
+	const transcriptItem = record.transcriptPath
+		? [{ ...common, label: "Transcript", path: record.transcriptPath, text: transcript ? formatTranscriptForDisplay(transcript) : "Transcript file could not be read.", type: "transcript" as const }]
+		: [];
 	return [
-		{ ...common, label: "Summary", text: summary, type: "summary" },
-		{ ...common, label: "Completion", path: completionPath, text: completionText, type: "summary" },
+		{ ...common, label: "Summary", text: summary, type: "summary" as const },
+		{ ...common, label: "Completion", path: completionPath, text: completionText, type: "summary" as const },
+		...transcriptItem,
 	];
 }

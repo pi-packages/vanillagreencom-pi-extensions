@@ -373,6 +373,19 @@ test("dashboard expanded message lines mark inbound prompt and outbound result",
 	assert.match(rendered, /└─ <- No gaps found\./);
 });
 
+test("dashboard expanded message lines label steering delivery", () => {
+	const cwd = tempRuntime();
+	writeManagerConfig(cwd, { dashboard: true });
+	const rendered = stripAnsi(renderDashboardWidgetLines({
+		collapsed: false,
+		mode: "expanded",
+		visible: true,
+		items: { a: dashboardItem({ status: "running", task: "Focus on failing tests", deliverAs: "steer" }) },
+	}, theme as any, cwd, 220).join("\n"));
+
+	assert.match(rendered, /└─ -> steer Focus on failing tests/);
+});
+
 test("dashboard expanded message lines use configured ASCII tree connectors", () => {
 	const cwd = tempRuntime();
 	writeManagerConfig(cwd, { dashboard: true, treeStyle: "ascii" });
@@ -965,7 +978,7 @@ test("Monitor tab task rendering still exposes task trace metadata", async () =>
 	const numbers = taskNumberById([taskRecord]);
 	const items = await traceViewerItems(taskRecord, numbers.get(taskId), { agents: [agent("planner", true, { effort: "xhigh" })] });
 
-	assert.equal(items.length, 2);
+	assert.equal(items.length, 3);
 	assert.match(items[0]!.text, /Task ID  planner-1700000120-bbbbbbbb/);
 	assert.doesNotMatch(items[0]!.text, /^(Agent|Session #|Model|Effort|Session)\s+/m);
 	assert.match(items[0]!.text, /Artifacts\n---------/);
@@ -979,6 +992,34 @@ test("Monitor tab task rendering still exposes task trace metadata", async () =>
 	assert.match(items[1]!.text, /Files changed\n-------------\nNone reported/);
 	assert.match(items[1]!.text, /Validation\n----------\nNone reported/);
 	assert.match(items[1]!.text, /Completion JSON\n---------------\nCompletion JSON file could not be read\./);
+	assert.equal(items[2]!.label, "Transcript");
+	assert.equal(items[2]!.path, "/tmp/planner-transcript.jsonl");
+	assert.match(items[2]!.text, /Transcript file could not be read\./);
+});
+
+test("Monitor trace labels delivery mode and humanizes input transcript events", async () => {
+	const dir = tempRuntime();
+	const transcript = join(dir, "child-session.jsonl");
+	writeFileSync(transcript, [
+		JSON.stringify({ event: { type: "input", textPreview: "Please follow up after current turn", source: "extension", streamingBehavior: "followUp", textBytes: 35, imagesCount: 0 } }),
+		JSON.stringify({ event: { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "done with follow-up" }] } } }),
+	].join("\n"));
+	const taskRecord = record("planner", "planner-1700000120-follow", "2026-05-14T05:02:00.000Z", {
+		deliverAs: "follow-up",
+		transcriptPath: transcript,
+		summary: "completed planner summary",
+	});
+
+	const items = await traceViewerItems(taskRecord, 1, { agents: [agent("planner", true)] });
+
+	assert.equal(items.length, 3);
+	assert.match(items[0]!.text, /Delivery  follow-up/);
+	assert.equal(items[2]!.label, "Transcript");
+	assert.equal(items[2]!.type, "transcript");
+	assert.match(items[2]!.text, /── input \(follow-up · extension · 0 images\) ──/);
+	assert.match(items[2]!.text, /Please follow up after current turn/);
+	assert.match(items[2]!.text, /── assistant message ──/);
+	assert.match(items[2]!.text, /done with follow-up/);
 });
 
 test("Monitor completion tab shows persisted bg result without JSON warning", async () => {

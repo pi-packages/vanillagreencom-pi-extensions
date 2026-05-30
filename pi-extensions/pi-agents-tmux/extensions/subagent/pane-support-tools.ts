@@ -233,7 +233,7 @@ export function registerPaneSupportTools(deps: PaneSupportToolDeps): void {
 			if (!(await paneExists(entry.paneId))) return { content: [{ type: "text", text: `Agent ${agentName} is not live.` }], details: {}, isError: true };
 
 			const deliverAs = params.deliverAs ?? "steer";
-			const followUpTask = isFollowUpDelivery(deliverAs) ? await createFollowUpTask(runtimeRoot, agentName, entry, params.message) : undefined;
+			const followUpTask = isFollowUpDelivery(deliverAs) ? await createFollowUpTask(runtimeRoot, agentName, entry, params.message, deliverAs) : undefined;
 			const metadata = await ensurePaneBridgeMetadata(runtimeRoot, entry);
 			const bridgeBin = metadata ? await resolvePiBridgeBin() : undefined;
 			const targetArgs = metadata ? bridgeTargetArgs(metadata) : [];

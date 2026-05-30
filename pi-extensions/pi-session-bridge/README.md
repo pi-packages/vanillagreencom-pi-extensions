@@ -64,6 +64,7 @@ If exactly one active bridge exists, target flags are optional. Filters: `--pid`
 
 `pi-bridge history` and the `stream` channel both default to compact event envelopes:
 
+- `input` → `{ source, streamingBehavior, imagesCount, textBytes, textLength, textPreview, textTruncated }`; idle prompts omit `streamingBehavior`, mid-stream interrupts use `steer`, and queued prompts use `followUp`.
 - `message_update` → `{ role, type, contentIndex, deltaLength, deltaBytes, deltaPreview }`.
 - `tool_execution_*` → `{ toolName, toolUseId, status, isError, *Bytes, *Preview, artifactPath, logPath, detailPath }`.
 - `agent_end` → `{ status, stopReason, usage, messagesCount, finalTextBytes, finalTextLength, finalTextPreview }`.
@@ -96,6 +97,7 @@ Example response and event:
 
 ```json
 {"type":"response","id":"1","command":"get_state","success":true,"data":{}}
+{"type":"event","event":"input","timestamp":"...","data":{"source":"extension","streamingBehavior":"followUp","textBytes":42,"textLength":42,"textPreview":"summarize when done"},"truncated":true,"originalBytes":96,"rawEventPath":"/tmp/pi-session-bridge-1000/raw/12345.jsonl","rawEventRef":"6"}
 {"type":"event","event":"message_update","timestamp":"...","data":{"role":"assistant","contentIndex":0,"deltaLength":50000,"deltaBytes":50000,"deltaPreview":"Hello..."},"truncated":true,"originalBytes":50012,"rawEventPath":"/tmp/pi-session-bridge-1000/raw/12345.jsonl","rawEventRef":"7"}
 {"type":"event","event":"vstack_activity","timestamp":"...","data":{"type":"agent.task_completed","source":"pi-agents","severity":"success","importance":"normal","summary":"agent done"}}
 ```
