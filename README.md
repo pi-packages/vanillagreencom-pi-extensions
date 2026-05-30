@@ -118,7 +118,7 @@ Key rules:
 
 - **Prefer `deny-tools` over allowlists.** Each harness inherits its normal tool set and blocks only what you list. Claude Code writes it as native `disallowedTools`; OpenCode emits `permission: <tool>: deny`; Pi enforces it via `pi-agents-tmux`. Cursor and Codex don't use per-agent deny lists — Codex subagents use `sandbox-mode`/approval instead.
 - **Pi `allowed-subagents` enables `delegate_subagent`.** vstack engineer agents default to `allowed-subagents = ["scout"]` so dev agents can dispatch read-only reconnaissance without gaining full orchestration controls. Set `[]` to disable; non-engineer roles default to disabled (and gain `delegate_subagent` in their `deny-tools`). Aliases: `allowedSubagents`, `subagent-agents`, `subagent_agents`.
-- **`effort` is written verbatim** by each harness. Valid: `low`, `medium`, `high`, `xhigh` (Claude also accepts `max`). Pi appends it to its model id as `:<effort>`.
+- **`effort` is written verbatim** by each harness. Valid: `low`, `medium`, `high`, `xhigh` (Claude also accepts `max`). Pi appends it to its model id as `:<effort>`; Pi has no native `max` thinking level, so provider metadata or bridge-specific overrides must map `xhigh` to provider values when needed.
 - **OpenCode agents default to `mode: subagent`.** Set `mode = "primary"` only when you want an OpenCode primary agent. OpenCode `color` must be hex.
 - **Claude `background` seeds from Pi `pane`** on first install (`pane = true` → `background = false`), then your edits are preserved on refresh.
 - **Custom safety hooks (`[[custom-hooks]]`)** follow the same pattern. Direct edits to generated agent or skill files are also picked up where possible.
