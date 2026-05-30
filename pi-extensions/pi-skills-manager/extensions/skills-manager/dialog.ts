@@ -347,7 +347,7 @@ class SkillsManagerDialog implements Focusable {
 		root.addChild(new Spacer(1));
 		const selected = this.getSelectedSkill();
 		const actions: Array<[string, string]> = [["-/=", "page"]];
-		if (selected) { actions.push(["tab", "preview"], ["alt+x", "enable/disable"]); if (!this.browseQuery && isDeletableSkill(selected)) actions.push(["backspace", "delete"]); }
+		if (selected) { actions.push(["tab", "preview"], ["ctrl+x", "enable/disable"]); if (!this.browseQuery && isDeletableSkill(selected)) actions.push(["backspace", "delete"]); }
 		root.addChild(new Text(skillKeyHints(this.theme, actions), 1, 0));
 		return renderFrame(this.theme, width, root.render(innerWidth), undefined, "Skills Manager", `${enabledCount}/${totalCount} enabled`);
 	}
@@ -402,7 +402,7 @@ class SkillsManagerDialog implements Focusable {
 			const skill = this.getCurrentSkill();
 			if (!skill) { this.exitToBrowse(); return; }
 			if (matchesKey(data, Key.escape) || matchesKey(data, Key.tab)) { this.exitToBrowse(skill.path); return; }
-			if (matchesKey(data, Key.enter)) { if (!skill.enabled) this.ctx.ui.notify("Enable this skill first with alt+x", "info"); else this.done(skill); return; }
+			if (matchesKey(data, Key.enter)) { if (!skill.enabled) this.ctx.ui.notify("Enable this skill first with ctrl+x", "info"); else this.done(skill); return; }
 			if (matchesKey(data, Key.alt("x")) || matchesKey(data, Key.ctrl("x"))) { void this.toggleSkill(skill); return; }
 			if (isDeletableSkill(skill) && (matchesKey(data, Key.alt("e")) || matchesKey(data, Key.ctrl("e")))) { this.openEditor(); return; }
 			if (isDeletableSkill(skill) && (matchesKey(data, Key.alt("r")) || matchesKey(data, Key.ctrl("r")))) { this.openRenameDialog(); return; }
@@ -417,7 +417,7 @@ class SkillsManagerDialog implements Focusable {
 		if (matchesKey(data, Key.down)) { this.selectedIndex = this.selectedIndex === this.filteredSkills.length ? 0 : this.selectedIndex + 1; return; }
 		if (matchesKey(data, "-") || matchesKey(data, Key.pageUp)) { this.selectedIndex = responsiveBrowsePageSelection(this.configuredListRows, this.tui.terminal.rows, this.selectedIndex, this.filteredSkills.length, -1, this.popupMaxHeight); return; }
 		if (matchesKey(data, "=") || matchesKey(data, Key.pageDown)) { this.selectedIndex = responsiveBrowsePageSelection(this.configuredListRows, this.tui.terminal.rows, this.selectedIndex, this.filteredSkills.length, 1, this.popupMaxHeight); return; }
-		if (matchesKey(data, Key.enter)) { if (this.selectedIndex === 0) { this.enterCreateMode(); return; } const skill = this.getSelectedSkill(); if (!skill) return; if (!skill.enabled) this.ctx.ui.notify("Enable this skill first with alt+x", "info"); else this.done(skill); return; }
+		if (matchesKey(data, Key.enter)) { if (this.selectedIndex === 0) { this.enterCreateMode(); return; } const skill = this.getSelectedSkill(); if (!skill) return; if (!skill.enabled) this.ctx.ui.notify("Enable this skill first with ctrl+x", "info"); else this.done(skill); return; }
 		if (matchesKey(data, Key.tab)) { const skill = this.getSelectedSkill(); if (skill) this.openPreview(skill); return; }
 		if (matchesKey(data, Key.alt("x")) || matchesKey(data, Key.ctrl("x"))) { const skill = this.getSelectedSkill(); if (skill) void this.toggleSkill(skill); return; }
 		if (matchesKey(data, Key.backspace) && !this.browseInput.getValue()) { const skill = this.getSelectedSkill(); if (skill && isDeletableSkill(skill)) this.openDeleteConfirm(skill, "browse"); return; }

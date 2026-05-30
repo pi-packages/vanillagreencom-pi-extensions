@@ -133,7 +133,7 @@ export class ScrollableSkillPreview implements Component {
 		const maxScroll = Math.max(0, totalLines - visibleHeight);
 		const scroll = maxScroll > 0 ? this.theme.fg("dim", ` ${glyphs().bullet.trim()} ${this.scrollOffset + 1}-${Math.min(totalLines, this.scrollOffset + visibleHeight)}/${totalLines}`) : "";
 		const hints: Array<[string, string]> = [["-/=", "page"]];
-		hints.push(["alt+x", "enable/disable"]);
+		hints.push(["ctrl+x", "enable/disable"]);
 		if (isDeletableSkill(this.skill)) hints.push(["alt+e", "edit"], ["alt+r", "rename"], ["backspace", "delete"]);
 		return truncateToWidth(`${skillKeyHints(this.theme, hints)}${scroll}`, innerWidth, this.theme.fg("dim", "..."));
 	}
