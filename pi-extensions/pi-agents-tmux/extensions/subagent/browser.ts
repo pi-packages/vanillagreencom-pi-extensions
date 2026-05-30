@@ -173,6 +173,14 @@ function renderAgentsBody(
 	return lines;
 }
 
+export function isAgentFrontmatterEditShortcut(data: string): boolean {
+	return data === "\x1bg" || data === "\x1b[103;3u" || matchesKey(data, "alt+g");
+}
+
+export function agentFooterHint(theme: Theme): string {
+	return `${ansiYellow("tab")} ${theme.fg("dim", "view · ")}${ansiYellow("-/=")} ${theme.fg("dim", "page · ")}${ansiYellow("←/→")} ${theme.fg("dim", "pane · ")}${ansiYellow("alt+g")} ${theme.fg("dim", "edit frontmatter · ")}${ansiYellow("alt+p")} ${theme.fg("dim", "start pane · ")}${ansiYellow("alt+o")} ${theme.fg("dim", "attach · ")}${ansiYellow("alt+x")} ${theme.fg("dim", "stop")}`;
+}
+
 function createAgentsBrowserComponent(
 	discovery: ReturnType<typeof discoverAgents>,
 	statuses: Map<string, AgentPaneStatus>,
@@ -454,7 +462,7 @@ function createAgentsBrowserComponent(
 		if (matchesKey(data, "home")) { if (ui.pane === "inspector") ui.inspectorScroll = 0; else { ui.selected = 0; ui.scroll = 0; } requestRender(); return; }
 		if (matchesKey(data, "end")) { if (ui.pane === "inspector") ui.inspectorScroll = Number.MAX_SAFE_INTEGER; else { ui.selected = Math.max(0, agentRows().length - 1); clamp(); } requestRender(); return; }
 		if (matchesKey(data, "enter") || matchesKey(data, "return")) return insertSelected();
-		if (matchesKey(data, "alt+m") || matchesKey(data, "ctrl+m")) return editFrontmatterSelected();
+		if (isAgentFrontmatterEditShortcut(data)) return editFrontmatterSelected();
 		if (matchesKey(data, "alt+p") || matchesKey(data, "ctrl+p")) return startSelected();
 		if (matchesKey(data, "alt+o") || matchesKey(data, "ctrl+o")) return attachSelected();
 		if (matchesKey(data, "alt+x") || matchesKey(data, "ctrl+x")) return stopSelected();
@@ -474,7 +482,7 @@ function createAgentsBrowserComponent(
 			return agentFrame(lines, safeWidth, theme, layout.innerRows, "Monitor");
 		}
 		clamp();
-		const footer = `${ansiYellow("tab")} ${theme.fg("dim", "view · ")}${ansiYellow("-/=")} ${theme.fg("dim", "page · ")}${ansiYellow("←/→")} ${theme.fg("dim", "pane · ")}${ansiYellow("alt+m")} ${theme.fg("dim", "edit frontmatter · ")}${ansiYellow("alt+p")} ${theme.fg("dim", "start pane · ")}${ansiYellow("alt+o")} ${theme.fg("dim", "attach · ")}${ansiYellow("alt+x")} ${theme.fg("dim", "stop")}`;
+		const footer = agentFooterHint(theme);
 		const lines = [
 			tabLine,
 			"",

@@ -172,7 +172,7 @@ Broker publication is isolated in `extensions/subagent/activity.ts` and must sta
 - `tab` / `shift+tab` switches between **Agents** and **Monitor**.
 - `↑/↓`, `-/=`, `home/end` navigate. `←/→` switches tree/detail focus and cycles task-detail subtabs. `enter` expands/collapses Monitor Active/Completed/session rows or opens task detail.
 - `enter` inserts `Use agent <name> to: ` into the editor.
-- `alt+m` edits the selected agent's frontmatter.
+- `alt+g` edits the selected agent's frontmatter.
 - Pane agents: `alt+p`/`ctrl+p` start or reuse, `alt+o`/`ctrl+o` attach, `alt+x`/`ctrl+x` stop.
 - `esc` closes.
 

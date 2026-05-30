@@ -6,10 +6,12 @@ import test from "node:test";
 import type { AgentConfig } from "../extensions/subagent/agents.js";
 import {
 	appendBgChatMessages,
+	agentFooterHint,
 	agentSystemPromptMarkdownTheme,
 	buildMonitorSessionGroups,
 	buildAgentRows,
 	clampMonitorUiToRows,
+	isAgentFrontmatterEditShortcut,
 	monitorFooterHint,
 	monitorTreeRows,
 	renderMonitorDetail,
@@ -706,6 +708,18 @@ test("Monitor tab line replaces History", () => {
 
 	assert.match(line, /Monitor/);
 	assert.doesNotMatch(line, /History/);
+});
+
+test("Agents footer and frontmatter edit shortcut use Alt+G", () => {
+	const footer = stripAnsi(agentFooterHint(theme as any));
+
+	assert.match(footer, /alt\+g edit frontmatter/);
+	assert.doesNotMatch(footer, /alt\+m edit frontmatter/);
+	assert.equal(isAgentFrontmatterEditShortcut("\x1bg"), true);
+	assert.equal(isAgentFrontmatterEditShortcut("\x1b[103;3u"), true);
+	assert.equal(isAgentFrontmatterEditShortcut("\x1bm"), false);
+	assert.equal(isAgentFrontmatterEditShortcut("\x1b[109;3u"), false);
+	assert.equal(isAgentFrontmatterEditShortcut("\x1b[103;5u"), false);
 });
 
 test("Monitor footer omits filter and transcript toggle hints", () => {
