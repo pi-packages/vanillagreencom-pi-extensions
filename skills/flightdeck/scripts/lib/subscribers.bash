@@ -47,7 +47,11 @@ classify_adapter_text() {
   local text="$1" pane_id="${2:-}" sub_log="${3:-/dev/null}" tag
   if [[ -n "${CLASSIFIER:-}" && -x "${CLASSIFIER:-}" ]]; then
     local classifier_args=(--no-footer-gate)
-    [[ -n "${FD_ENTRY_KIND:-}" ]] && classifier_args+=(--entry-kind "$FD_ENTRY_KIND")
+    if [[ -n "${FD_ENTRY_KIND:-}" ]]; then
+      classifier_args+=(--entry-kind "$FD_ENTRY_KIND")
+    else
+      classifier_args+=(--entry-kind-unknown)
+    fi
     [[ -n "${FD_ENTRY_HARNESS:-}" ]] && classifier_args+=(--entry-harness "$FD_ENTRY_HARNESS")
     local classifier_err_file classifier_rc classifier_stderr
     classifier_err_file=$(mktemp -t fd-classifier-err.XXXXXX)

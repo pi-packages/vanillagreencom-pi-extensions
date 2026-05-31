@@ -52,6 +52,7 @@ For each item id in the active plan graph:
 | `pre-pr-fixing` | `submitting` | `domain.plan_item.review_status = "pre-pr-fixing"`, child applying round-N findings |
 | `pre-pr-approved` | `submitting` | `domain.plan_item.review_status = "pre-pr-approved"`, child instructed to open PR |
 | `merge-ready` | `ready` | `domain.plan_item.phase = "merge-ready"` |
+| `merge-blocked-permission` | `ready` | `domain.plan_item.phase = "merge-blocked-permission"`, `merge_blocked_permission` recorded; keep monitoring authoritative GitHub state |
 | `merged` | `complete` | `domain.plan_item.phase = "merged"`, `merge_commit` set |
 | `aborted` | `cancelled` | `domain.plan_item.phase = "aborted"` |
 | `failed` | `failed` | `domain.plan_item.error = {phase, reason, stderr}` |
@@ -82,6 +83,7 @@ Plan PR tags shared with the GitHub lane:
 - `force-push-prompt`
 - `merge-now`
 - `merge-ready-but-unknown`
+- `merge-permission-blocked`
 - `force-merge-confirm`
 - `multi-select-tabbed`
 - `stale-no-pr-branch`
@@ -92,6 +94,24 @@ Do not route Linear-only tags in plan mode: `audit-relation-prompt`, `descope-re
 `terminal-state-reached` on a plan entry invokes `⤵ workflows/plan/close-item.md <ITEM_ID>` after generic completion detection. If the `pane-poll` row includes `detected_pr_number` / `detected_pr_url` and `entry.domain.plan_item.pr_number` is null, validate with `gh pr view <PR> --json url,headRefName,state` before invoking close: URL must match the detected URL and the head branch must match the plan item worktree branch. On success, persist `pane-registry set <ITEM_ID> pr_number <PR>`; on `gh` failure follow § 6 and pause rather than closing from pane text alone.
 
 Pre-PR review gate: when `FLIGHTDECK_PRE_PR_REVIEW != 0` and `entry.domain.plan_item.review_status != "pre-pr-approved"`, do NOT record a detected PR number or invoke close-item from a `terminal-state-reached` PR-URL on this entry. The child opened a PR before review approval. Set `paused_for_user = {entry_id:<ITEM_ID>, reason:"pre-pr-review-bypassed", prompt_text:"<detected_pr_url> opened before pre-pr-approved"}` and return without closing the item.
+
+Merge-permission monitoring: every watch cycle, before yielding on a `state="ready"` entry whose `domain.plan_item.phase == "merge-blocked-permission"` or `domain.plan_item.merge_blocked_permission` is set, run:
+
+```bash
+gh pr view <PR> --json state,mergeStateStatus,reviewDecision,statusCheckRollup,mergeCommit
+```
+
+- `state === "MERGED"` and `mergeCommit !== null` → invoke `workflows/plan/close-item.md <ITEM_ID>`; do not wait for another pane prompt.
+- Still `CLEAN` / approved-or-no-pending-reviewer / required checks `SUCCESS|SKIPPED` → update `merge_blocked_permission.last_checked_at`, keep `state="ready"`, log at most one `plan-merge-permission-blocked monitoring` decision per observed PR state hash, and yield. Do not set `paused_for_user`.
+- Token/permission changed and a direct merge can now proceed → clear `domain.plan_item.merge_blocked_permission`, set `domain.plan_item.phase="merge-ready"`, and route to `merge-now` / merge handler.
+- PR becomes `UNKNOWN`, `DIRTY`, `BEHIND`, check-failed, or review-blocked → clear or update the marker and route to the existing deterministic handler (`merge-ready-but-unknown`, conflict/behind, bot-review/CI). Pause only if that handler reaches a novel/destructive condition.
+- `gh` failure follows § 6 exactly; no merge, close, dependency spawn, or cleanup proceeds on unavailable GitHub state.
+
+The daemon's `merge-permission-monitor` emits a synthetic `merge-permission-blocked` wake at least once per 60s while the marker persists, even if the pane is quiet. Treat that wake as a timer hint, not as a pane prompt: do not set `state="prompting"` from it and do not ask the user. On each scheduled wake, after the `gh pr view` readiness predicate passes, perform one checked merge capability retry through the same safe merge path as `merge-now` (fresh `CLEAN`, approved-or-no-pending-reviewer, required checks `SUCCESS|SKIPPED`, and `FLIGHTDECK_AUTO_MERGE != 0`). Outcomes:
+
+- Retry succeeds or queues auto-merge → verify with authoritative `gh pr view <PR> --json state,mergeStateStatus,mergeCommit` before any close/teardown; queued auto-merge keeps monitoring until actual `MERGED`.
+- Retry again returns `MergePullRequest` / permission denied → update `merge_blocked_permission.last_checked_at` and `last_probe_at`, keep `state="ready"`, and yield for the next scheduled monitor wake.
+- Retry returns a non-permission failure → route to the existing deterministic handler for the current PR state; § 6 still owns `gh` CLI failures.
 
 ---
 
@@ -216,7 +236,7 @@ On re-entry:
 2. Re-read `entry.domain.plan_item` for item id, dependencies, PR, merge commit, worktree, and actual file count.
 3. Preserve `unknown_since` so the UNKNOWN timer does not reset.
 4. Re-read `entry.domain.plan_item.review_status` and `review_rounds`; if `review_status == "pre-pr-fixing"`, await the next `pre-pr-ready-for-review` signal instead of re-invoking the loop. If `review_status == "pre-pr-reviewing"`, the prior reviewer fan-out did not complete; rerun `workflows/shared/pre-pr-review.md` at the same round.
-5. Re-run `gh pr view` for open PRs unless `gh` is unavailable; unavailable follows § 6.
+5. Re-run `gh pr view` for open PRs unless `gh` is unavailable; unavailable follows § 6. If `domain.plan_item.merge_blocked_permission` is set, do not ask the user again; continue monitoring until authoritative `state === "MERGED"` and `mergeCommit !== null`, or route back to `merge-now` if the token/permission changed and the PR is still ready.
 6. Re-evaluate dependency edges and `paused_for_user`; if the user fixed the issue in the pane or via GitHub, reclassify and proceed.
 
 ## Returns

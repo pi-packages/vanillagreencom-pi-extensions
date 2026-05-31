@@ -22,6 +22,7 @@ export const ISSUE_ONLY_TAGS = new Set<string>([
 	"force-merge-confirm",
 	"merge-ready-but-unknown",
 	"merge-now",
+	"merge-permission-blocked",
 	"bot-review-wait-stuck",
 	"rebase-multi-choice",
 	"force-push-prompt",
@@ -43,6 +44,15 @@ export const PRE_FOOTER_RULES: Rule[] = [
 		tag: "awaiting-direction",
 		matched: "post-cancel idle",
 		pattern: /Awaiting user (direction|input)|User declined to answer questions|standing by for further instructions|awaiting your response\b/,
+	},
+	{
+		tag: "merge-permission-blocked",
+		matched: "merge permission denied",
+		// Wrapper failure blocks have a stable two-line shape and usually no
+		// TUI footer. Match before the footer gate, but require the block to be
+		// at the end of the assistant buffer so quoted issue-body examples do
+		// not trigger the handler.
+		pattern: /(?:^|\r?\n)BLOCKED PR #\d+[^\r\n]*gh pr merge failed\r?\n[ \t]*[^\r\n]*(MergePullRequest|does not have the correct permissions|permission denied|Resource not accessible by integration)\s*$/i,
 	},
 ];
 

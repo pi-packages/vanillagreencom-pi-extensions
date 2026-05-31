@@ -1,12 +1,12 @@
 # Workflow: `linear merge-plan` — Conflict Graph + Merge Order
 
-Compute the file-intersection conflict graph for all `merge-ready` PRs, sort by smallest-scope-first, execute the next safe merge.
+Compute the file-intersection conflict graph for all `merge-ready` PRs plus permission-blocked ready PRs, sort by smallest-scope-first, execute or monitor the next safe merge.
 
 Issue-mode workflow only. It is invoked by `workflows/linear/watch.md` after the generic `workflows/shared/session-watch.md` loop has reconciled entries and routed domain-neutral prompts through `workflows/shared/session-handle-prompt.md`.
 
-**Inputs**: master state (read-only at entry); the implicit list of `merge-ready` issues.
+**Inputs**: master state (read-only at entry); the implicit list of `merge-ready` issues plus `state="ready"` entries whose `domain.issue.phase == "merge-blocked-permission"`.
 
-**Pre-conditions**: `watch.md` § 4 detected ≥1 issue in `merge-ready` state.
+**Pre-conditions**: `watch.md` § 4 detected ≥1 issue in `merge-ready` state or permission-blocked monitoring state.
 
 **Post-condition**: at most one merge executed per invocation; the merged issue transitions to `merged`; conflict graph and merge queue updated for the remaining set.
 
@@ -14,9 +14,9 @@ Issue-mode workflow only. It is invoked by `workflows/linear/watch.md` after the
 
 ## § 1: Build Conflict Graph
 
-1. Collect PR numbers for all issues currently in `merge-ready`:
+1. Collect PR numbers for all issues currently merge-plannable (`state == "merge-ready"` or `state == "ready"` with `domain.issue.phase == "merge-blocked-permission"`):
    ```
-   pane-registry list | jq '.[] | select(.state == "merge-ready") | .pr_number' | sort -u
+   pane-registry list | jq '.[] | select(.state == "merge-ready" or (.state == "ready" and .domain.issue.phase == "merge-blocked-permission")) | .pr_number' | sort -u
    ```
 2. Build the graph:
    ```
@@ -62,7 +62,12 @@ See `patterns/decision-biases.md` § Smaller-PR-first merge order and § Merge-o
        ```
        Required: `state === "MERGED"` AND `mergeCommit !== null`. The `pr-merge` exit code is not proof by itself. If proof is missing, `state !== "MERGED"`, or `mergeCommit === null`, set `paused_for_user = {issue_id:<ISSUE_ID>, reason:"gh-pr-merge-proof-missing", prompt_text:<raw gh payload/stderr>}` (or return non-terminal for the next watch poll) and do **not** call `pane-registry set-state`, persist `merge_commit`, run repo sync, recompute the graph, or perform terminal handling. If proof passes, continue to § 4 with the authoritative `mergeCommit` payload.
      - `75` (QUEUED FOR AUTO-MERGE) → set the issue's `substate = queued-for-auto-merge`; do NOT mark merged. The merge will fire when CI / branch protection clear; the watch loop will catch the eventual MERGED state on a later poll. Push the issue back to the queue tail.
-     - `1` (BLOCKED) → escalate (`paused_for_user`); the wrapper's stderr classifies the block as transient or permanent — surface that in the pause message.
+     - `1` (BLOCKED) → inspect wrapper stderr/details before escalating. If output contains `MergePullRequest`, `does not have the correct permissions`, or equivalent merge permission denial while the re-validation in step 2 still proves `CLEAN` + approved + all checks green, do not set `paused_for_user` for the denial itself. Persist the ready state + phase + marker with one checked state write:
+       ```bash
+       UPDATED_ENTRY_JSON=$(jq -c '.state="ready" | .domain.issue.phase="merge-blocked-permission" | .domain.issue.merge_blocked_permission={reason:"MergePullRequest permission denied", pr:<PR>, ready:true, last_checked_at:"<ISO8601>", last_probe_at:"<ISO8601>"}' <<< "$ENTRY_JSON")
+       .agents/skills/flightdeck/scripts/flightdeck-state write-entry <ISSUE_ID> "$UPDATED_ENTRY_JSON"
+       ```
+       If `write-entry` fails, set `paused_for_user = {issue_id:<ISSUE_ID>, reason:"merge-permission-blocked-persist-failed", prompt_text:<stderr>}` and return before logging or queue mutation. After the durable marker succeeds, log decision `merge-permission-blocked "PR #<PR> ready; merge capability denied; monitoring"`, push the issue back to the queue tail, and rely on the daemon `merge-permission-monitor` scheduled wake to re-enter `watch.md` / `merge-plan.md` at least once per 60s until `gh pr view <PR> --json state,mergeStateStatus,mergeCommit` returns `state === "MERGED"` and `mergeCommit !== null` or the checked merge retry succeeds. For non-permission blocks, the wrapper's stderr classifies transient vs permanent; route transient back through the queue/UNKNOWN wait and pause only for real conflicts, destructive force-merge, or ambiguous/unsafe conditions.
    - `UNKNOWN` AND elapsed since first observed < `FLIGHTDECK_FORCE_MERGE_AFTER_SECS` → push back to queue tail; return to § 1 (graph unchanged).
    - `UNKNOWN` AND elapsed ≥ threshold AND force-merge predicate satisfied (see `patterns/conflict-detection.md`) → direct the per-issue agent to force-merge. If no live pane, invoke `github pr-merge <PR> --force --squash --delete-branch` (admin path) and apply the same exit-code branching above.
    - `DIRTY | BEHIND` with overlap → escalate (set `paused_for_user`); return to caller.
@@ -97,7 +102,7 @@ Polls `state` and `mergeStateStatus` correctly (never `mergeable`, which stays `
 After each merge:
 
 1. Remove the merged issue from `merge_queue`.
-2. Recompute the graph against the remaining `merge-ready` issues — main has moved; some PRs may now be `BEHIND` and need rebase before becoming truly merge-ready again.
+2. Recompute the graph against the remaining merge-plannable issues (`merge-ready` and `merge-blocked-permission`) — main has moved; some PRs may now be `BEHIND` and need rebase before becoming truly merge-ready again.
 3. If any PR's state flipped to `BEHIND` post-merge, transition that issue back to `submitting` (its agent will detect the conflict on next sync and prompt for rebase, which the `rebase-multi-choice` handler covers).
 4. Return to § 1 if more issues remain in the queue.
 
@@ -105,13 +110,13 @@ After each merge:
 
 ## § 5: Empty Queue
 
-When `merge_queue` is empty after a merge or no `merge-ready` issues remain at entry, return to `watch.md` § 5. The watch loop continues polling for new merge-ready transitions.
+When `merge_queue` is empty after a merge or no merge-plannable issues remain at entry, return to `watch.md` § 5. The watch loop continues polling for new merge-ready transitions and permission-blocked markers.
 
 ---
 
 ## Skip-If
 
-- No issue is currently in `merge-ready` state at entry → return immediately.
+- No issue is currently in `merge-ready` or `merge-blocked-permission` monitoring state at entry → return immediately.
 
 ## Returns
 
