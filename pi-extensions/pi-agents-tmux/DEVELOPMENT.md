@@ -136,6 +136,12 @@ Implementation: `extensions/subagent/agent-end-watchdog.ts` exposes `createAgent
 
 Race safety: the default writer uses `fs.open(path, "wx")` so a real `complete_subagent` that races the watchdog always wins. Successive `agent_end` events for the same task are deduped by an in-process `fired` set; pending grace timers are deduped by a `pending` map. Failures are warn-logged, never thrown. Disable entirely with `VSTACK_AGENT_END_WATCHDOG=0`.
 
+## Rate-limit watchdog (vstack#108 / #285)
+
+Persistent pane children run `extensions/subagent/rate-limit-watchdog.ts` on assistant `message_end` events. Classification is deliberately narrow: the event must be an assistant message with `stopReason: "error"`, and only assistant `errorMessage` / text blocks are scanned. Accepted prose includes transient provider messages (`temporarily limiting requests`, `rate limited`, `429`, `too many requests`) and Claude Code session/usage caps (`You've hit your session limit`, `You've hit your usage limit`, `session limit`, `usage limit`, `· resets ...`). Non-assistant tool/user echoes and assistant success turns still emit `subagents:rate_limit_skipped` rather than scheduling recovery.
+
+Retry timing now flows through the provider-neutral quota seam in `rate-limit-decision.ts`. Assistant prose is only the classifier/trigger. The schedule source order is: structured quota snapshot (`resetSource="usage-endpoint"`; Claude OAuth/web usage responses and Codex/OpenAI `wham/usage` shapes normalize into `QuotaSnapshot`), SDK `resetAt`/`resetsAt` or `retry_after*` (`resetSource="sdk-rate-limit-event"`), degraded localized prose reset parsing (`resetSource="prose-fallback"`), then plain ladder (`resetSource="backoff-only"`). Usage snapshots are fail-closed: transient or negated `not your usage limit` events only use saturated/limit-reached windows, malformed/unknown quota shapes fall back, and endpoint/schema failures warn with sanitized `quota-source-error` metadata. The Flightdeck CLI also emits sanitized `quotaSourceFailureSummary` so the bash subscriber records `quota_source_failure` activity before fallback scheduling. Activity payloads persist `reset_source`, `reset_at_ms`, and `degraded_reset_source` so stale wake-time decisions are debuggable. Codex CLI RPC is represented as a `cli-rpc` source seam but not spawned yet; implement it with bounded startup/per-method timeouts and token redaction before enabling.
+
 ## Dashboard widget internals
 
 `alt+a` cycles the widget hidden → compact → expanded. `alt+shift+a` / `f3` opens the full `/agents` popup.

@@ -21,6 +21,7 @@
 //        clear_bell_for_window on success
 
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -119,6 +120,49 @@ import { OC_LAST_ASSISTANT_JQ } from "../paths/oc.ts";
 import { CC_LAST_ASSISTANT_JQ } from "../paths/cc.ts";
 import { PI_LAST_ASSISTANT_JQ } from "../paths/pi.ts";
 import { CX_LAST_ASSISTANT_JQ } from "../paths/codex.ts";
+
+export function piRateLimitRetryStateFile(stateDir: string, paneId: string): string {
+	const hash = createHash("sha256").update(paneId).digest("hex").slice(0, 16);
+	return join(stateDir, `pi-rate-limit-retry-${hash}.state`);
+}
+
+export interface ClearPiRateLimitRetryStateResult {
+	file: string;
+	disarmed: boolean;
+	removed: boolean;
+	tombstoned: boolean;
+	error?: string;
+}
+
+export function clearPiRateLimitRetryStateFile(
+	stateDir: string,
+	paneId: string,
+	reason: string,
+	logError?: (message: string) => void,
+): ClearPiRateLimitRetryStateResult {
+	const file = piRateLimitRetryStateFile(stateDir, paneId);
+	if (!existsSync(file)) return { disarmed: true, file, removed: true, tombstoned: false };
+	let tombstoned = false;
+	let error = "";
+	try {
+		writeFileSync(file, `cancelled\t${reason}\t${Date.now()}\n`, { encoding: "utf8", mode: 0o600 });
+		tombstoned = true;
+	} catch (err) {
+		error = `tombstone-failed:${(err as Error)?.message ?? err}`;
+	}
+	try {
+		unlinkSync(file);
+		return { disarmed: true, file, removed: true, tombstoned, ...(error ? { error } : {}) };
+	} catch (err) {
+		const code = (err as NodeJS.ErrnoException)?.code;
+		if (code === "ENOENT") return { disarmed: true, file, removed: true, tombstoned, ...(error ? { error } : {}) };
+		error = `${error ? `${error},` : ""}unlink-failed:${(err as Error)?.message ?? err}`;
+	}
+	const disarmed = tombstoned;
+	if (!disarmed && error) logError?.(`pane=${paneId} reason=${reason} file=${file} error=${error}`);
+	else if (error) logError?.(`pane=${paneId} reason=${reason} file=${file} warning=${error}`);
+	return { disarmed, error: error || undefined, file, removed: false, tombstoned };
+}
 
 export interface RunLoopOpts {
 	stateDir: string;
@@ -597,8 +641,20 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
 		}
 	}
 
+	function clearPiRateLimitRetryState(paneId: string, reason: string): void {
+		const result = clearPiRateLimitRetryStateFile(opts.stateDir, paneId, reason, (message) => {
+			warn("pi-rate-limit-retry-state-clear-error", message);
+		});
+		if (result.disarmed) {
+			log("pi-rate-limit-retry-state-cleared", `pane=${paneId} reason=${reason} file=${result.file} removed=${result.removed ? "yes" : "no"} tombstoned=${result.tombstoned ? "yes" : "no"}`);
+		} else {
+			warn("pi-rate-limit-retry-state-still-armed", `pane=${paneId} reason=${reason} file=${result.file} error=${result.error ?? "unknown"}`);
+		}
+	}
+
 	function reapSubscriberForPane(paneId: string, reason: string): void {
 		const h = paneHarness.get(paneId) ?? "";
+		if (h === "pi") clearPiRateLimitRetryState(paneId, reason);
 		const pidFile = subscriberPidFor(h, paneId);
 		const pid = subscriberPid.get(paneId) ?? null;
 		reapSubscriber(
@@ -1062,6 +1118,7 @@ export async function runLoop(opts: RunLoopOpts): Promise<void> {
 				}
 				const deadPid = subscriberPid.get(innerId);
 				log("subscriber-dead", `pane=${innerId} harness=${subHarness}; clearing OC_SUBSCRIBED and falling back to capture-pane`);
+				if (subHarness === "pi") clearPiRateLimitRetryState(innerId, "subscriber-dead");
 				emitSubscriberDead(activity, subHarness, innerId, deadPid);
 				ocSubscribed.delete(innerId);
 				subscriberPid.delete(innerId);

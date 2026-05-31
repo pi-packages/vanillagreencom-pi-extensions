@@ -14,15 +14,20 @@
 
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { clearPiRateLimitRetryStateFile, piRateLimitRetryStateFile } from "../../src/daemon/loop.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SUBSCRIBERS_BASH = resolve(HERE, "../../../../scripts/lib/subscribers.bash");
 const DECIDER_TS = resolve(HERE, "../../src/daemon/rate-limit-watchdog.ts");
+const LOOP_TS = resolve(HERE, "../../src/daemon/loop.ts");
 
 const bashSrc = readFileSync(SUBSCRIBERS_BASH, "utf8");
+const loopSrc = readFileSync(LOOP_TS, "utf8");
 
 const CANONICAL_DATA = {
 	message: {
@@ -48,7 +53,7 @@ const HEALTHY_DATA = {
 	},
 };
 
-function runDecider(event: unknown, attempt: number, paneId = "%41", now = 0): { kind: string; raw: any } {
+function runDecider(event: unknown, attempt: number, paneId = "%41", now = 0, env: NodeJS.ProcessEnv = {}): { kind: string; raw: any; stderr: string } {
 	const r = spawnSync(
 		"bun",
 		[
@@ -61,11 +66,70 @@ function runDecider(event: unknown, attempt: number, paneId = "%41", now = 0): {
 			"--now",
 			String(now),
 		],
-		{ encoding: "utf8", input: JSON.stringify(event) },
+		{ encoding: "utf8", env: { ...process.env, ...env }, input: JSON.stringify(event) },
 	);
 	if (r.status !== 0) throw new Error(`decider CLI exit ${r.status}: ${r.stderr}`);
 	const parsed = JSON.parse(r.stdout);
-	return { kind: parsed.kind, raw: parsed };
+	return { kind: parsed.kind, raw: parsed, stderr: r.stderr };
+}
+
+function writeFakePiBridge(dir: string, stateJson: string, sendLog: string, removeBeforeStateReturns?: string): string {
+	const bin = join(dir, "fake-pi-bridge");
+	writeFileSync(bin, [
+		"#!/usr/bin/env bash",
+		"cmd=\"$1\"; shift || true",
+		"case \"$cmd\" in",
+		`  state) ${removeBeforeStateReturns ? `rm -f ${JSON.stringify(removeBeforeStateReturns)}; ` : ""}cat ${JSON.stringify(stateJson)} ;;`,
+		`  send) printf '%s\\n' \"$*\" >> ${JSON.stringify(sendLog)} ;;`,
+		"  *) exit 2 ;;",
+		"esac",
+	].join("\n"));
+	chmodSync(bin, 0o700);
+	return bin;
+}
+
+function runRetryDispatcher(args: {
+	retryState?: string;
+	expectedState?: string;
+	state: Record<string, unknown>;
+	expectedPid?: number | string;
+	expectedSession?: string;
+	expectedSocket?: string;
+	expectedSubscriberPid?: number | string;
+	removeRetryStateDuringState?: boolean;
+}): { sendLogText: string; status: number | null; stderr: string } {
+	const dir = mkdtempSync(join(tmpdir(), "fd-rate-limit-dispatch-"));
+	try {
+		const retryStateFile = join(dir, "retry.state");
+		const expectedState = args.expectedState ?? args.retryState ?? "nonce\tsess\t123\tsock\t%41\tsub";
+		if (args.retryState !== undefined) writeFileSync(retryStateFile, args.retryState);
+		const stateJson = join(dir, "state.json");
+		const sendLog = join(dir, "send.log");
+		writeFileSync(stateJson, JSON.stringify(args.state));
+		const fakePi = writeFakePiBridge(dir, stateJson, sendLog, args.removeRetryStateDuringState ? retryStateFile : undefined);
+		const r = spawnSync("bash", [
+			SUBSCRIBERS_BASH,
+			"pi-rate-limit-dispatch",
+			"0",
+			retryStateFile,
+			expectedState,
+			String(process.pid),
+			String(args.expectedPid ?? process.pid),
+			args.expectedSession ?? "sess",
+			args.expectedSocket ?? "sock",
+			String(args.expectedSubscriberPid ?? process.pid),
+			fakePi,
+			"--socket",
+			args.expectedSocket ?? "sock",
+		], { encoding: "utf8" });
+		return {
+			sendLogText: existsSync(sendLog) ? readFileSync(sendLog, "utf8") : "",
+			status: r.status,
+			stderr: r.stderr ?? "",
+		};
+	} finally {
+		rmSync(dir, { force: true, recursive: true });
+	}
 }
 
 describe("rate-limit wiring: bash subscriber mirror (vstack#108)", () => {
@@ -96,6 +160,14 @@ describe("rate-limit wiring: bash subscriber mirror (vstack#108)", () => {
 		expect(bashSrc).toContain('pi_rate_limit_emit_event "pi-rate-limit-decider-error"');
 	});
 
+	test("bash emits sanitized quota-source diagnostics before retry fallback", () => {
+		expect(bashSrc).toContain("quotaSourceFailureSummary");
+		expect(bashSrc).toContain("pi-rate-limit-quota-source-error");
+		expect(bashSrc).toContain("rate_limit_quota_source_error");
+		expect(bashSrc).toContain("quota_source_failure");
+		expect(bashSrc).toContain('pi_rate_limit_emit_event "pi-rate-limit-retry" "rate_limit_retry"');
+	});
+
 	test("bash pipes event JSON to the decider instead of passing it via argv", () => {
 		expect(bashSrc).toContain('printf \'%s\' "$rl_event_json" | bun "$rate_limit_decider" decide');
 		expect(bashSrc).not.toContain('--event "$rl_event_json"');
@@ -114,7 +186,111 @@ describe("rate-limit wiring: bash subscriber mirror (vstack#108)", () => {
 
 	test("bash resets subscriber retry budget on resolved assistant turn", () => {
 		expect(bashSrc).toContain("rate_limit_attempt=0");
+		expect(bashSrc).toContain('pi_rate_limit_clear_retry "resolved"');
 		expect(bashSrc).toContain("pi-rate-limit-resolved");
+	});
+
+	test("bash cancels stale detached rate-limit retries with a nonce state file", () => {
+		expect(bashSrc).toContain("rate_limit_retry_state_file=");
+		expect(bashSrc).toContain("rate_limit_retry_nonce=");
+		expect(bashSrc).toContain("pi_rate_limit_clear_retry");
+		expect(bashSrc).toContain("pi_rate_limit_retry_state_file_for_pane");
+		expect(bashSrc).toContain("rl_expected_state=");
+		expect(bashSrc).toContain("expected_pi_pid");
+		expect(bashSrc).toContain("expected_session");
+		expect(bashSrc).toContain("expected_socket");
+		expect(bashSrc).toContain("expected_subscriber_pid");
+		expect(bashSrc).toContain('current=$(cat "$state_file" 2>/dev/null || true)');
+		expect(bashSrc).toContain('[[ "$current" == "$expected_state" ]] || exit 0');
+		expect(bashSrc).toContain('state=$("$pi_bin" state "$@" 2>/dev/null) || exit 0');
+		expect(bashSrc).toContain('[[ "$actual_pid" == "$expected_pi_pid" ]] || exit 0');
+		expect(bashSrc).toContain('[[ "$actual_session" == "$expected_session" ]] || exit 0');
+		expect(bashSrc).toContain('[[ "$actual_socket" == "$expected_socket" ]] || exit 0');
+		expect(bashSrc).toContain('pi_rate_limit_clear_retry "subagent-completion"');
+		expect(bashSrc).toContain('pi_rate_limit_clear_retry "subscriber-stream-end"');
+		expect(bashSrc).toContain("pi_rate_limit_tombstone_retry_file");
+		expect(bashSrc).not.toContain('rm -f "$cleanup_file"');
+	});
+
+	test("daemon reap/dead paths clear Pi rate-limit retry state files", () => {
+		expect(loopSrc).toContain("piRateLimitRetryStateFile");
+		expect(loopSrc).toContain("pi-rate-limit-retry-");
+		expect(loopSrc).toContain("clearPiRateLimitRetryState");
+		expect(loopSrc).toContain('if (h === "pi") clearPiRateLimitRetryState(paneId, reason);');
+		expect(loopSrc).toContain('if (subHarness === "pi") clearPiRateLimitRetryState(innerId, "subscriber-dead");');
+	});
+
+	test("daemon cleanup removes the exact Pi rate-limit retry state path", () => {
+		const dir = mkdtempSync(join(tmpdir(), "fd-rate-limit-cleanup-"));
+		try {
+			const target = piRateLimitRetryStateFile(dir, "%41");
+			const other = piRateLimitRetryStateFile(dir, "%42");
+			writeFileSync(target, "armed\n");
+			writeFileSync(other, "other\n");
+			const result = clearPiRateLimitRetryStateFile(dir, "%41", "test");
+			expect(result.disarmed).toBe(true);
+			expect(result.removed).toBe(true);
+			expect(existsSync(target)).toBe(false);
+			expect(readFileSync(other, "utf8")).toBe("other\n");
+		} finally {
+			rmSync(dir, { force: true, recursive: true });
+		}
+	});
+
+	test("daemon cleanup disarms with tombstone when unlink cannot remove the file", () => {
+		const dir = mkdtempSync(join(tmpdir(), "fd-rate-limit-tombstone-"));
+		try {
+			const target = piRateLimitRetryStateFile(dir, "%41");
+			writeFileSync(target, "armed\n", { mode: 0o600 });
+			chmodSync(dir, 0o500);
+			const result = clearPiRateLimitRetryStateFile(dir, "%41", "test");
+			expect(result.disarmed).toBe(true);
+			expect(result.tombstoned).toBe(true);
+			expect(result.removed).toBe(false);
+			chmodSync(dir, 0o700);
+			expect(readFileSync(target, "utf8")).toContain("cancelled\ttest");
+		} finally {
+			try { chmodSync(dir, 0o700); } catch {}
+			rmSync(dir, { force: true, recursive: true });
+		}
+	});
+
+	test("retry dispatcher sends only when nonce, pid, session, socket, and subscriber match", () => {
+		const expectedState = `nonce\tsess\t${process.pid}\tsock\t%41\t${process.pid}`;
+		const ok = runRetryDispatcher({
+			expectedPid: process.pid,
+			expectedSession: "sess",
+			expectedSocket: "sock",
+			expectedSubscriberPid: process.pid,
+			retryState: expectedState,
+			state: { state: { pid: process.pid, sessionId: "sess", socket: "sock" } },
+		});
+		expect(ok.status).toBe(0);
+		expect(ok.sendLogText).toContain("--steer");
+
+		for (const blocked of [
+			{ name: "missing retry state", retryState: undefined, state: { state: { pid: process.pid, sessionId: "sess", socket: "sock" } } },
+			{ name: "tombstoned retry state", expectedState, retryState: "cancelled\tresolved\t123\tnonce", state: { state: { pid: process.pid, sessionId: "sess", socket: "sock" } } },
+			{ name: "retry state removed during bridge state", retryState: expectedState, removeRetryStateDuringState: true, state: { state: { pid: process.pid, sessionId: "sess", socket: "sock" } } },
+			{ name: "pid mismatch", retryState: expectedState, state: { state: { pid: process.pid + 10_000, sessionId: "sess", socket: "sock" } } },
+			{ name: "session mismatch", retryState: expectedState, state: { state: { pid: process.pid, sessionId: "other", socket: "sock" } } },
+			{ name: "socket mismatch", retryState: expectedState, state: { state: { pid: process.pid, sessionId: "sess", socket: "other" } } },
+			{ name: "subscriber mismatch", retryState: expectedState, expectedSubscriberPid: 999_999_999, state: { state: { pid: process.pid, sessionId: "sess", socket: "sock" } } },
+		] as const) {
+			const result = runRetryDispatcher({
+				expectedPid: process.pid,
+				expectedSession: "sess",
+				expectedSocket: "sock",
+				expectedSubscriberPid: (blocked as { expectedSubscriberPid?: number }).expectedSubscriberPid ?? process.pid,
+				expectedState: (blocked as { expectedState?: string }).expectedState,
+				removeRetryStateDuringState: (blocked as { removeRetryStateDuringState?: boolean }).removeRetryStateDuringState,
+				retryState: blocked.retryState,
+				state: blocked.state,
+			});
+			if (result.status !== 0 || result.sendLogText !== "") {
+				throw new Error(`${blocked.name}: status=${result.status} send=${JSON.stringify(result.sendLogText)} stderr=${JSON.stringify(result.stderr)}`);
+			}
+		}
 	});
 
 	test("bash references the canonical TS module name for parity", () => {
@@ -135,6 +311,30 @@ describe("rate-limit decider CLI (vstack#108)", () => {
 		expect(kind).toBe("retry-at");
 		expect(raw.attempt).toBe(1);
 		expect(raw.at).toBeGreaterThan(0);
+	});
+
+	test("quota-source diagnostics round-trip through CLI without leaking tokens", () => {
+		const token = "sk-ant-oauth-secret-token-cli-123456789";
+		const failure = {
+			provider: "claude",
+			reason: `http-401 bearer ${token}`,
+			resetSource: "usage-endpoint",
+			source: "quota-source-error",
+			status: 401,
+		};
+		const { kind, raw, stderr } = runDecider(
+			{ data: CANONICAL_DATA, event: "message_end", type: "event" },
+			0,
+			"%41",
+			0,
+			{ VSTACK_RATE_LIMIT_USAGE_JSON: JSON.stringify(failure) },
+		);
+		expect(kind).toBe("retry-at");
+		expect(raw.quotaSourceFailureSummary).toContain("http-401");
+		expect(raw.quotaSourceFailureSummary).toContain("status=401");
+		expect(raw.quotaSourceFailureSummary).not.toContain(token);
+		expect(stderr).toContain("quota-source-error");
+		expect(stderr).not.toContain(token);
 	});
 
 	test("canonical event + attempt at max returns exhausted", () => {

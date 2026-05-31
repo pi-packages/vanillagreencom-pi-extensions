@@ -5,6 +5,9 @@
 // inputs.
 
 import { describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import * as canonicalDecision from "../../src/daemon/rate-limit-watchdog.ts";
 import * as vendoredDecision from "../../../../../../pi-extensions/pi-agents-tmux/extensions/subagent/rate-limit-decision.ts";
@@ -12,10 +15,13 @@ import * as vendoredDecision from "../../../../../../pi-extensions/pi-agents-tmu
 const {
 	RATE_LIMIT_DEFAULT_BACKOFF_LADDER_SEC,
 	RATE_LIMIT_DEFAULT_MAX_ATTEMPTS,
+	RATE_LIMIT_CLOCK_RESET_PAST_TOLERANCE_MS,
 	RATE_LIMIT_ERROR_REGEX,
+	RATE_LIMIT_RESET_MARGIN_MS,
 	RATE_LIMIT_STEER_MESSAGE,
 	classifyRateLimitEvent,
 	decideRateLimitRetry,
+	extractResetAtMs,
 	extractRetryAfterMs,
 	isRateLimitEvent,
 	rateLimitBackoffLadderFromEnv,
@@ -27,6 +33,20 @@ const DECISION_MODULES: Array<{ name: string; module: typeof canonicalDecision }
 	{ module: canonicalDecision, name: "flightdeck-core canonical" },
 	{ module: vendoredDecision, name: "pi-agents-tmux vendored" },
 ];
+
+function fakeFetch(response: { ok: boolean; status: number; body?: unknown; jsonError?: Error }, calls: Array<{ input: string; init?: Record<string, unknown> }> = []) {
+	return async (input: string, init?: Record<string, unknown>) => {
+		calls.push({ input, init });
+		return {
+			ok: response.ok,
+			status: response.status,
+			json: async () => {
+				if (response.jsonError) throw response.jsonError;
+				return response.body;
+			},
+		};
+	};
+}
 
 // Canonical message_end-style envelope produced by pi-coding-agent for a
 // rate-limited assistant turn. Snapshot taken from a real session under
@@ -47,6 +67,93 @@ const CANONICAL_RATE_LIMIT_EVENT = {
 		role: "assistant",
 		stopReason: "error",
 		timestamp: 1_778_998_215_269,
+	},
+	type: "message",
+};
+
+const CLAUDE_SESSION_LIMIT_EVENT = {
+	message: {
+		api: "claude-bridge",
+		errorMessage:
+			"Claude Code returned an error result: You've hit your session limit · resets 7:50pm (America/Los_Angeles)",
+		model: "claude-opus-4-8",
+		provider: "claude-bridge",
+		role: "assistant",
+		stopReason: "error",
+	},
+	type: "message",
+};
+
+const CLAUDE_USAGE_LIMIT_EVENT = {
+	message: {
+		errorMessage: "You've hit your usage limit",
+		role: "assistant",
+		stopReason: "error",
+	},
+	type: "message",
+};
+
+const OPENAI_CODEX_RATE_LIMIT_EVENT = {
+	message: {
+		api: "openai-codex",
+		errorMessage: "Rate limited",
+		model: "GPT-5.3-Codex-Spark",
+		provider: "openai-codex",
+		role: "assistant",
+		stopReason: "error",
+	},
+	type: "message",
+};
+
+const SESSION_LIMIT_NOW = Date.UTC(2026, 4, 31, 1, 54, 56);
+const SESSION_LIMIT_RESET_AT = Date.UTC(2026, 4, 31, 2, 50, 0);
+const STRUCTURED_USAGE_RESET_AT = Date.UTC(2026, 4, 31, 3, 30, 0);
+const SESSION_LIMIT_JUST_AFTER_RESET = SESSION_LIMIT_RESET_AT + 1_000;
+const MIDNIGHT_BOUNDARY_NOW = Date.UTC(2026, 4, 31, 7, 0, 1);
+const MIDNIGHT_BOUNDARY_RESET_AT = Date.UTC(2026, 4, 31, 6, 59, 0);
+
+const CLAUDE_USAGE_RESPONSE = {
+	five_hour: { utilization: 1, resets_at: new Date(STRUCTURED_USAGE_RESET_AT).toISOString() },
+	seven_day: { utilization: 0.2, resets_at: new Date(STRUCTURED_USAGE_RESET_AT + 86_400_000).toISOString() },
+};
+
+const LOW_UTILIZATION_CLAUDE_USAGE_RESPONSE = {
+	five_hour: { utilization: 0.1, resets_at: new Date(STRUCTURED_USAGE_RESET_AT).toISOString() },
+	seven_day: { utilization: 0.2, resets_at: new Date(STRUCTURED_USAGE_RESET_AT + 86_400_000).toISOString() },
+	seven_day_opus: { utilization: 0.2, resets_at: new Date(STRUCTURED_USAGE_RESET_AT + 2 * 86_400_000).toISOString() },
+};
+
+const CODEX_WHAM_USAGE = {
+	plan_type: "prolite",
+	rate_limit: {
+		allowed: false,
+		limit_reached: true,
+		primary_window: { limit_window_seconds: 18_000, reset_after_seconds: 120, used_percent: 85 },
+		secondary_window: { limit_window_seconds: 604_800, reset_after_seconds: 600, used_percent: 95 },
+	},
+};
+
+const CODEX_WHAM_MODEL_USAGE = {
+	...CODEX_WHAM_USAGE,
+	additional_rate_limits: [
+		{
+			limit_name: "GPT-5.3-Codex-Spark",
+			metered_feature: "gpt-5.3-codex-spark",
+			rate_limit: {
+				limit_reached: true,
+				primary_window: { reset_after_seconds: 900, used_percent: 100 },
+				secondary_window: { reset_after_seconds: 1_800, used_percent: 80 },
+			},
+		},
+	],
+};
+
+const CLAUDE_MIDNIGHT_BOUNDARY_SESSION_LIMIT_EVENT = {
+	message: {
+		errorMessage:
+			"Claude Code returned an error result: You've hit your session limit · resets 11:59pm (America/Los_Angeles)",
+		role: "assistant",
+		stopReason: "error",
 	},
 	type: "message",
 };
@@ -99,6 +206,8 @@ describe("decideRateLimitRetry — canonical detection (vstack#108)", () => {
 		expect(decision.at).toBe(1_000_000 + 60_000);
 		expect(decision.steerMessage).toBe(RATE_LIMIT_STEER_MESSAGE);
 		expect(decision.hash).toContain("%41");
+		expect(decision.resetSource).toBe("backoff-only");
+		expect(decision.degradedResetSource).toBe(true);
 	});
 
 	test("ladder advances with the attempt counter", () => {
@@ -149,6 +258,8 @@ describe("decideRateLimitRetry — canonical detection (vstack#108)", () => {
 		if (decision.kind !== "retry-at") throw new Error("expected retry-at");
 		// Ladder[0]=60s ⇒ 60_000ms; explicit=90_000ms ⇒ wins.
 		expect(decision.at).toBe(10_000 + 90_000);
+		expect(decision.resetSource).toBe("sdk-rate-limit-event");
+		expect(decision.degradedResetSource).toBe(false);
 	});
 
 	test("explicit retry_after in seconds wins over a smaller ladder step", () => {
@@ -165,6 +276,256 @@ describe("decideRateLimitRetry — canonical detection (vstack#108)", () => {
 		});
 		if (decision.kind !== "retry-at") throw new Error("expected retry-at");
 		expect(decision.at).toBe(180_000);
+	});
+
+	test("Claude session-limit prose schedules only as a degraded reset fallback", () => {
+		expect(classifyRateLimitEvent(CLAUDE_SESSION_LIMIT_EVENT)).toEqual({ isRateLimitEvent: true });
+		expect(extractResetAtMs(CLAUDE_SESSION_LIMIT_EVENT, SESSION_LIMIT_NOW)).toBe(SESSION_LIMIT_RESET_AT);
+		const decision = decideRateLimitRetry({
+			attempt: 0,
+			event: CLAUDE_SESSION_LIMIT_EVENT,
+			lastRetryAt: null,
+			now: SESSION_LIMIT_NOW,
+			paneId: "%41",
+		});
+		expect(decision.kind).toBe("retry-at");
+		if (decision.kind !== "retry-at") throw new Error("expected retry-at");
+		expect(decision.at).toBe(SESSION_LIMIT_RESET_AT + RATE_LIMIT_RESET_MARGIN_MS);
+		expect(decision.resetSource).toBe("prose-fallback");
+		expect(decision.degradedResetSource).toBe(true);
+	});
+
+	test("Claude usage endpoint reset wins over localized prose reset", () => {
+		for (const { module, name } of DECISION_MODULES) {
+			const decision = module.decideRateLimitRetry(
+				{
+					attempt: 0,
+					event: CLAUDE_SESSION_LIMIT_EVENT,
+					lastRetryAt: null,
+					now: SESSION_LIMIT_NOW,
+					paneId: "%41",
+					usageSnapshot: module.normalizeQuotaSnapshot("claude", "usage-endpoint", CLAUDE_USAGE_RESPONSE, SESSION_LIMIT_NOW),
+				},
+				{ backoffLadderSec: [1], maxAttempts: 3 },
+			);
+			expect(decision.kind).toBe("retry-at");
+			if (decision.kind !== "retry-at") throw new Error(`expected retry-at for ${name}`);
+			expect(decision.at).toBe(STRUCTURED_USAGE_RESET_AT + RATE_LIMIT_RESET_MARGIN_MS);
+			expect(decision.resetSource).toBe("usage-endpoint");
+			expect(decision.degradedResetSource).toBe(false);
+		}
+	});
+
+	test("transient not-your-usage-limit events ignore low-utilization usage windows", () => {
+		for (const { module, name } of DECISION_MODULES) {
+			const decision = module.decideRateLimitRetry(
+				{
+					attempt: 0,
+					event: CANONICAL_RATE_LIMIT_EVENT,
+					lastRetryAt: null,
+					now: 1_000,
+					paneId: "%41",
+					usageSnapshot: module.normalizeQuotaSnapshot("claude", "usage-endpoint", LOW_UTILIZATION_CLAUDE_USAGE_RESPONSE, 1_000),
+				},
+				{ backoffLadderSec: [1], maxAttempts: 3 },
+			);
+			expect(decision.kind).toBe("retry-at");
+			if (decision.kind !== "retry-at") throw new Error(`expected retry-at for ${name}`);
+			expect(decision.at).toBe(2_000);
+			expect(decision.resetSource).toBe("backoff-only");
+			expect(decision.degradedResetSource).toBe(true);
+		}
+	});
+
+	test("transient not-your-usage-limit events ignore low-utilization model-matching windows", () => {
+		const event = {
+			...CANONICAL_RATE_LIMIT_EVENT,
+			message: { ...CANONICAL_RATE_LIMIT_EVENT.message, model: "claude-opus-4-8" },
+		};
+		for (const { module, name } of DECISION_MODULES) {
+			const decision = module.decideRateLimitRetry(
+				{
+					attempt: 0,
+					event,
+					lastRetryAt: null,
+					now: 1_000,
+					paneId: "%41",
+					usageSnapshot: module.normalizeQuotaSnapshot("claude", "usage-endpoint", LOW_UTILIZATION_CLAUDE_USAGE_RESPONSE, 1_000),
+				},
+				{ backoffLadderSec: [1], maxAttempts: 3 },
+			);
+			expect(decision.kind).toBe("retry-at");
+			if (decision.kind !== "retry-at") throw new Error(`expected retry-at for ${name}`);
+			expect(decision.at).toBe(2_000);
+			expect(decision.resetSource).toBe("backoff-only");
+		}
+	});
+
+	test("transient not-your-usage-limit events ignore low-utilization type-hint windows", () => {
+		for (const rateLimitType of ["five_hour", "usage"] as const) {
+			const event = { ...CANONICAL_RATE_LIMIT_EVENT, rateLimitType };
+			for (const { module, name } of DECISION_MODULES) {
+				const decision = module.decideRateLimitRetry(
+					{
+						attempt: 0,
+						event,
+						lastRetryAt: null,
+						now: 1_000,
+						paneId: "%41",
+						usageSnapshot: module.normalizeQuotaSnapshot("claude", "usage-endpoint", LOW_UTILIZATION_CLAUDE_USAGE_RESPONSE, 1_000),
+					},
+					{ backoffLadderSec: [1], maxAttempts: 3 },
+				);
+				expect(decision.kind).toBe("retry-at");
+				if (decision.kind !== "retry-at") throw new Error(`expected retry-at for ${name} ${rateLimitType}`);
+				expect(decision.at).toBe(2_000);
+				expect(decision.resetSource).toBe("backoff-only");
+			}
+		}
+	});
+
+	test("malformed usage-shaped payloads are not authoritative quota windows", () => {
+		for (const { module, name } of DECISION_MODULES) {
+			const decision = module.decideRateLimitRetry(
+				{
+					attempt: 0,
+					event: CLAUDE_USAGE_LIMIT_EVENT,
+					lastRetryAt: null,
+					now: 1_000,
+					paneId: "%41",
+					usageSnapshot: { not_usage: { reset_at: "2099-01-01T00:00:00Z" } },
+				},
+				{ backoffLadderSec: [1], maxAttempts: 3 },
+			);
+			expect(decision.kind).toBe("retry-at");
+			if (decision.kind !== "retry-at") throw new Error(`expected retry-at for ${name}`);
+			expect(decision.at).toBe(2_000);
+			expect(decision.resetSource).toBe("backoff-only");
+		}
+	});
+
+	test("top-level windows without trusted source or real quota fields are ignored", () => {
+		for (const { module, name } of DECISION_MODULES) {
+			const decision = module.decideRateLimitRetry(
+				{
+					attempt: 0,
+					event: CLAUDE_USAGE_LIMIT_EVENT,
+					lastRetryAt: null,
+					now: 1_000,
+					paneId: "%41",
+					usageSnapshot: { windows: [{ id: "not_usage", reset_at: "2099-01-01T00:00:00Z" }] },
+				},
+				{ backoffLadderSec: [1], maxAttempts: 3 },
+			);
+			expect(decision.kind).toBe("retry-at");
+			if (decision.kind !== "retry-at") throw new Error(`expected retry-at for ${name}`);
+			expect(decision.at).toBe(2_000);
+			expect(decision.resetSource).toBe("backoff-only");
+		}
+	});
+
+	test("Codex wham usage primary/secondary windows select highest utilization future reset", () => {
+		for (const { module, name } of DECISION_MODULES) {
+			const decision = module.decideRateLimitRetry(
+				{
+					attempt: 0,
+					event: OPENAI_CODEX_RATE_LIMIT_EVENT,
+					lastRetryAt: null,
+					now: 1_000,
+					paneId: "%99",
+					usageSnapshot: module.normalizeQuotaSnapshot("codex", "usage-endpoint", CODEX_WHAM_USAGE, 1_000),
+				},
+				{ backoffLadderSec: [1], maxAttempts: 3 },
+			);
+			expect(decision.kind).toBe("retry-at");
+			if (decision.kind !== "retry-at") throw new Error(`expected retry-at for ${name}`);
+			expect(decision.at).toBe(1_000 + 600_000 + RATE_LIMIT_RESET_MARGIN_MS);
+			expect(decision.resetSource).toBe("usage-endpoint");
+		}
+	});
+
+	test("Codex additional_rate_limits model window wins when model matches", () => {
+		for (const { module, name } of DECISION_MODULES) {
+			const decision = module.decideRateLimitRetry(
+				{
+					attempt: 0,
+					event: OPENAI_CODEX_RATE_LIMIT_EVENT,
+					lastRetryAt: null,
+					now: 1_000,
+					paneId: "%99",
+					usageSnapshot: module.normalizeQuotaSnapshot("codex", "usage-endpoint", CODEX_WHAM_MODEL_USAGE, 1_000),
+				},
+				{ backoffLadderSec: [1], maxAttempts: 3 },
+			);
+			expect(decision.kind).toBe("retry-at");
+			if (decision.kind !== "retry-at") throw new Error(`expected retry-at for ${name}`);
+			expect(decision.at).toBe(1_000 + 900_000 + RATE_LIMIT_RESET_MARGIN_MS);
+			expect(decision.resetSource).toBe("usage-endpoint");
+		}
+	});
+
+	test("clock-only reset prose just after reset stays in the current reset window", () => {
+		expect(extractResetAtMs(CLAUDE_SESSION_LIMIT_EVENT, SESSION_LIMIT_JUST_AFTER_RESET)).toBe(SESSION_LIMIT_RESET_AT);
+		const decision = decideRateLimitRetry(
+			{
+				attempt: 0,
+				event: CLAUDE_SESSION_LIMIT_EVENT,
+				lastRetryAt: null,
+				now: SESSION_LIMIT_JUST_AFTER_RESET,
+				paneId: "%41",
+			},
+			{ backoffLadderSec: [1], maxAttempts: 3 },
+		);
+		expect(decision.kind).toBe("retry-at");
+		if (decision.kind !== "retry-at") throw new Error("expected retry-at");
+		expect(decision.at).toBe(SESSION_LIMIT_RESET_AT + RATE_LIMIT_RESET_MARGIN_MS);
+	});
+
+	test("clock-only reset prose beyond the past tolerance rolls to the next day", () => {
+		const now = SESSION_LIMIT_RESET_AT + RATE_LIMIT_CLOCK_RESET_PAST_TOLERANCE_MS + 1;
+		expect(extractResetAtMs(CLAUDE_SESSION_LIMIT_EVENT, now)).toBe(SESSION_LIMIT_RESET_AT + 86_400_000);
+	});
+
+	test("canonical and vendored reset parser check previous local day at midnight boundary", () => {
+		for (const { module, name } of DECISION_MODULES) {
+			expect(module.extractResetAtMs(CLAUDE_MIDNIGHT_BOUNDARY_SESSION_LIMIT_EVENT, MIDNIGHT_BOUNDARY_NOW)).toBe(MIDNIGHT_BOUNDARY_RESET_AT);
+			const decision = module.decideRateLimitRetry(
+				{
+					attempt: 0,
+					event: CLAUDE_MIDNIGHT_BOUNDARY_SESSION_LIMIT_EVENT,
+					lastRetryAt: null,
+					now: MIDNIGHT_BOUNDARY_NOW,
+					paneId: "%41",
+				},
+				{ backoffLadderSec: [1], maxAttempts: 3 },
+			);
+			expect(decision.kind).toBe("retry-at");
+			if (decision.kind !== "retry-at") throw new Error(`expected retry-at for ${name}`);
+			expect(decision.at).toBe(MIDNIGHT_BOUNDARY_NOW + 1_000);
+		}
+	});
+
+	test("structured reset timestamps win over the backoff ladder when later", () => {
+		const resetAtMs = 200_000;
+		const withStructuredReset = {
+			...CLAUDE_USAGE_LIMIT_EVENT,
+			message: { ...CLAUDE_USAGE_LIMIT_EVENT.message, rate_limit_info: { resetsAt: new Date(resetAtMs).toISOString() } },
+		};
+		const decision = decideRateLimitRetry(
+			{
+				attempt: 0,
+				event: withStructuredReset,
+				lastRetryAt: null,
+				now: 0,
+				paneId: "%41",
+			},
+			{ backoffLadderSec: [1], maxAttempts: 3 },
+		);
+		expect(decision.kind).toBe("retry-at");
+		if (decision.kind !== "retry-at") throw new Error("expected retry-at");
+		expect(decision.at).toBe(resetAtMs + RATE_LIMIT_RESET_MARGIN_MS);
+		expect(decision.resetSource).toBe("sdk-rate-limit-event");
+		expect(decision.degradedResetSource).toBe(false);
 	});
 
 	test("ladder still wins when explicit retry_after is smaller (don't retry too early)", () => {
@@ -318,8 +679,10 @@ describe("rate-limit decision parity — false-positive regression coverage (vst
 		for (const { event } of [
 			...rejectionReasonEvents,
 			{ event: CANONICAL_RATE_LIMIT_EVENT, name: "canonical rate-limit event" },
+			{ event: CLAUDE_SESSION_LIMIT_EVENT, name: "Claude session-limit event" },
+			{ event: CLAUDE_USAGE_LIMIT_EVENT, name: "Claude usage-limit event" },
 		]) {
-			const input = { attempt: 0, event, lastRetryAt: null, now: 10_000, paneId: "%41" };
+			const input = { attempt: 0, event, lastRetryAt: null, now: SESSION_LIMIT_NOW, paneId: "%41" };
 			expect(vendoredDecision.decideRateLimitRetry(input)).toEqual(canonicalDecision.decideRateLimitRetry(input));
 		}
 	});
@@ -346,6 +709,11 @@ describe("isRateLimitEvent — defensive shape matching", () => {
 			"Rate limited (try again later)",
 			"HTTP 429 too many requests",
 			"rate_limit_exceeded",
+			"Claude Code returned an error result: You've hit your session limit · resets 7:50pm (America/Los_Angeles)",
+			"You've hit your usage limit",
+			"session limit",
+			"usage limit",
+			"· resets 7:50pm",
 		]) {
 			expect(RATE_LIMIT_ERROR_REGEX.test(text)).toBe(true);
 		}
@@ -374,6 +742,99 @@ describe("extractRetryAfterMs — recursive payload walk", () => {
 
 	test("finds retryAfterMs at top level", () => {
 		expect(extractRetryAfterMs({ retryAfterMs: 12_345 })).toBe(12_345);
+	});
+});
+
+describe("extractResetAtMs — Claude session cap reset parsing", () => {
+	test("parses Claude Code session-limit prose with IANA timezone", () => {
+		expect(extractResetAtMs(CLAUDE_SESSION_LIMIT_EVENT, SESSION_LIMIT_NOW)).toBe(SESSION_LIMIT_RESET_AT);
+	});
+
+	test("parses nested resetsAt ISO values", () => {
+		expect(
+			extractResetAtMs({
+				message: {
+					rate_limit_info: { resetsAt: "2026-05-31T02:50:00.000Z" },
+					role: "assistant",
+					stopReason: "error",
+				},
+				type: "message",
+			}),
+		).toBe(SESSION_LIMIT_RESET_AT);
+	});
+
+	test("returns null when no reset hint is present", () => {
+		expect(extractResetAtMs(CLAUDE_USAGE_LIMIT_EVENT, SESSION_LIMIT_NOW)).toBeNull();
+	});
+});
+
+describe("structured quota fetchers", () => {
+	test("provider quota fetch returns null when auth is unavailable", async () => {
+		const calls: Array<{ input: string; init?: Record<string, unknown> }> = [];
+		const result = await canonicalDecision.fetchProviderQuotaSnapshotFromEnv(
+			CLAUDE_SESSION_LIMIT_EVENT,
+			{} as NodeJS.ProcessEnv,
+			fakeFetch({ body: CLAUDE_USAGE_RESPONSE, ok: true, status: 200 }, calls),
+		);
+		expect(result).toBeNull();
+		expect(calls).toHaveLength(0);
+	});
+
+	test("Claude usage fetch handles 401 without leaking bearer token", async () => {
+		const token = "sk-ant-oauth-secret-token-1234567890";
+		const calls: Array<{ input: string; init?: Record<string, unknown> }> = [];
+		const result = await canonicalDecision.fetchClaudeUsageSnapshotFromEnv(
+			{ VSTACK_ANTHROPIC_OAUTH_ACCESS_TOKEN: token, VSTACK_RATE_LIMIT_USAGE_CACHE_MS: "0" } as NodeJS.ProcessEnv,
+			fakeFetch({ body: { error: "unauthorized" }, ok: false, status: 401 }, calls),
+		);
+		expect(result).toMatchObject({ provider: "claude", reason: "http-401", source: "quota-source-error", status: 401 });
+		expect(canonicalDecision.quotaSourceFailureSummary(result)).toContain("http-401");
+		expect(JSON.stringify(result)).not.toContain(token);
+		expect(canonicalDecision.quotaSourceFailureSummary(result)).not.toContain(token);
+		expect(calls).toHaveLength(1);
+		expect(calls[0]!.input).toBe("https://api.anthropic.com/api/oauth/usage");
+		expect(JSON.stringify(calls[0]!.init)).toContain("Bearer");
+	});
+
+	test("malformed Claude usage response falls back without token leakage", async () => {
+		const token = "sk-ant-oauth-secret-token-abcdefghi";
+		const result = await canonicalDecision.fetchClaudeUsageSnapshotFromEnv(
+			{ VSTACK_ANTHROPIC_OAUTH_ACCESS_TOKEN: token, VSTACK_RATE_LIMIT_USAGE_CACHE_MS: "0" } as NodeJS.ProcessEnv,
+			fakeFetch({ jsonError: new Error(`bad json ${token}`), ok: true, status: 200 }),
+		);
+		expect(result).toMatchObject({ provider: "claude", reason: "invalid-json", source: "quota-source-error" });
+		expect(JSON.stringify(result)).not.toContain(token);
+		expect(canonicalDecision.quotaSourceFailureSummary(result)).not.toContain(token);
+	});
+
+	test("unrecognized quota schema reports sanitized failure and falls back", async () => {
+		const token = "sk-ant-oauth-secret-token-schema123456";
+		const result = await canonicalDecision.fetchClaudeUsageSnapshotFromEnv(
+			{ VSTACK_ANTHROPIC_OAUTH_ACCESS_TOKEN: token, VSTACK_RATE_LIMIT_USAGE_CACHE_MS: "0" } as NodeJS.ProcessEnv,
+			fakeFetch({ body: { not_usage: { reset_at: "2099-01-01T00:00:00Z" } }, ok: true, status: 200 }),
+		);
+		expect(result).toMatchObject({ provider: "claude", reason: "unrecognized-schema", source: "quota-source-error" });
+		expect(JSON.stringify(result)).not.toContain(token);
+	});
+
+	test("Codex auth.json token enables wham usage fetch without persisting token in snapshot", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "fd-codex-auth-"));
+		const token = "codex-secret-token-123456789012345";
+		try {
+			mkdirSync(dir, { recursive: true });
+			writeFileSync(join(dir, "auth.json"), JSON.stringify({ tokens: { access_token: token }, plan_type: "prolite" }));
+			const calls: Array<{ input: string; init?: Record<string, unknown> }> = [];
+			const result = await canonicalDecision.fetchCodexUsageSnapshotFromEnv(
+				{ CODEX_HOME: dir, VSTACK_RATE_LIMIT_USAGE_CACHE_MS: "0" } as NodeJS.ProcessEnv,
+				fakeFetch({ body: CODEX_WHAM_USAGE, ok: true, status: 200 }, calls),
+			);
+			expect(result?.provider).toBe("codex");
+			expect(result?.windows.length).toBeGreaterThan(0);
+			expect(calls[0]!.input).toBe("https://chatgpt.com/backend-api/wham/usage");
+			expect(JSON.stringify(result)).not.toContain(token);
+		} finally {
+			rmSync(dir, { force: true, recursive: true });
+		}
 	});
 });
 
