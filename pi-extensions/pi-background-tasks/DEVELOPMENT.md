@@ -29,7 +29,7 @@ Resource controls are opt-in through extension-manager settings. `resourceContro
 
 When enabled, `planResourceControlledSpawn()` chooses a wrapper per task:
 
-- `systemd-run --user --scope --wait --collect` on Linux when user systemd scopes are usable. The task snapshot stores `resourceControl.unitName`, and stop/timeout/session-shutdown paths call `systemctl --user stop|kill <unit>` before falling back to the tracked wrapper process group. Restore/orphan polling checks the unit first so a live transient scope is not falsely finalized because the wrapper pid changed.
+- `systemd-run --user --wait --pipe --collect` on Linux when a probed transient service is usable with the configured resource properties. The task snapshot stores `resourceControl.unitName`, and stop/timeout/session-shutdown paths call `systemctl --user stop|kill <unit>`. A successful unit stop skips wrapper-PGID fallback; a failed unit stop keeps the task running instead of killing/reporting the wrapper as stopped. Restore/orphan polling checks the unit first so a live transient service is not falsely finalized because the wrapper pid changed.
 - `nice`/`ionice` fallback when configured or when `auto` cannot use systemd. This still execs the configured shell with the original command as one argv element, so shell metacharacters, heredocs, and quoting semantics stay owned by the user's shell.
 - No-op fallback with at most one warning/diagnostic when helpers are unavailable and `resourceControlWarnOnFallback=true`.
 

@@ -71,7 +71,7 @@ const DEFAULT_NICE = 10;
 const DEFAULT_IONICE_CLASS: ResourceControlIoniceClass = "best-effort";
 const DEFAULT_IONICE_LEVEL = 7;
 const SYSTEMCTL_TIMEOUT_MS = 2_000;
-let cachedUserSystemdRunnable: boolean | undefined;
+const cachedUserSystemdRunnable = new Map<string, boolean>();
 
 function finiteInt(value: number, fallback: number): number {
 	return Number.isFinite(value) ? Math.round(value) : fallback;
@@ -109,14 +109,30 @@ function commandExists(command: string, platform: NodeJS.Platform): boolean {
 	}
 }
 
-function userSystemdAvailable(commandProbe: (command: string) => boolean, platform: NodeJS.Platform): boolean {
+function systemdProbeCacheKey(settings: ResourceControlSettings): string {
+	return [settings.cpuWeight, settings.ioWeight, settings.nice, settings.ioniceClass, settings.ioniceLevel].join(":");
+}
+
+function systemdResourcePropertyArgs(settings: ResourceControlSettings): string[] {
+	return [
+		`--property=CPUWeight=${settings.cpuWeight}`,
+		`--property=IOWeight=${settings.ioWeight}`,
+		`--property=Nice=${settings.nice}`,
+		`--property=IOSchedulingClass=${settings.ioniceClass}`,
+		...(settings.ioniceClass === "idle" ? [] : [`--property=IOSchedulingPriority=${settings.ioniceLevel}`]),
+	];
+}
+
+function userSystemdAvailable(commandProbe: (command: string) => boolean, platform: NodeJS.Platform, settings: ResourceControlSettings): boolean {
 	if (platform !== "linux") return false;
 	if (!commandProbe("systemd-run") || !commandProbe("systemctl")) return false;
-	if (cachedUserSystemdRunnable !== undefined) return cachedUserSystemdRunnable;
+	const cacheKey = systemdProbeCacheKey(settings);
+	const cached = cachedUserSystemdRunnable.get(cacheKey);
+	if (cached !== undefined) return cached;
 	try {
 		const result = spawnSync("systemctl", ["--user", "show-environment"], { stdio: "ignore", timeout: 1_500 });
 		if (result.status !== 0) {
-			cachedUserSystemdRunnable = false;
+			cachedUserSystemdRunnable.set(cacheKey, false);
 			return false;
 		}
 		// Probe the exact transient-service shape used below. Older scope-based
@@ -124,11 +140,23 @@ function userSystemdAvailable(commandProbe: (command: string) => boolean, platfo
 		// where `--scope --wait` or scope-level Nice/IOScheduling properties are
 		// rejected by systemd-run.
 		const unitName = `vstack-pi-bg-probe-${process.pid}-${Date.now()}.service`;
-		const probe = spawnSync("systemd-run", ["--user", "--wait", "--pipe", "--quiet", "--collect", `--unit=${unitName}`, "--", "/usr/bin/true"], { stdio: "ignore", timeout: 3_000 });
-		cachedUserSystemdRunnable = probe.status === 0;
-		return cachedUserSystemdRunnable;
+		const probe = spawnSync("systemd-run", [
+			"--user",
+			"--wait",
+			"--pipe",
+			"--quiet",
+			"--collect",
+			`--unit=${unitName}`,
+			`--working-directory=${process.cwd()}`,
+			...systemdResourcePropertyArgs(settings),
+			"--",
+			"/usr/bin/true",
+		], { stdio: "ignore", timeout: 3_000 });
+		const ok = probe.status === 0;
+		cachedUserSystemdRunnable.set(cacheKey, ok);
+		return ok;
 	} catch {
-		cachedUserSystemdRunnable = false;
+		cachedUserSystemdRunnable.set(cacheKey, false);
 		return false;
 	}
 }
@@ -141,8 +169,8 @@ function commandProbeFor(probes: ResourceControlProbes | undefined, platform: No
 	return probes?.commandExists ?? ((command: string) => commandExists(command, platform));
 }
 
-function systemdProbeFor(probes: ResourceControlProbes | undefined, commandProbe: (command: string) => boolean, platform: NodeJS.Platform): () => boolean {
-	return probes?.userSystemdAvailable ?? (() => userSystemdAvailable(commandProbe, platform));
+function systemdProbeFor(probes: ResourceControlProbes | undefined, commandProbe: (command: string) => boolean, platform: NodeJS.Platform, settings: ResourceControlSettings): () => boolean {
+	return probes?.userSystemdAvailable ?? (() => userSystemdAvailable(commandProbe, platform, settings));
 }
 
 function originApplies(settings: ResourceControlSettings, origin: ResourceControlOrigin): boolean {
@@ -178,7 +206,7 @@ function resolveMode(
 
 	const platform = platformFor(probes);
 	const hasCommand = commandProbeFor(probes, platform);
-	const hasSystemd = systemdProbeFor(probes, hasCommand, platform);
+	const hasSystemd = systemdProbeFor(probes, hasCommand, platform, settings);
 	const systemdOk = hasSystemd();
 	const niceOk = canUseNiceIonice(hasCommand, platform);
 
@@ -209,11 +237,7 @@ function systemdPlan(input: ResourceControlSpawnInput, settings: ResourceControl
 		"--collect",
 		`--unit=${unitName}`,
 		`--working-directory=${input.cwd}`,
-		`--property=CPUWeight=${settings.cpuWeight}`,
-		`--property=IOWeight=${settings.ioWeight}`,
-		`--property=Nice=${settings.nice}`,
-		`--property=IOSchedulingClass=${settings.ioniceClass}`,
-		...(settings.ioniceClass === "idle" ? [] : [`--property=IOSchedulingPriority=${settings.ioniceLevel}`]),
+		...systemdResourcePropertyArgs(settings),
 		"--",
 		input.shell,
 		...input.shellArgs,

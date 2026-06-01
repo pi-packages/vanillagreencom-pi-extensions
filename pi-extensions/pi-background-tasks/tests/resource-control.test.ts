@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { createOrphanWatcher } from "../extensions/orphan-watcher.js";
 import {
@@ -15,6 +16,8 @@ import type { LifecycleHooks } from "../extensions/lifecycle.js";
 import type { BackgroundTaskSnapshot, ManagedTask } from "../extensions/types.js";
 
 const OLD_PI_DIR = process.env.PI_CODING_AGENT_DIR;
+const HERE = dirname(fileURLToPath(import.meta.url));
+const RESOURCE_CONTROL_SRC = resolve(HERE, "../extensions/resource-control.ts");
 
 function spawnInput(overrides: Record<string, unknown> = {}) {
 	return {
@@ -244,6 +247,13 @@ describe("resource-control spawn planning", () => {
 		expect(plan.file).toBe("nice");
 		expect(plan.args).toEqual(["-n", "10", "/bin/bash", "-lc", input.command]);
 		expect(plan.metadata?.mode).toBe("nice-ionice");
+	});
+
+	test("systemd availability probe uses the same property shape as real spawns", () => {
+		const src = readFileSync(RESOURCE_CONTROL_SRC, "utf8");
+		expect(src).toContain("...systemdResourcePropertyArgs(settings)");
+		expect(src).toContain("`--working-directory=${process.cwd()}`");
+		expect(src.match(/systemdResourcePropertyArgs\(settings\)/g)?.length).toBeGreaterThanOrEqual(2);
 	});
 });
 

@@ -563,12 +563,19 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 		activeCtx?.ui.notify?.(message, "warning");
 	};
 
-	const killTaskProcess = (task: ManagedTask, signal: NodeJS.Signals): boolean => {
+	type KillTaskResult = { error?: string; sent: boolean };
+
+	const killTaskProcess = (task: ManagedTask, signal: NodeJS.Signals): KillTaskResult => {
 		const resourceStop = stopResourceControlledTask(task.resourceControl, signal);
+		if (resourceStop.attempted && resourceStop.ok) return { sent: true };
 		if (resourceStop.attempted && !resourceStop.ok) {
-			appendLogLine(task, `\n[resource-control stop error] ${resourceStop.error ?? "systemctl failed"}\n`);
+			const error = resourceStop.error ?? "resource-control stop failed";
+			appendLogLine(task, `\n[resource-control stop error] ${error}\n`);
+			return { error, sent: false };
 		}
-		if (task.pid <= 0) return resourceStop.ok;
+		if (task.pid <= 0) {
+			return { sent: false };
+		}
 		try {
 			if (process.platform === "win32") {
 				process.kill(task.pid, signal);
@@ -576,11 +583,13 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 				// We spawn detached on Unix, so -pid targets the task process group.
 				process.kill(-task.pid, signal);
 			}
-			return true;
+			return { sent: true };
 		} catch (error) {
 			const code = (error as NodeJS.ErrnoException).code;
 			if (code !== "ESRCH") appendLogLine(task, `\n[kill error] ${String(error)}\n`);
-			return resourceStop.ok;
+			return resourceStop.attempted
+				? { error: resourceStop.error ?? String(error), sent: false }
+				: { sent: false };
 		}
 	};
 
@@ -613,8 +622,17 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 		// result content (vstack#210 round 3).
 		const safeCommand = truncateForTranscript(task.command, WAKE_MANIFEST_FIELD_MAX_CHARS) ?? "";
 
-		const sent = killTaskProcess(task, "SIGTERM");
-		if (!sent) {
+		const stopResult = killTaskProcess(task, "SIGTERM");
+		if (!stopResult.sent) {
+			if (stopResult.error) {
+				task.stopReason = null;
+				task.terminationReason = undefined;
+				task.updatedAt = Date.now();
+				rememberSnapshot(task);
+				persistSnapshots();
+				refreshUi();
+				return { ok: false, message: `Failed to stop ${task.id}: ${stopResult.error}` };
+			}
 			finalizeTask(task, task.exitCode, reason === "timeout" ? "timed_out" : "stopped");
 			return { ok: true, message: `Stopped ${task.id} (${safeCommand}).` };
 		}
@@ -870,10 +888,16 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 				// reconcile-on-restart coercion.
 				task.terminationReason = "session-shutdown";
 				voidPendingTaskWakes(task, "shutdown", logWakeDiagnostic);
-				task.status = "stopped";
+				const termResult = killTaskProcess(task, "SIGTERM");
+				const killResult: KillTaskResult = killTaskProcess(task, "SIGKILL");
+				if (termResult.sent || killResult.sent) {
+					task.status = "stopped";
+				} else {
+					task.stopReason = null;
+					task.terminationReason = undefined;
+					appendLogLine(task, `\n[shutdown stop skipped] ${termResult.error ?? killResult.error ?? "no stop signal sent"}\n`);
+				}
 				task.updatedAt = Date.now();
-				killTaskProcess(task, "SIGTERM");
-				killTaskProcess(task, "SIGKILL");
 				rememberSnapshot(task);
 			}
 			clearTaskTimers(task);

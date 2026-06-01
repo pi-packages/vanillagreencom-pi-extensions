@@ -149,4 +149,25 @@ describe("spawn hardening (vstack#97)", () => {
 		expect(tasks[0]!.status).toBe("running");
 		expect(tasks[0]!.terminationReason).toBeUndefined();
 	});
+
+	test("systemd resource-control stop does not kill the wrapper pgid after a successful unit stop", () => {
+		const src = readFileSync(BACKGROUND_TASKS_SRC, "utf8");
+		expect(src).toContain("if (resourceStop.attempted && resourceStop.ok) return { sent: true };");
+		expect(src.indexOf("if (resourceStop.attempted && resourceStop.ok) return { sent: true };")).toBeLessThan(src.indexOf("process.kill(-task.pid, signal)"));
+	});
+
+	test("failed systemd resource-control stop does not fall back to killing the wrapper pgid", () => {
+		const src = readFileSync(BACKGROUND_TASKS_SRC, "utf8");
+		const failureReturn = "return { error, sent: false };";
+		expect(src).toContain("[resource-control stop error]");
+		expect(src).toContain(failureReturn);
+		expect(src.indexOf(failureReturn)).toBeLessThan(src.indexOf("process.kill(-task.pid, signal)"));
+	});
+
+	test("failed resource-control stop without safe fallback is not finalized as stopped", () => {
+		const src = readFileSync(BACKGROUND_TASKS_SRC, "utf8");
+		expect(src).toContain("if (stopResult.error)");
+		expect(src).toContain("return { ok: false, message: `Failed to stop ${task.id}: ${stopResult.error}` }");
+		expect(src).toContain("[shutdown stop skipped]");
+	});
 });
