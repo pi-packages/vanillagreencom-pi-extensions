@@ -193,6 +193,8 @@ For autonomous/Flightdeck-style runs the agent never goes idle, so idle compacti
 
 When the budget guard fires it injects a sentinel into the compaction request so the QOL bounded handler always runs — chunked summarizer + handoff artifact — even if **Custom compaction summaries** is off. Manual compactions (`/tree`, idle compaction, user-triggered) still only use the QOL handler when **Custom compaction summaries** is on; otherwise they fall through to Pi's default compaction with no handoff artifact and no chunking. If you want every compaction to use the QOL bounded path, turn **Custom compaction summaries** on.
 
+While budget-guard compaction is running, QOL keeps a persistent status line above the prompt (and in the normal status footer when the compact statusline is disabled). After Pi prints the compacted-summary block, the line changes to `QOL budget guard finalizing compaction…` until `ctx.compact()` reports completion, so long reload/finalization gaps do not look frozen.
+
 Recommended values for autonomous/Flightdeck runs:
 
 - Keep **Long-session budget guard** on. Lower **Budget guard percent** to `75` if your provider buffers are tight.

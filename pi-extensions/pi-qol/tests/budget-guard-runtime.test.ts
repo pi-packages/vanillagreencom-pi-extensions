@@ -11,7 +11,9 @@ interface NotifyCall { message: string; level: GuardLevel }
 function recorder() {
 	const notifyCalls: NotifyCall[] = [];
 	const compactCalls: GuardCompactOptions[] = [];
+	const statusCalls: Array<string | undefined> = [];
 	const notify = (message: string, level: GuardLevel) => { notifyCalls.push({ level, message }); };
+	const onStatus = (message: string | undefined) => { statusCalls.push(message); };
 	const makeCompact = (mode: "success" | "fail" | "throw" | "swallow") => {
 		return (options: GuardCompactOptions) => {
 			compactCalls.push(options);
@@ -21,7 +23,7 @@ function recorder() {
 			if (mode === "fail") setTimeout(() => options.onError?.(new Error("model down")), 0);
 		};
 	};
-	return { compactCalls, makeCompact, notify, notifyCalls };
+	return { compactCalls, makeCompact, notify, notifyCalls, onStatus, statusCalls };
 }
 
 test("dispatch fires once per crossing key", () => {
@@ -98,14 +100,33 @@ test("dispatch propagates the sentinel in customInstructions", () => {
 	expect(compactCalls[0]?.customInstructions ?? "").toContain(QOL_BUDGET_GUARD_SENTINEL);
 });
 
+test("dispatch exposes persistent status until compaction callback finishes", async () => {
+	const driver = new BudgetGuardDriver();
+	const { makeCompact, notify, onStatus, statusCalls } = recorder();
+	driver.dispatch({ compact: makeCompact("success"), notify, onStatus, trigger: trigger("p:85:1", "90% context >= 85% budget guard") });
+	expect(statusCalls[0]).toContain("QOL budget guard compacting session");
+	await new Promise((resolve) => setTimeout(resolve, 5));
+	expect(statusCalls.at(-1)).toBeUndefined();
+});
+
+test("dispatch clears persistent status on async compact failure", async () => {
+	const driver = new BudgetGuardDriver();
+	const { makeCompact, notify, onStatus, statusCalls } = recorder();
+	driver.dispatch({ compact: makeCompact("fail"), notify, onStatus, trigger: trigger("p:85:1", "r") });
+	expect(statusCalls[0]).toContain("QOL budget guard compacting session");
+	await new Promise((resolve) => setTimeout(resolve, 5));
+	expect(statusCalls.at(-1)).toBeUndefined();
+});
+
 test("dispatch clears state and notifies on synchronous compact throw", () => {
 	const driver = new BudgetGuardDriver();
-	const { notify, notifyCalls } = recorder();
-	const result = driver.dispatch({ compact: () => { throw new Error("boom"); }, notify, trigger: trigger("p:85:1", "r") });
+	const { notify, notifyCalls, onStatus, statusCalls } = recorder();
+	const result = driver.dispatch({ compact: () => { throw new Error("boom"); }, notify, onStatus, trigger: trigger("p:85:1", "r") });
 	expect(result.kind).toBe("dispatch-threw");
 	expect(driver.canFire).toBe(true);
 	// On throw, the crossing key is cleared so the next agent_end can retry.
 	expect(driver.currentKey).toBeUndefined();
+	expect(statusCalls.at(-1)).toBeUndefined();
 	expect(notifyCalls.some((call) => call.message.includes("failed to start") && call.level === "error")).toBe(true);
 });
 

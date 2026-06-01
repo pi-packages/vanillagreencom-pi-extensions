@@ -1,8 +1,9 @@
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { TUI } from "@earendil-works/pi-tui";
+import { truncateToWidth, type TUI } from "@earendil-works/pi-tui";
 import { criticalInfo, lastAssistantTextFromAgentEnd, needsDirection, taskStats } from "./qol/agent-end.js";
 import { getQuestionService, readCavemanBridge, type QuestionOpenedEventLike } from "./qol/bridges.js";
 import { BudgetGuardDriver } from "./qol/budget-guard-runtime.js";
+import { ansiGreen } from "./qol/ansi.js";
 import {
 	budgetGuardTrigger,
 	compactionTriggerReason,
@@ -262,9 +263,19 @@ export default function qol(pi: ExtensionAPI): void {
 	};
 
 	const budgetGuardDriver = new BudgetGuardDriver();
+	let budgetGuardStatus: string | undefined;
+
+	const setBudgetGuardStatus = (ctx: ExtensionContext, message: string | undefined) => {
+		budgetGuardStatus = message;
+		if (ctx.hasUI) {
+			ctx.ui.setStatus("qol-budget-guard", message ? ctx.ui.theme.fg("accent", message) : undefined);
+			requestRender();
+		}
+	};
 
 	const resetBudgetGuard = () => {
 		budgetGuardDriver.reset();
+		budgetGuardStatus = undefined;
 	};
 
 	const maybeFireBudgetGuard = (ctx: ExtensionContext) => {
@@ -286,6 +297,7 @@ export default function qol(pi: ExtensionAPI): void {
 		budgetGuardDriver.dispatch({
 			compact: typeof ctx.compact === "function" ? ctx.compact.bind(ctx) : undefined,
 			notify: notifySafely,
+			onStatus: (message) => setBudgetGuardStatus(ctx, message),
 			trigger,
 		});
 	};
@@ -584,6 +596,7 @@ export default function qol(pi: ExtensionAPI): void {
 							render(width: number): string[] {
 								const lines = rateLimitAutoResumeController.enabled(ctx) ? rateLimitAutoResumeController.renderPreviewLines(width) : [];
 								if (scheduleEnabled) lines.push(...scheduleController.renderPreviewLines(width));
+								if (budgetGuardStatus) lines.push(truncateToWidth(ansiGreen(`┃ ${budgetGuardStatus}`), width, ""));
 								if (showStatusline) lines.push(renderStatusLine(width, ctx, gitState ?? makeFallbackGitState(ctx.cwd), pi, theme));
 								return lines;
 							},
@@ -635,10 +648,12 @@ export default function qol(pi: ExtensionAPI): void {
 		questionUnsubscribe?.();
 		questionUnsubscribe = undefined;
 		currentCtx = undefined;
+		budgetGuardStatus = undefined;
 		const host = globalThis as unknown as Record<PropertyKey, unknown>;
 		if (host[QOL_NOTIFICATION_SERVICE_SYMBOL] === notificationService) delete host[QOL_NOTIFICATION_SERVICE_SYMBOL];
 		ctx.ui.setStatus(STATUS_KEY, undefined);
 		ctx.ui.setStatus(SESSION_SEARCH_STATUS_KEY, undefined);
+		ctx.ui.setStatus("qol-budget-guard", undefined);
 		restorePendingQueueThemePatch(ctx);
 		resetStatuslineUi(ctx);
 		ctx.ui.setEditorComponent(undefined);
@@ -721,6 +736,7 @@ export default function qol(pi: ExtensionAPI): void {
 		sendQolNotification(ctx, "ready", settingString("notification.readyMessage", "Ready for input", ctx.cwd), "info", "ready");
 	});
 	pi.on("session_compact", (_event, ctx) => {
+		if (budgetGuardStatus) setBudgetGuardStatus(ctx, "QOL budget guard finalizing compaction…");
 		// After a successful compaction usage drops below the budget, so reset the
 		// crossing key so the next threshold crossing re-fires the guard.
 		budgetGuardDriver.noteSessionCompacted();

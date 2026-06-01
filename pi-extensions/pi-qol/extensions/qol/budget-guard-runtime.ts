@@ -17,6 +17,7 @@ export interface GuardDispatchInput {
 	trigger: BudgetTrigger | undefined;
 	compact: ((options: GuardCompactOptions) => void) | undefined;
 	notify: (message: string, level: GuardLevel) => void;
+	onStatus?: (message: string | undefined) => void;
 	staleCtx?: () => boolean;
 }
 
@@ -70,6 +71,7 @@ export class BudgetGuardDriver {
 			return { kind: "no-compact-fn" };
 		}
 		input.notify(`QOL budget guard starting compaction: ${trigger.reason}`, "info");
+		input.onStatus?.(`QOL budget guard compacting session: ${trigger.reason}`);
 		this.inFlight = true;
 		this.lastKey = trigger.key;
 		const instructions = `${QOL_BUDGET_GUARD_SENTINEL} QOL budget guard triggered at agent_end because ${trigger.reason}. Bound the summary input, preserve current task state, decisions, files, blockers, and next steps.`;
@@ -78,6 +80,7 @@ export class BudgetGuardDriver {
 				customInstructions: instructions,
 				onComplete: () => {
 					this.inFlight = false;
+					input.onStatus?.(undefined);
 					input.notify("QOL budget guard compaction completed.", "info");
 				},
 				onError: (error: Error) => {
@@ -85,6 +88,7 @@ export class BudgetGuardDriver {
 					// Allow the next agent_end to retry rather than poisoning the
 					// crossing key after a transient failure.
 					this.lastKey = undefined;
+					input.onStatus?.(undefined);
 					input.notify(`QOL budget guard compaction failed: ${error.message}`, "error");
 				},
 			});
@@ -92,6 +96,7 @@ export class BudgetGuardDriver {
 		} catch (error) {
 			this.inFlight = false;
 			this.lastKey = undefined;
+			input.onStatus?.(undefined);
 			const message = error instanceof Error ? error.message : String(error);
 			input.notify(`QOL budget guard compaction failed to start: ${message}`, "error");
 			return { kind: "dispatch-threw", error: message, reason: trigger.reason };
