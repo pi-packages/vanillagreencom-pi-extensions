@@ -7,6 +7,7 @@ TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FIXTURES="$TEST_DIR/fixtures"
 REPO_ROOT="$(cd "$TEST_DIR/../../.." && pwd)"
 STICKY="$REPO_ROOT/skills/github/scripts/commands/sticky-comment.sh"
+FIND_COMMENT="$REPO_ROOT/skills/github/scripts/commands/find-comment.sh"
 LIB="$REPO_ROOT/skills/github/scripts/lib/github-api.sh"
 
 PASS=0
@@ -45,22 +46,43 @@ assert_fails_with() {
 cat >"$TMPDIR/gh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ "${1:-}" != "api" ]]; then
-  echo "unexpected gh command: $*" >&2
-  exit 1
-fi
-endpoint="${2:-}"
-case "$endpoint" in
-  repos/{owner}/{repo}/issues/123/comments)
-    cat "$STUB_FIXTURES/mixed_bot_comments.json"
+case "${1:-}" in
+  auth)
+    if [[ "${2:-}" == "status" ]]; then
+      echo "Logged in"
+      exit 0
+    fi
     ;;
-  repos/{owner}/{repo}/pulls/123/reviews)
-    printf '[]\n'
+  repo)
+    if [[ "${2:-}" == "view" ]]; then
+      echo '{"owner":{"login":"owner"},"name":"repo"}'
+      exit 0
+    fi
     ;;
-  *)
-    printf '[]\n'
+  api)
+    endpoint="${2:-}"
+    case "$endpoint" in
+      repos/{owner}/{repo}/issues/123/comments|repos/owner/repo/issues/123/comments)
+        cat "$STUB_FIXTURES/mixed_bot_comments.json"
+        exit 0
+        ;;
+      repos/owner/repo/issues/124/comments)
+        cat "$STUB_FIXTURES/codex_own_comment.json"
+        exit 0
+        ;;
+      repos/{owner}/{repo}/pulls/123/reviews)
+        printf '[]\n'
+        exit 0
+        ;;
+      *)
+        printf '[]\n'
+        exit 0
+        ;;
+    esac
     ;;
 esac
+printf 'unexpected gh call: %s\n' "$*" >&2
+exit 1
 EOF
 chmod +x "$TMPDIR/gh"
 
@@ -76,6 +98,14 @@ assert_fails_with \
     "explicit --bot disables known-bot fallback" \
     "No sticky comment found" \
     "$STICKY" 123 --verdict --bot 'review-bot[bot]'
+
+echo
+echo "=== find-comment.sh review-summary ==="
+out=$("$FIND_COMMENT" 124 --author 'chatgpt-codex-connector[bot]' --review-summary)
+assert_eq "$(jq -r .id <<<"$out")" "4001" "find-comment review-summary returns Codex earliest comment"
+assert_eq "$(jq -r .author <<<"$out")" "chatgpt-codex-connector[bot]" "find-comment review-summary preserves Codex author"
+out=$("$FIND_COMMENT" 124 --author 'missing-reviewer[bot]' --review-summary)
+assert_eq "$out" "{}" "find-comment review-summary no-match returns empty object"
 
 echo
 echo "=== detect_bot_reviewers own-comment reactions ==="
@@ -105,6 +135,30 @@ gh_rest() {
 
 detected=$(detect_bot_reviewers 42 | paste -sd, -)
 assert_eq "$detected" "chatgpt-codex-connector[bot]" "detect includes Codex own-comment reaction reviewer"
+
+gh_rest() {
+    case "$1" in
+        repos/{owner}/{repo}/pulls/42/reviews)
+            printf '[]\n'
+            ;;
+        repos/{owner}/{repo}/issues/42/comments)
+            cat "$FIXTURES/codex_own_comment.json"
+            ;;
+        repos/{owner}/{repo}/issues/42/reactions)
+            printf '[]\n'
+            ;;
+        repos/{owner}/{repo}/issues/comments/4001/reactions)
+            printf '[{"user":{"login":"linear-code[bot]"},"content":"+1"}]\n'
+            ;;
+        *)
+            echo "unexpected endpoint: $1" >&2
+            return 1
+            ;;
+    esac
+}
+
+detected=$(detect_bot_reviewers 42 | paste -sd, -)
+assert_eq "$detected" "" "detect ignores unrelated bot reaction on review-bot comment"
 
 gh_rest() {
     case "$1" in

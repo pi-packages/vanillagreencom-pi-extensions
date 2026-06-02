@@ -748,21 +748,21 @@ detect_bot_reviewers() {
     # Codex can signal via a reaction on its own first comment rather than on
     # the PR body. Include those reaction authors without treating every bot
     # comment author as a reviewer.
-    local comment_id comment_reactions reaction_reviewers login_re
+    local comment_id comment_author comment_reactions reaction_reviewers login_re
     login_re="$(_review_comment_bot_login_regex)"
-    while IFS= read -r comment_id; do
-        [[ -z "$comment_id" ]] && continue
+    while IFS=$'\t' read -r comment_id comment_author; do
+        [[ -z "$comment_id" || -z "$comment_author" ]] && continue
         comment_reactions=$(gh_rest "repos/{owner}/{repo}/issues/comments/$comment_id/reactions") || return 1
-        reaction_reviewers=$(jq -r '
+        reaction_reviewers=$(jq -r --arg author "$comment_author" '
             .[]
-            | select((.user.login // "") | endswith("[bot]"))
+            | select((.user.login // "") == $author)
             | select((.content // "") == "+1" or (.content // "") == "eyes" or (.content // "") == "THUMBS_UP" or (.content // "") == "EYES")
             | .user.login
         ' <<<"$comment_reactions" 2>/dev/null || true)
         if [[ -n "$reaction_reviewers" ]]; then
             reviewers=$(printf '%s\n%s\n' "$reviewers" "$reaction_reviewers" | sort -u | grep -v '^$' || true)
         fi
-    done < <(jq -r --arg login_re "$login_re" '.[] | select((.user.login // "") | test($login_re)) | .id // empty' <<<"$comments" 2>/dev/null || true)
+    done < <(jq -r --arg login_re "$login_re" '.[] | select((.user.login // "") | test($login_re)) | [.id, .user.login] | @tsv' <<<"$comments" 2>/dev/null || true)
 
     printf '%s\n' "$reviewers" | sort -u | grep -v '^$' || true
 }
