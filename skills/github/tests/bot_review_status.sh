@@ -243,6 +243,10 @@ assert_eq "$(compute_sticky_verdict_from_body "Verdict: approval not recommended
 assert_eq "$(compute_sticky_verdict_from_body "Status: pending approval")" "pending" "pending approval directive stays pending"
 assert_eq "$(compute_sticky_verdict_from_body "Status: approval required")" "pending" "approval required directive stays pending"
 assert_eq "$(compute_sticky_verdict_from_body "Verdict: approved; no changes requested but cannot merge")" "changes" "real blocker wins over approved plus no changes requested"
+assert_eq "$(compute_sticky_verdict_from_body "Status: not ready for approval")" "pending" "not-ready-for-approval text stays pending"
+assert_eq "$(compute_sticky_verdict_from_body "Verdict: approval denied")" "changes" "approval denied text = changes"
+assert_eq "$(compute_sticky_verdict_from_body "Verdict: approval withheld")" "changes" "approval withheld text = changes"
+assert_eq "$(compute_sticky_verdict_from_body "Recommendation: no approval")" "changes" "no approval text = changes"
 
 echo
 echo "----"
