@@ -3,8 +3,8 @@
 # Usage: ./sticky-comment.sh <PR#> [--body|--updated-at|--verdict|--analysis] [--bot <login>]
 #
 # By default this targets the bot in $GH_BOT_USERNAME (Claude-style sticky),
-# or falls back to any bot-authored Claude-style review-summary comment when no
-# bot is configured. Pass --bot to query a different reviewer — useful when
+# or falls back to a known review-bot Claude-style review-summary comment when
+# no bot is configured. Pass --bot to query a different reviewer — useful when
 # multiple review bots (e.g. Claude + Codex) are configured for a single PR.
 #
 # Returns JSON by default, or specific field with flags:
@@ -51,7 +51,7 @@ Analysis Output:
   }
 
 Examples:
-  sticky-comment.sh 23                              # Full JSON for configured/default bot; auto-detects Claude-style if unset
+  sticky-comment.sh 23                              # Full JSON for configured/default bot; auto-detects known Claude-style if unset
   sticky-comment.sh 23 --body                       # Just comment body
   sticky-comment.sh 23 --verdict --bot 'codex[bot]' # Codex's verdict
 EOF
@@ -125,7 +125,7 @@ find_sticky_comment() {
 }
 
 # Find sticky comment: prefer the configured/default bot, then (when no bot was
-# explicitly configured) fall back to any bot-authored Claude-style review
+# explicitly configured) fall back to a known review-bot Claude-style review
 # summary such as `**Claude finished ...** —— [View job](...)`.
 STICKY=$(find_sticky_comment "$RESPONSE")
 

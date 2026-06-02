@@ -119,21 +119,19 @@ find_comment() {
     comments=$(gh_rest "repos/$owner/$repo/issues/$pr_num/comments") || exit 1
 
     if [ "$review_summary" = "true" ]; then
-        # Selection priority for a "review summary" comment:
-        #   1. Sticky bearing the "View job" marker (Claude-style sticky)
-        #   2. Comment with a review-section header
+        # Selection priority lives in github-api.sh so sticky-comment and
+        # find-comment stay aligned as review bot formats evolve:
+        #   1. Sticky bearing the "View job" / "Claude finished" marker
+        #   2. Comment with a shared review-signal marker
         #   3. The author's earliest comment (Codex-style submission comment)
         # Returns {} if no comment by author exists.
-        echo "$comments" | jq -c --arg author "$author" '
-            (if $author == "" then . else map(select(.user.login == $author)) end) as $candidates |
-            (
-                ($candidates | map(select(.body | test("View job"; "i"))) | first) //
-                ($candidates | map(select(.body | test("## Review|### Inline|### Recommendation|Recommendation:"; "i"))) | last) //
-                ($candidates | first) //
-                null
-            ) |
-            if . then {id: .id, author: .user.login, body: .body, created_at: .created_at, updated_at: .updated_at, url: .html_url} else {} end
-        '
+        local summary
+        summary=$(select_review_summary_comment_from_comments "$comments" "$author" false true)
+        if [[ -z "$summary" || "$summary" == "null" ]]; then
+            echo '{}'
+        else
+            echo "$summary" | jq -c '{id: .id, author: .user.login, body: .body, created_at: .created_at, updated_at: .updated_at, url: .html_url}'
+        fi
         return
     fi
 

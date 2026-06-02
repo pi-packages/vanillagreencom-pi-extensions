@@ -214,6 +214,10 @@ echo
 echo "=== detect_bot_reviewers_from_inputs ==="
 detected=$(detect_bot_reviewers_from_inputs "$(fx empty.json)" "$(fx mixed_bot_comments.json)" "$(fx empty.json)" | paste -sd, -)
 assert_eq "$detected" "claude[bot]" "detect excludes non-review bot linkback comments"
+detected=$(detect_bot_reviewers_from_inputs "$(fx empty.json)" "$(fx untrusted_status_comments.json)" "$(fx empty.json)" | paste -sd, -)
+assert_eq "$detected" "" "detect excludes untrusted non-review bot status comment"
+selected=$(select_sticky_comment_from_comments "$(fx untrusted_status_comments.json)" "review-bot[bot]" true)
+assert_eq "$selected" "" "sticky fallback ignores non-review bot status comment"
 
 # --- Reaction normalization (REST + GraphQL forms) ---
 echo
@@ -231,6 +235,9 @@ assert_eq "$(compute_sticky_verdict_from_body "## Review\n✅ Approved")" "appro
 assert_eq "$(compute_sticky_verdict_from_body "## Review\n⚠️ changes requested")" "changes" "review section + ⚠️ = changes"
 assert_eq "$(compute_sticky_verdict_from_body "## Review\n✅ Approved with ⚠️ caveats")" "changes" "mixed signals = changes"
 assert_eq "$(compute_sticky_verdict_from_body "$(jq -r '.[0].body' "$FIXTURES/claude_review_summary_comments.json")")" "approved" "Claude Review Summary approved despite unrelated changes prose"
+assert_eq "$(compute_sticky_verdict_from_body "Verdict: changes")" "changes" "bare Verdict: changes = changes"
+assert_eq "$(compute_sticky_verdict_from_body "Status: changes")" "changes" "bare Status: changes = changes"
+assert_eq "$(compute_sticky_verdict_from_body "Recommendation: approve")" "approved" "bare Recommendation: approve = approved"
 
 echo
 echo "----"
