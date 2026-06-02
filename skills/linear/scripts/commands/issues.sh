@@ -566,7 +566,7 @@ bulk_update_issues() {
             update_args+=("$_key" "$_val")
             shift
             ;;
-        --remove-parent)
+        --remove-parent | --clear-cycle)
             update_args+=("$1")
             shift
             ;;
