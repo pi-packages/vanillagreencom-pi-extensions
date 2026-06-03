@@ -4,6 +4,7 @@ use std::process::Command;
 
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
+use serde_json::Value;
 use thiserror::Error;
 
 use super::snapshot::DashboardSnapshot;
@@ -14,9 +15,13 @@ const MAX_SNAPSHOTS_PER_RUN: usize = 50;
 #[derive(Debug, Error)]
 pub enum RunHistoryError {
     #[error(
-        "flightdeck-state command not found; set FLIGHTDECK_STATE_BIN or FLIGHTDECK_SKILL_DIR"
+        "flightdeck-state {command} command not found for project_root={project_root}; searched {searched}"
     )]
-    CommandNotFound,
+    CommandNotFound {
+        command: &'static str,
+        project_root: String,
+        searched: String,
+    },
     #[error("failed to run flightdeck-state: {0}")]
     Io(#[from] std::io::Error),
     #[error("flightdeck-state {command} failed with status {status}: {stderr}")]
@@ -31,6 +36,14 @@ pub enum RunHistoryError {
     Snapshot(#[from] tracked_entries::SnapshotError),
     #[error("active run {run_id} has no metadata")]
     ActiveRunMissingMetadata { run_id: String },
+    #[error(
+        "flightdeck-state run ensure output missing string paths.state_json for project_root={project_root} tmux_session={tmux_session}: {output}"
+    )]
+    RunEnsureMissingStateJson {
+        project_root: String,
+        tmux_session: String,
+        output: String,
+    },
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -146,6 +159,11 @@ struct ActivePointer {
 }
 
 #[derive(Debug, Deserialize)]
+struct RunEnsureOutput {
+    paths: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
 struct RunShowOutput {
     metadata: RunMetadata,
     state: serde_json::Value,
@@ -170,6 +188,7 @@ pub fn list_runs(project_root: &Path) -> Result<Vec<HistoryRun>, RunHistoryError
             project_root.display().to_string(),
             "--json".to_owned(),
         ],
+        project_root,
     )?;
     let parsed: RunListOutput = serde_json::from_slice(&output)?;
     Ok(parsed
@@ -203,6 +222,36 @@ pub fn load_active_state_path(
     }
 }
 
+/// Runs the lifecycle entrypoint before dashboard launch/focus so stale
+/// all-dead active runs are finalized before probing `.entries.flightdeck-dashboard`.
+pub fn ensure_active_state_path(
+    project_root: &Path,
+    expected_session: &str,
+) -> Result<PathBuf, RunHistoryError> {
+    let args = [
+        "run".to_owned(),
+        "ensure".to_owned(),
+        "--project-root".to_owned(),
+        project_root.display().to_string(),
+        "--tmux-session".to_owned(),
+        expected_session.to_owned(),
+    ];
+    let output = run_state_command("run ensure", &args, project_root)?;
+    let parsed: RunEnsureOutput = serde_json::from_slice(&output)?;
+    parsed
+        .paths
+        .as_ref()
+        .and_then(|paths| paths.get("state_json"))
+        .and_then(Value::as_str)
+        .filter(|path| !path.trim().is_empty())
+        .map(PathBuf::from)
+        .ok_or_else(|| RunHistoryError::RunEnsureMissingStateJson {
+            project_root: project_root.display().to_string(),
+            tmux_session: expected_session.to_owned(),
+            output: output_preview(&output),
+        })
+}
+
 pub fn load_active_run_metadata(
     project_root: &Path,
     expected_session: &str,
@@ -217,6 +266,7 @@ pub fn load_active_run_metadata(
             "--tmux-session".to_owned(),
             expected_session.to_owned(),
         ],
+        project_root,
     )?;
     if output_is_json_null(&output) {
         return Ok(ActiveRunLookup::None);
@@ -275,7 +325,7 @@ pub fn load_run_snapshot(
         args.push("--snapshot".to_owned());
         args.push(snapshot.to_owned());
     }
-    let output = run_state_command("run show", &args)?;
+    let output = run_state_command("run show", &args, project_root)?;
     let parsed: RunShowOutput = serde_json::from_slice(&output)?;
     let raw_state = serde_json::to_string(&parsed.state)?;
     let mut warn = stderr_warning;
@@ -307,6 +357,7 @@ pub fn import_legacy_archives(project_root: &Path) -> Result<ImportSummary, RunH
             "--project-root".to_owned(),
             project_root.display().to_string(),
         ],
+        project_root,
     )?;
     let parsed: ImportOutput = serde_json::from_slice(&output)?;
     let runs = list_runs(project_root)?;
@@ -386,8 +437,19 @@ fn output_is_json_null(output: &[u8]) -> bool {
         .unwrap_or(false)
 }
 
-fn run_state_command(command: &'static str, args: &[String]) -> Result<Vec<u8>, RunHistoryError> {
-    let bin = resolve_flightdeck_state_bin().ok_or(RunHistoryError::CommandNotFound)?;
+fn run_state_command(
+    command: &'static str,
+    args: &[String],
+    project_root: &Path,
+) -> Result<Vec<u8>, RunHistoryError> {
+    let candidates = state_bin_candidates(project_root);
+    let bin = resolve_state_bin_candidate(&candidates).ok_or_else(|| {
+        RunHistoryError::CommandNotFound {
+            command,
+            project_root: project_root.display().to_string(),
+            searched: state_bin_search_context(&candidates),
+        }
+    })?;
     let output = Command::new(bin).args(args).output()?;
     if output.status.success() {
         return Ok(output.stdout);
@@ -399,35 +461,117 @@ fn run_state_command(command: &'static str, args: &[String]) -> Result<Vec<u8>, 
     })
 }
 
-fn resolve_flightdeck_state_bin() -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os("FLIGHTDECK_STATE_BIN").map(PathBuf::from) {
-        if path.is_file() {
-            return Some(path);
-        }
-    }
-    if let Some(path) = std::env::var_os("FLIGHTDECK_SKILL_DIR")
-        .map(PathBuf::from)
-        .map(|skill_dir| skill_dir.join("scripts/flightdeck-state"))
-    {
-        if path.is_file() {
-            return Some(path);
-        }
-    }
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StateBinCandidate {
+    display: String,
+    lookup: StateBinLookup,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum StateBinLookup {
+    File(Option<PathBuf>),
+    PathCommand(&'static str),
+}
+
+fn state_bin_candidates(project_root: &Path) -> Vec<StateBinCandidate> {
+    let mut candidates = Vec::new();
+    push_state_bin_candidate(
+        &mut candidates,
+        StateBinCandidate {
+            display: "$FLIGHTDECK_STATE_BIN".to_owned(),
+            lookup: StateBinLookup::File(
+                std::env::var_os("FLIGHTDECK_STATE_BIN").map(PathBuf::from),
+            ),
+        },
+    );
+    push_state_bin_candidate(
+        &mut candidates,
+        StateBinCandidate {
+            display: "$FLIGHTDECK_SKILL_DIR/scripts/flightdeck-state".to_owned(),
+            lookup: StateBinLookup::File(
+                std::env::var_os("FLIGHTDECK_SKILL_DIR")
+                    .map(PathBuf::from)
+                    .map(|skill_dir| skill_dir.join("scripts/flightdeck-state")),
+            ),
+        },
+    );
+    push_state_bin_candidate(
+        &mut candidates,
+        file_candidate(project_root.join("skills/flightdeck/scripts/flightdeck-state")),
+    );
+    push_state_bin_candidate(
+        &mut candidates,
+        file_candidate(project_root.join(".agents/skills/flightdeck/scripts/flightdeck-state")),
+    );
     if let Ok(cwd) = std::env::current_dir() {
-        let dev_path = cwd.join("../../scripts/flightdeck-state");
-        if dev_path.is_file() {
-            return Some(dev_path);
-        }
-        let canonical = cwd.join("skills/flightdeck/scripts/flightdeck-state");
-        if canonical.is_file() {
-            return Some(canonical);
-        }
-        let installed = cwd.join(".agents/skills/flightdeck/scripts/flightdeck-state");
-        if installed.is_file() {
-            return Some(installed);
+        push_state_bin_candidate(
+            &mut candidates,
+            file_candidate(cwd.join("../../scripts/flightdeck-state")),
+        );
+        push_state_bin_candidate(
+            &mut candidates,
+            file_candidate(cwd.join("skills/flightdeck/scripts/flightdeck-state")),
+        );
+        push_state_bin_candidate(
+            &mut candidates,
+            file_candidate(cwd.join(".agents/skills/flightdeck/scripts/flightdeck-state")),
+        );
+    }
+    push_state_bin_candidate(
+        &mut candidates,
+        StateBinCandidate {
+            display: "$PATH/flightdeck-state".to_owned(),
+            lookup: StateBinLookup::PathCommand("flightdeck-state"),
+        },
+    );
+    candidates
+}
+
+fn push_state_bin_candidate(candidates: &mut Vec<StateBinCandidate>, candidate: StateBinCandidate) {
+    if !candidates
+        .iter()
+        .any(|existing| existing.display == candidate.display)
+    {
+        candidates.push(candidate);
+    }
+}
+
+fn file_candidate(path: PathBuf) -> StateBinCandidate {
+    StateBinCandidate {
+        display: path.display().to_string(),
+        lookup: StateBinLookup::File(Some(path)),
+    }
+}
+
+fn resolve_state_bin_candidate(candidates: &[StateBinCandidate]) -> Option<PathBuf> {
+    for candidate in candidates {
+        match &candidate.lookup {
+            StateBinLookup::File(Some(path)) if path.is_file() => return Some(path.clone()),
+            StateBinLookup::PathCommand(command) => {
+                if let Some(path) = which(command) {
+                    return Some(path);
+                }
+            }
+            StateBinLookup::File(_) => {}
         }
     }
-    which("flightdeck-state")
+    None
+}
+
+fn state_bin_search_context(candidates: &[StateBinCandidate]) -> String {
+    candidates
+        .iter()
+        .map(|candidate| candidate.display.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn output_preview(output: &[u8]) -> String {
+    let text = String::from_utf8_lossy(output).trim().to_owned();
+    if text.is_empty() {
+        return "(empty stdout)".to_owned();
+    }
+    text.chars().take(512).collect()
 }
 
 fn which(bin: &str) -> Option<PathBuf> {
@@ -524,6 +668,37 @@ mod tests {
             assert!(error
                 .to_string()
                 .contains("flightdeck-state run active failed"));
+        });
+    }
+
+    #[test]
+    fn ensure_active_state_path_runs_lifecycle_entrypoint() {
+        with_fake_state_bin(|ctx| {
+            let state_path = ctx.project.join("runs/run-1/state.json");
+            write_json(
+                &ctx.responses.join("ensure.json"),
+                json!({ "paths": { "state_json": state_path } }),
+            );
+
+            let ensured = ensure_active_state_path(&ctx.project, "S").expect("ensure path");
+
+            assert_eq!(ensured, state_path);
+            assert_log_contains(&ctx.log, "run\nensure\n--project-root");
+            assert_log_contains(&ctx.log, "--tmux-session\nS");
+        });
+    }
+
+    #[test]
+    fn ensure_active_state_path_errors_when_state_json_missing() {
+        with_fake_state_bin(|ctx| {
+            write_json(&ctx.responses.join("ensure.json"), json!({ "paths": {} }));
+
+            let error = ensure_active_state_path(&ctx.project, "S").expect_err("ensure fails");
+
+            let message = error.to_string();
+            assert!(message.contains("missing string paths.state_json"));
+            assert!(message.contains("tmux_session=S"));
+            assert!(message.contains(ctx.project.to_str().expect("project str")));
         });
     }
 
@@ -674,6 +849,7 @@ case "$1 $2" in
     if [[ -f {responses}/fail-active ]]; then echo forced failure >&2; exit 7; fi
     cat {responses}/active.json
     ;;
+  "run ensure") cat {responses}/ensure.json ;;
   "run list") cat {responses}/list.json ;;
   "run show") cat {responses}/show.json ;;
   "run import-legacy") cat {responses}/import.json ;;

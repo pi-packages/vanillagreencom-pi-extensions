@@ -58,30 +58,27 @@ Issue mode adds `merge-ready`, `merged`, and `aborted` for the PR lifecycle; `wa
      fi
    fi
    ```
-   `flightdeck-dashboard launch` verifies the tracked `flightdeck-dashboard` entry and pane, refuses untracked same-name windows instead of spawning duplicates, and is guarded against recursive/active-run launches from the dashboard's own `flightdeck-session start`.
+   `flightdeck-dashboard launch` first runs the active-run stale check (same all-dead-pane predicate as `flightdeck-state run ensure`), then verifies the tracked `flightdeck-dashboard` entry and pane, refuses untracked same-name windows instead of spawning duplicates, and is guarded against recursive active-run creation from the dashboard's own `flightdeck-session start`.
 5. Spawn or attach the daemon idempotently after checking daemon status for live work:
    ```bash
    MASTER_PANE="${TMUX_PANE:-$(tmux display-message -p '#{pane_id}')}"
+   MASTER_HARNESS="$(.agents/skills/flightdeck/scripts/flightdeck-session detect-master-harness --master-pane "$MASTER_PANE")"
    INNER_HARNESSES="$(.agents/skills/flightdeck/scripts/pane-registry list --format inner-harnesses-live)"
    if [[ -n "$INNER_PANES" ]] && ! .agents/skills/flightdeck/scripts/flightdeck-daemon status --session "$SESSION" >/dev/null 2>&1; then
      daemon_start_err="$(mktemp -t flightdeck-daemon-start.XXXXXX)"
      daemon_start_rc=0
      daemon_respawn_failed=0
-     .agents/skills/flightdeck/scripts/flightdeck-daemon start \
-       --session "$SESSION" \
-       --master "$MASTER_PANE" \
-       --master-harness "$MASTER_HARNESS" \
-       --inner "$INNER_PANES" \
-       --inner-harnesses "$INNER_HARNESSES" 2>"$daemon_start_err" || daemon_start_rc=$?
+     daemon_start_args=(start --session "$SESSION" --master "$MASTER_PANE")
+     [[ -n "$MASTER_HARNESS" ]] && daemon_start_args+=(--master-harness "$MASTER_HARNESS")
+     daemon_start_args+=(--inner "$INNER_PANES" --inner-harnesses "$INNER_HARNESSES")
+     .agents/skills/flightdeck/scripts/flightdeck-daemon "${daemon_start_args[@]}" 2>"$daemon_start_err" || daemon_start_rc=$?
      if (( daemon_start_rc == 4 )); then
        MASTER_PANE="${TMUX_PANE:-$(tmux display-message -p '#{pane_id}')}"
        daemon_start_rc=0
-       .agents/skills/flightdeck/scripts/flightdeck-daemon start \
-         --session "$SESSION" \
-         --master "$MASTER_PANE" \
-         --master-harness "$MASTER_HARNESS" \
-         --inner "$INNER_PANES" \
-         --inner-harnesses "$INNER_HARNESSES" 2>"$daemon_start_err" || daemon_start_rc=$?
+       daemon_start_args=(start --session "$SESSION" --master "$MASTER_PANE")
+       [[ -n "$MASTER_HARNESS" ]] && daemon_start_args+=(--master-harness "$MASTER_HARNESS")
+       daemon_start_args+=(--inner "$INNER_PANES" --inner-harnesses "$INNER_HARNESSES")
+       .agents/skills/flightdeck/scripts/flightdeck-daemon "${daemon_start_args[@]}" 2>"$daemon_start_err" || daemon_start_rc=$?
      fi
      if (( daemon_start_rc == 1 )) && .agents/skills/flightdeck/scripts/flightdeck-daemon status --session "$SESSION" >/dev/null 2>&1; then
        echo "daemon-respawn-raced session=$SESSION"
@@ -99,7 +96,7 @@ Issue mode adds `merge-ready`, `merged`, and `aborted` for the PR lifecycle; `wa
      fi
    fi
    ```
-   On every watch tick with live tracked entries, master MUST check `flightdeck-daemon status --session "$SESSION"`. If it reports `no daemon`, master MUST respawn with the current alive inner pane list from `pane-registry list --format inner-panes-live` / `inner-harnesses-live`, capture the `flightdeck-daemon start` exit code + stderr, and log the respawn in the cycle notes. Exit `4` means stale `--master`: re-resolve from `$TMUX_PANE` and retry once. Exit `1` may be a lock race: if `flightdeck-daemon status` then reports running, log `daemon-respawn-raced` and continue. Any remaining non-zero exit must surface `daemon-respawn-failed` to the user; do NOT yield/end the turn because the master loop is not armed for wakes. **`flightdeck-session start` / `attach` is the canonical entry point that arms wake delivery** (vstack#213): after entry registration it consults `flightdeck-daemon health` (`staleness` field, `master_pane_id`, `subscribed_pane_ids`) and respawns when missing/stale. The watch loop's `flightdeck-daemon status` poll above remains the safety net for daemons that crash mid-session, but it is no longer the primary mechanism for arming wake delivery on a brand-new session. `flightdeck-state archive` also stops the daemon as part of state rotation. Reconciliation in `daemon/reconcile.ts` runs every `FD_RECONCILE_INTERVAL_SEC` and is best-effort safety net for mid-session pane additions — not a replacement for the start-path daemon arming.
+   On every watch tick with live tracked entries, master MUST check `flightdeck-daemon status --session "$SESSION"`. If it reports `no daemon`, master MUST respawn with the current alive inner pane list from `pane-registry list --format inner-panes-live` / `inner-harnesses-live`, capture the `flightdeck-daemon start` exit code + stderr, and log the respawn in the cycle notes. Pass `--master-harness` whenever `flightdeck-session detect-master-harness` returns one; that helper is the canonical resolver used by `flightdeck-session start` / `attach`, and the daemon uses the result to choose the correct wake payload for Pi/Claude/OpenCode/Codex masters. Exit `4` means stale `--master`: re-resolve from `$TMUX_PANE` and retry once. Exit `1` may be a lock race: if `flightdeck-daemon status` then reports running, log `daemon-respawn-raced` and continue. Any remaining non-zero exit must surface `daemon-respawn-failed` to the user; do NOT yield/end the turn because the master loop is not armed for wakes. **`flightdeck-session start` / `attach` is the canonical entry point that arms wake delivery** (vstack#213): after entry registration it consults `flightdeck-daemon health` (`staleness` field, `master_pane_id`, `master_harness`, `subscribed_pane_ids`) and respawns when missing, stale, or armed with `(unknown)` / mismatched `master_harness`. The watch loop's `flightdeck-daemon status` poll above remains the safety net for daemons that crash mid-session, but it is no longer the primary mechanism for arming wake delivery on a brand-new session. `flightdeck-state archive` also stops the daemon as part of state rotation. Reconciliation in `daemon/reconcile.ts` runs every `FD_RECONCILE_INTERVAL_SEC` and is best-effort safety net for mid-session pane additions — not a replacement for the start-path daemon arming.
 6. Acquire the master-busy lock before processing:
    ```bash
    .agents/skills/flightdeck/scripts/flightdeck-state master-busy lock --owner-pid "$MASTER_OWNER_PID"

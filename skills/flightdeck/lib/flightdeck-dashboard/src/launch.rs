@@ -11,7 +11,7 @@ use tokio::process::Command;
 
 use crate::cli::{FocusOrLaunchArgs, LaunchArgs, MotionArg, ThemeArg};
 use crate::daemon::lifecycle::{pid_alive, read_pid};
-use crate::state::tracked_entries;
+use crate::state::{run_history, tracked_entries};
 use crate::util::paths::{fd_resolve_state_dir, resolve_session_key};
 
 const DASHBOARD_ENTRY_ID: &str = "flightdeck-dashboard";
@@ -229,7 +229,13 @@ pub async fn run(args: LaunchArgs) -> Result<()> {
     let motion = select_motion(args.motion);
     let project_root = resolve_project_root();
     let explicit_state_file = args.state_file.as_deref().map(absolutize);
-    let state_file = resolve_state_file(explicit_state_file.as_deref(), &session, &project_root);
+    let mut state_file =
+        resolve_state_file(explicit_state_file.as_deref(), &session, &project_root);
+    if explicit_state_file.is_none() {
+        if let Some(ensured_state_file) = ensure_active_run_for_dashboard(&session, &project_root) {
+            state_file = Some(ensured_state_file);
+        }
+    }
     let _launch_lock = DashboardLaunchLock::acquire(&session_key)?;
     let launch_plan = DashboardLaunchPlan {
         session: &session,
@@ -395,7 +401,13 @@ async fn focus_or_launch(
     let project_root = resolve_project_root();
     let window_name = select_window_name(args.window_name.as_deref());
     let explicit_state_file = args.state_file.as_deref().map(absolutize);
-    let state_file = resolve_state_file(explicit_state_file.as_deref(), &session, &project_root);
+    let mut state_file =
+        resolve_state_file(explicit_state_file.as_deref(), &session, &project_root);
+    if explicit_state_file.is_none() {
+        if let Some(ensured_state_file) = ensure_active_run_for_dashboard(&session, &project_root) {
+            state_file = Some(ensured_state_file);
+        }
+    }
     let _launch_lock = match DashboardLaunchLock::acquire(&session_key) {
         Ok(lock) => lock,
         Err(error) => {
@@ -717,6 +729,18 @@ async fn start_daemon_if_needed(
             ));
         }
         Err(error) => warn(format!("failed to spawn dashboard daemon: {error}")),
+    }
+}
+
+fn ensure_active_run_for_dashboard(session: &str, project_root: &Path) -> Option<PathBuf> {
+    match run_history::ensure_active_state_path(project_root, session) {
+        Ok(path) => Some(path),
+        Err(error) => {
+            warn(format!(
+                "active-run stale check skipped before dashboard launch/focus: {error}"
+            ));
+            None
+        }
     }
 }
 
