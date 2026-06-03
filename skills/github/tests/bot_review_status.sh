@@ -72,6 +72,16 @@ assert_eq "$(echo "$out" | jq -r .status)" "approved" "1b status=approved (forma
 assert_contains "$(echo "$out" | jq -c .signals)" "formal_review:approved" "1b signals contain formal_review:approved"
 assert_contains "$(echo "$out" | jq -c .signals)" "sticky:approved" "1b signals contain sticky:approved"
 
+out=$(bot_review_status_compute \
+    "claude[bot]" \
+    "$(fx empty.json)" \
+    "$(fx claude_review_summary_comments.json)" \
+    "$(fx empty.json)" \
+    "$(fx empty.json)" \
+    "$(fx empty.json)")
+assert_eq "$(echo "$out" | jq -r .status)" "approved" "1c status=approved (Claude Review Summary comment only)"
+assert_contains "$(echo "$out" | jq -c .signals)" "sticky:approved" "1c signals contain sticky:approved"
+
 # --- 2. Codex 👀 only = pending ---
 echo "Test 2: Codex eyes-reaction only = pending"
 out=$(bot_review_status_compute \
@@ -199,6 +209,20 @@ fi
 echo "Test 7c: Empty reviewer set aggregates to pending (not approved)"
 assert_eq "$(agg '[]')" "pending" "7c agg([])=pending"
 
+# --- Review-signal auto-detection ---
+echo
+echo "=== detect_bot_reviewers_from_inputs ==="
+detected=$(detect_bot_reviewers_from_inputs "$(fx empty.json)" "$(fx mixed_bot_comments.json)" "$(fx empty.json)" | paste -sd, -)
+assert_eq "$detected" "claude[bot]" "detect excludes non-review bot linkback comments"
+detected=$(detect_bot_reviewers_from_inputs "$(fx empty.json)" "$(fx untrusted_status_comments.json)" "$(fx empty.json)" | paste -sd, -)
+assert_eq "$detected" "" "detect excludes untrusted non-review bot status comment"
+selected=$(select_sticky_comment_from_comments "$(fx untrusted_status_comments.json)" "review-bot[bot]" true)
+assert_eq "$selected" "" "sticky fallback ignores non-review bot status comment"
+detected=$(detect_bot_reviewers_from_inputs "$(fx empty.json)" "$(fx empty.json)" "$(fx codex_eyes_body_reactions.json)" | paste -sd, -)
+assert_eq "$detected" "chatgpt-codex-connector[bot]" "detect includes known review bot PR-body reaction"
+detected=$(detect_bot_reviewers_from_inputs "$(fx empty.json)" "$(fx empty.json)" "$(fx untrusted_body_reactions.json)" | paste -sd, -)
+assert_eq "$detected" "" "detect excludes untrusted bot PR-body reaction"
+
 # --- Reaction normalization (REST + GraphQL forms) ---
 echo
 echo "=== reaction normalization ==="
@@ -214,6 +238,23 @@ assert_eq "$(compute_sticky_verdict_from_body "View job\n- [ ] todo")" "pending"
 assert_eq "$(compute_sticky_verdict_from_body "## Review\n✅ Approved")" "approved" "review section + ✅ + approved = approved"
 assert_eq "$(compute_sticky_verdict_from_body "## Review\n⚠️ changes requested")" "changes" "review section + ⚠️ = changes"
 assert_eq "$(compute_sticky_verdict_from_body "## Review\n✅ Approved with ⚠️ caveats")" "changes" "mixed signals = changes"
+assert_eq "$(compute_sticky_verdict_from_body "$(jq -r '.[0].body' "$FIXTURES/claude_review_summary_comments.json")")" "approved" "Claude Review Summary approved despite unrelated changes prose"
+assert_eq "$(compute_sticky_verdict_from_body "Verdict: changes")" "changes" "bare Verdict: changes = changes"
+assert_eq "$(compute_sticky_verdict_from_body "Status: changes")" "changes" "bare Status: changes = changes"
+assert_eq "$(compute_sticky_verdict_from_body "Recommendation: approve")" "approved" "bare Recommendation: approve = approved"
+assert_eq "$(compute_sticky_verdict_from_body "Recommendation: do not approve")" "changes" "negated Recommendation approval = changes"
+assert_eq "$(compute_sticky_verdict_from_body "Verdict: approval not recommended")" "changes" "approval-not-recommended verdict = changes"
+assert_eq "$(compute_sticky_verdict_from_body "Status: pending approval")" "pending" "pending approval directive stays pending"
+assert_eq "$(compute_sticky_verdict_from_body "Status: approval required")" "pending" "approval required directive stays pending"
+assert_eq "$(compute_sticky_verdict_from_body "Verdict: approved; no changes requested but cannot merge")" "changes" "real blocker wins over approved plus no changes requested"
+assert_eq "$(compute_sticky_verdict_from_body "Status: not ready for approval")" "pending" "not-ready-for-approval text stays pending"
+assert_eq "$(compute_sticky_verdict_from_body "Status: not yet approved")" "pending" "not-yet-approved text stays pending"
+assert_eq "$(compute_sticky_verdict_from_body "Status: not ready to approve")" "pending" "not-ready-to-approve text stays pending"
+assert_eq "$(compute_sticky_verdict_from_body "Verdict: approval denied")" "changes" "approval denied text = changes"
+assert_eq "$(compute_sticky_verdict_from_body "Verdict: approval withheld")" "changes" "approval withheld text = changes"
+assert_eq "$(compute_sticky_verdict_from_body "Verdict: rejected")" "changes" "rejected verdict = changes"
+assert_eq "$(compute_sticky_verdict_from_body "Verdict: denied")" "changes" "denied verdict = changes"
+assert_eq "$(compute_sticky_verdict_from_body "Recommendation: no approval")" "changes" "no approval text = changes"
 
 echo
 echo "----"

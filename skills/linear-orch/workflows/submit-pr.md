@@ -128,8 +128,10 @@ PENDING_REVIEWERS=$(echo "$WAIT_RESULT" | jq -r '.pending_reviewers | join(", ")
 Waits for all configured bot reviewers (`$BOT_REVIEWERS` — e.g., `review-bot-a[bot],chatgpt-codex-connector[bot]`). Auto-detects if not configured. Max wait 600s.
 
 `bot-review-wait` understands per-reviewer signaling:
-- **Claude-style** — formal review (APPROVED/CHANGES_REQUESTED) and/or sticky "View job" comment.
+- **Claude-style** — formal review (APPROVED/CHANGES_REQUESTED) and/or sticky `View job` / `**Claude finished ...**` comment with `### Review Summary` verdict text (`✅ Approved`, `Changes requested`).
 - **Codex-style** — reactions on the PR body / earliest comment (👀 = pending, 👍 = approved) and inline review threads (= changes).
+
+Auto-detection only treats review-signal comments from known review bots as reviewers; unrelated automation comments (for example issue linkbacks) do not block completion. Configure custom comment-only review bots with `BOT_REVIEWERS` / `--reviewers`.
 
 `status=complete` is only emitted when **no reviewer is pending** (verdict will be `approved` or `changes`). If you need a reviewer to be ignored, pass `--skip "bot-login"` or set `BOT_SKIPPED_REVIEWERS`.
 
@@ -164,17 +166,15 @@ done
 
 **Extended poll** (timeout + pending only):
 ```bash
-# Poll sticky verdict every 30s for up to 300s more
-EXT_ELAPSED=0
-while [ $EXT_ELAPSED -lt 300 ]; do
-  BOT_VERDICT=$(.agents/skills/github/scripts/github.sh sticky-comment [PR_NUMBER] --verdict 2>/dev/null || echo "pending")
-  if [[ "$BOT_VERDICT" == "approved" || "$BOT_VERDICT" == "changes" ]]; then
-    break
-  fi
-  sleep 30
-  EXT_ELAPSED=$((EXT_ELAPSED + 30))
-done
-# Proceed to § 3 regardless (with note if still pending)
+# Re-run multi-reviewer wait every 30s for up to 300s more.
+BOT_WAIT_ARGS=([PR_NUMBER] 30 300 --json)
+[[ -n "${BOT_REVIEWERS:-}" ]] && BOT_WAIT_ARGS+=(--reviewers "$BOT_REVIEWERS")
+[[ -n "${BOT_SKIPPED_REVIEWERS:-}" ]] && BOT_WAIT_ARGS+=(--skip "$BOT_SKIPPED_REVIEWERS")
+WAIT_RESULT=$(.agents/skills/linear-orch/scripts/bot-review-wait "${BOT_WAIT_ARGS[@]}")
+BOT_STATUS=$(echo "$WAIT_RESULT"  | jq -r '.status')
+BOT_VERDICT=$(echo "$WAIT_RESULT" | jq -r '.verdict')
+PENDING_REVIEWERS=$(echo "$WAIT_RESULT" | jq -r '.pending_reviewers | join(", ")')
+# Proceed to § 3 if complete/terminal; otherwise ask with pending reviewers.
 ```
 
 ---
@@ -183,20 +183,16 @@ done
 
 ### 3.1 Initial Triage
 
-1. **Bot completion pre-check** — ensure sticky verdict is terminal before triaging:
+1. **Bot completion pre-check** — ensure all configured/detected bot reviewers have terminal status before triaging:
    ```bash
-   VERDICT=$(.agents/skills/github/scripts/github.sh sticky-comment [PR_NUMBER] --verdict 2>/dev/null || echo "pending")
-   if [[ "$VERDICT" == "pending" ]]; then
-     # Poll every 30s for up to 180s
-     PRE_ELAPSED=0
-     while [ $PRE_ELAPSED -lt 180 ]; do
-       sleep 30
-       PRE_ELAPSED=$((PRE_ELAPSED + 30))
-       VERDICT=$(.agents/skills/github/scripts/github.sh sticky-comment [PR_NUMBER] --verdict 2>/dev/null || echo "pending")
-       if [[ "$VERDICT" != "pending" ]]; then break; fi
-     done
-   fi
-   # Proceed regardless — terminal or timed out
+   BOT_WAIT_ARGS=([PR_NUMBER] 30 180 --json)
+   [[ -n "${BOT_REVIEWERS:-}" ]] && BOT_WAIT_ARGS+=(--reviewers "$BOT_REVIEWERS")
+   [[ -n "${BOT_SKIPPED_REVIEWERS:-}" ]] && BOT_WAIT_ARGS+=(--skip "$BOT_SKIPPED_REVIEWERS")
+   WAIT_RESULT=$(.agents/skills/linear-orch/scripts/bot-review-wait "${BOT_WAIT_ARGS[@]}")
+   BOT_STATUS=$(echo "$WAIT_RESULT"  | jq -r '.status')
+   BOT_VERDICT=$(echo "$WAIT_RESULT" | jq -r '.verdict')
+   PENDING_REVIEWERS=$(echo "$WAIT_RESULT" | jq -r '.pending_reviewers | join(", ")')
+   # Proceed if complete/terminal; if still pending, include PENDING_REVIEWERS in triage notes.
    ```
 
 2. **Run Workflow**: `⤵ workflows/review-pr-comments.md [PR_NUMBER] § 1-8 → § 3.1` with context:

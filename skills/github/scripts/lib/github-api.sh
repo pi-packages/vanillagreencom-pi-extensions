@@ -356,37 +356,130 @@ get_formal_review_verdict() {
     esac
 }
 
+# Comment bodies that look like bot review/status output rather than generic
+# automation comments (for example Linear linkbacks). Keep this broad enough for
+# Claude sticky comments, but narrow enough that unrelated bot comments do not
+# become reviewers and block bot-review-wait.
+_review_signal_comment_regex() {
+    printf '%s' 'Claude finished|View job|### PR Review|### Review Summary|## Review|### Inline|### Recommendation|Recommendation:|Verdict:|Status:'
+}
+
+# Review-summary comments can contain terminal verdicts, so no-config fallback
+# only accepts known review-bot identities. Custom bots remain supported by
+# explicit GH_BOT_USERNAME / --bot / BOT_REVIEWERS paths.
+_review_comment_bot_login_regex() {
+    printf '%s' '^(claude|claude-code|review-bot|chatgpt-codex-connector)\[bot\]$'
+}
+
+# Select a review-summary comment from a preloaded issue comments JSON array.
+# Reused by sticky-comment and find-comment so bot-format marker changes live in
+# one place. Selection order: View-job marker, review-signal marker, optional
+# first candidate fallback.
+select_review_summary_comment_from_comments() {
+    local comments_json="${1:-[]}"
+    local author="${2:-}"
+    local allow_known_bot_fallback="${3:-false}"
+    local include_first_fallback="${4:-false}"
+    local marker_re login_re
+    marker_re="$(_review_signal_comment_regex)"
+    login_re="$(_review_comment_bot_login_regex)"
+
+    jq -c \
+        --arg author "$author" \
+        --arg marker_re "$marker_re" \
+        --arg login_re "$login_re" \
+        --arg allow_known_bot_fallback "$allow_known_bot_fallback" \
+        --arg include_first_fallback "$include_first_fallback" '
+        def bot_login: (.user.login // "");
+        def body_text: (.body // "");
+        def is_view_job: (body_text | test("Claude finished|View job"; "i"));
+        def is_review_signal($marker_re): (body_text | test($marker_re; "i"));
+        def is_known_review_bot($login_re): (bot_login | test($login_re));
+        def pick($items; $marker_re; $include_first_fallback):
+            (($items | map(select(is_view_job)) | last) //
+             ($items | map(select(is_review_signal($marker_re))) | last) //
+             (if $include_first_fallback == "true" then ($items | first) else empty end) //
+             empty);
+        (if $author == "" then . else [.[] | select(bot_login == $author)] end) as $candidates |
+        ($candidates | pick(.; $marker_re; $include_first_fallback)) //
+        (if $allow_known_bot_fallback == "true" then
+            ([.[] | select(is_known_review_bot($login_re))] | pick(.; $marker_re; "false"))
+         else empty end)
+    ' <<<"$comments_json" 2>/dev/null || true
+}
+
+# Select the sticky/review-summary comment for a bot from a preloaded issue
+# comments JSON array. When allow_known_bot_fallback is true, fall back only to
+# known review-bot identities if the requested/default bot did not post one.
+select_sticky_comment_from_comments() {
+    local comments_json="${1:-[]}"
+    local bot_user="${2:-}"
+    local allow_known_bot_fallback="${3:-false}"
+    select_review_summary_comment_from_comments "$comments_json" "$bot_user" "$allow_known_bot_fallback" false
+}
+
 # Compute the verdict ("pending"|"approved"|"changes") from a sticky/review
-# comment body. Mirrors the logic in commands/sticky-comment.sh — kept here so
-# bot_review_status_compute and tests do not need to shell out.
+# comment body. This intentionally reads verdict-like lines/sections instead of
+# grepping the entire body for "changes", since approved Claude summaries can
+# contain unrelated text like "Review CI workflow changes".
 compute_sticky_verdict_from_body() {
     local body="$1"
-    local has_review_section
-    has_review_section=$(printf '%s' "$body" | grep -ciE '## Review|### Inline|### Recommendation|Recommendation:|View job' || true)
-    if [[ $has_review_section -eq 0 ]]; then
-        local unchecked
+    local marker_re verdict_lines has_final_section unchecked
+    marker_re="$(_review_signal_comment_regex)"
+
+    # Pull out explicit verdict/status/recommendation lines plus review-summary
+    # bodies. Avoid generic checklist/body lines that can mention "changes" as a
+    # noun rather than a requested verdict.
+    verdict_lines=$(printf '%s\n' "$body" | awk '
+        BEGIN { in_summary=0; remaining=0 }
+        /^### Review Summary[[:space:]]*$/ { in_summary=1; remaining=8; print; next }
+        /^### Recommendation[[:space:]]*$/ { in_summary=1; remaining=8; print; next }
+        /^## Review[[:space:]]*$/ { in_summary=1; remaining=8; print; next }
+        /^### Inline/ { in_summary=1; remaining=8; print; next }
+        in_summary && remaining > 0 { print; remaining--; next }
+        /(^|[[:space:]])(Verdict|Status|Recommendation):/ { print; next }
+        /(✅|⚠️|❌)/ { print; next }
+        /([Cc]hanges requested|[Nn]eeds changes|[Rr]equest changes|[Aa]pproved for merge|[Rr]eady for merge|Review Complete ✅|\*\*[Aa]pproved\*\*)/ { print; next }
+    ' || true)
+
+    local change_verdict_lines verdict_directives has_explicit_changes has_warning has_explicit_approval
+    # Strip only explicitly negated "changes requested" text before scanning
+    # for blockers. Keep the rest of the line so real blockers like
+    # "cannot merge" still win over nearby approval text.
+    change_verdict_lines=$(printf '%s\n' "$verdict_lines" | sed -E 's/[Nn]o changes requested//g; s/0 changes requested//g; s/[Nn]o blocking changes//g')
+    verdict_directives=$(printf '%s\n' "$verdict_lines" | grep -iE '(^|[[:space:]])(Verdict|Status|Recommendation):' || true)
+    has_explicit_changes=$(printf '%s\n' "$change_verdict_lines" | grep -ciE '(^|[^[:alnum:]])(changes requested|needs changes|request changes|changes required|not approved|cannot merge|do not merge|blocks merge|blocked)([^[:alnum:]]|$)' || true)
+    local change_directives has_bare_directive_changes has_denied_approval has_pending_approval has_bare_directive_approval
+    change_directives=$(printf '%s\n' "$verdict_directives" | sed -E 's/[Nn]o changes requested//g; s/0 changes requested//g; s/[Nn]o blocking changes//g')
+    has_bare_directive_changes=$(printf '%s\n' "$change_directives" | grep -ciE '(^|[[:space:]])(Verdict|Status|Recommendation):[[:space:]]*(changes|change|needs changes|request changes|changes requested)\b' || true)
+    has_denied_approval=$(printf '%s\n' "$verdict_lines" | grep -ciE "\b(do not approve|don't approve|cannot approve|not approved|approval not recommended|not recommend approval|recommend against approval|approval denied|approval rejected|approval withheld|no approval|denied approval|rejected approval|denied|rejected|reject)\b" || true)
+    has_pending_approval=$(printf '%s\n' "$verdict_lines" | grep -ciE '\b(not ready for approval|not ready to approve|not yet approved|pending approval|approval pending|awaiting approval|needs approval|requires approval|approval required|required approval)\b' || true)
+    has_bare_directive_approval=$(printf '%s\n' "$verdict_directives" | grep -ciE '(^|[[:space:]])(Verdict|Status|Recommendation):[[:space:]]*(✅[[:space:]]*)?(approve|approved)\b' || true)
+    has_warning=$(printf '%s\n' "$verdict_lines" | grep -cE '⚠️|❌' || true)
+    has_explicit_approval=$(printf '%s\n' "$verdict_lines" | grep -ciE '✅.*approved|approved for merge|ready for merge|Review Complete ✅|\*\*Approved\*\*' || true)
+
+    if [[ $has_explicit_changes -gt 0 || $has_bare_directive_changes -gt 0 || $has_denied_approval -gt 0 || $has_warning -gt 0 ]]; then
+        echo "changes"
+        return 0
+    fi
+    if [[ $has_pending_approval -gt 0 ]]; then
+        echo "pending"
+        return 0
+    fi
+    if [[ $has_explicit_approval -gt 0 || $has_bare_directive_approval -gt 0 ]]; then
+        echo "approved"
+        return 0
+    fi
+
+    has_final_section=$(printf '%s' "$body" | grep -ciE "$marker_re" || true)
+    if [[ $has_final_section -eq 0 ]]; then
         unchecked=$(printf '%s\n' "$body" | grep -c '^[[:space:]]*- \[ \]' || true)
         if [[ $unchecked -gt 0 ]]; then
             echo "pending"
             return 0
         fi
     fi
-    local has_check has_approv has_warn has_changes
-    has_check=$(printf '%s' "$body" | grep -c "✅" || true)
-    has_approv=$(printf '%s' "$body" | grep -ci "approv" || true)
-    has_warn=$(printf '%s' "$body" | grep -c "⚠️" || true)
-    has_changes=$(printf '%s' "$body" | grep -ci "changes" || true)
-    if [[ $has_check -gt 0 && $has_approv -gt 0 ]]; then
-        if [[ $has_warn -gt 0 || $has_changes -gt 0 ]]; then
-            echo "changes"
-        else
-            echo "approved"
-        fi
-    elif [[ $has_warn -gt 0 || $has_changes -gt 0 ]]; then
-        echo "changes"
-    else
-        echo "pending"
-    fi
+    echo "pending"
 }
 
 # ---------------------------------------------------------------------------
@@ -485,12 +578,7 @@ bot_review_status_compute() {
 
     # --- sticky / review summary comment ---
     local sticky_obj sticky_body sticky_at
-    sticky_obj=$(jq -c --arg u "$reviewer" '
-        [.[] | select(.user.login == $u)] |
-        ((map(select(.body | test("View job"; "i"))) | first) //
-         (map(select(.body | test("## Review|### Inline|### Recommendation"; "i"))) | last) //
-         empty)
-    ' <<<"$comments_json" 2>/dev/null || echo "null")
+    sticky_obj=$(select_sticky_comment_from_comments "$comments_json" "$reviewer" false)
     if [[ -n "$sticky_obj" && "$sticky_obj" != "null" ]]; then
         sticky_body=$(jq -r '.body // ""' <<<"$sticky_obj")
         sticky_at=$(jq -r '.updated_at // .created_at // ""' <<<"$sticky_obj")
@@ -622,20 +710,68 @@ query($owner: String!, $repo: String!, $pr: Int!) {
     bot_review_status_compute "$reviewer" "$reviews" "$comments" "$body_reactions" "$own_reactions" "$threads"
 }
 
-# Auto-detect bot reviewers — every "*[bot]" login that has signaled on the PR
-# in any way (formal review, issue comment, or reaction on the PR body).
+# Auto-detect bot reviewers that have emitted review-specific signals. Generic
+# automation comments (Linear linkbacks, release notes, etc.) are intentionally
+# excluded so they do not block bot-review-wait as unknown reviewers.
+detect_bot_reviewers_from_inputs() {
+    local reviews_json="${1:-[]}"
+    local comments_json="${2:-[]}"
+    local reactions_json="${3:-[]}"
+    local marker_re login_re
+    marker_re="$(_review_signal_comment_regex)"
+    login_re="$(_review_comment_bot_login_regex)"
+
+    {
+        jq -r '.[].user.login | select(endswith("[bot]"))' <<<"$reviews_json"
+        jq -r --arg marker_re "$marker_re" --arg login_re "$login_re" '
+            .[]
+            | select((.user.login // "") | test($login_re))
+            | select((.body // "") | test($marker_re; "i"))
+            | .user.login
+        ' <<<"$comments_json"
+        jq -r --arg login_re "$login_re" '
+            .[]
+            | select((.user.login // "") | test($login_re))
+            | .user.login
+        ' <<<"$reactions_json"
+    } | sort -u | grep -v '^$' || true
+}
+
+# Auto-detect bot reviewers — formal-review bots, bots with review-signal
+# comments, bots reacting on the PR body, and bots reacting on their own issue
+# comment (Codex-style fallback).
 detect_bot_reviewers() {
     local pr="$1"
     local reviews comments reactions
     reviews=$(gh_rest "repos/{owner}/{repo}/pulls/$pr/reviews") || return 1
     comments=$(gh_rest "repos/{owner}/{repo}/issues/$pr/comments") || return 1
     reactions=$(gh_rest "repos/{owner}/{repo}/issues/$pr/reactions") || return 1
-    {
-        jq -r '.[].user.login | select(endswith("[bot]"))' <<<"$reviews"
-        jq -r '.[].user.login | select(endswith("[bot]"))' <<<"$comments"
-        jq -r '.[].user.login | select(endswith("[bot]"))' <<<"$reactions"
-    } | sort -u | grep -v '^$' || true
+
+    local reviewers
+    reviewers=$(detect_bot_reviewers_from_inputs "$reviews" "$comments" "$reactions")
+
+    # Codex can signal via a reaction on its own first comment rather than on
+    # the PR body. Include those reaction authors without treating every bot
+    # comment author as a reviewer.
+    local comment_id comment_author comment_reactions reaction_reviewers login_re
+    login_re="$(_review_comment_bot_login_regex)"
+    while IFS=$'\t' read -r comment_id comment_author; do
+        [[ -z "$comment_id" || -z "$comment_author" ]] && continue
+        comment_reactions=$(gh_rest "repos/{owner}/{repo}/issues/comments/$comment_id/reactions") || return 1
+        reaction_reviewers=$(jq -r --arg author "$comment_author" '
+            .[]
+            | select((.user.login // "") == $author)
+            | select((.content // "") == "+1" or (.content // "") == "eyes" or (.content // "") == "THUMBS_UP" or (.content // "") == "EYES")
+            | .user.login
+        ' <<<"$comment_reactions" 2>/dev/null || true)
+        if [[ -n "$reaction_reviewers" ]]; then
+            reviewers=$(printf '%s\n%s\n' "$reviewers" "$reaction_reviewers" | sort -u | grep -v '^$' || true)
+        fi
+    done < <(jq -r --arg login_re "$login_re" '.[] | select((.user.login // "") | test($login_re)) | [.id, .user.login] | @tsv' <<<"$comments" 2>/dev/null || true)
+
+    printf '%s\n' "$reviewers" | sort -u | grep -v '^$' || true
 }
+
 
 # Check if bot token is configured and valid
 # Usage: check_bot_token [format]
