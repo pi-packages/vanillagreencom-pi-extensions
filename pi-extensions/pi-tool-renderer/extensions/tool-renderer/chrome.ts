@@ -62,6 +62,7 @@ export function installToolExecutionRendererPatch(pi: ExtensionAPI): void {
 	proto.render = function patchedToolExecutionRender(this: any, width: number): string[] {
 		const rendered = originalRender.call(this, width);
 		if (!Array.isArray(rendered) || typeof this?.toolName !== "string" || typeof this?.toolCallId !== "string") return rendered;
+		if (isSelfRenderedTool(this)) return renderToolChromeLines(this, rendered, width);
 		return trimOuterBlankLines(rendered);
 	};
 	proto.hasRendererDefinition = function patchedHasRendererDefinition(this: any) {
@@ -129,6 +130,53 @@ function shouldOmitBottomToolChromeRule(core: string[]): boolean {
 	return core.some((line) => /(?:└─+(?:┴─+)?┘|\+-+(?:\+-+)?\+)/.test(stripAnsi(line ?? "")));
 }
 
+function renderedToolCore(rendered: string[], width: number, cwd?: string): string[] | undefined {
+	let start = 0;
+	while (start < rendered.length && stripAnsi(rendered[start] ?? "").trim().length === 0) start++;
+	let end = rendered.length - 1;
+	while (end >= start && stripAnsi(rendered[end] ?? "").trim().length === 0) end--;
+	if (start > end) return undefined;
+	const renderWidth = stableRenderWidth(width, cwd);
+	return rendered.slice(start, end + 1).flatMap((line) => {
+		// Pi's Text/Box components pad rows before trailing SGR reset codes.
+		// Plain trimEnd() cannot see those spaces when ANSI comes after them;
+		// if they survive, the right-margin guard wraps each padded row into a
+		// blank continuation line. Trim visually trailing spaces before wrapping.
+		const wrapped = wrapTextWithAnsi(trimTrailingWhitespaceBeforeAnsi(stripLeadingBackgroundLayer(line)), renderWidth);
+		return wrapped.length > 0 ? wrapped : [""];
+	});
+}
+
+function toolChromeThemeFor(component: any): any {
+	return component?.[TOOL_CHROME_THEME_SYMBOL] ?? component?.ui?.theme ?? (activeToolChromeCtx?.hasUI ? activeToolChromeCtx.ui.theme : undefined);
+}
+
+function renderToolChromeLines(component: any, rendered: string[], width: number): string[] {
+	const effectiveCwd = component?.cwd ?? process.cwd();
+	const mode = toolChromeMode(effectiveCwd);
+	if (mode === "off") return rendered;
+	const core = renderedToolCore(rendered, width, effectiveCwd);
+	if (!core) return rendered;
+	if (mode === "transparent") return core;
+	const rule = mutedHorizontalRule(toolChromeThemeFor(component), width, effectiveCwd);
+	return shouldOmitBottomToolChromeRule(core) ? [rule, ...core] : [rule, ...core, rule];
+}
+
+function isSelfRenderedTool(component: any): boolean {
+	try {
+		return typeof component?.toolName === "string"
+			&& typeof component?.toolCallId === "string"
+			&& typeof component?.hasRendererDefinition === "function"
+			&& typeof component?.getRenderShell === "function"
+			&& component.hasRendererDefinition()
+			&& component.getRenderShell() === "self";
+	} catch {
+		return false;
+	}
+}
+
+export const __test = { renderToolChromeLines, renderedToolCore, shouldOmitBottomToolChromeRule };
+
 export function installToolChromePatch(): void {
 	const proto = Container?.prototype as any;
 	if (!proto || proto[TOOL_CHROME_PATCH_SYMBOL]) return;
@@ -138,27 +186,7 @@ export function installToolChromePatch(): void {
 		const rendered = originalRender.call(this, width);
 		if (!Array.isArray(rendered) || rendered.length === 0) return rendered;
 		if (typeof this?.toolName !== "string" || typeof this?.toolCallId !== "string") return rendered;
-		const mode = toolChromeMode(this?.cwd ?? process.cwd());
-		if (mode === "off") return rendered;
-		let start = 0;
-		while (start < rendered.length && stripAnsi(rendered[start] ?? "").trim().length === 0) start++;
-		let end = rendered.length - 1;
-		while (end >= start && stripAnsi(rendered[end] ?? "").trim().length === 0) end--;
-		if (start > end) return rendered;
-		const effectiveCwd = this?.cwd ?? process.cwd();
-		const renderWidth = stableRenderWidth(width, effectiveCwd);
-		const core = rendered.slice(start, end + 1).flatMap((line) => {
-			// Pi's Text/Box components pad rows before trailing SGR reset codes.
-			// Plain trimEnd() cannot see those spaces when ANSI comes after them;
-			// if they survive, the right-margin guard wraps each padded row into a
-			// blank continuation line. Trim visually trailing spaces before wrapping.
-			const wrapped = wrapTextWithAnsi(trimTrailingWhitespaceBeforeAnsi(stripLeadingBackgroundLayer(line)), renderWidth);
-			return wrapped.length > 0 ? wrapped : [""];
-		});
-		if (mode === "transparent") return core;
-		const activeTheme = this?.[TOOL_CHROME_THEME_SYMBOL] ?? this?.ui?.theme ?? (activeToolChromeCtx?.hasUI ? activeToolChromeCtx.ui.theme : undefined);
-		const rule = mutedHorizontalRule(activeTheme, width, effectiveCwd);
-		return shouldOmitBottomToolChromeRule(core) ? [rule, ...core] : [rule, ...core, rule];
+		return renderToolChromeLines(this, rendered, width);
 	};
 	proto[TOOL_CHROME_PATCH_SYMBOL] = true;
 }
@@ -217,4 +245,3 @@ export function installWorkingLoaderAlignmentPatch(): void {
 		}
 	};
 }
-

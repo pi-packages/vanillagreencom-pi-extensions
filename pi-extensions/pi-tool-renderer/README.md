@@ -135,7 +135,7 @@ Glyph style: each package exposes `glyphStyle` (`unicode` default, `ascii` for t
 
 | Setting | What it does |
 | --- | --- |
-| Global tool chrome | `off`, `transparent`, or `outlines` (muted horizontal rules above/below). |
+| Global tool chrome | `off`, `transparent`, or `outlines` (muted horizontal rules above/below), including tools that render their own shell. |
 | Guard terminal right margin | Render one column short to avoid auto-wrap flashes in tmux. |
 | Animate pending tool status | Blink pending bullets. Off for stable streaming. |
 | Working indicator | `default`, `pulse`, or `hidden`. |
