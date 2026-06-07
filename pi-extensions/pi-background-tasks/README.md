@@ -135,7 +135,7 @@ Exit wakeups are durable across session restarts and PID reuse — if a task end
 
 Output wakeups are transcript-budget-safe by default: each wake carries one ~2 KB tail (`outputAlertMaxChars`) plus a compact task manifest with truncated command/title/cwd, a chatty task is capped to 20 output wakes / 20 KB cumulative inline bytes before further wakes are suppressed (`outputWakeBudgetMaxWakes` / `outputWakeBudgetMaxBytes`), and unset `notifyMode` defaults to `transition` (or `first-match-only` when `notifyPattern` is set) so identical poller output does not wake the agent repeatedly. Output wakes and the budget-exhausted notice are delivered as `steer` messages, exit wakes as `followUp` so terminal status arrives in the next-turn delivery slot. Set `notifyMode: "always"` and/or raise the wake budget when you really do want every-update wakes.
 
-Activity broker publication is best-effort and requires `pi-session-bridge` in the same Pi runtime. Broker events are side-channel `vstack_activity` stream rows, not chat messages; Flightdeck consumes them into its activity JSONL sidecar when enabled.
+Activity broker publication is best-effort and requires `pi-session-bridge` in the same Pi runtime. Broker events are side-channel `vstack_activity` stream rows, not chat messages.
 
 See [`DEVELOPMENT.md`](./DEVELOPMENT.md) for the `bg_task` tool surface, wake-metadata schema, activity broker mapping, and orphan/PID-reuse identity probe.
 

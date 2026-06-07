@@ -37,7 +37,7 @@ For whole-codebase audits, findings may be pre-existing. Report only issues that
 
 ## 3. Classify Findings
 
-Read the linear-orch skill's recommendation-bias patterns if available. Apply its actionability checks to ALL findings before entering `blockers[]` or `suggestions[]`.
+Read the orch skill's recommendation-bias patterns if available. Apply its actionability checks to ALL findings before entering `blockers[]` or `suggestions[]`.
 
 **Verdict rules:**
 - `action_required`: 1+ items in `blockers[]`

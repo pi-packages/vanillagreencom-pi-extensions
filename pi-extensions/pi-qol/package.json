@@ -875,7 +875,7 @@
         {
           "key": "compaction.budgetGuardEnabled",
           "label": "Long-session budget guard",
-          "description": "Trigger compaction on agent_end (no idle wait) when context usage crosses budgetPercent or budgetTokens. Designed for autonomous/Flightdeck runs so transcript growth cannot silently hit provider/buffer limits. Fires once per threshold crossing, not in a loop.",
+          "description": "Trigger compaction on agent_end (no idle wait) when context usage crosses budgetPercent or budgetTokens. Designed for long autonomous runs so transcript growth cannot silently hit provider/buffer limits. Fires once per threshold crossing, not in a loop.",
           "type": "boolean",
           "default": true,
           "category": "Compaction Budget Guard",

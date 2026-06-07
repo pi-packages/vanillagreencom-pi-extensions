@@ -628,8 +628,8 @@ case "${1:-}" in
 
   codex-branch)
     # Codex Desktop may create an app-managed branch name. Normalize the
-    # current worktree to the issue branch expected by linear-orch before
-    # running `linear-orch start <ISSUE>`.
+    # current worktree to the issue branch expected by orch before
+    # running `orch start <ISSUE>`.
     ISSUE="${2:?Error: codex-branch requires an issue ID or branch name}"
     ARG="${3:-}"
     if [[ -z "$ARG" ]]; then

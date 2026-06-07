@@ -1,11 +1,6 @@
 /**
- * Vendored mirror of skills/flightdeck/lib/flightdeck-core/src/daemon/
- * rate-limit-watchdog.ts (vstack#108). The canonical reference lives in
- * flightdeck-core and is parity-tested there; pi-extensions ship as
- * standalone npm-style packages so a relative import outside the
- * package boundary will not resolve post-install. Keep this file in
- * lock-step with the canonical module — parity tests in both packages
- * exercise the same decision shape so drift surfaces quickly.
+ * Shared rate-limit retry decision module (vstack#108). Pi extensions ship
+ * as standalone npm-style packages, so this copy stays self-contained.
  *
  * Functional copy: identical inputs must produce identical decisions.
  */

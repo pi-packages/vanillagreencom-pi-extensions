@@ -30,7 +30,7 @@ CLI wrapper for Linear's GraphQL API with local cache, bulk operations, and stru
 
 | Pattern | Use For |
 |---------|---------|
-| [patterns/workflow-actions.md](patterns/workflow-actions.md) | Multi-step issue/project state changes used by linear-orch and TPM workflows |
+| [patterns/workflow-actions.md](patterns/workflow-actions.md) | Multi-step issue/project state changes used by orch and TPM workflows |
 
 ## Commands
 

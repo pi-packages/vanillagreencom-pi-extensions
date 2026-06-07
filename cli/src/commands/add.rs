@@ -275,21 +275,20 @@ mod auto_include_agent_skills_tests {
     #[test]
     fn auto_includes_role_skills_referenced_by_agent_role() {
         // vstack#71 repro: reviewer-error declares engineer role and
-        // [role-skills] engineer = ["linear-dev", "github"]. Without
+        // [role-skills] engineer = ["dev", "github"]. Without
         // explicit --skill flags the agent's frontmatter still references
-        // linear-dev, but the skill never lands on disk.
+        // dev, but the skill never lands on disk.
         let mut mapping = MappingConfig::default();
-        mapping.role_skills.insert(
-            "engineer".into(),
-            vec!["linear-dev".into(), "github".into()],
-        );
-        let all = vec![skill("linear-dev", &[]), skill("github", &[])];
+        mapping
+            .role_skills
+            .insert("engineer".into(), vec!["dev".into(), "github".into()]);
+        let all = vec![skill("dev", &[]), skill("github", &[])];
         let agents = vec![agent("reviewer-error", AgentRole::Engineer)];
         let mut selected = Vec::<Skill>::new();
         let added = auto_include_agent_skills(&agents, &mapping, &all, &mut selected);
-        assert_eq!(added, vec!["github".to_string(), "linear-dev".to_string()]);
+        assert_eq!(added, vec!["dev".to_string(), "github".to_string()]);
         let names: Vec<&str> = selected.iter().map(|s| s.name.as_str()).collect();
-        assert!(names.contains(&"linear-dev"));
+        assert!(names.contains(&"dev"));
         assert!(names.contains(&"github"));
     }
 
@@ -298,10 +297,10 @@ mod auto_include_agent_skills_tests {
         let mut mapping = MappingConfig::default();
         mapping
             .role_skills
-            .insert("engineer".into(), vec!["linear-dev".into()]);
-        let all = vec![skill("linear-dev", &[])];
+            .insert("engineer".into(), vec!["dev".into()]);
+        let all = vec![skill("dev", &[])];
         let agents = vec![agent("rust", AgentRole::Engineer)];
-        let mut selected = vec![skill("linear-dev", &[])];
+        let mut selected = vec![skill("dev", &[])];
         let added = auto_include_agent_skills(&agents, &mapping, &all, &mut selected);
         assert!(added.is_empty());
         assert_eq!(selected.len(), 1);
@@ -309,21 +308,18 @@ mod auto_include_agent_skills_tests {
 
     #[test]
     fn transitive_required_dependencies_are_pulled_in() {
-        // linear-orch -> linear-dev (required dep). Agent only references
-        // linear-orch; auto-include must transitively pull in linear-dev.
+        // orch -> dev (required dep). Agent only references
+        // orch; auto-include must transitively pull in dev.
         let mut mapping = MappingConfig::default();
         mapping
             .role_skills
-            .insert("engineer".into(), vec!["linear-orch".into()]);
-        let all = vec![
-            skill("linear-orch", &["linear-dev"]),
-            skill("linear-dev", &[]),
-        ];
+            .insert("engineer".into(), vec!["orch".into()]);
+        let all = vec![skill("orch", &["dev"]), skill("dev", &[])];
         let agents = vec![agent("planner", AgentRole::Engineer)];
         let mut selected = Vec::<Skill>::new();
         let added = auto_include_agent_skills(&agents, &mapping, &all, &mut selected);
-        assert!(added.contains(&"linear-orch".into()));
-        assert!(added.contains(&"linear-dev".into()));
+        assert!(added.contains(&"orch".into()));
+        assert!(added.contains(&"dev".into()));
     }
 
     #[test]
@@ -347,8 +343,8 @@ mod auto_include_agent_skills_tests {
         let mut mapping = MappingConfig::default();
         mapping
             .role_skills
-            .insert("engineer".into(), vec!["linear-dev".into()]);
-        let all = vec![skill("linear-dev", &[])];
+            .insert("engineer".into(), vec!["dev".into()]);
+        let all = vec![skill("dev", &[])];
         let mut selected = Vec::<Skill>::new();
         let added = auto_include_agent_skills(&[], &mapping, &all, &mut selected);
         assert!(added.is_empty());
@@ -875,7 +871,7 @@ source (e.g. switching vstack repos, or starting clean), pass --clobber:
     // vstack#71: auto-install skills referenced by selected agents.
     // Without this, `vstack add --agent reviewer-error` produces a
     // .agents/reviewer-error.md whose `skills:` frontmatter points at
-    // skills/linear-dev/SKILL.md that was never copied to the
+    // skills/dev/SKILL.md that was never copied to the
     // install mirror. Walk each agent's mapping-resolved skill set
     // (agent-skills + role-skills + prefix matches) plus transitive
     // dependencies and add any missing canonical skills.

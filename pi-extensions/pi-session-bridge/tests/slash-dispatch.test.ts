@@ -156,35 +156,35 @@ describe("slash expansion", () => {
 	});
 
 	test("dedups repeated skill expansion within the same session", () => {
-		const skillPath = p("skills/flightdeck/SKILL.md");
+		const skillPath = p("skills/orch/SKILL.md");
 		mkdirSync(dirname(skillPath), { recursive: true });
-		writeFileSync(skillPath, "---\nname: flightdeck\n---\n# Flightdeck\nWatch sessions.\n");
-		const commands = [{ name: "skill:flightdeck", source: "skill", sourceInfo: { path: skillPath } }] as SlashCommandInfoLike[];
+		writeFileSync(skillPath, "---\nname: orch\n---\n# Orchestration\nStart work.\n");
+		const commands = [{ name: "skill:orch", source: "skill", sourceInfo: { path: skillPath } }] as SlashCommandInfoLike[];
 		const cache = new Map<string, Map<string, string>>();
 
-		const first = expandLoadedSlashContent("/skill:flightdeck watch --from-daemon", commands, readFileSync, {
+		const first = expandLoadedSlashContent("/skill:orch start ABC-123", commands, readFileSync, {
 			sessionId: "session-a",
 			skillExpansionCache: cache,
 		});
 		expect(first.expanded).toBe(true);
-		expect(first.text).toContain(`<skill name="flightdeck" location="${skillPath}">`);
-		expect(first.text).toContain("# Flightdeck");
+		expect(first.text).toContain(`<skill name="orch" location="${skillPath}">`);
+		expect(first.text).toContain("# Orchestration");
 
-		const second = expandLoadedSlashContent("/skill:flightdeck watch --from-daemon", commands, readFileSync, {
+		const second = expandLoadedSlashContent("/skill:orch start ABC-123", commands, readFileSync, {
 			sessionId: "session-a",
 			skillExpansionCache: cache,
 		});
 		expect(second.expanded).toBe(true);
 		expect(second.kind).toBe("skill");
-		expect(second.text).toBe("Skill flightdeck (previously loaded). Invocation: watch --from-daemon");
+		expect(second.text).toBe("Skill orch (previously loaded). Invocation: start ABC-123");
 		expect(second.text).not.toContain("<skill");
-		expect(second.text).not.toContain("# Flightdeck");
+		expect(second.text).not.toContain("# Orchestration");
 
-		const otherSession = expandLoadedSlashContent("/skill:flightdeck watch --from-daemon", commands, readFileSync, {
+		const otherSession = expandLoadedSlashContent("/skill:orch start ABC-123", commands, readFileSync, {
 			sessionId: "session-b",
 			skillExpansionCache: cache,
 		});
-		expect(otherSession.text).toContain(`<skill name="flightdeck" location="${skillPath}">`);
+		expect(otherSession.text).toContain(`<skill name="orch" location="${skillPath}">`);
 	});
 
 	test("evicts only the shutting-down session from the skill expansion cache", async () => {
@@ -206,14 +206,14 @@ describe("slash expansion", () => {
 	});
 
 	test("bounds skill expansion cache to the 100 most recent sessions", () => {
-		const skillPath = p("skills/flightdeck/SKILL.md");
+		const skillPath = p("skills/orch/SKILL.md");
 		mkdirSync(dirname(skillPath), { recursive: true });
-		writeFileSync(skillPath, "---\nname: flightdeck\n---\n# Flightdeck\nWatch sessions.\n");
-		const commands = [{ name: "skill:flightdeck", source: "skill", sourceInfo: { path: skillPath } }] as SlashCommandInfoLike[];
+		writeFileSync(skillPath, "---\nname: orch\n---\n# Orchestration\nStart work.\n");
+		const commands = [{ name: "skill:orch", source: "skill", sourceInfo: { path: skillPath } }] as SlashCommandInfoLike[];
 		const cache = new Map<string, Map<string, string>>();
 
 		for (let index = 0; index < 101; index++) {
-			expandLoadedSlashContent("/skill:flightdeck watch", commands, readFileSync, {
+			expandLoadedSlashContent("/skill:orch start ABC-123", commands, readFileSync, {
 				sessionId: `session-${index}`,
 				skillExpansionCache: cache,
 			});
@@ -226,38 +226,38 @@ describe("slash expansion", () => {
 	});
 
 	test("re-expands skill after SKILL.md content changes", () => {
-		const skillPath = p("skills/linear-orch/SKILL.md");
+		const skillPath = p("skills/orch/SKILL.md");
 		mkdirSync(dirname(skillPath), { recursive: true });
-		writeFileSync(skillPath, "---\nname: linear-orch\n---\n# Linear Orchestration v1\n");
-		const commands = [{ name: "skill:linear-orch", source: "skill", sourceInfo: { path: skillPath } }] as SlashCommandInfoLike[];
+		writeFileSync(skillPath, "---\nname: orch\n---\n# Orchestration v1\n");
+		const commands = [{ name: "skill:orch", source: "skill", sourceInfo: { path: skillPath } }] as SlashCommandInfoLike[];
 		const cache = new Map<string, Map<string, string>>();
 
-		const first = expandLoadedSlashContent("/skill:linear-orch run", commands, readFileSync, {
+		const first = expandLoadedSlashContent("/skill:orch run", commands, readFileSync, {
 			sessionId: "session-a",
 			skillExpansionCache: cache,
 		});
-		expect(first.text).toContain("# Linear Orchestration v1");
+		expect(first.text).toContain("# Orchestration v1");
 
-		const deduped = expandLoadedSlashContent("/skill:linear-orch run", commands, readFileSync, {
+		const deduped = expandLoadedSlashContent("/skill:orch run", commands, readFileSync, {
 			sessionId: "session-a",
 			skillExpansionCache: cache,
 		});
-		expect(deduped.text).toBe("Skill linear-orch (previously loaded). Invocation: run");
+		expect(deduped.text).toBe("Skill orch (previously loaded). Invocation: run");
 
-		writeFileSync(skillPath, "---\nname: linear-orch\n---\n# Linear Orchestration v2\n");
-		const changed = expandLoadedSlashContent("/skill:linear-orch run", commands, readFileSync, {
+		writeFileSync(skillPath, "---\nname: orch\n---\n# Orchestration v2\n");
+		const changed = expandLoadedSlashContent("/skill:orch run", commands, readFileSync, {
 			sessionId: "session-a",
 			skillExpansionCache: cache,
 		});
-		expect(changed.text).toContain(`<skill name="linear-orch" location="${skillPath}">`);
-		expect(changed.text).toContain("# Linear Orchestration v2");
-		expect(changed.text).not.toContain("# Linear Orchestration v1");
+		expect(changed.text).toContain(`<skill name="orch" location="${skillPath}">`);
+		expect(changed.text).toContain("# Orchestration v2");
+		expect(changed.text).not.toContain("# Orchestration v1");
 
-		const dedupedAgain = expandLoadedSlashContent("/skill:linear-orch run", commands, readFileSync, {
+		const dedupedAgain = expandLoadedSlashContent("/skill:orch run", commands, readFileSync, {
 			sessionId: "session-a",
 			skillExpansionCache: cache,
 		});
-		expect(dedupedAgain.text).toBe("Skill linear-orch (previously loaded). Invocation: run");
+		expect(dedupedAgain.text).toBe("Skill orch (previously loaded). Invocation: run");
 	});
 
 	test("dedup is independent per skill within a session (pins Map<sessionId, Map<skillName, hash>>)", () => {

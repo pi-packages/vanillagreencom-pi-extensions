@@ -41,7 +41,7 @@ Read decision files listed in delegation. Do NOT suggest changes that contradict
 
 ### 1.3 Classify Findings
 
-Read the linear-orch skill's recommendation-bias patterns. Apply its decision flow to ALL findings — a finding must pass actionability and relatedness checks before entering `blockers[]` or `suggestions[]`. Then use size to categorize suggestions as `fix` or `issue`.
+Read the orch skill's recommendation-bias patterns. Apply its decision flow to ALL findings — a finding must pass actionability and relatedness checks before entering `blockers[]` or `suggestions[]`. Then use size to categorize suggestions as `fix` or `issue`.
 
 ### 1.4 Handle Re-Review
 

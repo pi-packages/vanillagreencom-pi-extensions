@@ -52,14 +52,6 @@ docs, and config can mention `unsafe`, `#[repr(C)]`, `extern "C"`, or
 2. `verify.sh` in project root
 3. Auto-detect from `Cargo.toml`, `package.json`, `go.mod`, `pyproject.toml`, `Makefile`
 
-## Flightdeck Activity
-
-GitHub wrappers emit Flightdeck activity rows only when `FLIGHTDECK_MANAGED=1`
-or `FLIGHTDECK_ACTIVITY_FILE` is set. Emission is best-effort: if the shared
-Flightdeck helper is unavailable, wrappers continue and print one clear
-non-blocking warning instead of raw shell diagnostics. Standalone use outside
-Flightdeck stays silent.
-
 ## Dependencies
 
 - `gh` CLI authenticated

@@ -106,4 +106,4 @@ labels: infer from project taxonomy + source context before create
 origin: "discovered"
 ```
 
-**Skip handoff markers first.** Before mapping a Discovered Work bullet into an audit item, drop any bullet whose text matches `^-\s+(handoff_to_submit_pr|handoff_to_merge_pr|current_workflow_action):\s` — those bullets are owned by a later step of the current PR workflow (submit-pr / merge-pr / review-pr), not by the backlog. The canonical marker-first bullet form is documented in `linear-dev/workflows/dev-implement.md` § 9, and the filter itself runs in `linear-orch/workflows/review-pr.md` § 9 step 2.
+**Skip handoff markers first.** Before mapping a Discovered Work bullet into an audit item, drop any bullet whose text matches `^-\s+(handoff_to_submit_pr|handoff_to_merge_pr|current_workflow_action):\s` — those bullets are owned by a later step of the current PR workflow (submit-pr / merge-pr / review-pr), not by the backlog. The canonical marker-first bullet form is documented in `dev/workflows/dev-implement.md` § 9, and the filter itself runs in `orch/workflows/review-pr.md` § 9 step 2.

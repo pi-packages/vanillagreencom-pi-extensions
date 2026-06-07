@@ -294,7 +294,6 @@ const PI_EXTENSION_RENAMES: &[(&str, &[&str])] = &[
         "@vanillagreen/pi-extension-manager",
         &["pi-extension-manager"],
     ),
-    ("@vanillagreen/pi-flightdeck", &["pi-flightdeck"]),
     ("@vanillagreen/pi-hooks", &["pi-hooks"]),
     ("@vanillagreen/pi-output-policy", &["pi-output-policy"]),
     (

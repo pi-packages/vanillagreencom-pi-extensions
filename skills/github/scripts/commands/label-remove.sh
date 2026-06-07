@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 # GitHub label remove wrapper.
-# Runs `gh pr edit --remove-label` (or `gh issue edit --remove-label`) and
-# emits pr.unlabeled / issue.unlabeled activity when running under
-# Flightdeck. Standalone use outside Flightdeck remains identical to plain gh.
+# Runs `gh pr edit --remove-label` or `gh issue edit --remove-label`.
 
 set -euo pipefail
 
@@ -27,17 +25,8 @@ Options:
   --pr              Treat the ref as a PR (default).
   --help, -h        Show this help.
 
-Activity:
-  Emits pr.unlabeled (or issue.unlabeled) when FLIGHTDECK_MANAGED=1 or
-  FLIGHTDECK_ACTIVITY_FILE is set. Emit failure does not block the
-  underlying gh command — gh's exit code is authoritative.
-
-  When FLIGHTDECK_ENTRY_ID is set the row also carries entry_id so
-  the dashboard can route it under the right tracked entry.
-
 Examples:
   label-remove.sh 44 defer-ci --reason "CI passed; re-enable"
-  FLIGHTDECK_MANAGED=1 label-remove.sh 44 do-not-merge
   label-remove.sh 123 needs-triage --issue
 EOF
 }

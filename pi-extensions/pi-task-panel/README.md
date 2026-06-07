@@ -13,7 +13,7 @@ Persistent task panel above the Pi status line. Tasks are managed by the agent t
 - Auto-hide when all tasks are done; auto-show happens only for the first non-empty task state each session and never overrides a panel you hid.
 - Bulk-edit, import, and export tasks as plain markdown.
 - Workflow reminders nudge the agent to keep the panel in sync.
-- Participates in vstack's stable mini-dashboard stack order: Flightdeck → Tasks → Agents → BG tasks.
+- Participates in vstack's stable mini-dashboard stack order: Orch → Tasks → Agents → BG tasks.
 - Per-session sidecar state keeps slash-command edits and pending tasks resumable before the next model turn writes tool-result history.
 - Large task panels keep tool-result history compact; oversized `tasks_write` details store only counts and id samples while sidecar state remains canonical for resume. If sidecar writes fail, Pi warns and keeps a full session-history fallback; `tasks_write` also keeps full tool-result details for that write.
 
