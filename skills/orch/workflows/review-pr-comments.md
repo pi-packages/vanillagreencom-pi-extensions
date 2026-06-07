@@ -1,6 +1,6 @@
 # PR Comment Triage Workflow
 
-Route PR review comments to domain agents for analysis, auto-fix valid items, loop until stable.
+Route PR review comments to domain agents, auto-fix valid items, loop until stable.
 
 ## Inputs
 
@@ -12,11 +12,11 @@ Route PR review comments to domain agents for analysis, auto-fix valid items, lo
 | `review-pr-comments --dry-run [N]` | Parse + analyze, stop before § 6 |
 | (from submit-pr/start-worktree) | Managed lifecycle with caller context |
 
-**Dry-run**: Runs § 1-5, presents triage report, stops before fixes. No side effects.
+**Dry-run**: Runs §§ 1-5, presents triage report, stops before fixes. No side effects.
 
 **Caller context parameters** (via `⤵`):
 - `worktree`: worktree path
-- `lifecycle` (optional): `"managed"` (return to caller at § 9) | `"self"` (default, standalone).
+- `lifecycle` (optional): `"managed"` (return to caller at § 8) | `"self"` (default, standalone).
 - `issue_id` (optional): issue tracker ID. If absent, extracted from branch.
 - `pr_number` (optional): PR number. If absent, resolved from branch.
 
@@ -32,15 +32,13 @@ fi
 
 ## API Error Handling
 
-On any `gh` or `.agents/skills/github/scripts/github.sh` command failure: halt, report error, ask user: `Retry` | `Skip step` | `Abort`.
-
----
+On any `gh` or `.agents/skills/github/scripts/github.sh` failure: halt, report error, ask user: `Retry` | `Skip step` | `Abort`.
 
 ## 1. Fetch & Parse PR Data
 
 ### 1.1 Wait for All Bot Reviews
 
-Multiple bots may review on different timelines (e.g., Claude posts a sticky comment + formal review while Codex signals via 👀/👍 reactions and inline threads). Wait for all configured reviewers before triaging.
+Multiple bots may review on different timelines. Wait for all configured reviewers before triaging.
 
 ```bash
 WAIT_RESULT=$(.agents/skills/orch/scripts/bot-review-wait [PR_NUMBER] 15 600 --json --reviewers "$BOT_REVIEWERS")
@@ -49,9 +47,9 @@ BOT_VERDICT=$(echo "$WAIT_RESULT" | jq -r '.verdict')
 PENDING_REVIEWERS=$(echo "$WAIT_RESULT" | jq -r '.pending_reviewers | join(", ")')
 ```
 
-`$BOT_REVIEWERS` is a comma-separated list of bot usernames to wait for (e.g., `review-bot-a[bot],chatgpt-codex-connector[bot]`). Default: auto-detect review bots from formal reviews, known review-bot comment summaries (`View job` / `**Claude finished ...**` with `### Review Summary`), PR-body reactions, and known review-bot own-comment reactions. Custom comment-only review bots must be configured explicitly with `BOT_REVIEWERS` / `--reviewers`.
+`$BOT_REVIEWERS`: comma-separated bot usernames. Default: auto-detected from formal reviews, known review-bot comment summaries, PR-body reactions, and own-comment reactions. Custom comment-only bots must be configured explicitly via `BOT_REVIEWERS` / `--reviewers`.
 
-**Polling behavior**: per reviewer, status is one of `pending|approved|changes|skipped|unknown`. Claude-style comments parse `✅ Approved` / `Changes requested`; Codex-style signals use 👀 = pending, 👍 = approved, and inline review threads = changes. The wrapper only returns `status=complete` when no reviewer is pending. If `status=timeout` and `pending_reviewers` is non-empty, ask the user `Wait` | `Skip pending bot` (configure via `BOT_SKIPPED_REVIEWERS`) | `Proceed without`. Late arrivals are still caught in § 6.3.
+**Polling behavior**: per reviewer, status is `pending|approved|changes|skipped|unknown`. Claude-style comments parse `✅ Approved` / `Changes requested`; Codex-style signals use 👀 = pending, 👍 = approved, inline threads = changes. Returns `status=complete` only when no reviewer is pending. If `status=timeout`, ask the user `Wait` | `Skip pending bot` (configure via `BOT_SKIPPED_REVIEWERS`) | `Proceed without`. Late arrivals are caught in § 6.3.
 
 ### 1.2 Fetch Actionable Data
 
@@ -59,7 +57,7 @@ PENDING_REVIEWERS=$(echo "$WAIT_RESULT" | jq -r '.pending_reviewers | join(", ")
 PR_DATA=$(.agents/skills/github/scripts/github.sh pr-data "[PR_NUMBER]" --actionable)
 ```
 
-Output contains: `threads` (inline) + `comments` (PR-level).
+Output: `threads` (inline) + `comments` (PR-level).
 
 ### 1.3 Filter Comments
 
@@ -126,24 +124,22 @@ Output contains: `threads` (inline) + `comments` (PR-level).
    - `source`: from keyword matching
    - `blocking`: `true` for security items, `false` if "non-blocking"/"optional", `false` otherwise
 
-   **Bot inline threads**: Bot review threads (e.g., codex inline suggestions with priority badges) are already captured in step 1 as regular review threads. They carry the bot's username as `author` — do NOT filter them out.
+   **Bot inline threads**: Bot review threads are already captured in step 1 as regular review threads (bot username as `author`) — do NOT filter them out.
 
 ### 1.5 Resolve Issue Context
 
 1. **Identify parent issue**: Extract `[ISSUE_ID]` from branch name. If not found, ask user.
 
-2. **Get worktree context**:
+2. **Get worktree**:
    ```bash
    WT_PATH=$(.agents/skills/worktree/scripts/worktree path [ISSUE_ID] 2>/dev/null || echo ".")
    ```
 
-3. **Gather decision context** (decider skill): `.agents/skills/decider/scripts/decisions search --issue [ISSUE_ID]`. Collect matching decision IDs and summaries for § 3 delegation prompt.
-
----
+3. **Decision context**: `.agents/skills/decider/scripts/decisions search --issue [ISSUE_ID]`. Collect matching IDs and summaries for § 3 delegation prompt.
 
 ## 2. Detect Domains
 
-Map each comment to a domain based on source and file path. Domain-to-agent routing is project-configurable — the table below shows example defaults:
+Map each comment to a domain based on source and file path. Domain-to-agent routing is project-configurable — example defaults:
 
 | Source / Path Pattern | Domain Agent (example) |
 |-----------------------|------------------------|
@@ -157,13 +153,11 @@ Map each comment to a domain based on source and file path. Domain-to-agent rout
 | `docs/**` | documentation review agent |
 | No file path (general comment) | architecture review agent |
 
----
-
 ## 3. Analyze via Domain Agents
 
 ### 3.1 Route to Domain Agents (Parallel if Multiple)
 
-**Delegate to domain agents** from § 2 mapping (parallel task calls if multiple).
+**Delegate to domain agents** from § 2 mapping (parallel if multiple).
 
 <delegation_format>
 Analyze these PR review comments for your domain.
@@ -210,8 +204,6 @@ URL: [URL]
 1. **Wait for all agents**. Extract `Report` path and `Verdict` from each.
 2. **Store paths** in `JSON paths[]` for § 5.
 
----
-
 ## 4. Synthesize (if multi-domain)
 
 **Skip if** comments from single domain only.
@@ -248,11 +240,9 @@ URL: [URL]
 
 2. **Add returned path** to `JSON paths[]`.
 
----
-
 ## 5. Present Triage Report
 
-1. **Read all JSON files** from `JSON paths[]`
+1. **Read all JSON files** from `JSON paths[]`.
 
 2. **Aggregate items** across all agents, preserving `agent` attribution:
    - `blockers[]` → Blockers
@@ -260,7 +250,7 @@ URL: [URL]
    - `suggestions[]` with `category: "issue"` → Issue Items (defer to § 6.2)
    - `questions[]` → Questions (auto-response in § 7.1)
 
-3. **Deduplicate** by (location, description) — keep first, note all sources
+3. **Deduplicate** by (location, description) — keep first, note all sources.
 
 4. **Decide action** for each fix item. Auto-fix all valid items — do NOT prompt for selection.
 
@@ -314,8 +304,6 @@ Issue suggestions: [N] items → § 6.2 audit
 
 **Omit empty sections.** Proceed immediately to § 6 — no user prompt.
 
----
-
 ## 6. Apply Fixes & Loop
 
 ### 6.1 Delegate Fixes
@@ -326,9 +314,7 @@ Issue suggestions: [N] items → § 6.2 audit
 
 2. **Group items** by `agent` field.
 
-3. **Delegate fixes** per agent group (reuse existing dev agent if available).
-
-   ⚠ Fill placeholders only ([Format Tags Are Literal](../SKILL.md#format-tags-are-literal)). `Recommendation:` = technical fix only; the agent owns process per `dev/workflows/dev-fix.md`.
+3. **Delegate fixes** per agent group (reuse existing dev agent if available). ⚠ Fill placeholders only ([Format Tags Are Literal](../SKILL.md#format-tags-are-literal)). `Recommendation:` = technical fix only; the agent owns process per `dev/workflows/dev-fix.md`.
 
    <delegation_format>
    Follow workflow: .agents/skills/dev/workflows/dev-fix.md
@@ -392,7 +378,7 @@ Issue suggestions: [N] items → § 6.2 audit
 
 After fixes are pushed, bots re-review. Wait for new comments, then loop.
 
-1. **Update state**:
+1. **Update iteration count**:
    ```bash
    .agents/skills/orch/scripts/workflow-state increment [ISSUE_ID] pr_comment_review.iterations
    ```
@@ -401,9 +387,9 @@ After fixes are pushed, bots re-review. Wait for new comments, then loop.
    ```bash
    ITERATIONS=$(.agents/skills/orch/scripts/workflow-state get [ISSUE_ID] .pr_comment_review.iterations)
    ```
-   **If** `ITERATIONS >= 5` → § 7 (max iterations, present skipped summary)
+   **If** `ITERATIONS >= 5` → § 7.
 
-3. **Wait 5 minutes** for bot re-reviews to arrive:
+3. **Wait 5 minutes** for bot re-reviews:
    ```bash
    sleep 300
    ```
@@ -419,8 +405,8 @@ After fixes are pushed, bots re-review. Wait for new comments, then loop.
 
    | `NEW_THREADS` | Action |
    |---------------|--------|
-   | `0` | No new comments → § 7 |
-   | `> 0` | New comments detected → update baseline, loop to § 1 |
+   | `0` | → § 7 |
+   | `> 0` | Update baseline, loop to § 1 |
 
 6. **Update baseline** (before looping):
    ```bash
@@ -434,13 +420,13 @@ After fixes are pushed, bots re-review. Wait for new comments, then loop.
 
 ## 7. Present Skipped Summary & Await User
 
-**Always runs** after comment loop stabilizes (§ 6.3 exits with 0 new comments or max iterations).
+**Always runs** after the comment loop stabilizes (§ 6.3 exits with 0 new comments or max iterations).
 
 ### 7.1 Post Replies & Resolve Threads
 
-**Backstop only.** Inline threads handled per-pass in § 6.1 step 8 are already replied & resolved. This step covers PR-level comments, human-only threads, and any inline items missed by per-pass handling.
+**Backstop only.** Inline threads handled per-pass in § 6.1 step 8 are already replied & resolved. This step covers PR-level comments, human-only threads, and inline items missed by per-pass handling.
 
-Before posting, skip any `source_id` already present in `pr_comment_review.replied` to avoid duplicate replies.
+Skip any `source_id` already in `pr_comment_review.replied` to avoid duplicate replies.
 
 1. **Post reply** to each comment from the final pass:
 
@@ -454,7 +440,7 @@ Before posting, skip any `source_id` already present in `pr_comment_review.repli
 
    **For questions** (automatic): Post `draft_response` from JSON.
 
-   **Posting mechanism** — use inline `--body "..."` only when the response is a plain string. If `[RESPONSE]` quotes the original comment (which usually contains backticks or code fences), write to a file and pass `--body-file`:
+   **Posting**: use inline `--body "..."` only for plain strings. If `[RESPONSE]` contains backticks or code fences, write to a file and use `--body-file`:
    - Inline threads (plain): `.agents/skills/github/scripts/github.sh post-reply "[THREAD_ID]" "[RESPONSE]" --pr "[PR_NUMBER]"`
    - Inline threads (Markdown): write to `[WORKTREE_PATH]/tmp/reply-[THREAD_ID].md` then `... post-reply "[THREAD_ID]" --body-file "$REPLY_FILE" --pr "[PR_NUMBER]"`
    - PR-level comments (Markdown with quoted blocks): write to `[WORKTREE_PATH]/tmp/comment-[PR_NUMBER].md` then `... post-comment "[PR_NUMBER]" --body-file "$COMMENT_FILE"`
@@ -470,7 +456,7 @@ Before posting, skip any `source_id` already present in `pr_comment_review.repli
 
 ### 7.2 Present Final Summary
 
-Aggregate all passes (§ 5 initial + § 6.3 re-triages). Show cumulative totals and all items NOT addressed.
+Aggregate all passes. Show cumulative totals and all unaddressed items.
 
 <output_format>
 
@@ -497,13 +483,9 @@ Awaiting your response — ask questions, override skipped items, or confirm don
 
 </output_format>
 
-**STOP and wait for user.** The user may:
-- Ask about specific skipped items
-- Override a skip: "fix #1" or "fix the refresh one"
-- Ask follow-up questions about any comment
-- Confirm done: → § 8
+**STOP and wait for user.** The user may ask about skipped items, override a skip ("fix #1"), ask follow-up questions, or confirm done: → § 8.
 
-If user requests fixes for skipped items → delegate via § 6.1 (single item), push, then return here.
+If user requests fixes for skipped items → delegate via § 6.1 (single item), push, return here.
 
 ### 7.3 Reconcile & Post Summaries
 
@@ -522,7 +504,9 @@ If user requests fixes for skipped items → delegate via § 6.1 (single item), 
    [filled SUMMARY_CONTENT — see template below]
    SUMMARY_EOF
    .agents/skills/github/scripts/github.sh post-comment [PR_NUMBER] --body-file "$SUMMARY_FILE"
-   .agents/skills/linear/scripts/linear.sh comments create [ISSUE_ID] --body "$(cat "$SUMMARY_FILE")"
+   # Linear only — GitHub items get linkage via `Closes #N` in the PR body
+   TRACKER=linear; [[ "$ISSUE_ID" == issue-* ]] && TRACKER=github
+   [[ "$TRACKER" == "linear" ]] && .agents/skills/linear/scripts/linear.sh comments create [ISSUE_ID] --body "$(cat "$SUMMARY_FILE")"
    ```
 
    ```markdown
@@ -537,8 +521,6 @@ If user requests fixes for skipped items → delegate via § 6.1 (single item), 
    ### Not Addressed
    - [SOURCE]: [ITEM] — [REASON]
    ```
-
----
 
 ## 8. Update State & Return
 
@@ -558,4 +540,4 @@ If user requests fixes for skipped items → delegate via § 6.1 (single item), 
 
    **If managed**: Return to the parent workflow's next section.
 
-   **If standalone**: Session complete — triage results presented in § 7.2.
+   **If standalone**: Session complete.

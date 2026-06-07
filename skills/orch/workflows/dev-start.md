@@ -1,6 +1,6 @@
 # Dev Implementation Workflow
 
-Delegate development work to specialist agent(s). Handles single issues and bundled multi-agent work with handoff.
+Delegate development work to specialist agent(s). Handles single issues and bundled multi-agent work.
 
 ## Inputs
 
@@ -20,16 +20,18 @@ Delegate development work to specialist agent(s). Handles single issues and bund
 ISSUE_ID=${ARG:-$(git rev-parse --abbrev-ref HEAD | grep -oiP "$GH_ISSUE_PATTERN")}
 ```
 
-Apply [Worktree Scope](../SKILL.md#worktree-scope): if current dir is a worktree and `ISSUE_ID` ≠ the current branch's issue, ask the user before proceeding. Then resolve `WT_PATH`:
+Apply [Worktree Scope](../SKILL.md#worktree-scope): if in a worktree and `ISSUE_ID` ≠ the current branch's issue, ask the user before proceeding. Resolve `WT_PATH`:
 - Inside a worktree → `WT_PATH=$(pwd)`
-- Main repo, worktree exists (`worktree exists $ISSUE_ID` → `true`) → `WT_PATH=$(.agents/skills/worktree/scripts/worktree path $ISSUE_ID)`
+- Main repo, worktree exists → `WT_PATH=$(.agents/skills/worktree/scripts/worktree path $ISSUE_ID)`
 - Main repo, worktree missing → ask the user before creating
 
 ```bash
+TRACKER=linear; [[ "$ISSUE_ID" == issue-* ]] && TRACKER=github
 # Init workflow state if not exists
 if ! .agents/skills/orch/scripts/workflow-state exists $ISSUE_ID; then
-  # Check for parent context (start-new flow: sub-issue in parent's worktree)
-  PARENT_ID=$(.agents/skills/linear/scripts/linear.sh cache issues get $ISSUE_ID --format=compact | jq -r '.parent.identifier // empty')
+  # Linear only: check for parent context (start-new flow: sub-issue in parent's worktree)
+  PARENT_ID=""
+  [[ "$TRACKER" == "linear" ]] && PARENT_ID=$(.agents/skills/linear/scripts/linear.sh cache issues get $ISSUE_ID --format=compact | jq -r '.parent.identifier // empty')
   if [[ -n "$PARENT_ID" ]] && .agents/skills/orch/scripts/workflow-state exists $PARENT_ID; then
     TEAM=$(.agents/skills/orch/scripts/workflow-state get $PARENT_ID '.team_name // empty')
     WT_PATH=$(.agents/skills/orch/scripts/workflow-state get $PARENT_ID '.worktree // empty')
@@ -40,26 +42,32 @@ if ! .agents/skills/orch/scripts/workflow-state exists $ISSUE_ID; then
 fi
 ```
 
----
-
 ## 1. Determine Agent
 
 `agent:X` label → X | No label → infer from component paths.
 
 ```bash
+# Linear
 .agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID] --format=compact | jq -r '.labels[]'
+
+# GitHub
+gh issue view ${ISSUE_ID#issue-} --json labels --jq '.labels[].name'
 ```
 
 ---
 
 ## 2. Delegate to Specialist Agent(s)
 
-**Dev agents persist for the entire session.** Never shutdown dev agents — they stay alive for re-delegation (fix cycles, pending children, PR review fixes). Only the caller's finalization step shuts them down.
+**Dev agents persist for the entire session.** Never shutdown dev agents — they stay alive for fix cycles, pending children, and PR review fixes. Only the caller's finalization step shuts them down.
+
+**After each spawn**, persist the agent session:
+```bash
+.agents/skills/orch/scripts/workflow-state update [ISSUE_ID] '.child_sessions["[AGENT_TYPE]"] = {"agent_id": "[AGENT_OR_TASK_ID]"}'
+```
 
 ### If Single Issue
 
-Delegate to a `[AGENT_TYPE]` agent with the prompt below.
-Wait for completion. Parse: Branch, Commit, QA Labels, Summary.
+Delegate to a `[AGENT_TYPE]` agent. Wait for completion. Parse: Branch, Commit, QA Labels, Summary.
 
 **Single issue delegation prompt:**
 
@@ -74,23 +82,22 @@ Labels: [LABELS]
 Blocks: [BLOCKED_ISSUE_IDS or "none"]
 </delegation_format>
 
+**GitHub items**: replace the `Issue:` line with `GitHub Issue: [OWNER/REPO]#[N]`.
+
 ### If Bundled Issue
 
-**Agent grouping**: Group pending sub-issues by `agent:[TYPE]` label. Read [agent-sequencing.md](agent-sequencing.md) for ordering. Process sequentially: first group → wait for completion → validate (§ 3) → collect handoff notes → next group. Each agent receives its sub-issues + completed sub-issues from prior agents as context.
+**Agent grouping**: Group pending sub-issues by `agent:[TYPE]` label. See [agent-sequencing.md](agent-sequencing.md) for ordering. Process sequentially: first group → wait for completion → validate (§ 3) → collect handoff notes → next group.
 
-**Handoff collection** (between agent groups): After each agent group returns and passes § 3 validation, before delegating the next group:
+**Handoff collection** (between agent groups): After each group returns and passes § 3 validation, before delegating the next group:
 
-a. For each sub-issue completed by any prior agent group (cumulative, not just the latest):
+a. For each sub-issue completed by any prior agent group (cumulative):
    ```bash
    .agents/skills/linear/scripts/linear.sh cache comments list [COMPLETED_ISSUE_ID] | jq -r '.[] | select(.body | contains("Handoff Notes")) | .body'
    ```
 b. Extract "Handoff Notes" sections. Combine into a single block.
-c. Include in next delegation as the `Handoff from prior agents:` field (see delegation format below).
+c. Include in next delegation as `Handoff from prior agents:` (see below). Omit if none found.
 
-If no handoff notes found, omit the section.
-
-Delegate to a `[AGENT_TYPE]` agent with the prompt below.
-Wait for completion. Parse: Branch, Commit, QA Labels, Summary.
+Delegate to a `[AGENT_TYPE]` agent. Wait for completion. Parse: Branch, Commit, QA Labels, Summary.
 
 **Bundled issue delegation prompt:**
 
@@ -124,8 +131,6 @@ Handoff from prior agents:
 - [extracted handoff notes]
 </delegation_format>
 
----
-
 ## 3. Validate Agent Return
 
 **Expected format**: `Branch: ... | Commit: [SHA] | QA Labels: ... | Summary: Posted ✓`
@@ -135,11 +140,13 @@ Handoff from prior agents:
    # Check commit exists
    git -C "[WORKTREE_PATH]" log -1 --oneline
 
-   # Check state + summary (auto-includes pending children from bundle)
+   # Linear only: check state + summary (auto-includes pending children from bundle)
    .agents/skills/linear/scripts/linear.sh issues validate-completion [ISSUE_ID] --include-children-of [ISSUE_ID]
    ```
 
-2. **Evaluate results**:
+   **GitHub/ad-hoc**: no tracker validation — require the commit plus a return message with Branch, Commit, QA Labels, and Summary content.
+
+2. **Evaluate results** (Linear):
 
    | Field | Expected | Failure Action |
    |-------|----------|----------------|

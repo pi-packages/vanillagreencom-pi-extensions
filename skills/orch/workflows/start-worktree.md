@@ -1,6 +1,6 @@
 # Start Session Workflow (Worktree)
 
-Expedited session start for worktree contexts. Skips issue selection, preparation, research, and worktree creation — those completed in the prior main-repo session.
+Expedited session start for worktree contexts. Skips issue selection, preparation, and worktree creation — completed in the prior main-repo session.
 
 ## Inputs
 
@@ -28,7 +28,7 @@ Expedited session start for worktree contexts. Skips issue selection, preparatio
 
 2. **Parse return**: Branch, Commit, QA Labels, Summary.
 
-3. **Do NOT shutdown dev agent.** It persists for § 3 fix cycles, § 10 pending children, and any re-delegation. Only § 5.4 shuts it down.
+3. **Do NOT shutdown dev agent.** Persists for § 3 fix cycles and re-delegation. Only § 5.4 shuts it down.
 
 → § 3
 
@@ -55,8 +55,6 @@ Expedited session start for worktree contexts. Skips issue selection, preparatio
 
 ## 5. Finalization
 
-Post-review cleanup: reconcile fixes, post summaries, handoff to downstream issues.
-
 ### 5.1 Reconcile Fixes Against Existing Issues
 
 **Invoke workflow**: `⤵ workflows/fix-reconcile.md § 1-9 → § 5.2` with context:
@@ -73,7 +71,7 @@ Post-review cleanup: reconcile fixes, post summaries, handoff to downstream issu
 
 ### 5.3 Output Session Summary
 
-**Do NOT mark issues Done.** Issues stay "In Review" until `workflows/merge-pr.md` or issue-closing convention triggers Done on merge.
+**Do NOT mark issues Done.** Issues stay "In Review" until merge triggers Done.
 
 1. **Read final state**:
    ```bash
@@ -131,7 +129,7 @@ Post-review cleanup: reconcile fixes, post summaries, handoff to downstream issu
 
 ### 5.4 Shutdown Team
 
-1. **Shutdown all agents** from `child_sessions` in workflow state. Terminate each still-active agent.
+1. Terminate all still-active agents from `child_sessions` in workflow state.
 
 ### 5.5 Offer Merge
 
@@ -141,7 +139,7 @@ Post-review cleanup: reconcile fixes, post summaries, handoff to downstream issu
 
 | Choice | Action |
 |--------|--------|
-| Merge | `⤵ workflows/merge-pr.md [PR_NUMBER] § 1-7 → end` |
+| Merge | `⤵ workflows/merge-pr.md [PR_NUMBER] § 1-8 → end` |
 | Skip | → end |
 
 → end

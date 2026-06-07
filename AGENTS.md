@@ -105,7 +105,7 @@ iced = ["iced-rs", "iced-shadcn", ...]
 
 [role-skills]
 analyst = ["linear", "github"]
-engineer = ["dev", "github", "worktree", "decider", "linear"]
+engineer = ["dev", "github", "decider", "linear"]
 reviewer = ["reviewer"]
 
 [hook-events]

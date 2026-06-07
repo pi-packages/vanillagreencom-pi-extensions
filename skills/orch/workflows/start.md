@@ -1,20 +1,20 @@
 # Start Workflow
 
-Start one work item. This workflow never watches or manages other sessions.
+Start one work item. Never watches or manages other sessions.
 
 ## Inputs
 
 | Command | Flow |
 |---------|------|
-| `start` | dashboard -> select one item |
-| `start [LINEAR_ID]` | prepare Linear issue -> handoff or worktree run |
-| `start github OWNER/REPO#N` | prepare GitHub issue -> handoff or worktree run |
+| `start` | dashboard → select one item |
+| `start [LINEAR_ID]` | prepare Linear issue → handoff or worktree run |
+| `start github OWNER/REPO#N` | prepare GitHub issue → handoff or worktree run |
 | `start new ...` | `workflows/start-new.md` |
 
 ## 1. Route
 
-1. If cwd is a worktree, invoke `workflows/start-worktree.md` and stop.
-2. If args start with `new`, invoke `workflows/start-new.md`.
+1. If args start with `new`, invoke `workflows/start-new.md`.
+2. If cwd is a worktree, invoke `workflows/start-worktree.md` and stop.
 3. If args start with `github`, set `tracker=github`, parse `[OWNER/REPO]` and `[N]`.
 4. Else set `tracker=linear`, parse `[ISSUE_ID]` if present.
 
@@ -27,7 +27,7 @@ Start one work item. This workflow never watches or manages other sessions.
    .agents/skills/orch/scripts/session-init
    ```
 2. Output exactly as printed.
-3. Pick one recommended work item. If multiple items should exist, convert them into Linear/GitHub issues first; do not spawn a controller session.
+3. Pick one recommended work item. If multiple items exist, convert them into Linear/GitHub issues first; do not spawn a controller session.
 
 <output_format>
 ### Milestone: Work Selected
@@ -48,7 +48,7 @@ Start one work item. This workflow never watches or manages other sessions.
 .agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID] --with-bundle
 ```
 
-If the issue is a child with a parent bundle, use the parent unless the user explicitly chose the child.
+If the issue has a parent bundle, use the parent unless the user explicitly chose the child.
 
 ### GitHub
 
@@ -97,4 +97,4 @@ Ask one action:
 
 ## 6. End
 
-If launched as handoff, stop after launch. Do not monitor the new session.
+If launched as handoff, stop after launch.

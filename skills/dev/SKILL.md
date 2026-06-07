@@ -43,8 +43,6 @@ Review and QA-review workflows live in the reviewer skill: [`../reviewer/workflo
 
 ## Configuration
 
-This skill is workflow-based. All behavior is defined in the workflow files.
-
 Agent types referenced in workflows (names are project-configurable):
 - **Dev agents**: `[AGENT_TYPE]` — specialist agents receiving implementation delegations
 - **Review agents**: `[REVIEW_AGENT]` — agents that review specific aspects (correctness, quality, security, testing, docs, errors, structure)

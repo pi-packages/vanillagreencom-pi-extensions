@@ -22,7 +22,7 @@ Skip issue tracker updates for ad-hoc requests (no issue reference).
 ```
 Respect blocking order: complete blockers before blocked issues.
 
-**Completed sub-issues**: Sub-issues marked `(completed)` in delegation are for context only — skip them in § 4 loop. They represent prior work in this PR.
+**Completed sub-issues**: Marked `(completed)` in delegation — context only, skip in § 4 loop.
 
 ---
 
@@ -63,11 +63,11 @@ GitHub only:
 gh issue view [N] --repo [OWNER/REPO] --json number,title,body,comments,labels,url
 ```
 
-Ad-hoc: use the delegation text as the source of truth and skip tracker writes.
+Ad-hoc: use delegation text as source of truth, skip tracker writes.
 
 **If bundled**: Activate parent only. Sub-issues activated individually during § 4 loop.
 
-**If bundled with completed siblings**: Also read comments from completed sibling sub-issues listed in delegation to pick up handoff notes:
+**If bundled with completed siblings**: Also read completed sibling comments for handoff notes:
 ```bash
 .agents/skills/linear/scripts/linear.sh cache comments list [COMPLETED_SIBLING_ID]
 ```
@@ -84,32 +84,31 @@ gh issue view [N] --repo [OWNER/REPO] --json body --jq .body
 
 **If bundled**: Also check each sub-issue for research refs. Aggregate unique paths.
 
-**If sub-issue**: Also check the parent issue's description for research/decision references. Sub-issues inherit their parent's research context.
+**If sub-issue**: Also check the parent issue's description. Sub-issues inherit parent research context.
 
-**If research/decision/context references found** (in issue or parent): Read the cited files — these are mandatory context, not optional. Follow § 2.2.1, then continue.
+**If research/decision/context references found**: Read the cited files — mandatory context, not optional. Follow § 2.2.1, then continue.
 
 #### 2.2.1 Research-Informed Implementation
 
 You have domain context the orchestrator lacks. You decide how research applies.
 
-1. **Read and evaluate**: Read project research documents (e.g., `[ISSUE_ID]/findings.md`). Consider how it applies to existing patterns and architecture documentation.
+1. **Read and evaluate**: Read project research documents. Consider how they apply to existing patterns and architecture docs.
 
-2. **Check for existing decision** (decider skill): `.agents/skills/decider/scripts/decisions search --issue [RESEARCH_ISSUE_ID]`. If a prior research-complete already recorded a decision, reference it — don't duplicate. Only create new decisions if evaluation reveals *additional* decisions.
+2. **Check for existing decision** (decider skill): `.agents/skills/decider/scripts/decisions search --issue [RESEARCH_ISSUE_ID]`. If a prior research-complete already recorded a decision, reference it — don't duplicate. Only create new decisions for additional decisions revealed by your evaluation.
 
 3. **Update architecture docs** if research changes documented patterns.
 
-4. **Update `vstack.toml`** if research reveals project-specific context that should persist (under `[agent-launch-instructions]` for launch/startup instructions, `[agent-additional-instructions]` for persistent agent rules, or `[skill-instructions]` for skill-level context).
+4. **Update `vstack.toml`** if research reveals project-specific context that should persist (under `[agent-launch-instructions]`, `[agent-additional-instructions]`, or `[skill-instructions]`).
 
 ### 2.3 Evaluate Feasibility
 
 Before planning, check your domain's code (per your agent's Domain Setup):
 
-- **Prior decisions?** (decider skill) `.agents/skills/decider/scripts/decisions search "[RELEVANT_KEYWORDS]"` to find governing decision entries
-- **Description contradicts a decision?** Read the full decision file, not just the index summary. Report back to orchestrator with decision reference — do not implement approaches a decision explicitly rejects
+- **Prior decisions?** `.agents/skills/decider/scripts/decisions search "[RELEVANT_KEYWORDS]"` — read the full decision file, not just the index summary. Report back to orchestrator with decision reference if the description contradicts a decision — do not implement approaches a decision explicitly rejects.
 - **Can you proceed?** Do required APIs/types exist?
 - **Cross-domain dependency?** Need work in another domain first?
 - **Blocked by existing issue?**
-- **Optimization work without `baseline` label?** If improving existing behavior, add label now (before any code changes)
+- **Optimization work without `baseline` label?** Add label now (before any code changes).
 
 **If blocked** → **Jump to § 3**, then STOP.
 
@@ -129,8 +128,8 @@ Follow your agent definition for architecture docs, code paths, skills to load.
 
 **Check labels** from § 2.1. If `baseline` label present:
 
-1. **Identify affected domain** — determine which component (backend, frontend, etc.) is affected
-2. **If a benchmarking skill is installed**, follow its baseline workflow to capture pre-implementation baselines
+1. Identify the affected component (backend, frontend, etc.)
+2. **If a benchmarking skill is installed**, follow its baseline workflow to capture pre-implementation baselines.
 
 The performance QA agent uses the baseline file during QA review.
 
@@ -138,7 +137,7 @@ The performance QA agent uses the baseline file during QA review.
 
 ## 3. Block Issue (if dependency discovered)
 
-**Skip if** not blocked — § 2.3 routed to § 2.4 (normal flow skips § 3).
+**Skip if** not blocked — § 2.3 routed to § 2.4.
 
 ### 3.1 Blocked by Existing Issue
 
@@ -152,7 +151,7 @@ GitHub/ad-hoc: report the blocker in the return message; do not invent tracker s
 
 ### 3.2 Cross-Domain Dependency Discovery
 
-When you discover work in another domain must happen first (prerequisite issue doesn't exist):
+When work in another domain must happen first (prerequisite issue doesn't exist):
 
 1. **Add blocked label** (Linear only):
    ```bash
@@ -177,10 +176,7 @@ When you discover work in another domain must happen first (prerequisite issue d
    Requesting orchestrator create prerequisite issue."
    ```
 
-3. **Report to orchestrator**: Your final message must state:
-   - Issue is blocked pending cross-domain work
-   - Domain and labels for new issue
-   - Issue description ready for creation
+3. **Report to orchestrator**: Final message must state the blocker, domain and labels for the new issue, and that the issue description is ready for creation.
 
 **Orchestrator**: Creates prerequisite, sets blocking relation, delegates.
 
@@ -224,18 +220,18 @@ Implement per your agent's domain expertise. Run quality gates before completion
 
 Update relevant docs if implementation changes documented APIs or architecture.
 
-**If significant path choices made** during implementation, follow the decider skill's create-decision workflow:
+**If significant path choices made**, follow the decider skill's create-decision workflow:
 
 1. Get next ID: `.agents/skills/decider/scripts/decisions next-id`
-2. Select template from the decider skill's `templates/decision-entry.md` (minimal/standard/comprehensive)
-3. Create decision file per the decider skill's `schemas/decision-format.md`
-4. Add row to INDEX.md per the decider skill's `templates/index-row.md`
+2. Select template from `templates/decision-entry.md` (minimal/standard/comprehensive)
+3. Create decision file per `schemas/decision-format.md`
+4. Add row to INDEX.md per `templates/index-row.md`
 5. Use `// REVISIT(DXXX):` in code where applicable
 6. Include decision ID in § 9 completion comment
 
 **Skip decision recording if** no alternatives were considered or trade-offs made.
 
-**If bundled**: Complete § 5-10 (validate, commit, post summary, finalize) for this sub-issue before marking task done.
+**If bundled**: Complete § 5-10 for this sub-issue before marking task done.
 
 ---
 
@@ -259,7 +255,7 @@ Always report unresolved validation failures to orchestrator.
 
 **Skip if** the issue does not have the `design` label.
 
-Use visual QA skills as necessary to validate that UI changes render correctly. Focus on what your changes affect — not the full checklist. Do NOT capture golden baselines — that happens at submit-pr time.
+Use visual QA skills to validate that UI changes render correctly. Focus on what your changes affect — not the full checklist. Do NOT capture golden baselines — that happens at submit-pr time.
 
 ---
 
@@ -273,10 +269,10 @@ Use visual QA skills as necessary to validate that UI changes render correctly. 
 - Spent multiple cycles on something a rule could prevent
 - Discovered optimal approaches that differ from documented patterns
 
-**Action**: Update the relevant documentation. Three options depending on what you learned:
+**Action**: Update the relevant documentation:
 
 - **Architecture docs** → Update if patterns, APIs, or documented behavior changed.
-- **Project config** → Add to `./vstack.toml` (`[skill-instructions]` for skill-level context, `[agent-additional-instructions]` for persistent agent rules, `[agent-launch-instructions]` for launch/startup instructions). Run `vstack refresh` to apply.
+- **Project config** → Add to `./vstack.toml` (`[skill-instructions]`, `[agent-additional-instructions]`, or `[agent-launch-instructions]`). Run `vstack refresh` to apply.
 
 Criteria: Would this save 5+ minutes in a future session? If yes, update. One surgical addition per lesson. No verbose examples.
 

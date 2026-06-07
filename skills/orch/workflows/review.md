@@ -1,6 +1,6 @@
 # Review Workflow
 
-On-demand code review for the current working session. Reviews recent commits, presents findings, and offers to fix selected items. Designed for agile sessions where the user is directly involved.
+On-demand code review for the current session. Reviews recent commits, presents findings, and offers to fix selected items.
 
 ## Inputs
 
@@ -11,7 +11,7 @@ On-demand code review for the current working session. Reviews recent commits, p
 | `review last [N]` | Review last N commits |
 | `review [HASH]` | Review changes in specific commit |
 
-**Always standalone** — no managed lifecycle. No caller context parameters.
+**Always standalone** — no managed lifecycle, no caller context parameters.
 
 **Init:**
 ```bash
@@ -32,7 +32,7 @@ BASE_BRANCH=${WORKTREE_DEFAULT_BRANCH:-$(git symbolic-ref refs/remotes/origin/HE
 [ -n "$BASE_BRANCH" ] || BASE_BRANCH=main
 ```
 
-**Compute diff range based on arguments:**
+**Diff range by argument:**
 
 | Argument | `DIFF_RANGE` | Description |
 |----------|-------------|-------------|
@@ -57,8 +57,6 @@ git diff $DIFF_RANGE --stat
 
 Collect decision IDs and summaries from JSON output.
 
----
-
 ## 2. Launch Review Agents
 
 **Detect team context:**
@@ -66,7 +64,10 @@ Collect decision IDs and summaries from JSON output.
 TEAM=$(.agents/skills/orch/scripts/workflow-state get $ISSUE_ID '.team_name // empty' 2>/dev/null) || true
 ```
 
-**Determine agent list**: All configured review agents.
+**Determine agent list**:
+```bash
+AGENTS=$(.agents/skills/orch/scripts/list-review-agents)
+```
 
 Delegate to each review agent in parallel:
 
@@ -82,15 +83,13 @@ Decisions:
 [If none: "- No linked decisions found."]
 </delegation_format>
 
----
-
 ## 3. Collect & Present Results
 
 Wait for all review agents to complete. Do NOT shutdown — agents needed for potential fix delegation in § 4.
 
-Extract `Report` path and `Verdict` from each agent's return. If any agent fails to return expected format, halt and report error.
+Extract `Report` path and `Verdict` from each agent's return. If any agent fails to return the expected format, halt and report error.
 
-Overall verdict: `action_required` if any agent has blockers, `pass` otherwise.
+Overall verdict: `action_required` if any agent has blockers; `pass` otherwise.
 
 **Update state** (if `ISSUE_ID` exists):
 ```bash
@@ -117,8 +116,6 @@ Read agent JSONs, check for items where `category == "fix"` or `category == "iss
 |---------|--------|------|
 | any | yes (or `action_required`) | → § 4 |
 | `pass` | none | → § 6 |
-
----
 
 ## 4. Present Review Items
 
@@ -160,7 +157,7 @@ Est: 1 (hours) | 2 (half-day) | 3 (day) | 4 (2-3d) | 5 (week+)
 
 **Omit empty categories.**
 
-→ Ask user (omit categories with no items):
+Ask user (omit categories with no items):
 
 | Category | Question | Type |
 |----------|----------|------|
@@ -190,16 +187,7 @@ Est: 1 (hours) | 2 (half-day) | 3 (day) | 4 (2-3d) | 5 (week+)
    - `items`: [SELECTED_ITEMS — format each as `#[N] | [Agent] | [Location]` with Description + Recommendation]
    - `source`: `review`
 
-3. **Update state** (if `ISSUE_ID` exists):
-   ```bash
-   # For each applied item:
-   .agents/skills/orch/scripts/workflow-state append [ISSUE_ID] fixed_items '{"description":"[DESC]","location":"[LOC]","commit":"[SHA]","source":"review"}'
-
-   # For each escalated/skipped item:
-   .agents/skills/orch/scripts/workflow-state append [ISSUE_ID] escalated_items '{"description":"[DESC]","location":"[LOC]","reason":"[REASON]","source":"review"}'
-   ```
-
-4. **Present fix results**:
+3. **Present fix results** (state writes for fixed/escalated items are owned by `dev-fix.md` — do not re-append here):
 
    <output_format>
 
@@ -213,8 +201,6 @@ Est: 1 (hours) | 2 (half-day) | 3 (day) | 4 (2-3d) | 5 (week+)
 
 → § 5 (if issue items selected) or § 6
 
----
-
 ## 5. Create Issues
 
 **Skip if** no issue suggestions selected AND no escalated items from § 4.1. → § 6
@@ -227,8 +213,6 @@ Est: 1 (hours) | 2 (half-day) | 3 (day) | 4 (2-3d) | 5 (week+)
 2. **Write file**: `tmp/audit-review-YYYYMMDD-HHMMSS.json`
 
 3. **Run Workflow**: `⤵ .agents/skills/project-management/workflows/audit-issues.md --issues [FILE_PATH] § 1-9 → § 6`
-
----
 
 ## 6. Summary
 
@@ -249,6 +233,6 @@ Est: 1 (hours) | 2 (half-day) | 3 (day) | 4 (2-3d) | 5 (week+)
 
 </output_format>
 
-**Omit rows with zero values** (except Scope and Agents).
+**Omit zero-value rows** (except Scope and Agents).
 
 → END

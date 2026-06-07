@@ -1,53 +1,36 @@
 # Dev Workflows
 
-Agent workflows for issue implementation, review fix delegation, pre-submission PR review, and QA review. Designed for specialist agents receiving delegations from an orchestrator.
+Agent workflows for issue implementation and review fix processing, for specialist agents receiving delegations from an orchestrator.
+
+## Workflows
+
+| Workflow | Purpose |
+|----------|---------|
+| `workflows/dev-implement.md` | Full implementation lifecycle: activate → plan → implement → validate → commit → QA labels → summary → finalize (§ 1-11) |
+| `workflows/dev-fix.md` | Process review fix items: evaluate → apply/skip → validate → commit → return |
+
+Code-review and QA-review workflows live in the reviewer skill: `skills/reviewer/workflows/review.md` and `skills/reviewer/workflows/qa-review.md`.
 
 ## Structure
 
 ```
 skills/dev/
-├── SKILL.md              # Skill definition for AI agents and skill-aware harnesses
-├── README.md             # This file — human-facing docs
+├── SKILL.md              # Skill definition for AI agents
+├── README.md             # This file
 └── workflows/
-    ├── dev-implement.md   # Main implementation lifecycle (§ 1-11)
-    └── dev-fix.md         # Review fix delegation workflow (§ 1-6)
+    ├── dev-implement.md  # Main implementation lifecycle (§ 1-11)
+    └── dev-fix.md        # Review fix workflow (§ 1-6)
 ```
 
-Code-review and QA-review workflows live in the reviewer skill: `skills/reviewer/workflows/review.md` and `skills/reviewer/workflows/qa-review.md`.
+## Dependencies
 
-This skill is workflow-based. All behavior is defined in the workflow files.
-
-## Workflows
-
-### dev-implement.md
-
-The main workflow for dev agents receiving `Issue: [ISSUE_ID]` delegations. Supports both single-issue and bundled (parent + sub-issues) flows. Covers the full lifecycle: environment setup, issue activation, research context, feasibility evaluation, implementation, validation, visual QA, skill reflection, commit, QA label application, completion summary, and finalization.
-
-### dev-fix.md
-
-The workflow for dev agents receiving review fix delegations. Each review item is evaluated independently against project decisions and conventions, then applied or skipped with reasoning. Includes validation, visual QA for UI fixes, and structured return with per-item decisions.
-
-## Skill Dependencies
-
-| Dependency | Purpose | Variable |
-|------------|---------|----------|
-| Issue tracker CLI | Optional tracker updates for Linear/GitHub issues | `linear.sh` or `gh issue` |
-| Reviewer skill | Code-review + QA-review ethos, scope boundaries, workflows, and finding schema | Referenced by name |
-| orch skill | Recommendation-bias patterns | Referenced by name |
-| Decider skill | Decision templates, search CLI, creation workflows | `.agents/skills/decider/scripts/decisions` |
-| Benchmarking | Run benchmarks if a benchmarking skill is installed | Optional |
-
-## Configuration
-
-### Agent types
-
-- **Dev agents**: `[AGENT_TYPE]` — specialist agents receiving implementation delegations
-- **Review agents**: `[REVIEW_AGENT]` — agents that review specific aspects (correctness, quality, security, testing, docs, errors, structure)
-- **QA agents**: `[QA_AGENT]` — agents for safety, performance, and architecture review
-
-### Commit format
-
-`[PREFIX]([ISSUE_ID]): [DESCRIPTION]` — configurable per project conventions.
+| Dependency | Purpose |
+|------------|---------|
+| Issue tracker CLI | Linear (`linear.sh`) or GitHub (`gh issue`) for tracker updates |
+| Reviewer skill | Code-review and QA-review ethos, workflows, and finding schema |
+| orch skill | Recommendation-bias patterns |
+| Decider skill | Decision search, templates, and creation workflow |
+| Benchmarking skill | Baseline capture (optional) |
 
 ## License
 

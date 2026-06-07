@@ -20,6 +20,7 @@ Post summary comments to git host and issue tracker, and selective handoff comme
 ```bash
 # Extract issue from branch if not provided
 ISSUE_ID=$(git rev-parse --abbrev-ref HEAD | grep -oiP "$GH_ISSUE_PATTERN")
+TRACKER=linear; [[ "$ISSUE_ID" == issue-* ]] && TRACKER=github
 WT_PATH=$(.agents/skills/worktree/scripts/worktree path $ISSUE_ID 2>/dev/null || echo ".")
 PR_NUMBER=$(.agents/skills/github/scripts/github.sh -C "$WT_PATH" pr-view --json number 2>/dev/null | jq -r .number)
 # Init workflow state if not exists
@@ -43,7 +44,7 @@ fi
 
 2. **Skip if** `FIXED_COUNT == 0` AND `AUDIT_ISSUES == 0` AND `PR_ISSUES == 0` AND `ESCALATED_COUNT == 0`. → § 2
 
-3. **Post to git host and issue tracker** — consolidate all review cycle results from state. Write the summary to a file first so Markdown backticks and fenced code blocks are not command-substituted by the shell (same hazard as the submit-pr PR body):
+3. **Post to git host and issue tracker** — consolidate all review cycle results from state. Write to a file first (same backtick hazard as submit-pr PR body):
    ```bash
    SUMMARY_FILE="[WORKTREE_PATH]/tmp/post-summary-[ISSUE_ID]-$(date +%Y%m%d-%H%M%S).md"
    mkdir -p "$(dirname "$SUMMARY_FILE")"
@@ -51,9 +52,10 @@ fi
    [filled SUMMARY_CONTENT — see template below]
    SUMMARY_EOF
    .agents/skills/github/scripts/github.sh post-comment [PR_NUMBER] --body-file "$SUMMARY_FILE"
-   .agents/skills/linear/scripts/linear.sh comments create [ISSUE_ID] --body "$(cat "$SUMMARY_FILE")"
+   # Linear only — GitHub items get linkage via `Closes #N` in the PR body
+   [[ "$TRACKER" == "linear" ]] && .agents/skills/linear/scripts/linear.sh comments create [ISSUE_ID] --body "$(cat "$SUMMARY_FILE")"
    ```
-   The Linear path still uses `--body` because `linear.sh` does not accept `--body-file`; `"$(cat ...)"` is safe because the heredoc has already been written to disk and the substitution only re-reads the literal bytes.
+   The Linear path uses `--body "$(cat ...)"` because `linear.sh` lacks `--body-file`; safe here because the heredoc is already on disk.
 
    **Summary content template** (omit empty sections):
 
@@ -89,6 +91,8 @@ fi
 ---
 
 ## 2. Post Handoff Comments (selective)
+
+**Skip if** `TRACKER=github` (dependencies live in issue bodies, not tracked relations). → § 3
 
 1. **Check unblocked issues**: `.agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID] | jq '.blocks'`
 

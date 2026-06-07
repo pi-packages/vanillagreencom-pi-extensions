@@ -1,6 +1,6 @@
 # Start New Workflow
 
-Create one issue, then route through normal `orch start`.
+Create one issue, then route through `orch start`.
 
 ## Inputs
 
@@ -11,7 +11,7 @@ Create one issue, then route through normal `orch start`.
 
 ## 1. Confirm Scope
 
-Ask only for missing product details: title, expected outcome, tracker, project/repo, labels.
+Ask only for missing details: title, expected outcome, tracker, project/repo, labels.
 
 ## 2. Create Issue
 

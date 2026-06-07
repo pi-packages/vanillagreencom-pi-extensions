@@ -1,6 +1,6 @@
 # Dev Fix Workflow
 
-Delegate fix items to specialist dev agent. Works standalone (user-initiated) or managed (from review-pr).
+Delegate fix items to a specialist dev agent. Works standalone (user-initiated) or managed (from review-pr).
 
 ## Inputs
 
@@ -24,12 +24,10 @@ Delegate fix items to specialist dev agent. Works standalone (user-initiated) or
 ISSUE_ID=${ARG:-$(git rev-parse --abbrev-ref HEAD | grep -oiP "$GH_ISSUE_PATTERN")}
 ```
 
-Apply [Worktree Scope](../SKILL.md#worktree-scope): if current dir is a worktree and `ISSUE_ID` ≠ the current branch's issue, ask the user before proceeding. Then resolve `WT_PATH`:
+Apply [Worktree Scope](../SKILL.md#worktree-scope): if in a worktree and `ISSUE_ID` ≠ the current branch's issue, ask the user before proceeding. Resolve `WT_PATH`:
 - Inside a worktree → `WT_PATH=$(pwd)`
 - Main repo, worktree exists → `WT_PATH=$(.agents/skills/worktree/scripts/worktree path $ISSUE_ID)`
 - Main repo, worktree missing → ask the user before creating
-
----
 
 ## 1. Build Fix Items
 
@@ -37,7 +35,7 @@ Apply [Worktree Scope](../SKILL.md#worktree-scope): if current dir is a worktree
 
 **If standalone**: Synthesize from conversation context.
 
-1. **Gather context**: From the conversation, identify what needs fixing. Read relevant files if needed.
+1. **Gather context**: Identify what needs fixing. Read relevant files if needed.
 
 2. **Format each fix item**:
    ```
@@ -67,8 +65,6 @@ Apply [Worktree Scope](../SKILL.md#worktree-scope): if current dir is a worktree
    | Cancel | → END |
    | Items selected | → § 2 |
 
----
-
 ## 2. Delegate
 
 1. **Determine agent**:
@@ -76,10 +72,12 @@ Apply [Worktree Scope](../SKILL.md#worktree-scope): if current dir is a worktree
    - Otherwise: from workflow state or issue labels
      ```bash
      AGENT=$(.agents/skills/orch/scripts/workflow-state get $ISSUE_ID '.agent // empty' 2>/dev/null)
-     [[ -z "$AGENT" ]] && AGENT=$(.agents/skills/linear/scripts/linear.sh cache issues get $ISSUE_ID --format=compact | jq -r '[.labels[] | select(startswith("agent:"))] | first | split(":")[1] // empty')
+     TRACKER=linear; [[ "$ISSUE_ID" == issue-* ]] && TRACKER=github
+     # Linear only — GitHub items: gh issue view ${ISSUE_ID#issue-} --json labels, or infer from component paths
+     [[ -z "$AGENT" && "$TRACKER" == "linear" ]] && AGENT=$(.agents/skills/linear/scripts/linear.sh cache issues get $ISSUE_ID --format=compact | jq -r '[.labels[] | select(startswith("agent:"))] | first | split(":")[1] // empty')
      ```
 
-2. **Group items by agent domain** if multi-domain. Sequential per [agent-sequencing.md](agent-sequencing.md).
+2. **Group items by agent domain** if multi-domain. Order per [agent-sequencing.md](agent-sequencing.md).
 
 3. **Detect team context**:
    ```bash
@@ -88,7 +86,7 @@ Apply [Worktree Scope](../SKILL.md#worktree-scope): if current dir is a worktree
 
 4. **Delegate** to `[AGENT_TYPE]` agent (reuse existing dev agent if available).
 
-   ⚠ Fill placeholders only ([Format Tags Are Literal](../SKILL.md#format-tags-are-literal)). `Recommendation:` = technical fix, not procedure. The agent already owns validate/commit/return per `dev/workflows/dev-fix.md`.
+   ⚠ Fill placeholders only ([Format Tags Are Literal](../SKILL.md#format-tags-are-literal)). `Recommendation:` = technical fix, not procedure steps. The agent owns validate/commit/return per `dev/workflows/dev-fix.md`.
    - ✅ `"Read X from parent state and forward to child — fix in parent so descendants inherit."`
    - ❌ `"1. Apply fix. 2. Run validate. 3. Commit. 4. Let orchestrator handle linkage."`
 

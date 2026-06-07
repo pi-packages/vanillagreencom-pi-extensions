@@ -1,6 +1,6 @@
 # PR Review Workflow
 
-Pre-submission code review with fix handling, QA checks, and issue audit.
+Pre-submission code review: fix handling, QA checks, and issue audit.
 
 ## Inputs
 
@@ -12,9 +12,9 @@ Pre-submission code review with fix handling, QA checks, and issue audit.
 
 **Caller context parameters** (via `⤵`):
 - `worktree`: worktree path
-- `agents` (optional): list of review agent names. Default: every `reviewer-*` agent discovered in the active harness registry (typically all installed `reviewer-*` from `vstack.toml` `[agent-skills]`, e.g. `reviewer-arch`, `reviewer-correctness`, `reviewer-doc`, `reviewer-error`, `reviewer-perf`, `reviewer-quality`, `reviewer-safety`, `reviewer-security`, `reviewer-structure`, `reviewer-test`). Do not hardcode a count — enumerate from the registry.
+- `agents` (optional): list of review agent names. Default: every `reviewer-*` agent from the active harness registry. Do not hardcode a count — enumerate from the registry.
 - `lifecycle` (optional): `"managed"` (return to caller at § 11) | `"self"` (default, standalone).
-- `dev_agent` (optional): name of alive dev agent for fix delegation. If absent, fixes use sub-agent tasks.
+- `dev_agent` (optional): alive dev agent for fix delegation. If absent, fixes use sub-agent tasks.
 - `issue_id` (optional): issue tracker ID. If absent, extracted from branch.
 
 **If PR# provided:**
@@ -22,9 +22,7 @@ Pre-submission code review with fix handling, QA checks, and issue audit.
 ISSUE=$(.agents/skills/github/scripts/github.sh pr-issue [PR_NUMBER] --format=text)
 ```
 
-Apply [Worktree Scope](../SKILL.md#worktree-scope). If no worktree exists for `$ISSUE`, ask the user before running `worktree create $ISSUE --pr [PR_NUMBER]`.
-
-**If no argument:** Set `WT_PATH` to current directory.
+Apply [Worktree Scope](../SKILL.md#worktree-scope). If no worktree exists for `$ISSUE`, ask the user before running `worktree create $ISSUE --pr [PR_NUMBER]`. If no argument: set `WT_PATH` to current directory.
 
 **Standalone init** (`lifecycle: "self"` only):
 ```bash
@@ -33,7 +31,12 @@ ISSUE_ID=$(git rev-parse --abbrev-ref HEAD | grep -oiP "$GH_ISSUE_PATTERN")
 # Init workflow state if not exists
 if ! .agents/skills/orch/scripts/workflow-state exists $ISSUE_ID; then
   .agents/skills/orch/scripts/workflow-state init $ISSUE_ID --worktree "$WT_PATH" --branch "$(git -C $WT_PATH rev-parse --abbrev-ref HEAD)"
-  QA_LABELS=$(.agents/skills/linear/scripts/linear.sh cache issues get $ISSUE_ID | jq '[.labels[] | select(startswith("needs-"))]')
+  TRACKER=linear; [[ "$ISSUE_ID" == issue-* ]] && TRACKER=github
+  if [[ "$TRACKER" == "github" ]]; then
+    QA_LABELS=$(gh issue view ${ISSUE_ID#issue-} --json labels --jq '[.labels[].name | select(startswith("needs-"))]')
+  else
+    QA_LABELS=$(.agents/skills/linear/scripts/linear.sh cache issues get $ISSUE_ID | jq '[.labels[] | select(startswith("needs-"))]')
+  fi
   .agents/skills/orch/scripts/workflow-state set $ISSUE_ID qa_labels "$QA_LABELS"
 fi
 ```
@@ -50,17 +53,15 @@ git -C [WORKTREE_PATH] diff "origin/$BASE_BRANCH"...HEAD --stat
 
 **If no changes**: Report "No changes to review" and **END**.
 
-### 1.1 Gather Decision Context
+**Tiny/docs-only skip path**: Review is the default gate. If the full diff is docs/comments-only (`*.md`, comments, typo fixes) or tiny (≤10 changed lines, no logic change), present the diff stat and ask the user: `Run full review` | `Skip review (tiny/docs-only)`. On skip: `workflow-state set [ISSUE_ID] review_skipped "tiny-docs"` → § 11 with verdict `pass`. Never auto-skip without asking.
 
-Extract issue ID from branch name (e.g., `[BRANCH_NAME]` → `[ISSUE_ID]`). Use the decider skill's search workflow:
+### 1.1 Gather Decision Context
 
 ```bash
 .agents/skills/decider/scripts/decisions search --issue [ISSUE_ID]
 ```
 
-Collect decision IDs and summaries from the JSON output.
-
-**If decisions found**: Include in delegation prompt below. Agents MUST read cited decisions/research before suggesting changes that could contradict them.
+Collect decision IDs and summaries from the JSON output. If decisions found: include in the delegation prompt below. Agents MUST read cited decisions before suggesting changes that could contradict them.
 
 ### 1.2 Check for Re-Review Context
 
@@ -70,7 +71,7 @@ FIXED=$(.agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.fixed_items 
 ESCALATED=$(.agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.escalated_items // []')
 ```
 
-If `CYCLES > 0`: This is a re-review. Include the "Previous review cycle context" section in the delegation prompt below, populated from `FIXED` and `ESCALATED`.
+If `CYCLES > 0`: include the "Previous review cycle context" section in the delegation prompt, populated from `FIXED` and `ESCALATED`.
 
 ## 2. Launch Review Agents
 
@@ -79,18 +80,17 @@ If `CYCLES > 0`: This is a re-review. Include the "Previous review cycle context
 TEAM=$(.agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.team_name // empty')
 ```
 
-**Determine agent list**: If `agents` context provided, use only those. Otherwise enumerate every `reviewer-*` agent from the active harness registries (do not hardcode a fixed set or count):
+**Determine agent list**: If `agents` context provided, use only those. Otherwise enumerate every `reviewer-*` agent from active harness registries (do not hardcode a count):
 
 ```bash
 AGENTS=$(.agents/skills/orch/scripts/list-review-agents)
 if [ $? -ne 0 ] || [ -z "$AGENTS" ]; then
-  # Report and skip review delegation.
   echo "No reviewer-* agents installed in any harness registry; skipping review delegation" >&2
   # → § 5 (verdict pass, no items to handle)
 fi
 ```
 
-The `list-review-agents` script scans `.pi/agents`, `.claude/agents`, `.agents`, `.codex/agents`, and `.opencode/agents` (whichever exist) for `reviewer-*` files, dedupes, and exits non-zero if none are found. The output is one agent name per line.
+`list-review-agents` scans `.pi/agents`, `.claude/agents`, `.agents`, `.codex/agents`, and `.opencode/agents` for `reviewer-*` files, dedupes, and exits non-zero if none found. Output: one agent name per line.
 
 Before any spawn, read existing reviewer state:
 ```bash
@@ -98,51 +98,42 @@ EXISTING_REVIEW_AGENTS=$(.agents/skills/orch/scripts/workflow-state get [ISSUE_I
 EXISTING_REVIEW_AGENT_IDS=$(.agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.review_agent_ids // {}')
 ```
 
-For each reviewer in `[AGENTS]`:
-- Reuse by exact reviewer name when `review_agent_ids` points to a live/recoverable session
-- If only `review_agents` exists, attempt one recovery/resume path, then treat as missing if still unavailable
-- Spawn only the missing, closed, or confirmed-stuck reviewer
+For each reviewer in `[AGENTS]`: reuse by exact name when `review_agent_ids` points to a live/recoverable session. If only `review_agents` exists, attempt one recovery/resume, then treat as missing. Spawn only the missing, closed, or confirmed-stuck reviewer. Do not respawn already-live reviewers.
 
-Do not respawn already-live reviewers during re-review. Idle reviewers remain the active reviewer for that role.
-
-After reconciliation, store only the active reviewer set in state:
+After reconciliation, store the active reviewer set:
   ```bash
   .agents/skills/orch/scripts/workflow-state set [ISSUE_ID] review_agents '[AGENT_LIST_JSON]'
   .agents/skills/orch/scripts/workflow-state set [ISSUE_ID] review_agent_ids '[AGENT_ID_MAP_JSON]'
   ```
 
-**Do NOT delegate yet.** Continue to § 2.1 to resolve external review availability *before* any reviewer is spawned.
+**Do NOT delegate yet.** Continue to § 2.1 to resolve external review availability *before* spawning.
 
 ## 2.1 External Review Availability
 
-External review runs automatically alongside internal reviewers whenever the second-opinion skill is installed and a target is detected — no user prompt. Treated identically to internal reviewers in review and re-review cycles.
+External review runs automatically alongside internal reviewers when the second-opinion skill is installed and a target is detected — no user prompt. Treated identically to internal reviewers.
 
-**Skip if** second-opinion skill is not installed (`.agents/skills/second-opinion/scripts/second-opinion` does not exist). Set `EXTERNAL_REVIEW_REQUESTED=false` → § 2.2.
+**Skip if** `.agents/skills/second-opinion/scripts/second-opinion` does not exist. Set `EXTERNAL_REVIEW_REQUESTED=false` → § 2.2.
 
-**Detect external target**:
 ```bash
 EXTERNAL_TARGET=$(.agents/skills/second-opinion/scripts/second-opinion detect 2>/dev/null) || true
 ```
 
-**Skip if** `EXTERNAL_TARGET` is empty or `"none"`. Set `EXTERNAL_REVIEW_REQUESTED=false` → § 2.2.
-
-Otherwise, set `EXTERNAL_REVIEW_REQUESTED=true` → § 2.2.
+**Skip if** `EXTERNAL_TARGET` is empty or `"none"`. Set `EXTERNAL_REVIEW_REQUESTED=false` → § 2.2. Otherwise `EXTERNAL_REVIEW_REQUESTED=true` → § 2.2.
 
 ## 2.2 Delegate Review Agents
 
-**Record delegation timestamp** before delegating — used by the § 3 watchdog to gate filesystem fallback so stale JSONs from earlier cycles cannot be misread as current returns:
+**Record delegation timestamp** before delegating — gates the § 3 watchdog filesystem fallback against stale JSONs from earlier cycles:
 ```bash
 .agents/skills/orch/scripts/workflow-state set [ISSUE_ID] review_delegated_at "$(date +%s)"
 ```
 
-Delegate to each active review agent in `[AGENTS]` in parallel with the prompt below. **If `EXTERNAL_REVIEW_REQUESTED=true`**, launch the external review (block below) in the *same parallel batch* as the internal reviewers so the user does not wait for serialized completion.
+Delegate to each active reviewer in `[AGENTS]` in parallel. **If `EXTERNAL_REVIEW_REQUESTED=true`**, launch the external review in the *same parallel batch*.
 
-**Harness-specific batching:** External review is a shell command (`second-opinion review`), not an in-harness sub-agent task, so different harnesses combine the two waves differently:
+**Harness-specific batching:**
+- **Claude Code / Codex / OpenCode**: spawn reviewers via the harness sub-agent task API; run the external review shell command in the same delegation step.
+- **Pi** (`pi-agents-tmux`): launch external review via `bg_task` action `spawn` immediately before (or after) the `subagent` parallel-tasks call in the same turn. Both count toward the same `OUTSTANDING` set in § 3.
 
-- **Claude Code / Codex / OpenCode** — spawn internal reviewers via the harness's sub-agent task API and run the external review shell command from the same delegation step; the parallel batch is a logical wave, not a single API call.
-- **Pi** (`pi-agents-tmux`) — the `subagent` tool with `tasks: [...]` accepts only Pi agents, not arbitrary shell commands. Launch the external review via `bg_task` action `spawn` **immediately before** the `subagent` parallel-tasks call (or immediately after — ordering does not matter, but they must be in the same turn). Both run concurrently and both count toward the same `OUTSTANDING` set in § 3.
-
-**Delegation prompt:** Follow exactly, fill placeholders, add nothing else. Omit lines/sections with empty placeholders.
+**Delegation prompt:** Fill placeholders, omit empty lines/sections.
 
 <delegation_format>
 Follow workflow: .agents/skills/reviewer/workflows/review.md
@@ -160,7 +151,7 @@ Re-review cycle [N]. Already resolved — do NOT re-report:
 </if>
 </delegation_format>
 
-**External review execution** (only if `EXTERNAL_REVIEW_REQUESTED=true`, default timeout from `SECOND_OPINION_TIMEOUT` env var or 300s):
+**External review execution** (only if `EXTERNAL_REVIEW_REQUESTED=true`; default timeout: `SECOND_OPINION_TIMEOUT` env var or 300s):
 
 ```bash
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
@@ -170,7 +161,7 @@ EXTERNAL_OUTPUT="[WORKTREE_PATH]/tmp/review-external-${TIMESTAMP}.json"
   --output "$EXTERNAL_OUTPUT"
 ```
 
-**On success** — validate and append to state:
+**On success** — validate and append:
 ```bash
 # Basic schema check: verdict field must exist
 if jq -e '.verdict' "$EXTERNAL_OUTPUT" >/dev/null 2>&1; then
@@ -180,31 +171,30 @@ else
 fi
 ```
 
-**On failure**: Report error to user but **continue** — external review is advisory, not blocking. Do not halt the review pipeline.
+**On failure**: report to user but **continue** — external review is advisory, not blocking.
 
 ## 3. Collect Results (Watchdog)
 
-Do NOT shutdown reviewers — they may be needed for re-review in § 4.
+Do NOT shutdown reviewers — needed for re-review in § 4.
 
 ### 3.1 Completion
 
 `OUTSTANDING = [AGENTS] ∪ ({external} if EXTERNAL_REVIEW_REQUESTED)`. An agent completes when *either*:
-
 - A return message arrives with `Verdict:` and `File:` lines, *or*
 - Latest `[WORKTREE_PATH]/tmp/review-[AGENT]-*.json` with `mtime >= review_delegated_at` validates with `jq -e '.verdict'`
 
-On completion, append the path and drop the agent from `OUTSTANDING`:
+On completion, append and drop from `OUTSTANDING`:
 ```bash
 .agents/skills/orch/scripts/workflow-state append [ISSUE_ID] json_paths "[PATH]"
 ```
 
 ### 3.2 Watchdog Rules
 
-**Sweep filesystem on every event below** — catches silent finishers without delay.
+**Sweep filesystem on every event** — catches silent finishers without delay.
 
 Per-agent deadline from `review_delegated_at`:
-- Perf reviewer (agent name contains `perf`): **25 min**
-- All others, including external: **15 min**
+- Agent name contains `perf`: **25 min**
+- All others (including external): **15 min**
 
 | Event | Action |
 |-------|--------|
@@ -217,7 +207,7 @@ Exit to § 3.3 when `OUTSTANDING` is empty (`unresponsive` counts as resolved).
 
 ### 3.3 Present Results
 
-Extract `verdict` from each appended JSON. **Overall verdict**: `action_required` if any reviewer has blockers, `pass` otherwise. Unresponsive reviewers do not affect the overall verdict.
+Extract `verdict` from each appended JSON. **Overall verdict**: `action_required` if any reviewer has blockers; `pass` otherwise. Unresponsive reviewers do not affect the verdict.
 
 <output_format>
 
@@ -245,9 +235,7 @@ Read agent JSONs, check for items where `category == "fix"`.
 
 ## 4. Handle PR Review Items
 
-**Collect items** from agent JSONs:
-- **Blockers**: items from agents with `action_required` verdict
-- **Fix suggestions**: items where `category == "fix"` from any agent
+**Collect items** from agent JSONs — blockers (from `action_required` agents) and fix suggestions (`category == "fix"`).
 
 **If no items** → § 5.
 
@@ -273,7 +261,7 @@ Read agent JSONs, check for items where `category == "fix"`.
 
 **Omit empty categories.**
 
-→ Ask user (omit categories with no items):
+Ask user (omit categories with no items):
 
 | Category | Question | Type |
 |----------|----------|------|
@@ -320,7 +308,7 @@ If >4 suggestion items: show first 3 + `All N fixes`. Refine via "Other".
    **Selective shutdown** (row 3):
    a. Read review JSONs. Reporting agents = agents whose JSON contained items.
    b. Shutdown non-reporting agents. Keep reporting agents alive for potential fix cycles.
-   d. Update state: `.agents/skills/orch/scripts/workflow-state set [ISSUE_ID] review_agents '[REPORTERS_ONLY]'`
+   c. Update state: `.agents/skills/orch/scripts/workflow-state set [ISSUE_ID] review_agents '[REPORTERS_ONLY]'`
 
 ## 5. Verdict Pass
 
@@ -348,7 +336,7 @@ If >4 suggestion items: show first 3 + `All N fixes`. Refine via "Other".
 
 1. **Check labels**. See issue tracker label configuration (project-level).
 
-2. **Determine sequence**: QA agent types are configurable per project. Example label-to-agent mappings: `needs-safety-audit` → safety audit agent, `needs-perf-test` → performance QA agent, `needs-review` → architecture review agent, `design` → visual QA agent (use visual QA skills as necessary to validate UI changes).
+2. **Determine sequence**: QA agent types are configurable per project. Example mappings: `needs-safety-audit` → safety audit agent, `needs-perf-test` → performance QA agent, `needs-review` → architecture review agent, `design` → visual QA agent.
 
 **For each QA agent, execute steps 3–5:**
 
@@ -374,10 +362,10 @@ If >4 suggestion items: show first 3 + `All N fixes`. Refine via "Other".
 
 4. **Wait for completion.**
 
-5. **Process agent return.** Agent returns `verdict`, `json_path`, and (for performance QA agent) `benchmark_commit`.
+5. **Process agent return.** Agent returns `verdict`, `json_path`, and (for performance QA) `benchmark_commit`.
    - **Update state**: `.agents/skills/orch/scripts/workflow-state append [ISSUE_ID] json_paths "[json_path]"`
    - If `benchmark_commit` is not "none", verify: `git -C [WORKTREE_PATH] log -1 --oneline [SHA]`.
-   - **If performance QA agent**: post benchmark report to issue tracker as issue comment:
+   - **If performance QA agent**: post benchmark report as issue comment — **Linear only**; GitHub: `gh issue comment ${ISSUE_ID#issue-} --body "[PERF_REPORT]"`:
      ```bash
      .agents/skills/linear/scripts/linear.sh comments create [ISSUE_ID] --body "[PERF_REPORT]"
      ```
@@ -428,7 +416,7 @@ Follow § 4 pattern (collect → present → ask user → delegate via `workflow
 - **Items**: from QA agent JSONs. Exclude items already in `fixed_items` or `escalated_items`.
 - **Table header**: `QA Agent` instead of `Agent`. Title: `QA Review Items — [ISSUE_ID]`.
 - **Source**: `qa-review` in `workflows/dev-fix.md` context.
-- **`qa_agent`**: pass QA agent name (project-configurable, e.g. safety audit, performance QA, architecture review) to `workflows/dev-fix.md` context.
+- **`qa_agent`**: pass QA agent name to `workflows/dev-fix.md` context.
 - **Route after fix**:
 
    | `files_changed` | `risk_flags` | `scope` | Route |
@@ -442,13 +430,13 @@ Follow § 4 pattern (collect → present → ask user → delegate via `workflow
 
 **Read state**: `.agents/skills/orch/scripts/workflow-state get [ISSUE_ID] .json_paths`
 
-**Skip if** json_paths empty (no reviews ran). Output: "No review items." → § 9
+**Skip if** json_paths empty. Output: "No review items." → § 9
 
-1. **Read all JSON files** from state `json_paths`
+1. **Read all JSON files** from state `json_paths`.
 
 2. **Collect issue suggestions** — items where `category == "issue"` from review JSONs (defer to § 9 audit). Fix suggestions already handled in § 4 / § 7.
 
-3. **Deduplicate** by (location, description) — keep first, note all sources
+3. **Deduplicate** by (location, description) — keep first, note all sources.
 
 4. **Present summary**:
 
@@ -515,12 +503,12 @@ Issue suggestions: [N] items → § 9 audit
 
 1. **Read state**: `.agents/skills/orch/scripts/workflow-state get [ISSUE_ID] .escalated_items`
 
-2. **Extract discovered work** from completion summaries:
+2. **Extract discovered work** from completion summaries — **Linear only**; GitHub/ad-hoc: parse the dev agent's return message for a "Discovered Work" section instead:
    ```bash
    .agents/skills/linear/scripts/linear.sh cache comments list [ISSUE_ID] | jq -r '.[] | select(.body | contains("Discovered Work")) | .body'
    ```
-   If bundled: also extract from each sub-issue via `.agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID] --with-bundle | jq -r '.children[].id'`.
-   Parse "Discovered Work" section bullets into audit items with `origin: "discovered"`, `found_by: [agent]`. Skip if section absent or "(Skip if none)".
+   If bundled: also check sub-issues via `.agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID] --with-bundle | jq -r '.children[].id'`.
+   Parse "Discovered Work" bullets into audit items with `origin: "discovered"`, `found_by: [agent]`. Skip if section absent or "(Skip if none)".
 
    **Filter out workflow-internal handoffs.** Skip any Discovered Work bullet whose leading token after `- ` is one of the markers below. The marker MUST be the first token — anything before it (such as `[Type]`) prevents the match. The canonical bullet form is documented in `dev/workflows/dev-implement.md` § 9:
 
@@ -528,9 +516,9 @@ Issue suggestions: [N] items → § 9 audit
    - `- handoff_to_merge_pr: [process] ... (estimate: N)` — produced by the eventual `merge-pr` step.
    - `- current_workflow_action: [doc] ... (estimate: N)` — item the current `review-pr` cycle will handle itself.
 
-   Match by exact regex `^-\s+(handoff_to_submit_pr|handoff_to_merge_pr|current_workflow_action):\s`. These items must not be routed through the TPM audit — they are already in-flight in the current workflow. Drop them silently from the audit-input file in step 4 below.
+   Match by exact regex `^-\s+(handoff_to_submit_pr|handoff_to_merge_pr|current_workflow_action):\s`. Drop silently from the audit-input file in step 4 — these are already in-flight in the current workflow.
 
-   This filter applies only to Discovered Work bullets parsed from completion summaries. Escalated items and review JSON `category: "issue"` suggestions remain in the audit input unchanged — the orchestrator has already decided those are tracked work.
+   This filter applies only to Discovered Work bullets. Escalated items and `category: "issue"` suggestions remain in the audit input unchanged.
 
 3. **Skip if** no issue suggestions AND escalated_items empty AND no discovered work items. → § 10
 
@@ -551,6 +539,8 @@ Issue suggestions: [N] items → § 9 audit
 
 ## 10. Delegate Pending Children
 
+**Skip if** `TRACKER=github` (no Linear parent/child bundle model). → § 11
+
 1. **Query pending children**:
    ```bash
    .agents/skills/linear/scripts/linear.sh cache issues children [ISSUE_ID] --recursive --pending --format=safe
@@ -563,7 +553,7 @@ Issue suggestions: [N] items → § 9 audit
    .agents/skills/orch/scripts/workflow-state set [ISSUE_ID] pre_delegate_sha "$(git -C [WORKTREE_PATH] rev-parse HEAD)"
    ```
 
-4. **Delegate immediately.** Do **not** surface a Defer/Skip prompt — § 10 is mandatory once § 9 created `make_child` issues under `[ISSUE_ID]`. Delegate regardless of how sub-issues were created or their perceived scope.
+4. **Delegate immediately.** Do **not** surface a Defer/Skip prompt — § 10 is mandatory once § 9 created `make_child` issues under `[ISSUE_ID]`.
 
    If delegation is skipped (user override, escalation), § 10 must FIRST detach every `audit_issues_created` entry from `[ISSUE_ID]` before returning to § 11 — otherwise `merge-pr.md` will cascade-Done them.
 
@@ -599,4 +589,4 @@ Issue suggestions: [N] items → § 9 audit
 
 **If managed**: Return to the parent workflow's next section.
 
-**If standalone**: Session complete — review cycle complete. Summary presented in § 8.
+**If standalone**: Session complete — summary in § 8.

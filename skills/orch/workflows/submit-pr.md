@@ -10,10 +10,7 @@ Push changes, create/update PR, handle bot review, triage PR comments, and trigg
 | `submit-pr [PR#]` | Manage existing PR |
 | (from start-worktree) | Managed lifecycle with caller context |
 
-**Caller context parameters** (via `⤵`):
-- `worktree`: worktree path
-- `lifecycle` (optional): `"managed"` (return to caller at § 7) | `"self"` (default, standalone).
-- `issue_id` (optional): issue tracker ID. If absent, extracted from branch.
+**Caller context parameters** (via `⤵`): `worktree`, `lifecycle` (`"managed"` → return at § 7 | `"self"` default), `issue_id` (extracted from branch if absent).
 
 **If PR# provided:**
 ```bash
@@ -21,14 +18,14 @@ ISSUE_ID=$(.agents/skills/github/scripts/github.sh pr-issue [PR_NUMBER] --format
 WT_PATH=$(.agents/skills/worktree/scripts/worktree path $ISSUE_ID 2>/dev/null || echo ".")
 ```
 
+Resolve `TRACKER` per [Tracker Resolution](../SKILL.md#tracker-resolution).
+
 **If no argument:** Set `WT_PATH` to current directory.
 
 **Standalone init** (`lifecycle: "self"` only):
 ```bash
-# Extract issue from branch if not provided
 ISSUE_ID=$(git rev-parse --abbrev-ref HEAD | grep -oiP "$GH_ISSUE_PATTERN")
 WT_PATH=$(.agents/skills/worktree/scripts/worktree path $ISSUE_ID 2>/dev/null || echo ".")
-# Init workflow state if not exists
 if ! .agents/skills/orch/scripts/workflow-state exists $ISSUE_ID; then
   .agents/skills/orch/scripts/workflow-state init $ISSUE_ID --worktree "$WT_PATH" --branch "$(git rev-parse --abbrev-ref HEAD)"
 fi
@@ -50,7 +47,7 @@ fi
 
 3. **Build PR body** from current workflow state using the template below (omit empty sections).
 
-   **PR body MUST be written to a file before being passed to `pr-create`.** PR bodies frequently contain Markdown backticks (`` `WindowKind` ``, fenced code blocks, validation command lists). Passing them inline through any shell that performs command substitution — including unquoted heredocs in nested workflows — will execute those backticks against the local shell and corrupt the body. Use one of:
+   **PR body MUST be written to a file** — inline bodies with backticks or fenced code blocks corrupt under shell command substitution. Use a quoted heredoc (disables interpolation) or your harness's `Write` tool:
 
    ```bash
    BODY_FILE="[WORKTREE_PATH]/tmp/pr-body-[ISSUE_ID]-$(date +%Y%m%d-%H%M%S).md"
@@ -60,8 +57,6 @@ fi
    - ...
    PR_BODY_EOF
    ```
-
-   The quoted heredoc terminator (`<<'PR_BODY_EOF'`) is what disables backtick interpolation — the unquoted form (`<<PR_BODY_EOF`) does **not** and is forbidden for PR bodies. Alternatively, write the file via your harness's `write` / `Write` tool with the full Markdown as the string content; that path performs no shell interpretation.
 
    ```markdown
    ## Summary
@@ -96,7 +91,10 @@ fi
 
    **No existing PR** → create with `defer-ci` label. Always pass the body via `--body-file`:
    ```bash
+   # Linear
    ISSUE_TITLE=$(.agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID] | jq -r '.title')
+   # GitHub
+   ISSUE_TITLE=$(gh issue view ${ISSUE_ID#issue-} --json title --jq '.title')
 
    .agents/skills/github/scripts/github.sh -C "[WORKTREE_PATH]" pr-create \
      --title "[PREFIX]([ISSUE_ID]): $ISSUE_TITLE" \
@@ -104,13 +102,11 @@ fi
      --label defer-ci
    ```
 
-   **Existing PR** (`$PR_NUM` set) → update body and ensure label. `gh pr edit` also supports `--body-file`:
+   **Existing PR** (`$PR_NUM` set) → update body and ensure label:
    ```bash
    gh pr edit "$PR_NUM" --body-file "$BODY_FILE" 2>/dev/null || true
    .agents/skills/github/scripts/commands/label-add.sh "$PR_NUM" defer-ci --reason "queue for bot review before CI" 2>/dev/null || true
    ```
-
-   **Never** inline a PR body containing backticks or fenced code blocks via `--body "..."`. If you must produce one for tooling that lacks `--body-file`, write to a file and use `gh pr edit "$PR_NUM" --body-file "$BODY_FILE"` rather than constructing the argument in shell.
 
 ---
 
@@ -125,15 +121,7 @@ BOT_VERDICT=$(echo "$WAIT_RESULT" | jq -r '.verdict')
 PENDING_REVIEWERS=$(echo "$WAIT_RESULT" | jq -r '.pending_reviewers | join(", ")')
 ```
 
-Waits for all configured bot reviewers (`$BOT_REVIEWERS` — e.g., `review-bot-a[bot],chatgpt-codex-connector[bot]`). Auto-detects if not configured. Max wait 600s.
-
-`bot-review-wait` understands per-reviewer signaling:
-- **Claude-style** — formal review (APPROVED/CHANGES_REQUESTED) and/or sticky `View job` / `**Claude finished ...**` comment with `### Review Summary` verdict text (`✅ Approved`, `Changes requested`).
-- **Codex-style** — reactions on the PR body / earliest comment (👀 = pending, 👍 = approved) and inline review threads (= changes).
-
-Auto-detection only treats review-signal comments from known review bots as reviewers; unrelated automation comments (for example issue linkbacks) do not block completion. Configure custom comment-only review bots with `BOT_REVIEWERS` / `--reviewers`.
-
-`status=complete` is only emitted when **no reviewer is pending** (verdict will be `approved` or `changes`). If you need a reviewer to be ignored, pass `--skip "bot-login"` or set `BOT_SKIPPED_REVIEWERS`.
+Waits for all configured bot reviewers (`$BOT_REVIEWERS`). Auto-detects if not configured. Max wait 600s. Understands Claude-style (formal review + sticky verdict comment) and Codex-style (reactions + inline threads) signaling. Unrelated automation comments do not block. `status=complete` only when no reviewer is pending. To ignore a reviewer: `--skip "bot-login"` or `BOT_SKIPPED_REVIEWERS`.
 
 **Route result**:
 
@@ -406,7 +394,7 @@ All bot review comments resolved (or max iterations). Verify no late-arriving th
    - `issue_id`: [ISSUE_ID]
    - `pr_number`: [PR_NUMBER]
 
-2. **Post summary** — skip if no fixes AND no issues created. Write the summary to a file first so Markdown backticks and code fences cannot be command-substituted by the shell:
+2. **Post summary** — skip if no fixes AND no issues created. Write to a file first (same backtick hazard as PR body):
    ```bash
    SUMMARY_FILE="[WORKTREE_PATH]/tmp/submit-summary-[ISSUE_ID]-$(date +%Y%m%d-%H%M%S).md"
    mkdir -p "$(dirname "$SUMMARY_FILE")"
@@ -414,6 +402,7 @@ All bot review comments resolved (or max iterations). Verify no late-arriving th
    [filled SUMMARY_CONTENT — see template below]
    SUMMARY_EOF
    .agents/skills/github/scripts/github.sh post-comment [PR_NUMBER] --body-file "$SUMMARY_FILE"
+   # Linear only — GitHub items get linkage via `Closes #N` in the PR body
    .agents/skills/linear/scripts/linear.sh comments create [ISSUE_ID] --body "$(cat "$SUMMARY_FILE")"
    ```
 
@@ -455,7 +444,7 @@ All bot review comments resolved (or max iterations). Verify no late-arriving th
 
    | Choice | Action |
    |--------|--------|
-   | Merge | `⤵ workflows/merge-pr.md [PR_NUMBER] § 1-7 → end` |
+   | Merge | `⤵ workflows/merge-pr.md [PR_NUMBER] § 1-8 → end` |
    | Skip | → end |
 
 ---

@@ -1,6 +1,6 @@
 # CI Fix Workflow
 
-Fix CI failures by analyzing logs and routing to appropriate agents.
+Analyze CI failures and route to appropriate agents for fixing.
 
 ## Inputs
 
@@ -49,11 +49,7 @@ If multiple failures and no argument, present:
 .agents/skills/github/scripts/github.sh ci-logs [PR_NUMBER]
 ```
 
-Returns:
-- **Job name**: build job identifier
-- **Error type**: fmt, lint, test, build (auto-classified)
-- **Run ID**: For further investigation
-- **Failed logs**: Last 100 lines of failure output
+Returns: job name, error type (fmt/lint/test/build, auto-classified), run ID, last 100 lines of failure output.
 
 ## 3. Classify & Route
 
@@ -102,9 +98,7 @@ Infer agent type from component paths or issue labels.
 
 **Detect team context**: `.agents/skills/orch/scripts/workflow-state exists [ISSUE_ID] && TEAM=$(.agents/skills/orch/scripts/workflow-state get [ISSUE_ID] .team_name)`
 
-Delegate to `[AGENT]` with the prompt below. Wait for completion.
-
-Follow exactly, fill placeholders, add nothing else. Omit lines/sections with empty placeholders.
+Delegate to `[AGENT]`. Wait for completion. Fill placeholders, omit empty lines/sections.
 
 <delegation_format>
 CI failure on PR #[PR_NUMBER] ([BRANCH_NAME]).
@@ -156,7 +150,7 @@ For `queue` argument (merge queue failures). May need to dequeue PR while fixing
    WT_PATH=$(.agents/skills/worktree/scripts/worktree create [ISSUE_ID] "[DRAFT_BRANCH]" --pr [DRAFT_PR_NUMBER])
    ```
 
-5. **Delegate to architecture review agent**: Follow exactly, fill placeholders, add nothing else. Omit lines/sections with empty placeholders.
+5. **Delegate to architecture review agent**: Fill placeholders, omit empty lines/sections.
 
 <delegation_format>
 Merge queue CI failure - integration issue across stacked PRs.
@@ -184,10 +178,11 @@ After fix is pushed:
 .agents/skills/orch/scripts/ci-wait [PR_NUMBER]
 ```
 
-**Post to issue tracker** (if issue found in branch name):
+**Post to issue tracker** — **Linear only** (GitHub items: the PR conversation already records the fix):
 ```bash
 ISSUE=$(.agents/skills/github/scripts/github.sh pr-issue [PR_NUMBER] --format=text)
-[ -n "$ISSUE" ] && .agents/skills/linear/scripts/linear.sh comments create "$ISSUE" --body "CI Fix: [ERROR_TYPE] → [FIX_DESCRIPTION]"
+TRACKER=linear; [[ "$ISSUE" == issue-* ]] && TRACKER=github
+[[ -n "$ISSUE" && "$TRACKER" == "linear" ]] && .agents/skills/linear/scripts/linear.sh comments create "$ISSUE" --body "CI Fix: [ERROR_TYPE] → [FIX_DESCRIPTION]"
 ```
 
 ## 6. Present Results
@@ -227,4 +222,4 @@ ISSUE=$(.agents/skills/github/scripts/github.sh pr-issue [PR_NUMBER] --format=te
 
 **If managed**: Return to the parent workflow's next section.
 
-**If standalone**: Session complete — CI fix results presented in § 6.
+**If standalone**: Session complete.

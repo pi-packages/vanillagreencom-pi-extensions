@@ -35,15 +35,10 @@ If quick check finds high-severity issues (conflicts): Show issues, abort early.
 ### 2.2 Run Full Verification (if quick check passes)
 
 ```bash
-echo "Running full verification (merge + build + test)..."
 VERIFY=$(.agents/skills/github/scripts/github.sh pr-cross-check [PR_NUMBERS] --verify --json)
 ```
 
-**Full verification does:**
-1. Creates temp worktree from main
-2. Merges PRs sequentially
-3. Runs project build + test commands
-4. Reports results + cleans up
+Creates temp worktree from main, merges PRs sequentially, runs build + test, reports + cleans up.
 
 ### 2.3 Handle Results
 
@@ -69,18 +64,14 @@ CHECK=$(.agents/skills/github/scripts/github.sh pr-merge [PR_NUMBER] --check)
 
 ### 3.1 Resolve transient "unknown" before prompting
 
-If `issues` contains an entry starting with `unknown:` (GitHub still computing
-mergeable status), do NOT prompt the user — wait for resolution and re-check:
+If `issues` contains an entry starting with `unknown:` (GitHub still computing mergeable status), wait and re-check — do NOT prompt the user:
 
 ```bash
 .agents/skills/github/scripts/github.sh await-mergeable [PR_NUMBER]
 CHECK=$(.agents/skills/github/scripts/github.sh pr-merge [PR_NUMBER] --check)
 ```
 
-`await-mergeable` polls `state` and `mergeStateStatus` (NOT `mergeable` —
-that field stays UNKNOWN permanently after merge and will hang forever).
-Returns when GitHub has computed a real merge state, or exits 124 on timeout.
-On timeout, surface the failure to the user instead of looping further.
+`await-mergeable` polls `state` + `mergeStateStatus` (never `mergeable` — stays UNKNOWN after merge, hangs forever). Exit 124 on timeout → surface to user.
 
 ### 3.2 Parse and act
 
@@ -111,6 +102,7 @@ PR #N ready with warnings:
 
 ```bash
 ISSUE=$(.agents/skills/github/scripts/github.sh pr-issue [PR_NUMBER] --format=text)
+TRACKER=linear; [[ "$ISSUE" == issue-* ]] && TRACKER=github
 [ -n "$ISSUE" ] && .agents/skills/worktree/scripts/worktree exists "$ISSUE"
 ```
 
@@ -130,7 +122,7 @@ Linear cascades the parent's Done state to all children. Any `make_child`
 issue still pending under `[ISSUE]` will be silently flipped to Done on
 merge. Detach them first.
 
-**Skip if** no `[ISSUE]` extracted in § 4.1.
+**Skip if** no `[ISSUE]` extracted in § 4.1, or `TRACKER=github` (no cascade — Linear only).
 
 1. **List pending children** and partition by `state_type`:
    ```bash
@@ -198,9 +190,9 @@ merge. Detach them first.
 
 ## 5. Execute Merge
 
-**Note**: Some harnesses reset cwd after each shell call. Use `cd && ...` chains or absolute paths — standalone `cd` does not persist.
+**Note**: Some harnesses reset cwd per shell call — use `cd && ...` chains or absolute paths.
 
-1. **Resolve main repo root** (needed when session runs from inside a worktree):
+1. **Resolve main repo root** (needed when running from a worktree):
    ```bash
    MAIN_REPO_ROOT=$(git rev-parse --git-common-dir | sed 's|/\.git$||')
    [[ "$MAIN_REPO_ROOT" == ".git" ]] && MAIN_REPO_ROOT="$PWD"
@@ -212,16 +204,13 @@ merge. Detach them first.
    (cd [MAIN_REPO_ROOT] && .agents/skills/github/scripts/github.sh pr-merge [PR_NUMBER] [--force])
    ```
 
-   If exit code is `75` (queued for auto-merge), the merge will fire when CI
-   and branch protection clear. Wait before downstream sync steps:
+   Exit `75` = queued for auto-merge (fires when CI + branch protection clear). Wait before sync:
    ```bash
    (cd [MAIN_REPO_ROOT] && .agents/skills/github/scripts/github.sh await-mergeable [PR_NUMBER])
    ```
-   Do NOT poll `gh pr view --json mergeable` inline — the field stays UNKNOWN
-   permanently after merge and the loop never terminates. Always use the
-   `await-mergeable` subcommand.
+   Never poll `gh pr view --json mergeable` — stays UNKNOWN after merge, loops forever.
 
-3. **Sync issue tracker cache** (merged PRs close issues via magic words — cache must reflect done states):
+3. **Sync issue tracker cache** — **Linear only** (merged PRs close issues via magic words; cache must reflect done states):
    ```bash
    (cd [MAIN_REPO_ROOT] && .agents/skills/linear/scripts/linear.sh sync --reconcile)
    ```
@@ -230,13 +219,9 @@ merge. Detach them first.
    ```bash
    (cd [MAIN_REPO_ROOT] && for remote in $(git remote); do git fetch "$remote" --prune || true; done && git pull --rebase && git worktree prune)
    ```
-   **`--rebase`**: Prevents merge bubble commits when local main has direct commits while PRs land on remote.
+   `--rebase` prevents merge-bubble commits when local main diverged.
 
-5. **Sweep stale branches & worktrees** (after all PRs merged and synced):
-
-   Default cleanup is scoped to the current PR's issue/worktree only. Do not
-   enumerate unrelated local branches or sibling worktrees during a single PR
-   merge.
+5. **Sweep stale branches & worktrees** (after all PRs merged and synced). Default: scoped to current PR only — do not enumerate unrelated branches or sibling worktrees.
 
    ### 5a. Scoped sweep (default)
 
@@ -252,10 +237,7 @@ merge. Detach them first.
 
    ### 5b. Project maintenance sweep (explicit only)
 
-   Run this section only for `merge-pr all` or when the user explicitly asks
-   for project cleanup.
-
-   Find local branches whose remote PRs are already merged/closed:
+   Run only for `merge-pr all` or explicit user request. Find local branches whose remote PRs are merged/closed:
    ```bash
    (cd [MAIN_REPO_ROOT] && git branch --format='%(refname:short)' | grep -v '^main$')
    ```
@@ -278,13 +260,11 @@ merge. Detach them first.
    ```
    If orphans found: Ask user before `rm -rf`.
 
-6. **Cleanup current worktree** (if cleanup requested in § 4.1 — **must be last**, destroys session cwd):
+6. **Cleanup current worktree** (if requested in § 4.1 — **must be last**, destroys session cwd):
    ```bash
    (cd [MAIN_REPO_ROOT] && .agents/skills/worktree/scripts/worktree remove "[ISSUE_ID]")
    ```
-   **Session launched from worktree**: If this prints `SESSION CWD DESTROYED`, the shell cwd no longer exists. Present § 7 results immediately, then tell the user to end the session. No further shell calls will succeed.
-
-   Skip if cleanup was not requested.
+   If this prints `SESSION CWD DESTROYED`: present § 7 immediately, tell user to end the session — no further shell calls will succeed. Skip if cleanup not requested.
 
 ## 6. Post-Merge Quality Review (overlapping files only)
 
@@ -298,12 +278,7 @@ For each file flagged as overlapping in § 2.1:
    ```
    Where `PRE_MERGE_SHA` is the main branch commit before the first merge in § 5.
 
-2. **Read the full merged file** and review for:
-   - Duplicate or near-duplicate imports/usings
-   - Methods/blocks from different PRs that should be reordered for logical grouping
-   - Redundant error handling (both PRs added similar guards)
-   - Inconsistent patterns (one PR uses pattern A, another uses pattern B for the same concern)
-   - Dead code introduced by the combination (PR A adds a helper, PR B adds the same inline)
+2. **Read the full merged file** and review for: duplicate imports, reordering needs, redundant error guards, inconsistent patterns, dead code from the combination.
 
 3. **Act on findings**:
    - **Auto-fix**: Duplicate imports, obvious ordering issues, trivial style inconsistencies → fix directly, commit as `fix(merge): clean up overlapping changes from PRs #X, #Y`

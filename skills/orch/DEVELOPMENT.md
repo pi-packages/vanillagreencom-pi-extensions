@@ -1,26 +1,26 @@
-# Orchestration — development notes
+# Orchestration — Development Notes
 
-Implementation details and contributor notes for the orch skill. End-user setup and command reference live in [`README.md`](./README.md); AI / agent-facing instructions live in [`SKILL.md`](./SKILL.md).
+Implementation details and contributor notes. End-user setup: [`README.md`](./README.md). Agent-facing instructions: [`SKILL.md`](./SKILL.md).
 
-## GitHub auth fallback
+## GitHub Auth Fallback
 
-`bot-review-wait` and `ci-wait` share `scripts/lib/gh-auth.sh::orch_sanitize_gh_env` to handle the case where a stale `GH_TOKEN` / `GITHUB_TOKEN` masks working `gh` keyring auth. The ladder is:
+`bot-review-wait` and `ci-wait` share `scripts/lib/gh-auth.sh::orch_sanitize_gh_env`. Four-step ladder:
 
-1. **Sanitize.** If env tokens are set but `gh auth status` fails, run `env -u GH_TOKEN -u GITHUB_TOKEN gh auth status`. If that succeeds, warn on stderr and `unset` the env tokens.
-2. **Bot-token load.** If `GH_TOKEN` ends up empty, load a valid `GH_BOT_TOKEN` from `.env.local`/`.env`. `op://` references resolve via `op read` when the 1Password CLI is available.
-3. **Fallback retry.** If auth still fails, drop the env tokens again and retry the bot-token load. Stale env tokens plus a broken keyring still recover when `.env.local` provides a valid bot token.
-4. **Hard fail.** If no path works, exit `3` with a clear diagnostic so callers do not poll until timeout against an empty output.
+1. **Sanitize.** Env tokens set but `gh auth status` fails → try `env -u GH_TOKEN -u GITHUB_TOKEN gh auth status`. If that succeeds, warn on stderr and unset.
+2. **Bot-token load.** `GH_TOKEN` empty → load `GH_BOT_TOKEN` from `.env.local`/`.env`. `op://` references resolve via `op read`.
+3. **Fallback retry.** Auth still fails → drop env tokens, retry bot-token load. Recovers when `.env.local` has a valid token despite broken keyring.
+4. **Hard fail.** No path works → exit `3` with diagnostic. Callers do not poll against empty output.
 
 ## Tests
 
-```
+```bash
 bash skills/orch/tests/run-all.sh
 # Filter:
 bash skills/orch/tests/run-all.sh session_init
 ```
 
-Tests stage isolated repos/worktrees with parametrized CLI stubs on `PATH`. The auth suites exercise stale-token sanitize, keyring fallback, `.env.local` `GH_BOT_TOKEN` fallback, and the hard "no working auth path" exit (code `3`); the session-init suite exercises worktree Linear auth diagnostic preservation. Suites:
+Tests stage isolated repos/worktrees with parametrized CLI stubs on `PATH`. Each `tests/*.sh` is self-contained and prints `pass: N fail: M`. Suites:
 
-- `bot_review_wait.sh` — review-wait state machine.
+- `bot_review_wait.sh` — review-wait state machine + auth ladder.
 - `ci_wait.sh` — CI-wait state machine + auth ladder.
-- `session_init.sh` — worktree session-init auth reporting.
+- `session_init.sh` — worktree Linear auth diagnostic preservation.

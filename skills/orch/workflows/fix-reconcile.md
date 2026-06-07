@@ -1,12 +1,14 @@
 # Fix Reconciliation
 
-Batch workflow to check if applied fixes address existing open issues. Processes **all fixes at once**.
+Batch workflow — checks if applied fixes address existing open issues. Processes **all fixes at once**.
 
 **Entry points**: start-worktree § 5.1, submit-pr § 6, review-pr-comments § 7.2
 
-**Always invoke** — do not skip based on judgment. § 1 gathers fixes from workflow-state and skips internally if none exist.
+**Always invoke** — § 1 skips internally if no fixes exist. Do not skip based on judgment.
 
-**Execute**: § 1 → § 2 → § 3 → § 4 → § 5 → § 6 → § 7 → § 8
+**Skip if** `TRACKER=github` ([Tracker Resolution](../SKILL.md#tracker-resolution)) — matches fixes against Linear issues only. → § 9
+
+**Execute**: § 1 → § 2 → § 3 → § 4 → § 5 → § 6 → § 7 → § 8 → § 9
 
 ## Inputs
 
@@ -75,7 +77,7 @@ results: [
   ...
 ]
 ```
-No user display needed in this step. Proceed to § 5 for preview display.
+No user display in this step — § 5 handles preview.
 
 ## 5. Present Preview
 

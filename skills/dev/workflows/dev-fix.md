@@ -69,7 +69,7 @@ Related improvements OK — unrelated changes should become separate issues.
 
 **Skip if** the issue does not have the `design` label, or the fix does not touch UI code.
 
-Use visual QA skills as necessary to validate that the fix renders correctly. Focus on what the fix changes — not the full checklist.
+Use visual QA skills to validate that the fix renders correctly. Focus on what the fix changes — not the full checklist.
 
 ### 4.2 Commit
 
@@ -98,10 +98,10 @@ If validation failures exist, append: `[validate: FAILING_CHECK]`
 - Spent multiple cycles on something a rule could prevent
 - Discovered optimal approaches that differ from documented patterns
 
-**Action**: Update the relevant documentation. Three options depending on what you learned:
+**Action**: Update the relevant documentation:
 
 - **Architecture docs** → Update if patterns, APIs, or documented behavior changed.
-- **Project config** → Add to `./vstack.toml` (`[skill-instructions]` for skill-level context, `[agent-additional-instructions]` for persistent agent rules, `[agent-launch-instructions]` for launch/startup instructions). Run `vstack refresh` to apply.
+- **Project config** → Add to `./vstack.toml` (`[skill-instructions]`, `[agent-additional-instructions]`, or `[agent-launch-instructions]`). Run `vstack refresh` to apply.
 
 Criteria: Would this save 5+ minutes in a future session? If yes, update. One surgical addition per lesson. No verbose examples.
 

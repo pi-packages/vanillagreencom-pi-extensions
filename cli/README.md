@@ -28,5 +28,5 @@ cargo run -- add .. --all --copy
 
 The CLI does not run skill or extension tests. Each test surface lives next to the code it covers:
 
-- Orch shell tests: [`../skills/orch/README.md#tests`](../skills/orch/README.md#tests)
+- Orch shell tests: [`../skills/orch/DEVELOPMENT.md#tests`](../skills/orch/DEVELOPMENT.md#tests)
 - Pi extension Bun tests: each `pi-extensions/<name>/tests/` directory

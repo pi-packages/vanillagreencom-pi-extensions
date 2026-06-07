@@ -4,9 +4,7 @@ Guidelines for categorizing review findings as fix (apply in PR) vs issue (track
 
 ## Verification Prerequisite
 
-Before classifying any comment as noise, stale, or not actionable — read the actual file(s) and location(s) it references. Verify against current code. A comment is only stale if the code proves it so; never infer staleness from comment text, age, or assumptions about what prior fixes addressed.
-
-**No file read = no dismissal.** The cost of reading a file is low; the cost of wrongly dismissing a valid comment is a bug shipped to production.
+Before classifying any comment as noise, stale, or not actionable — read the actual file(s) it references and verify against current code. A comment is only stale if the code proves it so. **No file read = no dismissal.**
 
 ## Decision Flow
 
@@ -30,9 +28,9 @@ For each potential suggestion, evaluate in order:
 
 ### When Uncertain
 
-- About category: prefer `fix` for related suggestions
-- About relevance: prefer `issue`
-- Can't be a fix and not specific enough for an issue → omit
+- Category uncertain: prefer `fix` (if related)
+- Relevance uncertain: prefer `issue`
+- Neither fits: omit
 
 ## Category Signals
 

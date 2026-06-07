@@ -1,8 +1,6 @@
 # Codebase Review Workflow
 
-Ad-hoc full-codebase reviewer fanout. No PR, no issue, no diff, no fix delegation.
-
-Use for early-stage projects when the user asks for a whole-codebase review.
+Ad-hoc full-codebase reviewer fanout. No PR, no issue, no diff, no fix delegation. Use for whole-codebase reviews.
 
 ## Inputs
 
@@ -41,11 +39,7 @@ Enumerate every installed `reviewer-*` agent from active harness registries:
 AGENTS=$(.agents/skills/orch/scripts/list-review-agents)
 ```
 
-If no agents are found, report `No reviewer-* agents installed; cannot run codebase review` and **END**.
-
-Use the full list. Do not path-filter; this workflow is intentionally a full fanout.
-
----
+If no agents are found, report `No reviewer-* agents installed; cannot run codebase review` and **END**. Use the full list — do not path-filter.
 
 ## 3. Delegate Reviewers
 
@@ -59,19 +53,13 @@ Scope: Whole codebase. Inspect tracked, non-generated project code files, plus t
 Exclusions: generated artifacts, dependency/vendor dirs, build outputs, binary assets, harness mirrors, and lockfiles unless your review domain specifically requires them.
 </delegation_format>
 
----
-
 ## 4. Collect Results
 
-Wait for all review agents to complete. Extract `Verdict:` and `File:` from each agent return.
-
-If an agent fails to return the expected format, include it in the final table as `unresponsive` and continue. Do not synthesize findings.
-
----
+Wait for all review agents to complete. Extract `Verdict:` and `File:` from each return. If an agent fails to return the expected format, include it as `unresponsive` and continue. Do not synthesize findings.
 
 ## 5. Present Findings
 
-Read all returned JSON files. Overall verdict is `action_required` if any reviewer returned blockers, otherwise `pass`.
+Read all returned JSON files. Overall verdict: `action_required` if any reviewer returned blockers, `pass` otherwise.
 
 Present one concise report:
 

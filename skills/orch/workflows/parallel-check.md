@@ -1,6 +1,6 @@
 # Parallel Work Check
 
-Check whether multiple issues are safe to hand off at the same time. This stores only cached analysis; it does not launch or monitor sessions.
+Check whether multiple issues are safe to hand off simultaneously. Stores cached analysis only; does not launch or monitor sessions.
 
 ## Inputs
 
@@ -35,11 +35,11 @@ Collect title, body/description, labels, dependencies, files/modules mentioned, 
 
 ## 3. Analyze Coupling
 
-Check:
+Check for:
 - Direct dependencies between items.
 - Shared blockers or pending research.
 - Same agent/domain assignment.
-- Mentioned file/module overlap.
+- File/module overlap.
 - Shared public types, APIs, schema, migrations, or build manifests.
 - Existing worktrees or open PRs.
 

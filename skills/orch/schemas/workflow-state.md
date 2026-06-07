@@ -1,6 +1,6 @@
 # Workflow State Schema
 
-Persistent state file for orch workflows. Initialized during session start and designed to survive context compaction.
+Persistent state file for orch workflows. Survives context compaction.
 
 **Location**: `$ORCH_STATE_DIR/workflow-state-[ISSUE_ID].json` (default: `tmp/`)
 
@@ -19,7 +19,7 @@ Persistent state file for orch workflows. Initialized during session start and d
     "backend": { "status": "active", "agent_id": "agent_abc123", "spawned_at": "2026-03-19T10:00:00Z" },
     "frontend": { "status": "closed", "agent_id": "agent_def456", "spawned_at": "2026-03-19T09:00:00Z" }
   },
-  "review_agents": ["security-review", "test-review", "doc-review"],  // example — actual agents are project-configured
+  "review_agents": ["security-review", "test-review", "doc-review"],  // project-configured
   "review_agent_ids": {
     "security-review": "agent_rev123",
     "test-review": "agent_rev456",
@@ -28,6 +28,9 @@ Persistent state file for orch workflows. Initialized during session start and d
   "pre_delegate_sha": "abc123f",
   "skip_qa": false,
   "cycles": 0,
+  "submit_cycles": 0,
+  "review_delegated_at": 1769600000,
+  "review_skipped": "tiny-docs",
   "json_paths": [
     "tmp/review-security-20260128-100000.json"
   ],
@@ -56,7 +59,9 @@ Persistent state file for orch workflows. Initialized during session start and d
     "iterations": 0,
     "fixes": [],
     "issues_created": [],
-    "skipped": []
+    "skipped": [],
+    "replied": [],
+    "ci_gate_rerouted": false
   }
 }
 ```
@@ -74,20 +79,23 @@ Persistent state file for orch workflows. Initialized during session start and d
 | `qa_labels` | string[] | QA trigger labels from dev return |
 | `child_sessions` | object | Per-agent lifecycle: `{agent: {status, agent_id, spawned_at}}` |
 | `review_agents` | string[] | Reviewer names currently expected to stay alive across fix/re-review cycles |
-| `review_agent_ids` | object | Reviewer session IDs keyed by reviewer name. Reuse these before spawning `{"name":"id",...}` |
+| `review_agent_ids` | object | Reviewer session IDs keyed by name — reuse before spawning `{"name":"id",...}` |
 | `pre_delegate_sha` | string | HEAD before delegation — scopes re-review diffs |
 | `skip_qa` | boolean | Skip QA for re-cycle (cleared after routing) |
 | `cycles` | number | Review/fix cycle count |
+| `submit_cycles` | number | Submit-PR iteration count (bot review/CI loops) |
+| `review_delegated_at` | number | Epoch seconds of last review delegation — gates the § 3 filesystem-fallback watchdog |
+| `review_skipped` | string | Set to `tiny-docs` when the user takes the tiny/docs-only review skip path |
 | `json_paths` | string[] | Accumulated review JSON file paths |
 | `fixed_items` | object[] | Blockers successfully fixed |
 | `escalated_items` | object[] | Blockers that couldn't be fixed |
 | `audit_issues_created` | string[] | Issue IDs created by audit |
 | `pr_review_baseline` | object | Baseline for PR comment loop detection |
-| `pr_comment_review` | object | PR comment review tracking |
+| `pr_comment_review` | object | PR comment review tracking: `iterations`, `fixes[]`, `issues_created[]`, `skipped[]`, `replied[]` (thread IDs answered), `ci_gate_rerouted` (CI ran early once) |
 
 ## CLI
 
-All operations use `.agents/skills/orch/scripts/workflow-state`. Run `.agents/skills/orch/scripts/workflow-state help` for full usage.
+All operations use `.agents/skills/orch/scripts/workflow-state` (run with `help` for full usage).
 
 ```bash
 .agents/skills/orch/scripts/workflow-state init PROJ-123 --agent backend --worktree /tmp/wt
