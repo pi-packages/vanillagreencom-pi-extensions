@@ -158,7 +158,7 @@ trading-design = "Dark theme, green/red accents."
 | `sonnet` | `sonnet` | `openai/gpt-5.5` | `gpt-5.5` | `openai-codex/gpt-5.5` |
 | `haiku` | `haiku` | `openai/gpt-5.5` | `gpt-5.5` | `openai-codex/gpt-5.5` |
 
-Each canonical agent declares its own `effort:` in frontmatter. Harnesses write it verbatim — no cross-harness translation, no derivation from `model`. Valid values: `low`, `medium`, `high`, `xhigh` (and Claude additionally accepts `max`). Pi appends the effort to its model id as `:<effort>` when set; Pi itself has no separate `max` thinking level, so provider metadata or bridge-specific overrides must map `xhigh` to provider-specific values when needed. Keep Claude Code `opus` mapped to `opus[1m]` as the future-moving alias; pin `claude-opus-4-8[1m]` only when a fixed version is required.
+Each canonical agent declares its own `effort:` in frontmatter. Harnesses write it verbatim after per-harness frontmatter overrides are applied — no cross-harness translation, no derivation from `model`. Valid values: `low`, `medium`, `high`, `xhigh` (and Claude additionally accepts `max`). Pi appends the effort to its model id as `:<effort>` when set; Pi itself has no separate `max` thinking level, so provider metadata or bridge-specific overrides must map `xhigh` to provider-specific values when needed. Keep Claude Code `opus` mapped to `opus[1m]` as the future-moving alias; pin `claude-opus-4-8[1m]` only when a fixed version is required.
 
 ## Per-Harness Tool Overrides
 

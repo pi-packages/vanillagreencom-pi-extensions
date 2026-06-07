@@ -123,8 +123,8 @@ reviewer = ["reviewer"]
 # fields fall through to the canonical agent .md frontmatter.
 #
 # Claude accepts `max` effort on Opus 4.8/4.7 for the deepest reasoning. Use it
-# for engineer + research roles where wall-clock cost is acceptable; other
-# Claude agents inherit `xhigh` from each agent's canonical `effort:` field.
+# for engineer + research roles where wall-clock cost is acceptable. Scout uses
+# a Claude-only high override while other harnesses keep medium reasoning.
 [agent-frontmatter.claude]
 iced = { effort = "max" }
 
@@ -133,3 +133,5 @@ planner = { effort = "max" }
 researcher = { effort = "max" }
 
 rust = { effort = "max" }
+
+scout = { effort = "high" }

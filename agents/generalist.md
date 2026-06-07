@@ -1,9 +1,9 @@
 ---
 name: generalist
 description: General-purpose agent for documentation, cleanup, stale references, code organization, and miscellaneous maintenance tasks.
-model: sonnet
+model: opus
 role: engineer
-effort: high
+effort: xhigh
 color: green
 ---
 
