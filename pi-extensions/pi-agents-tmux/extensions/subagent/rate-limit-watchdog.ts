@@ -7,8 +7,7 @@
  * session/usage-limit error payload), this watchdog:
  *
  *   1. Picks a retry-at delay from the shared decideRateLimitRetry
- *      decision module in flightdeck-core (so the bash subscriber and
- *      this layer share the same backoff ladder + canonical detection).
+ *      decision module (shared backoff ladder + canonical detection).
  *      Claude session/usage prose only classifies the event; live usage
  *      endpoint data wins scheduling when available, SDK reset/retry
  *      fields win next, and prose reset parsing is marked degraded.

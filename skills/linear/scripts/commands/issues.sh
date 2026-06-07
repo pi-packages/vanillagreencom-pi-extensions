@@ -41,61 +41,9 @@ linear_mutation_success() {
     [ "$(echo "$normalized" | jq -r '.success // false' 2>/dev/null || echo false)" = "true" ]
 }
 
-emit_linear_issue_activity() {
-    local type="$1"
-    local severity="$2"
-    local normalized="$3"
-    linear_mutation_success "$normalized" || return 0
-    local identifier title state state_type summary details
-    identifier=$(echo "$normalized" | jq -r '.identifier // .id // .data.issue.identifier // empty' 2>/dev/null || true)
-    title=$(echo "$normalized" | jq -r '.data.issue.title // empty' 2>/dev/null || true)
-    state=$(echo "$normalized" | jq -r '.data.issue.state.name // empty' 2>/dev/null || true)
-    state_type=$(echo "$normalized" | jq -r '.data.issue.state.type // empty' 2>/dev/null || true)
-    summary="$type"
-    [ -n "$identifier" ] && summary="$identifier ${type#linear.}"
-    details=$(jq -cn --arg title "$title" --arg state "$state" --arg state_type "$state_type" '{title: $title, state: $state, state_type: $state_type}')
-    # vstack#71 W4 Phase 7 follow-up: --linear-id always carries the Linear
-    # identifier; --issue-id only when an external Flightdeck entry id is
-    # in scope. Aliasing both to the Linear id diverges once non-Linear
-    # issue sources exist.
-    local emit_args=(
-        --severity "$severity"
-        --importance normal
-        --summary "$summary"
-        --linear-id "$identifier"
-        --details-json "$details"
-    )
-    if [ -n "${FLIGHTDECK_ENTRY_ID:-}" ]; then
-        emit_args+=(--issue-id "$FLIGHTDECK_ENTRY_ID")
-    fi
-    bash "$SCRIPT_DIR/../_activity-emit.sh" "$type" "${emit_args[@]}" || true
-}
+emit_linear_issue_activity() { return 0; }
 
-emit_linear_relation_activity() {
-    local normalized="$1"
-    linear_mutation_success "$normalized" || return 0
-    local relation_id relation_type issue related summary details
-    relation_id=$(echo "$normalized" | jq -r '.identifier // .data.issueRelation.id // empty' 2>/dev/null || true)
-    relation_type=$(echo "$normalized" | jq -r '.data.issueRelation.type // empty' 2>/dev/null || true)
-    issue=$(echo "$normalized" | jq -r '.data.issueRelation.issue.identifier // empty' 2>/dev/null || true)
-    related=$(echo "$normalized" | jq -r '.data.issueRelation.relatedIssue.identifier // empty' 2>/dev/null || true)
-    summary="Linear relation created"
-    [ -n "$issue" ] && [ -n "$related" ] && summary="Linear relation created: $issue → $related"
-    details=$(jq -cn --arg relation_id "$relation_id" --arg relation_type "$relation_type" --arg issue "$issue" --arg related "$related" '{relation_id: $relation_id, relation_type: $relation_type, issue: $issue, related_issue: $related}')
-    # vstack#71 W4 Phase 7 follow-up: --linear-id always; --issue-id only
-    # when Flightdeck binds an external entry id.
-    local rel_args=(
-        --severity info
-        --importance normal
-        --summary "$summary"
-        --linear-id "$issue"
-        --details-json "$details"
-    )
-    if [ -n "${FLIGHTDECK_ENTRY_ID:-}" ]; then
-        rel_args+=(--issue-id "$FLIGHTDECK_ENTRY_ID")
-    fi
-    bash "$SCRIPT_DIR/../_activity-emit.sh" linear.relation_created "${rel_args[@]}" || true
-}
+emit_linear_relation_activity() { return 0; }
 
 linear_update_activity_type() {
     local normalized="$1"
@@ -130,7 +78,7 @@ Actions:
   add-relation   Create a relation between issues
   remove-relation Delete an issue relation
 
-Workflow Actions (composite operations for linear-dev):
+Workflow Actions (composite operations for dev):
   activate       Claim issue: set "In Progress"
   block          Block issue: add label + relation + comment
   unblock        Unblock issue: remove label + comment
@@ -238,7 +186,7 @@ Examples:
   issues.sh list --project-id <uuid> --with-relations   # Single query with all relations
   issues.sh bulk-get PROJ-184 PROJ-185 PROJ-186 PROJ-187    # Multiple issues with full details
 
-  # Workflow actions (linear-dev shortcuts)
+  # Workflow actions (dev shortcuts)
   issues.sh activate PROJ-42 --agent rust        # Claim issue for work
   issues.sh block PROJ-42 --by PROJ-41 --reason "Need market data types first"
   issues.sh unblock PROJ-42                      # Resume after blocker resolved

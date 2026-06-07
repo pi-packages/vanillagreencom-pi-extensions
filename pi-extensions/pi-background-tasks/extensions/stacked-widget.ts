@@ -7,7 +7,7 @@ export type MiniDashboardComponent = Component & { dispose?(): void };
 export type MiniDashboardFactory = (tui: TUI, theme: Theme) => MiniDashboardComponent;
 
 export const MINI_DASHBOARD_RANK = {
-	FLIGHTDECK: 10,
+	ORCH: 10,
 	TASKS: 20,
 	AGENTS: 30,
 	BACKGROUND_TASKS: 40,

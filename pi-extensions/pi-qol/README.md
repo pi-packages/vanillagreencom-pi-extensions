@@ -181,7 +181,7 @@ Idle thresholds (token threshold, idle delay, fixed token limit, percent limit) 
 
 ### Long-session budget guard
 
-For autonomous/Flightdeck-style runs the agent never goes idle, so idle compaction may never fire and the transcript can grow until provider/buffer limits hit. The budget guard runs on `agent_end` (not idle) and starts a compaction immediately when context usage crosses a percent of the model window or an absolute token limit. It fires once per threshold crossing — repeated `agent_end` events above the same threshold do not retrigger it, and the crossing key resets on a successful compaction or on a transient compaction failure (so the next `agent_end` retries).
+For long autonomous runs the agent may not go idle, so idle compaction may never fire and the transcript can grow until provider/buffer limits hit. The budget guard runs on `agent_end` (not idle) and starts a compaction immediately when context usage crosses a percent of the model window or an absolute token limit. It fires once per threshold crossing — repeated `agent_end` events above the same threshold do not retrigger it, and the crossing key resets on a successful compaction or on a transient compaction failure (so the next `agent_end` retries).
 
 | Setting | What it does | Default |
 | --- | --- | --- |
@@ -196,7 +196,7 @@ When the budget guard fires it injects a sentinel into the compaction request so
 
 While budget-guard compaction is running, QOL keeps a persistent status line above the prompt (and in the normal status footer when the compact statusline is disabled). After Pi prints the compacted-summary block, the line changes to `QOL budget guard finalizing compaction…` until `ctx.compact()` reports completion, so long reload/finalization gaps do not look frozen.
 
-Recommended values for autonomous/Flightdeck runs:
+Recommended values for long autonomous runs:
 
 - Keep **Long-session budget guard** on. Lower **Budget guard percent** to `75` if your provider buffers are tight.
 - Optionally turn **Custom compaction summaries** on so user-initiated and idle compactions also use the QOL chunked summarizer + handoff artifact. (Budget-guard-triggered compactions always use them regardless of this setting.)

@@ -161,16 +161,10 @@ pub fn prefixed_skill_matches(agent_name: &str, available: &[String]) -> Vec<Str
 
 fn default_role_skills(agent_role: &AgentRole) -> &'static [&'static str] {
     match agent_role {
-        AgentRole::Reviewer => &["linear-dev"],
+        AgentRole::Reviewer => &["dev"],
         AgentRole::Analyst => &["linear", "github"],
-        AgentRole::Engineer => &["linear-dev", "github", "worktree"],
-        AgentRole::Manager => &[
-            "project-management",
-            "linear",
-            "linear-dev",
-            "github",
-            "worktree",
-        ],
+        AgentRole::Engineer => &["dev", "github", "worktree"],
+        AgentRole::Manager => &["project-management", "linear", "dev", "github", "worktree"],
     }
 }
 
@@ -548,7 +542,7 @@ Does testing things.
             "rust-tooling".into(),
             "rust-runtime".into(),
             "python-web".into(),
-            "linear-dev".into(),
+            "dev".into(),
             "github".into(),
             "worktree".into(),
         ];
@@ -557,22 +551,18 @@ Does testing things.
         assert!(matched.contains(&"rust-runtime".to_string()));
         assert!(!matched.contains(&"python-web".to_string()));
         // Engineer gets workflow skills
-        assert!(matched.contains(&"linear-dev".to_string()));
+        assert!(matched.contains(&"dev".to_string()));
         assert!(matched.contains(&"github".to_string()));
         assert!(matched.contains(&"worktree".to_string()));
     }
 
     #[test]
     fn match_skills_reviewer_prefix_strip() {
-        let available = vec![
-            "rust-tooling".into(),
-            "rust-runtime".into(),
-            "linear-dev".into(),
-        ];
+        let available = vec!["rust-tooling".into(), "rust-runtime".into(), "dev".into()];
         let matched = match_skills("reviewer-rust", &AgentRole::Reviewer, &available);
         assert!(matched.contains(&"rust-tooling".to_string()));
         assert!(matched.contains(&"rust-runtime".to_string()));
-        assert!(matched.contains(&"linear-dev".to_string()));
+        assert!(matched.contains(&"dev".to_string()));
     }
 
     #[test]

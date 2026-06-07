@@ -52,17 +52,6 @@ nix run github:vanillagreencom/vstack -- add vanillagreencom/vstack
 
 That opens an interactive installer where you pick which agents, skills, hooks, and Pi extensions to bring in, and which tools to install them into.
 
-### Flightdeck upgrade note
-
-If Flightdeck reports a run-store permission error after upgrading, such as `mode=644 expected 600`, review and repair legacy permissions with:
-
-```bash
-vstack flightdeck migrate-permissions --dry-run
-vstack flightdeck migrate-permissions
-```
-
-The migration tightens Flightdeck run-store directories to `0700` and files to `0600`. It refuses symlinks, foreign-owned paths, and group/other-writable paths instead of silently masking possible tampering.
-
 ## How It Works
 
 A source repo is a package registry. vstack discovers what's there, asks which pieces you want, then writes the right files for each tool.
@@ -184,12 +173,11 @@ Rust and performance reference material now lives directly in the `rust`, `revie
 |---|---|
 | [`decider`](skills/decider/)* | Architectural decision document management and indexing. |
 | [`deep-research`](skills/deep-research/) | Exa-powered deep research and portable findings report generation. |
-| [`flightdeck`](skills/flightdeck/)* | Primary-agent tmux session supervisor for AI harness panes; runs Linear/GitHub issue and plan-file lanes with structured activity JSONL and Rust dashboard. Sub-agents do NOT load this directly. |
 | [`github`](skills/github/)* | Bash CLI over the GitHub API for PR operations: threads, comments, reviews, CI logs, merging, and cross-PR analysis. |
 | [`html-artifact`](skills/html-artifact/) | Standalone HTML artifacts for plans, reports, reviews, explainers, prototypes, and custom editors. |
-| [`linear-dev`](skills/linear-dev/)* | Delegated implementation and review-fix issue workflows for dev agents. |
+| [`dev`](skills/dev/)* | Delegated implementation and review-fix issue workflows for dev agents. |
 | [`linear`](skills/linear/)* | Bash CLI over Linear's GraphQL API with local cache, mutation syncing, and structured output (issues, cycles, milestones, projects). |
-| [`linear-orch`](skills/linear-orch/)* | Primary-agent orchestrator for the per-issue Linear lifecycle (dev → review → submit → merge); spawns specialist sub-agents and review pipelines from inside a worktree. Sub-agents do NOT load this directly. |
+| [`orch`](skills/orch/)* | Primary-agent single work-item orchestration for Linear/GitHub issues: prepare, delegate, review, submit, merge, and launch handoff. Sub-agents do NOT load this directly. |
 | [`project-management`](skills/project-management/)* | TPM-driven planning, audits, roadmaps, and research-backed decomposition. |
 | [`reviewer`](skills/reviewer/)* | Strict code-review, whole-codebase review, and QA-review ethos, scope boundaries, workflows, and canonical finding/verdict JSON schema. Loaded by any `reviewer-*` agent. |
 | [`second-opinion`](skills/second-opinion/) | Cross-model review via the opposite AI CLI (Claude ↔ Codex). |
@@ -232,7 +220,6 @@ If a Pi extension declares production dependencies (`dependencies` or `optionalD
 | [`pi-claude-bridge`](pi-extensions/pi-claude-bridge/README.md) | Claude Code provider bridge with prompt-context forwarding. |
 | [`pi-codex-minimal-tools`](pi-extensions/pi-codex-minimal-tools/README.md) | Codex-style image, patch, and image-generation tools alongside Pi natives. |
 | [`pi-extension-manager`](pi-extensions/pi-extension-manager/README.md) | Pi-styled package manager and inline settings editor. |
-| [`pi-flightdeck`](pi-extensions/pi-flightdeck/README.md) | Optional Pi UI support for Flightdeck: inline mini-dashboard, pause banner, notifications, and `/flightdeck` focus/open integration for the Rust app. |
 | [`pi-hooks`](pi-extensions/pi-hooks/README.md) | First-class Pi port of the vstack safety hooks: bare-cd blocking, pre-commit fmt+clippy, post-edit clippy, end-of-turn lint. |
 | [`pi-output-policy`](pi-extensions/pi-output-policy/README.md) | Large-output policy with transcript-budget-aware truncation, spill-file preservation, and balanced/compact/compat modes. |
 | [`pi-prompt-stash`](pi-extensions/pi-prompt-stash/README.md) | Per-session prompt stash history with stash/pop editor. |

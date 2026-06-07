@@ -70,7 +70,7 @@ export function registerPaneSupportTools(deps: PaneSupportToolDeps): void {
 		renderShell: "self",
 		name: "get_subagent_result",
 		label: "Get Agent Result",
-		description: "Retrieve status/results for persistent pane agent tasks by taskId or latest agent task. Use waitFor: \"idle\" to wait for pane isIdle transition without shell polling. This is a recovery/status tool for pane tasks and does not change Flightdeck or Orchestration ownership.",
+		description: "Retrieve status/results for persistent pane agent tasks by taskId or latest agent task. Use waitFor: \"idle\" to wait for pane isIdle transition without shell polling. This is a recovery/status tool for pane tasks and does not change orchestration ownership.",
 		parameters: GetSubagentResultParams,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			if (!params.taskId && !params.agent) {

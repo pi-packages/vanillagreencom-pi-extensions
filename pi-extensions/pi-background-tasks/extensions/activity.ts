@@ -29,7 +29,7 @@ export interface BackgroundTaskActivityOptions {
 const ACTIVITY_BROKER_SYMBOL = Symbol.for("vstack.pi.activity");
 const COMMAND_DETAIL_MAX_CHARS = 200;
 // Activity broker payloads are sidecar (not transcript), but a 10-20KB tail
-// per match still bloats the JSONL stream and Flightdeck's activity sidecar
+// per match still bloats the JSONL stream
 // (vstack#210). Keep the broker preview compact; full output stays on disk.
 const ACTIVITY_OUTPUT_TAIL_MAX_CHARS = 512;
 

@@ -70,7 +70,7 @@ Use this table to avoid duplicate findings across parallel reviewers. If domains
 
 | Topic | Source |
 |-------|--------|
-| Recommendation bias (verification, actionability, fix-vs-issue) | linear-orch skill (`workflows/recommendation-bias.md`) |
+| Recommendation bias (verification, actionability, fix-vs-issue) | orch skill (`workflows/recommendation-bias.md`) |
 | Label application | Project label-application guide |
 | Benchmark baselines | Project benchmarking skill if installed |
 | Regression classification | Project benchmarking skill if available |

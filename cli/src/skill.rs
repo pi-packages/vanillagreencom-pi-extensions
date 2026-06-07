@@ -414,7 +414,7 @@ dependencies:
 | Dependency | Purpose | Variable |
 |------------|---------|----------|
 | Issue tracker CLI (e.g., `linear` skill) | Issue CRUD | `$ISSUE_CLI` |
-| linear-orch skill | Review-finding schema | Referenced by name |
+| orch skill | Review-finding schema | Referenced by name |
 | Benchmarking skill (optional) | Baseline capture | `$BENCH_CLI` |
 
 ## Other Section
@@ -422,7 +422,7 @@ dependencies:
         let deps = parse_dependencies_from_body(body);
         let names: Vec<&str> = deps.iter().map(|d| d.name.as_str()).collect();
         assert!(names.contains(&"linear"));
-        assert!(names.contains(&"linear-orch"));
+        assert!(names.contains(&"orch"));
         assert!(names.contains(&"benchmarking"));
         assert!(
             deps.iter()
@@ -435,16 +435,13 @@ dependencies:
     #[test]
     fn expand_deps_transitive() {
         let mut graph = HashMap::new();
-        graph.insert(
-            "linear-orch".into(),
-            vec!["linear-dev".into(), "decider".into()],
-        );
-        graph.insert("linear-dev".into(), vec!["linear".into()]);
+        graph.insert("orch".into(), vec!["dev".into(), "decider".into()]);
+        graph.insert("dev".into(), vec!["linear".into()]);
 
-        let selected = vec!["linear-orch".to_string()];
+        let selected = vec!["orch".to_string()];
         let (expanded, added) = expand_dependencies(&selected, &graph);
 
-        assert!(expanded.contains(&"linear-dev".to_string()));
+        assert!(expanded.contains(&"dev".to_string()));
         assert!(expanded.contains(&"decider".to_string()));
         assert!(expanded.contains(&"linear".to_string()));
         assert_eq!(added.len(), 3);

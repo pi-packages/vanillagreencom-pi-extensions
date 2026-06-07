@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 # GitHub label add wrapper.
-# Runs `gh pr edit --add-label` (or `gh issue edit --add-label`) and emits
-# pr.labeled / issue.labeled activity when running under Flightdeck.
-# Standalone use outside Flightdeck remains identical to plain gh.
+# Runs `gh pr edit --add-label` or `gh issue edit --add-label`.
 
 set -euo pipefail
 
@@ -27,17 +25,8 @@ Options:
   --pr              Treat the ref as a PR (default).
   --help, -h        Show this help.
 
-Activity:
-  Emits pr.labeled (or issue.labeled) when FLIGHTDECK_MANAGED=1 or
-  FLIGHTDECK_ACTIVITY_FILE is set. Emit failure does not block the
-  underlying gh command — gh's exit code is authoritative.
-
-  When FLIGHTDECK_ENTRY_ID is set the row also carries entry_id so
-  the dashboard can route it under the right tracked entry.
-
 Examples:
   label-add.sh 44 defer-ci --reason "skip heavy CI"
-  FLIGHTDECK_MANAGED=1 label-add.sh 44 do-not-merge
   label-add.sh 123 needs-triage --issue
 EOF
 }

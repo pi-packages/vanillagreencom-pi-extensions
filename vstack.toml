@@ -68,7 +68,7 @@ reviewer-test = ["reviewer"]
 generalist = [
     "decider",
     "github",
-    "linear-dev",
+    "dev",
     "linear",
 ]
 
@@ -91,7 +91,7 @@ reviewer-security = ["reviewer"]
 tpm = [
     "decider",
     "github",
-    "linear-dev",
+    "dev",
     "linear",
     "project-management",
 ]
@@ -106,8 +106,8 @@ researcher = [
 # Skills given to all agents of a role
 [role-skills]
 analyst = ["linear", "github"]
-engineer = ["linear-dev", "github", "decider", "linear"]
-manager = ["linear-dev", "github", "project-management", "linear", "decider"]
+engineer = ["dev", "github", "decider", "linear"]
+manager = ["dev", "github", "project-management", "linear", "decider"]
 reviewer = ["reviewer"]
 
 # Hook assignment by event:matcher → roles

@@ -58,7 +58,7 @@ color: orange
 
 ### Skill frontmatter (`skills/*/SKILL.md`)
 ```yaml
-name: linear-orch
+name: orch
 description: ...
 license: MIT
 user-invocable: true
@@ -105,7 +105,7 @@ iced = ["iced-rs", "iced-shadcn", ...]
 
 [role-skills]
 analyst = ["linear", "github"]
-engineer = ["linear-dev", "github", "worktree", "decider", "linear"]
+engineer = ["dev", "github", "decider", "linear"]
 reviewer = ["reviewer"]
 
 [hook-events]
@@ -182,13 +182,12 @@ Each canonical agent declares its own `effort:` in frontmatter. Harnesses write 
 - **Docs and instruction payloads ship with the code change.** Any change to a hook, skill, agent, or Pi extension must update — in the same commit — affected READMEs, AGENTS.md, `vstack.toml`, `.env.local.example`, `package.json`, agent instruction payloads (`appendSystem` files / before_agent_start hook prose), and any cross-referencing docs. A behavior change without its docs/instructions update is incomplete.
 - **Edit skills directly.** Edit `skills/<name>/SKILL.md` in place. No separate `rules/` directories or per-skill `AGENTS.md` files.
 - **Never touch harness mirror dirs.** `.agents/`, `.claude/`, `.opencode/`, `.pi/`, and `.codex/` are installed harness outputs, not canonical packages. Edit only `agents/`, `skills/`, `hooks/`, and `pi-extensions/`; harness mirrors regenerate on `vstack add` / `vstack refresh`.
-- **New tmux windows, never split the active pane.** Create a new tmux window in the current session for any spawned work. Use Flightdeck session tooling for launch/attach and harness adapters (`pi-bridge`, OpenCode HTTP, Claude channels, Codex bridge) before falling back to raw tmux.
-- **flock semantics in flightdeck.** Use the helpers in `skills/flightdeck/lib/flightdeck-core/src/state/locking.ts`. The naive `spawnSync("flock", ["-x", String(fd), "true"])` pattern is a no-op; read the file header before adding new locked critical sections.
+- **New tmux windows, never split the active pane.** Create a new tmux window in the current session for any spawned handoff work. Prefer `skills/orch/scripts/open-terminal` for issue handoff.
 - **Always create vstack worktrees via the worktree skill.** Use `skills/worktree/scripts/worktree create <id>` (not raw `git worktree add`) so `.env.local`, harness mirror dirs, bot identity, and per-worktree config are wired in.
 - **Worktree scratch goes in `<worktree>/tmp/`, not at worktree root or `/tmp/`.** Agent task briefs, intermediate result JSONs, review hand-offs, and similar ephemeral artifacts belong in the worktree's gitignored `tmp/` dir (auto-created when listed in `WORKTREE_MKDIRS`). Worktree root is for tracked content only.
 - **READMEs are user-facing only.** Describe what the thing is, how to use it, features, settings/options, and install/setup. Technical/development detail goes in `DEVELOPMENT.md`; agent skill instructions live in the matching `SKILL.md`.
 - **Pi hook parity.** Pi gets its hooks via the `pi-extensions/pi-hooks` extension (native TS port of `hooks/*.sh` against Pi's `tool_call`/`tool_result`/`turn_end` events). Any change to a hook script must land in the same commit as the matching change in `pi-extensions/pi-hooks/extensions/hooks.ts` so all five harnesses stay behaviorally aligned.
-- **Pi upstream lifecycle fix.** When touching pi-agents-tmux completion, Flightdeck Pi session handling, or print/json lifecycle workarounds, recheck `earendil-works/pi#2023` for upstream true-idle / scheduled-continuation fixes.
+- **Pi upstream lifecycle fix.** When touching pi-agents-tmux completion or print/json lifecycle workarounds, recheck `earendil-works/pi#2023` for upstream true-idle / scheduled-continuation fixes.
 
 ## Updating Pi Extensions
 
