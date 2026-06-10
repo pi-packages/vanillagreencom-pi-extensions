@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { discoverAgents } from "../extensions/subagent/agents.js";
 
@@ -87,4 +87,46 @@ test("discovers real project agents below HOME", () => {
 
 	const bothShared = discoverAgents(cwd, "both").agents.find((agent) => agent.name === "shared");
 	expect(bothShared).toMatchObject({ description: "project Pi override", source: "project" });
+});
+
+test("skips project agent directories symlinked to user sources", () => {
+	const home = process.env.HOME!;
+	const cwd = join(home, "work", "dir-symlink-app", "src");
+	const projectRoot = join(home, "work", "dir-symlink-app");
+	mkdirSync(cwd, { recursive: true });
+	const homeClaudeDir = join(home, ".claude", "agents");
+	const piUserDir = join(home, ".pi", "agent", "agents");
+	writeAgent(homeClaudeDir, "home-claude", "home Claude");
+	writeAgent(piUserDir, "pi-user", "Pi user");
+	mkdirSync(join(projectRoot, ".claude"), { recursive: true });
+	mkdirSync(join(projectRoot, ".pi"), { recursive: true });
+	symlinkSync(homeClaudeDir, join(projectRoot, ".claude", "agents"), "dir");
+	symlinkSync(piUserDir, join(projectRoot, ".pi", "agents"), "dir");
+
+	const project = discoverAgents(cwd, "project");
+	expect(project.agents).toEqual([]);
+	expect(project.projectAgentsDir).toBeNull();
+	expect(discoverAgents(cwd, "user").agents.map((agent) => agent.name)).toEqual(["home-claude", "pi-user"]);
+});
+
+test("skips project agent files symlinked to user sources", () => {
+	const home = process.env.HOME!;
+	const cwd = join(home, "work", "file-symlink-app", "src");
+	const projectRoot = join(home, "work", "file-symlink-app");
+	mkdirSync(cwd, { recursive: true });
+	const homeClaudeFile = writeAgent(join(home, ".claude", "agents"), "linked-claude", "home Claude");
+	const piUserFile = writeAgent(join(home, ".pi", "agent", "agents"), "linked-pi", "Pi user");
+	const projectClaudeDir = join(projectRoot, ".claude", "agents");
+	const projectPiDir = join(projectRoot, ".pi", "agents");
+	mkdirSync(projectClaudeDir, { recursive: true });
+	mkdirSync(projectPiDir, { recursive: true });
+	symlinkSync(homeClaudeFile, join(projectClaudeDir, "linked-claude.md"), "file");
+	symlinkSync(piUserFile, join(projectPiDir, "linked-pi.md"), "file");
+	writeAgent(projectClaudeDir, "real-claude", "real project Claude");
+	writeAgent(projectPiDir, "real-pi", "real project Pi");
+
+	const project = discoverAgents(cwd, "project");
+	expect(project.agents.map((agent) => agent.name)).toEqual(["real-claude", "real-pi"]);
+	expect(project.agents.every((agent) => agent.source === "project")).toBe(true);
+	expect(project.projectAgentsDir).toBe(projectClaudeDir + ", " + projectPiDir);
 });

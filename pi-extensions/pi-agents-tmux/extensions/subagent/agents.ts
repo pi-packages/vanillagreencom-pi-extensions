@@ -109,7 +109,7 @@ function asBoolean(value: unknown): boolean {
 	return normalized === "true" || normalized === "yes" || normalized === "1" || normalized === "pane";
 }
 
-function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig[] {
+function loadAgentsFromDir(dir: string, source: "user" | "project", blockedSourceDirs: string[] = []): AgentConfig[] {
 	const agents: AgentConfig[] = [];
 
 	if (!fs.existsSync(dir)) {
@@ -128,6 +128,9 @@ function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig
 		if (!entry.isFile() && !entry.isSymbolicLink()) continue;
 
 		const filePath = path.join(dir, entry.name);
+		if (source === "project" && isSameOrDescendantOfAny(filePath, blockedSourceDirs)) {
+			continue;
+		}
 		let content: string;
 		try {
 			content = fs.readFileSync(filePath, "utf-8");
@@ -180,6 +183,13 @@ function userHomeDir(): string {
 	return home ? home : homedir();
 }
 
+function userAgentSourceDirs(): string[] {
+	return [
+		path.join(userHomeDir(), ".claude", "agents"),
+		path.join(getAgentDir(), "agents"),
+	];
+}
+
 function realpathOrResolve(p: string): string {
 	try {
 		return fs.realpathSync(p);
@@ -188,7 +198,17 @@ function realpathOrResolve(p: string): string {
 	}
 }
 
-function findNearestProjectAgentDirs(cwd: string): string[] {
+function isSameOrDescendant(candidate: string, root: string): boolean {
+	const relative = path.relative(root, candidate);
+	return relative === "" || (relative.length > 0 && !relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function isSameOrDescendantOfAny(candidate: string, roots: string[]): boolean {
+	const realCandidate = realpathOrResolve(candidate);
+	return roots.some((root) => isSameOrDescendant(realCandidate, root));
+}
+
+function findNearestProjectAgentDirs(cwd: string, blockedSourceDirs: string[]): string[] {
 	const home = realpathOrResolve(userHomeDir());
 	let currentDir = path.resolve(cwd);
 	while (true) {
@@ -197,7 +217,9 @@ function findNearestProjectAgentDirs(cwd: string): string[] {
 
 		const claudeDir = path.join(currentDir, ".claude", "agents");
 		const piDir = path.join(currentDir, ".pi", "agents");
-		const dirs = [claudeDir, piDir].filter(isDirectory);
+		const dirs = [claudeDir, piDir]
+			.filter(isDirectory)
+			.filter((dir) => !isSameOrDescendantOfAny(dir, blockedSourceDirs));
 		if (dirs.length > 0) return dirs;
 
 		const parentDir = path.dirname(currentDir);
@@ -207,15 +229,13 @@ function findNearestProjectAgentDirs(cwd: string): string[] {
 }
 
 export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryResult {
-	const userAgentDirs = [
-		path.join(userHomeDir(), ".claude", "agents"),
-		path.join(getAgentDir(), "agents"),
-	];
-	const projectAgentDirs = findNearestProjectAgentDirs(cwd);
+	const userAgentDirs = userAgentSourceDirs();
+	const userAgentRealDirs = userAgentDirs.map(realpathOrResolve);
+	const projectAgentDirs = findNearestProjectAgentDirs(cwd, userAgentRealDirs);
 
 	const userAgents = scope === "project" ? [] : userAgentDirs.flatMap((dir) => loadAgentsFromDir(dir, "user"));
 	const projectAgents =
-		scope === "user" ? [] : projectAgentDirs.flatMap((dir) => loadAgentsFromDir(dir, "project"));
+		scope === "user" ? [] : projectAgentDirs.flatMap((dir) => loadAgentsFromDir(dir, "project", userAgentRealDirs));
 
 	const agentMap = new Map<string, AgentConfig>();
 

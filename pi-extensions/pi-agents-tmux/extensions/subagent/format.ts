@@ -20,6 +20,9 @@ import {
 } from "./types.js";
 
 export const SESSION_KEY_CHIP_MAX_CHARS = 14;
+const STATUSLINE_INFO_CACHE_TTL_MS = 1000;
+
+const statuslineInfoCache = new Map<string, { expiresAt: number; value: SubagentStatuslineInfo }>();
 
 function normalizeSessionMode(value: unknown): SessionMode | undefined {
 	return value === "fresh" || value === "resumed" || value === "new" ? value : undefined;
@@ -86,13 +89,27 @@ export function resolveSubagentStatuslineInfo(agentName: string | undefined, cwd
 	const name = agentName?.trim();
 	if (!name) return undefined;
 	const envColor = normalizeAgentAsciiColor(process.env.PI_SUBAGENT_CHILD_COLOR);
+	if (envColor) return { name, color: envColor };
+
+	const resolvedCwd = cwd ?? process.cwd();
+	const cacheKey = `${resolvedCwd}\0${name}`;
+	const now = Date.now();
+	const cached = statuslineInfoCache.get(cacheKey);
+	if (cached && cached.expiresAt > now) {
+		return cached.value;
+	}
+	if (cached) statuslineInfoCache.delete(cacheKey);
+
 	try {
-		const agents = discoverAgents(cwd ?? process.cwd(), "both").agents;
+		const agents = discoverAgents(resolvedCwd, "both").agents;
 		const agent = agents.find((candidate) => candidate.name === name);
-		const color = normalizeAgentAsciiColor(agent?.color) ?? envColor ?? defaultAgentAsciiColor(name, agents);
-		return { name, color };
+		const value = { name, color: normalizeAgentAsciiColor(agent?.color) ?? defaultAgentAsciiColor(name, agents) };
+		statuslineInfoCache.set(cacheKey, { expiresAt: now + STATUSLINE_INFO_CACHE_TTL_MS, value });
+		return value;
 	} catch {
-		return { name, color: envColor };
+		const value = { name, color: undefined };
+		statuslineInfoCache.set(cacheKey, { expiresAt: now + STATUSLINE_INFO_CACHE_TTL_MS, value });
+		return value;
 	}
 }
 
@@ -743,4 +760,3 @@ export function stringifyError(error: unknown): string {
 export function delay(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
-
