@@ -1032,11 +1032,11 @@ fn cursor_hook_artifact_exists(
     global: bool,
     hook: &crate::hook::Hook,
 ) -> bool {
-    let rules_dir = if global {
-        cursor_global_dir().join("rules")
-    } else {
-        project_root.join(".cursor").join("rules")
-    };
+    if global {
+        return false;
+    }
+
+    let rules_dir = project_root.join(".cursor").join("rules");
     let expected = crate::installer::cursor_hook_rule_contents(hook);
     generated_safety_action_line(hook).is_some_and(|action_line| {
         safety_text_artifact_matches(
@@ -1868,6 +1868,53 @@ echo foreign
 
         let entry = lock.entries.get("cursor-hook").unwrap();
         assert_eq!(entry.harnesses, vec!["cursor".to_string()]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn recover_hook_lock_entries_ignores_cursor_rule_for_global_scope() {
+        let dir = sandbox("hook_recover_cursor_global");
+        let source = dir.join("source");
+        let project = dir.join("project");
+        let fake_home = dir.join("home");
+        fs::create_dir_all(source.join("hooks")).unwrap();
+        let source_hook_path = source.join("hooks").join("cursor-hook.sh");
+        fs::write(
+            &source_hook_path,
+            test_hook_script("cursor-hook", "echo source"),
+        )
+        .unwrap();
+        let hook = crate::hook::Hook::from_file(&source_hook_path).unwrap();
+        fs::create_dir_all(fake_home.join(".cursor").join("rules")).unwrap();
+        fs::write(
+            fake_home.join(".cursor/rules/safety-cursor-hook.mdc"),
+            crate::installer::cursor_hook_rule_contents(&hook),
+        )
+        .unwrap();
+
+        let (modified, recovered) = crate::test_util::with_home_dir(&fake_home, || {
+            let mut lock = LockFile {
+                version: 1,
+                entries: std::collections::BTreeMap::new(),
+            };
+            let modified = recover_hook_lock_entries_at(
+                &mut lock,
+                &project,
+                true,
+                &source.display().to_string(),
+                "2026-06-07T00:00:00Z",
+            );
+            (modified, lock.entries.get("cursor-hook").cloned())
+        });
+
+        assert!(
+            !modified,
+            "global recovery must not record project-only Cursor hooks"
+        );
+        assert!(
+            recovered.is_none(),
+            "Cursor must be absent from global hook lock recovery"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
