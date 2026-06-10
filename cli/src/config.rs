@@ -917,6 +917,21 @@ fn scan_installed_hooks_on_disk_at(
     global: bool,
     source: &str,
 ) -> Vec<DiskHookItem> {
+    let cursor_global_rules_dir = cursor_global_dir().join("rules");
+    scan_installed_hooks_on_disk_at_with_cursor_global_rules(
+        project_root,
+        global,
+        source,
+        &cursor_global_rules_dir,
+    )
+}
+
+fn scan_installed_hooks_on_disk_at_with_cursor_global_rules(
+    project_root: &Path,
+    global: bool,
+    source: &str,
+    cursor_global_rules_dir: &Path,
+) -> Vec<DiskHookItem> {
     let Some(source_root) = resolve_source_path(source) else {
         return Vec::new();
     };
@@ -928,7 +943,12 @@ fn scan_installed_hooks_on_disk_at(
     source_hooks
         .into_iter()
         .filter_map(|hook| {
-            let harnesses = installed_hook_harnesses_on_disk(project_root, global, &hook);
+            let harnesses = installed_hook_harnesses_on_disk(
+                project_root,
+                global,
+                &hook,
+                cursor_global_rules_dir,
+            );
             if harnesses.is_empty() {
                 None
             } else {
@@ -945,6 +965,7 @@ fn installed_hook_harnesses_on_disk(
     project_root: &Path,
     global: bool,
     hook: &crate::hook::Hook,
+    cursor_global_rules_dir: &Path,
 ) -> Vec<String> {
     let mut harnesses = Vec::new();
 
@@ -954,7 +975,7 @@ fn installed_hook_harnesses_on_disk(
         harnesses.push(crate::harness::Harness::ClaudeCode.id().to_string());
     }
     if hook.applies_to(crate::harness::Harness::Cursor.id())
-        && cursor_hook_artifact_exists(project_root, global, hook)
+        && cursor_hook_artifact_exists(project_root, global, hook, cursor_global_rules_dir)
     {
         harnesses.push(crate::harness::Harness::Cursor.id().to_string());
     }
@@ -1031,12 +1052,18 @@ fn cursor_hook_artifact_exists(
     project_root: &Path,
     global: bool,
     hook: &crate::hook::Hook,
+    cursor_global_rules_dir: &Path,
 ) -> bool {
-    if global {
+    if global && !crate::harness::Harness::Cursor.supports_global_scope() {
         return false;
     }
 
-    let rules_dir = project_root.join(".cursor").join("rules");
+    let project_rules_dir = project_root.join(".cursor").join("rules");
+    let rules_dir = if global {
+        cursor_global_rules_dir
+    } else {
+        &project_rules_dir
+    };
     let expected = crate::installer::cursor_hook_rule_contents(hook);
     generated_safety_action_line(hook).is_some_and(|action_line| {
         safety_text_artifact_matches(
@@ -1203,8 +1230,32 @@ fn recover_hook_lock_entries_at(
     source: &str,
     installed_at: &str,
 ) -> bool {
+    let cursor_global_rules_dir = cursor_global_dir().join("rules");
+    recover_hook_lock_entries_at_with_cursor_global_rules(
+        lock,
+        project_root,
+        global,
+        source,
+        installed_at,
+        &cursor_global_rules_dir,
+    )
+}
+
+fn recover_hook_lock_entries_at_with_cursor_global_rules(
+    lock: &mut LockFile,
+    project_root: &Path,
+    global: bool,
+    source: &str,
+    installed_at: &str,
+    cursor_global_rules_dir: &Path,
+) -> bool {
     let mut modified = false;
-    for item in scan_installed_hooks_on_disk_at(project_root, global, source) {
+    for item in scan_installed_hooks_on_disk_at_with_cursor_global_rules(
+        project_root,
+        global,
+        source,
+        cursor_global_rules_dir,
+    ) {
         match lock.entries.get_mut(&item.name) {
             Some(entry) if entry.kind == ItemKind::Hook => {
                 for harness in item.harnesses {
@@ -1876,7 +1927,7 @@ echo foreign
         let dir = sandbox("hook_recover_cursor_global");
         let source = dir.join("source");
         let project = dir.join("project");
-        let fake_home = dir.join("home");
+        let cursor_global_rules_dir = dir.join("global-cursor").join("rules");
         fs::create_dir_all(source.join("hooks")).unwrap();
         let source_hook_path = source.join("hooks").join("cursor-hook.sh");
         fs::write(
@@ -1885,34 +1936,31 @@ echo foreign
         )
         .unwrap();
         let hook = crate::hook::Hook::from_file(&source_hook_path).unwrap();
-        fs::create_dir_all(fake_home.join(".cursor").join("rules")).unwrap();
+        fs::create_dir_all(&cursor_global_rules_dir).unwrap();
         fs::write(
-            fake_home.join(".cursor/rules/safety-cursor-hook.mdc"),
+            cursor_global_rules_dir.join("safety-cursor-hook.mdc"),
             crate::installer::cursor_hook_rule_contents(&hook),
         )
         .unwrap();
-
-        let (modified, recovered) = crate::test_util::with_home_dir(&fake_home, || {
-            let mut lock = LockFile {
-                version: 1,
-                entries: std::collections::BTreeMap::new(),
-            };
-            let modified = recover_hook_lock_entries_at(
-                &mut lock,
-                &project,
-                true,
-                &source.display().to_string(),
-                "2026-06-07T00:00:00Z",
-            );
-            (modified, lock.entries.get("cursor-hook").cloned())
-        });
+        let mut lock = LockFile {
+            version: 1,
+            entries: std::collections::BTreeMap::new(),
+        };
+        let modified = recover_hook_lock_entries_at_with_cursor_global_rules(
+            &mut lock,
+            &project,
+            true,
+            &source.display().to_string(),
+            "2026-06-07T00:00:00Z",
+            &cursor_global_rules_dir,
+        );
 
         assert!(
             !modified,
             "global recovery must not record project-only Cursor hooks"
         );
         assert!(
-            recovered.is_none(),
+            !lock.entries.contains_key("cursor-hook"),
             "Cursor must be absent from global hook lock recovery"
         );
         let _ = fs::remove_dir_all(&dir);
