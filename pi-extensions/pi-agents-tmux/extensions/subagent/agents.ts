@@ -2,14 +2,17 @@
  * Agent discovery and configuration for the project-local Pi subagent extension.
  *
  * Supported locations:
- * - ~/.pi/agent/agents/*.md       user-level agents
+ * - ~/.claude/agents/*.md         user-level Claude compatibility agents
+ * - ~/.pi/agent/agents/*.md       user-level Pi agents
  * - .pi/agents/*.md               project-level Pi agents
  * - .claude/agents/*.md           project-level compatibility import
  *
- * When duplicate names exist, precedence is: user < .claude < .pi.
+ * When duplicate names exist, precedence is:
+ * user .claude < user .pi < project .claude < project .pi.
  */
 
 import * as fs from "node:fs";
+import { homedir } from "node:os";
 import * as path from "node:path";
 import { getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import { effortFromModelId, normalizeReasoningEffort } from "./settings.js";
@@ -106,7 +109,7 @@ function asBoolean(value: unknown): boolean {
 	return normalized === "true" || normalized === "yes" || normalized === "1" || normalized === "pane";
 }
 
-function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig[] {
+function loadAgentsFromDir(dir: string, source: "user" | "project", blockedSourceDirs: string[] = []): AgentConfig[] {
 	const agents: AgentConfig[] = [];
 
 	if (!fs.existsSync(dir)) {
@@ -125,6 +128,9 @@ function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig
 		if (!entry.isFile() && !entry.isSymbolicLink()) continue;
 
 		const filePath = path.join(dir, entry.name);
+		if (source === "project" && isSameOrDescendantOfAny(filePath, blockedSourceDirs)) {
+			continue;
+		}
 		let content: string;
 		try {
 			content = fs.readFileSync(filePath, "utf-8");
@@ -172,12 +178,48 @@ function isDirectory(p: string): boolean {
 	}
 }
 
-function findNearestProjectAgentDirs(cwd: string): string[] {
-	let currentDir = cwd;
+function userHomeDir(): string {
+	const home = process.env.HOME?.trim();
+	return home ? home : homedir();
+}
+
+function userAgentSourceDirs(): string[] {
+	return [
+		path.join(userHomeDir(), ".claude", "agents"),
+		path.join(getAgentDir(), "agents"),
+	];
+}
+
+function realpathOrResolve(p: string): string {
+	try {
+		return fs.realpathSync(p);
+	} catch {
+		return path.resolve(p);
+	}
+}
+
+function isSameOrDescendant(candidate: string, root: string): boolean {
+	const relative = path.relative(root, candidate);
+	return relative === "" || (relative.length > 0 && !relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function isSameOrDescendantOfAny(candidate: string, roots: string[]): boolean {
+	const realCandidate = realpathOrResolve(candidate);
+	return roots.some((root) => isSameOrDescendant(realCandidate, root));
+}
+
+function findNearestProjectAgentDirs(cwd: string, blockedSourceDirs: string[]): string[] {
+	const home = realpathOrResolve(userHomeDir());
+	let currentDir = path.resolve(cwd);
 	while (true) {
+		const isHome = realpathOrResolve(currentDir) === home;
+		if (isHome) return [];
+
 		const claudeDir = path.join(currentDir, ".claude", "agents");
 		const piDir = path.join(currentDir, ".pi", "agents");
-		const dirs = [claudeDir, piDir].filter(isDirectory);
+		const dirs = [claudeDir, piDir]
+			.filter(isDirectory)
+			.filter((dir) => !isSameOrDescendantOfAny(dir, blockedSourceDirs));
 		if (dirs.length > 0) return dirs;
 
 		const parentDir = path.dirname(currentDir);
@@ -187,12 +229,13 @@ function findNearestProjectAgentDirs(cwd: string): string[] {
 }
 
 export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryResult {
-	const userDir = path.join(getAgentDir(), "agents");
-	const projectAgentDirs = findNearestProjectAgentDirs(cwd);
+	const userAgentDirs = userAgentSourceDirs();
+	const userAgentRealDirs = userAgentDirs.map(realpathOrResolve);
+	const projectAgentDirs = findNearestProjectAgentDirs(cwd, userAgentRealDirs);
 
-	const userAgents = scope === "project" ? [] : loadAgentsFromDir(userDir, "user");
+	const userAgents = scope === "project" ? [] : userAgentDirs.flatMap((dir) => loadAgentsFromDir(dir, "user"));
 	const projectAgents =
-		scope === "user" ? [] : projectAgentDirs.flatMap((dir) => loadAgentsFromDir(dir, "project"));
+		scope === "user" ? [] : projectAgentDirs.flatMap((dir) => loadAgentsFromDir(dir, "project", userAgentRealDirs));
 
 	const agentMap = new Map<string, AgentConfig>();
 
