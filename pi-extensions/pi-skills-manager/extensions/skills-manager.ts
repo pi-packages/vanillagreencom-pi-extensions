@@ -9,6 +9,7 @@ import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@e
 import { INSTALL_SYMBOL } from "./skills-manager/constants.js";
 import { createSkillFromAnswers } from "./skills-manager/creation.js";
 import { showSkillsManager } from "./skills-manager/dialog.js";
+import { recordProjectTrust } from "./skills-manager/paths.js";
 import { deleteSkill, loadSkillRegistry } from "./skills-manager/registry.js";
 import { settingBoolean, updatePackageConfig } from "./skills-manager/settings.js";
 import { patchInteractiveModeStartupSkillsBlock, setStartupHideEnabled } from "./skills-manager/startup.js";
@@ -64,6 +65,7 @@ export default function skillsManager(pi: ExtensionAPI): void {
 	}
 
 	async function prepareSession(ctx: ExtensionContext): Promise<boolean> {
+		recordProjectTrust(ctx);
 		setStartupHideEnabled(settingBoolean("enabled", true, ctx.cwd) && settingBoolean("hideStartupSkillsBlock", true, ctx.cwd));
 		try {
 			await refreshRegistry(ctx.cwd);

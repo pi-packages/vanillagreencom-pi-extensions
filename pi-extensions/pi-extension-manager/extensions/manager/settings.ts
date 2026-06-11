@@ -50,7 +50,7 @@ export function readJsonObject(path: string): { json: Record<string, unknown>; e
 
 function isProjectTrusted(ctx: ExtensionContext): boolean {
 	try {
-		return (ctx as ExtensionContext & { isProjectTrusted?: () => boolean }).isProjectTrusted?.() ?? true;
+		return (ctx as ExtensionContext & { isProjectTrusted?: () => boolean }).isProjectTrusted?.() === true;
 	} catch {
 		return false;
 	}

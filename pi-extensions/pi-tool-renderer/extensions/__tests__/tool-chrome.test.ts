@@ -7,6 +7,7 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 
 import { stripAnsi } from "../tool-renderer/ansi.js";
 import { __test } from "../tool-renderer/chrome.js";
+import { recordProjectTrust } from "../tool-renderer/settings.js";
 
 const createdDirs: string[] = [];
 
@@ -29,6 +30,7 @@ function tempCwd(config?: Record<string, unknown>): string {
 		writeFileSync(join(dir, ".pi", "settings.json"), JSON.stringify({
 			vstack: { extensionManager: { config: { "@vanillagreen/pi-tool-renderer": config } } },
 		}));
+		recordProjectTrust({ cwd: dir, isProjectTrusted: () => true });
 	}
 	return dir;
 }

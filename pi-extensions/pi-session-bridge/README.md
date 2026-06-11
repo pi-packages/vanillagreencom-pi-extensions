@@ -135,6 +135,8 @@ interface PiActivityBroker {
 
 Open `/extensions:settings`; settings appear under the **Session Bridge** tab.
 
+Project settings in `.pi/settings.json` apply only after Pi marks the workspace trusted; before trust, vstack Pi extensions read user/global settings only.
+
 | Setting | What it does |
 | --- | --- |
 | Enable session bridge | Master toggle for bridge socket registration, CLI access, and status reporting. |

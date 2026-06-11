@@ -3,7 +3,7 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 import { clearLegacySessionStatus } from "./actions.js";
 import { pinSessionModel } from "./model.js";
 import { openManager } from "./overlay.js";
-import { samePath } from "./paths.js";
+import { recordProjectTrust, samePath } from "./paths.js";
 import { configuredShortcut, settingBoolean } from "./settings.js";
 import { INSTALL_SYMBOL, type SessionAction, type SessionManagerContext } from "./types.js";
 
@@ -64,6 +64,7 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 	if (!settingBoolean("enabled", true)) return;
 
 	pi.on("session_start", async (_event, ctx) => {
+		recordProjectTrust(ctx);
 		if (!settingBoolean("enabled", true, ctx.cwd)) return;
 		clearLegacySessionStatus(ctx);
 	});

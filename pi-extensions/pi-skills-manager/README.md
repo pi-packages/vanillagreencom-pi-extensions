@@ -48,6 +48,8 @@ Create: name (normalized to a lowercase slug), trigger-focused description, visi
 
 Open `/extensions:settings`; settings appear under the **Skills Manager** tab.
 
+Project settings in `.pi/settings.json` apply only after Pi marks the workspace trusted; before trust, vstack Pi extensions read user/global settings only.
+
 | Setting | What it does |
 | --- | --- |
 | Hide startup skills block | Hide Pi's built-in startup `[Skills]` list. |

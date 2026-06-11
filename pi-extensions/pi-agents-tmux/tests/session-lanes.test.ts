@@ -19,6 +19,7 @@ import {
 	resolveBgSession,
 	setSessionCompactorForTests,
 } from "../extensions/subagent/sessions.js";
+import { recordProjectTrust } from "../extensions/subagent/settings.js";
 import {
 	runSingleAgent,
 	setBgTimeoutKillGraceMsForTests,
@@ -47,6 +48,7 @@ function writeSettings(cwd: string, config: Record<string, unknown>) {
 	writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({
 		vstack: { extensionManager: { config: { "@vanillagreen/pi-agents-tmux": config } } },
 	}), "utf8");
+	recordProjectTrust({ cwd, isProjectTrusted: () => true });
 }
 
 function testAgent(): AgentConfig {

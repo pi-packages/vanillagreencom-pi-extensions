@@ -12,6 +12,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { buildInventory, npmCandidatesFromInventory } from "./manager/inventory.js";
 export { npmCandidatesFromInventory };
+import { recordProjectTrust } from "./manager/glyphs.js";
 import { openManager } from "./manager/manager-ui.js";
 import { openQuickSettings, quickSettingsCompletions } from "./manager/quick-settings-ui.js";
 import { userPiDir } from "./manager/paths.js";
@@ -116,6 +117,7 @@ export default function extensionManager(pi: ExtensionAPI): void {
 	});
 
 	pi.on("session_start", (_event, ctx) => {
+		recordProjectTrust(ctx);
 		activeCtx = ctx;
 		const inventory = buildInventory(pi, ctx);
 

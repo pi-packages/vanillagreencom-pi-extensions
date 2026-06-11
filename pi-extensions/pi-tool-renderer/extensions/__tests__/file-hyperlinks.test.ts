@@ -36,7 +36,7 @@ describe("file path hyperlinks", () => {
 
 	test("readCallText links only the file path, keeping line range outside href", () => {
 		const cwd = mkdtempSync(join(tmpdir(), "pi-tool-renderer-links-"));
-		const rendered = readCallText({ path: "README.md", offset: 2, limit: 3 }, theme, cwd);
+		const rendered = readCallText({ path: "README.md", offset: 2, limit: 3 }, theme, cwd, true);
 		const href = pathToFileURL(resolve(cwd, "README.md")).href;
 
 		expect(rendered).toContain(`\x1b]8;;${href}`);
@@ -45,7 +45,7 @@ describe("file path hyperlinks", () => {
 
 	test("ls call text links its target path", () => {
 		const cwd = mkdtempSync(join(tmpdir(), "pi-tool-renderer-links-"));
-		const rendered = readOnlyCallText("ls", { path: "pi-extensions" }, theme, cwd);
+		const rendered = readOnlyCallText("ls", { path: "pi-extensions" }, theme, cwd, true);
 		const href = pathToFileURL(resolve(cwd, "pi-extensions")).href;
 
 		expect(rendered).toContain(`\x1b]8;;${href}`);

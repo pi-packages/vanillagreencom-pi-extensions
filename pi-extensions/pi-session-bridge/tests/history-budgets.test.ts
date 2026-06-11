@@ -47,6 +47,7 @@ function fakeCtx(dir: string): any {
 	return {
 		cwd: dir,
 		hasUI: false,
+		isProjectTrusted: () => true,
 		sessionManager: { getSessionId: () => "session-test" },
 	};
 }

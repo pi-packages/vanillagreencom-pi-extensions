@@ -79,6 +79,8 @@ Do not include a final `Confirm`, `Submit`, `Review`, or `Done` question tab in 
 
 Open `/extensions:settings`; settings appear under the **Questions** tab.
 
+Project settings in `.pi/settings.json` apply only after Pi marks the workspace trusted; before trust, vstack Pi extensions read user/global settings only.
+
 | Setting | What it does |
 | --- | --- |
 | Question UI mode | `editor` replaces the input area; `overlay` uses a floating popup. |

@@ -46,6 +46,8 @@ Session titles match Pi `/resume`: explicit session name, otherwise first user m
 
 Open `/extensions:settings`; settings appear under the **Session Manager** tab.
 
+Project settings in `.pi/settings.json` apply only after Pi marks the workspace trusted; before trust, vstack Pi extensions read user/global settings only.
+
 | Setting | What it does |
 | --- | --- |
 | Manager shortcut | Default `f1`. Set `none` to disable. |

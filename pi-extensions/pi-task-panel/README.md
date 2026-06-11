@@ -76,6 +76,8 @@ The panel toggle cycles visible modes and hides the panel; toggling back in rest
 
 Open `/extensions:settings`; settings appear under the **Task Panel** tab.
 
+Project settings in `.pi/settings.json` apply only after Pi marks the workspace trusted; before trust, vstack Pi extensions read user/global settings only.
+
 Glyph style: each package exposes `glyphStyle` (`unicode` default, `ascii` for terminal-safe chrome). `@vanillagreen/pi-tool-renderer.globalGlyphStyleOverride=ascii` forces ASCII chrome across vstack Pi extensions while leaving tool/model/user content unchanged.
 
 ### Panel

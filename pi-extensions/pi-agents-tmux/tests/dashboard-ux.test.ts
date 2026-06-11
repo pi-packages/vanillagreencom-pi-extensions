@@ -27,7 +27,7 @@ import { latestDashboardActivity, renderDashboardWidgetLines, sortDashboardItems
 import { COMPLETION_SUMMARY_UNAVAILABLE, extractLastAssistantTextFromTranscriptContent, highlightInlinePreview, oneLinePreview, parseTranscriptUsage } from "../extensions/subagent/format.js";
 import { oneShotTranscriptPath } from "../extensions/subagent/paths.js";
 import { formatTaskRecordResult } from "../extensions/subagent/renderers.js";
-import { animateSpinnersEnabled } from "../extensions/subagent/settings.js";
+import { animateSpinnersEnabled, recordProjectTrust } from "../extensions/subagent/settings.js";
 import { subagentToolRenderers } from "../extensions/subagent/subagent-render.js";
 import {
 	backfillTaskSummaryFromTranscript,
@@ -63,6 +63,7 @@ function writeManagerConfig(cwd: string, config: Record<string, unknown>): void 
 	writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({
 		vstack: { extensionManager: { config: { "@vanillagreen/pi-agents-tmux": config } } },
 	}));
+	recordProjectTrust({ cwd, isProjectTrusted: () => true });
 }
 
 function writeProjectAgent(cwd: string, name: string, frontmatter: string[] = []): void {

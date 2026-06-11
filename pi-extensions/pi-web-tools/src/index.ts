@@ -3,7 +3,7 @@ import { computeNextActiveTools, statusLines } from "./active-tools.js";
 import { INSTALL_SYMBOL } from "./activation.js";
 import { rewriteNativeOpenAiWebSearch } from "./native-openai.js";
 import { resolveWebProvider } from "./provider-selection.js";
-import { loadSettings, WEB_PROVIDERS, type WebProvider, type WebToolsSettings } from "./settings.js";
+import { loadSettings, recordProjectTrust, WEB_PROVIDERS, type WebProvider, type WebToolsSettings } from "./settings.js";
 import { restoreStoredContent } from "./storage.js";
 import { createCodeSearchToolDefinition } from "./tools/code-search.js";
 import { createGetWebContentToolDefinition } from "./tools/get-web-content.js";
@@ -34,15 +34,23 @@ function registerTools(pi: ExtensionAPI): void {
 	pi.registerTool(createWebFindSimilarToolDefinition(pi, currentSettings) as never);
 	pi.registerTool(createCodeSearchToolDefinition(pi, currentSettings) as never);
 	pi.registerTool(createGetWebContentToolDefinition() as never);
-	if (currentSettings().compatibilityTools) {
-		pi.registerTool(createWebFetchToolDefinition(pi, currentSettings, "fetch_content") as never);
-		pi.registerTool(createGetWebContentToolDefinition("get_search_content") as never);
-		pi.registerTool(createWebSearchToolDefinition(pi, currentSettings, "web_search_exa", "exa") as never);
-		pi.registerTool(createWebFetchToolDefinition(pi, currentSettings, "web_fetch_exa") as never);
-		pi.registerTool(createWebResearchToolDefinition(pi, currentSettings, "web_research_exa") as never);
-		pi.registerTool(createWebAnswerToolDefinition(pi, currentSettings, "web_answer_exa") as never);
-		pi.registerTool(createWebFindSimilarToolDefinition(pi, currentSettings, "web_find_similar_exa") as never);
-	}
+}
+
+let compatibilityToolsRegistered = false;
+function registerCompatibilityTools(pi: ExtensionAPI): void {
+	if (compatibilityToolsRegistered) return;
+	compatibilityToolsRegistered = true;
+	pi.registerTool(createWebFetchToolDefinition(pi, currentSettings, "fetch_content") as never);
+	pi.registerTool(createGetWebContentToolDefinition("get_search_content") as never);
+	pi.registerTool(createWebSearchToolDefinition(pi, currentSettings, "web_search_exa", "exa") as never);
+	pi.registerTool(createWebFetchToolDefinition(pi, currentSettings, "web_fetch_exa") as never);
+	pi.registerTool(createWebResearchToolDefinition(pi, currentSettings, "web_research_exa") as never);
+	pi.registerTool(createWebAnswerToolDefinition(pi, currentSettings, "web_answer_exa") as never);
+	pi.registerTool(createWebFindSimilarToolDefinition(pi, currentSettings, "web_find_similar_exa") as never);
+}
+
+function registerConfiguredCompatibilityTools(pi: ExtensionAPI, cwd?: string): void {
+	if (currentSettings(cwd).compatibilityTools) registerCompatibilityTools(pi);
 }
 
 function syncActiveTools(pi: ExtensionAPI, ctx: ExtensionContext): void {
@@ -116,13 +124,24 @@ export default function webTools(pi: ExtensionAPI): void {
 	registerTools(pi);
 
 	pi.on("session_start", async (_event, ctx) => {
+		recordProjectTrust(ctx);
+		registerConfiguredCompatibilityTools(pi, ctx.cwd);
 		restoreStoredContent(ctx);
 		syncActiveTools(pi, ctx);
 	});
-	pi.on("model_select", async (_event, ctx) => syncActiveTools(pi, ctx));
-	pi.on("thinking_level_select", async (_event, ctx) => syncActiveTools(pi, ctx));
+	pi.on("model_select", async (_event, ctx) => {
+		recordProjectTrust(ctx);
+		registerConfiguredCompatibilityTools(pi, ctx.cwd);
+		syncActiveTools(pi, ctx);
+	});
+	pi.on("thinking_level_select", async (_event, ctx) => {
+		recordProjectTrust(ctx);
+		registerConfiguredCompatibilityTools(pi, ctx.cwd);
+		syncActiveTools(pi, ctx);
+	});
 
 	pi.on("before_provider_request", (event, ctx) => {
+		recordProjectTrust(ctx);
 		const settings = currentSettings(ctx.cwd);
 		if (!settings.enabled || !settings.nativeOpenAiWebSearch) return undefined;
 		const resolution = resolveWebProvider(undefined, settings, contextModel(ctx));

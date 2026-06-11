@@ -33,6 +33,8 @@ pi install npm:@vanillagreen/pi-hooks
 
 Open `/extensions:settings`; settings appear under the **Hooks** tab.
 
+Project settings in `.pi/settings.json` apply only after Pi marks the workspace trusted; before trust, vstack Pi extensions read user/global settings only.
+
 | Setting | What it does |
 | --- | --- |
 | Enable hooks | Master toggle. Disable to make the extension inert without uninstalling. |

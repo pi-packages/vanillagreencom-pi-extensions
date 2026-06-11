@@ -8,6 +8,7 @@ import outputPolicy, {
 	isSanitizeExceptTool,
 	minimizeShellOutput,
 	processText,
+	recordProjectTrust,
 	resolvePolicyMode,
 	sanitizeDetails,
 } from "../extensions/output-policy.ts";
@@ -21,6 +22,7 @@ function withConfig(config: Record<string, unknown>, run: (cwd: string) => void)
 		writeFileSync(join(dir, ".pi", "settings.json"), JSON.stringify({
 			vstack: { extensionManager: { config: { [CONFIG_ID]: config } } },
 		}, null, 2));
+		recordProjectTrust({ cwd: dir, isProjectTrusted: () => true });
 		run(dir);
 	} finally {
 		rmSync(dir, { force: true, recursive: true });
@@ -33,6 +35,7 @@ function fakeCtx(cwd: string): any {
 	const sessionId = `test-${testSeq}-${process.hrtime.bigint().toString(36)}`;
 	return {
 		cwd,
+		isProjectTrusted: () => true,
 		sessionManager: {
 			getSessionId: () => sessionId,
 			getSessionFile: () => null,

@@ -42,6 +42,8 @@ Glyph style: each package exposes `glyphStyle` (`unicode` default, `ascii` for t
 
 Open `/extensions:settings`; settings appear under the **Prompt Stash** tab.
 
+Project settings in `.pi/settings.json` apply only after Pi marks the workspace trusted; before trust, vstack Pi extensions read user/global settings only.
+
 | Setting | What it does |
 | --- | --- |
 | Stash shortcut | Configurable. |

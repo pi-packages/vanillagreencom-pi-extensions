@@ -44,6 +44,8 @@ Status icons: `●` active, `○` inactive, `×` broken. Packages with newer ver
 
 Open `/extensions:settings`; settings appear under the **Extension Manager** tab.
 
+Project settings in `.pi/settings.json` apply only after Pi marks the workspace trusted; before trust, vstack Pi extensions read user/global settings only.
+
 | Setting | What it does |
 | --- | --- |
 | Enable manager UI | Expose `/extensions` and the manager UI. `/extensions:enable` is always available as recovery. |

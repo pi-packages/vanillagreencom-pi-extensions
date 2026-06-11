@@ -66,7 +66,7 @@ import { finalizeTaskLifecycle, replayMissedExitsLifecycle, type LifecycleHooks 
 import { createOrphanWatcher, type OrphanWatcher } from "./orphan-watcher.js";
 import { applyCustomEntryWithBarrier, createPersistence, sessionIdForContext, sidecarStatePath } from "./persistence.js";
 import { defaultSystemdUnitActive, planResourceControlledSpawn, stopResourceControlledTask } from "./resource-control.js";
-import { logFilePath, settingBoolean, settingEnum, settingNumber, settingString, taskEnv } from "./settings.js";
+import { logFilePath, recordProjectTrust, settingBoolean, settingEnum, settingNumber, settingString, taskEnv } from "./settings.js";
 import { applyBgToolResultTasksWithBarrier } from "./tool-result-details.js";
 import {
 	defaultReadProcessIdentity,
@@ -853,6 +853,7 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 
 	pi.on("session_start", (_event, ctx) => {
 		shuttingDown = false;
+		recordProjectTrust(ctx);
 		activeCtx = ctx;
 		restoreSnapshots(ctx);
 		replayMissedExits();
@@ -865,6 +866,7 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 		syncWidget(ctx);
 	});
 	pi.on("before_agent_start", (_event, ctx) => {
+		recordProjectTrust(ctx);
 		activeCtx = ctx;
 		syncWidget(ctx);
 	});
@@ -908,6 +910,7 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 	});
 
 	pi.on("tool_call", async (event: any, ctx: ExtensionContext) => {
+		recordProjectTrust(ctx);
 		activeCtx = ctx;
 		if (event?.toolName !== "bash") return undefined;
 		const command = typeof event.input?.command === "string" ? event.input.command : "";
@@ -932,6 +935,7 @@ export default function backgroundTasks(pi: ExtensionAPI): void {
 	});
 
 	pi.on("user_bash", (event: any, ctx: ExtensionContext) => {
+		recordProjectTrust(ctx);
 		activeCtx = ctx;
 		const command = typeof event?.command === "string" ? event.command : "";
 		const decision = decisionForBashCommand(command, event?.cwd ?? ctx.cwd);

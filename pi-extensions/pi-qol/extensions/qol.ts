@@ -67,7 +67,7 @@ import {
 	runSessionSearchResumeOrFork,
 	sessionSearchShortcut,
 } from "./qol/session-search/index.js";
-import { settingBoolean, settingNumber, settingString } from "./qol/settings.js";
+import { recordProjectTrust, settingBoolean, settingNumber, settingString } from "./qol/settings.js";
 import { statusMessage } from "./qol/status-message.js";
 import {
 	formatTmuxSessionTitle,
@@ -560,6 +560,7 @@ export default function qol(pi: ExtensionAPI): void {
 	});
 
 	pi.on("session_start", (event, ctx) => {
+		recordProjectTrust(ctx);
 		currentCtx = ctx;
 		subscribeCavemanBridge();
 		latestSystemPromptOptions = undefined;

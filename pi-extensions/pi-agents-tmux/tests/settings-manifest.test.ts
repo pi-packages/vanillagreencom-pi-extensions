@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { bgTaskTimeoutMs, DEFAULT_BG_TASK_TIMEOUT_MS, settingNumber } from "../extensions/subagent/settings.js";
+import { bgTaskTimeoutMs, DEFAULT_BG_TASK_TIMEOUT_MS, recordProjectTrust, settingNumber } from "../extensions/subagent/settings.js";
 import { MAX_CONCURRENCY } from "../extensions/subagent/types.js";
 
 type ManifestSetting = {
@@ -25,6 +25,7 @@ function writeProjectSettings(cwd: string, config: Record<string, unknown>): voi
 	writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({
 		vstack: { extensionManager: { config: { "@vanillagreen/pi-agents-tmux": config } } },
 	}), "utf8");
+	recordProjectTrust({ cwd, isProjectTrusted: () => true });
 }
 
 test("settings metadata hides deprecated maxParallelTasks", () => {

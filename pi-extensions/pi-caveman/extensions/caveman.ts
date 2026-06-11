@@ -10,6 +10,7 @@ import {
 	normalizeActiveMode,
 	normalizeMode,
 	readVstackConfig,
+	recordProjectTrust,
 	settingBoolean,
 	settingString,
 	shouldClarityEscape,
@@ -288,6 +289,7 @@ export default function caveman(pi: ExtensionAPI): void {
 	};
 
 	pi.on("session_start", (_event, ctx) => {
+		recordProjectTrust(ctx);
 		activeCtx = ctx;
 		const hadSessionState = hasPersistedState(ctx);
 		state = restoreState(ctx);

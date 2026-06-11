@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { PACKAGE_ID } from "./constants.js";
-import { detectExtensionInstallScope, projectSettingsPath, userPiDir } from "./paths.js";
+import { detectExtensionInstallScope, projectSettingsPath, projectSettingsTrusted, userPiDir } from "./paths.js";
 import type { ExtensionInstallScope, OverlaySize, SettingsFile } from "./types.js";
 
 export function readJsonObject(path: string): SettingsFile {
@@ -31,7 +31,8 @@ function getOrCreateRecord(parent: Record<string, unknown>, key: string): Record
 }
 
 function piSettingsFiles(cwd = process.cwd()): SettingsFile[] {
-	return [readJsonObject(join(userPiDir(), "settings.json")), readJsonObject(projectSettingsPath(cwd))];
+	const user = readJsonObject(join(userPiDir(), "settings.json"));
+	return projectSettingsTrusted(cwd) ? [user, readJsonObject(projectSettingsPath(cwd))] : [user];
 }
 
 function packageConfigFromFile(file: SettingsFile): Record<string, unknown> | undefined {
@@ -76,9 +77,10 @@ export function settingOverlaySize(key: string, fallback: OverlaySize, cwd = pro
 
 function writeScopeForConfigKey(cwd: string, key: string): ExtensionInstallScope {
 	const [user, project] = piSettingsFiles(cwd);
-	if (packageConfigFromFile(project)?.[key] !== undefined) return "project";
+	if (project && packageConfigFromFile(project)?.[key] !== undefined) return "project";
 	if (packageConfigFromFile(user)?.[key] !== undefined) return "global";
-	return detectExtensionInstallScope(cwd);
+	const detected = detectExtensionInstallScope(cwd);
+	return detected === "project" && !projectSettingsTrusted(cwd) ? "global" : detected;
 }
 
 export function updatePackageConfig(cwd: string, updates: Record<string, unknown>, scope?: ExtensionInstallScope): void {

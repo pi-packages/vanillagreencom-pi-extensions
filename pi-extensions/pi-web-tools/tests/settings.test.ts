@@ -3,7 +3,7 @@ import { chmodSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { DEFAULT_SETTINGS, loadSettings, settingsDiagnostics } from "../src/settings.js";
+import { DEFAULT_SETTINGS, loadSettings, recordProjectTrust, settingsDiagnostics } from "../src/settings.js";
 
 function tempDir(): string { return mkdtempSync(join(tmpdir(), "pi-web-tools-")); }
 
@@ -47,6 +47,7 @@ test("loadSettings merges user/project/private config and env wins", () => {
 	process.env.PI_CODING_AGENT_DIR = user;
 	process.env.EXA_API_KEY = "env-exa";
 	try {
+		recordProjectTrust({ cwd: project, isProjectTrusted: () => true });
 		const settings = loadSettings(project);
 		assert.equal(settings.autoEnable, true);
 		assert.equal(settings.defaultProvider, "exa");
@@ -58,6 +59,26 @@ test("loadSettings merges user/project/private config and env wins", () => {
 	} finally {
 		if (previousDir === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previousDir;
 		if (previousExa === undefined) delete process.env.EXA_API_KEY; else process.env.EXA_API_KEY = previousExa;
+	}
+});
+
+test("loadSettings skips project settings until project trust is recorded", () => {
+	const root = tempDir();
+	const user = join(root, "agent");
+	const project = join(root, "project");
+	mkdirSync(user, { recursive: true });
+	mkdirSync(join(project, ".pi"), { recursive: true });
+	writeFileSync(join(user, "settings.json"), JSON.stringify({ vstack: { extensionManager: { config: { "@vanillagreen/pi-web-tools": { autoEnable: false } } } } }));
+	writeFileSync(join(project, ".pi", "settings.json"), JSON.stringify({ vstack: { extensionManager: { config: { "@vanillagreen/pi-web-tools": { autoEnable: true } } } } }));
+	const previousDir = process.env.PI_CODING_AGENT_DIR;
+	process.env.PI_CODING_AGENT_DIR = user;
+	try {
+		recordProjectTrust({ cwd: project, isProjectTrusted: () => false });
+		assert.equal(loadSettings(project).autoEnable, false);
+		recordProjectTrust({ cwd: project, isProjectTrusted: () => true });
+		assert.equal(loadSettings(project).autoEnable, true);
+	} finally {
+		if (previousDir === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previousDir;
 	}
 });
 
@@ -103,7 +124,12 @@ test("loadSettings reads project .env.local without overriding process env", () 
 	process.env.PI_CODING_AGENT_DIR = user;
 	delete process.env.EXA_API_KEY;
 	try {
+		recordProjectTrust({ cwd: project, isProjectTrusted: () => false });
 		let settings = loadSettings(project);
+		assert.equal(settings.apiKeys.exa, undefined);
+		assert.equal(settings.apiKeys.perplexity, undefined);
+		recordProjectTrust({ cwd: project, isProjectTrusted: () => true });
+		settings = loadSettings(project);
 		assert.equal(settings.apiKeys.exa, "env-file-exa");
 		assert.equal(settings.apiKeys.perplexity, "env-file-pplx");
 		process.env.EXA_API_KEY = "process-exa";

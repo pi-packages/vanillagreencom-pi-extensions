@@ -289,9 +289,9 @@ export function renderToolPathText(rawPath: unknown, theme: any, cwd?: string, o
 	return linkPath(theme.fg("accent", shortenPath(displayPath)), displayPath, cwd, hyperlinks);
 }
 
-export function readCallText(args: any, theme: any, cwd?: string): string {
+export function readCallText(args: any, theme: any, cwd?: string, hyperlinks?: boolean): string {
 	const range = args?.offset || args?.limit ? `:${args.offset ?? 1}${args.limit ? `-${Number(args.offset ?? 1) + Number(args.limit) - 1}` : ""}` : "";
-	return `${toolLabel(theme, "Read ")}${renderToolPathText(args?.path ?? args?.file_path ?? "", theme, cwd)}${range ? theme.fg("accent", range) : ""}`;
+	return `${toolLabel(theme, "Read ")}${renderToolPathText(args?.path ?? args?.file_path ?? "", theme, cwd, undefined, hyperlinks)}${range ? theme.fg("accent", range) : ""}`;
 }
 
 export function bashCallText(args: any, theme: any, cwd?: string): string {
@@ -313,11 +313,11 @@ export function isGitDiffCommand(command: unknown): boolean {
 	return /(?:^|[;&|()]\s*)(?:(?:env\s+(?:-\S+\s+)*(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*)|(?:command\s+))*git(?:\s+(?!--?diff\b)(?:-[A-Za-z]\S*|--\S+)(?:\s+(?!diff(?:\s|$))\S+)*)*\s+diff(?:\s|$)/.test(normalized);
 }
 
-export function readOnlyCallText(toolName: string, args: any, theme: any, cwd?: string): string {
-	if (toolName === "ls") return `${toolLabel(theme, `${toolName} `)}${renderToolPathText(args?.path ?? ".", theme, cwd)}`;
+export function readOnlyCallText(toolName: string, args: any, theme: any, cwd?: string, hyperlinks?: boolean): string {
+	if (toolName === "ls") return `${toolLabel(theme, `${toolName} `)}${renderToolPathText(args?.path ?? ".", theme, cwd, undefined, hyperlinks)}`;
 	const query = args?.pattern ?? args?.glob ?? args?.path ?? args?.query ?? "";
 	const rendered = args?.pattern === undefined && args?.glob === undefined && typeof args?.path === "string"
-		? renderToolPathText(args.path, theme, cwd)
+		? renderToolPathText(args.path, theme, cwd, undefined, hyperlinks)
 		: theme.fg("accent", clipLine(String(query), cwd));
 	return `${toolLabel(theme, `${toolName} `)}${rendered}`;
 }

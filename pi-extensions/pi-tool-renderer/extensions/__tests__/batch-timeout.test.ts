@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { registerToolBatch } from "../tool-renderer/batch.js";
+import { recordProjectTrust } from "../tool-renderer/settings.js";
 
 const RENDERER_CONFIG_ID = "@vanillagreen/pi-tool-renderer";
 
@@ -25,6 +26,7 @@ function writeBatchSettings(cwd: string, overrides: Record<string, unknown>): vo
 		}),
 		"utf8",
 	);
+	recordProjectTrust({ cwd, isProjectTrusted: () => true });
 }
 
 interface CapturedDef {

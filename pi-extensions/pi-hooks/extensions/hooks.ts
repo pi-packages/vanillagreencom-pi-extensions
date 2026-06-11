@@ -3,7 +3,7 @@ import { isAbsolute, resolve } from "node:path";
 
 import { isBareCd, runPreCommitCheck } from "./bash-guards.js";
 import { invalidateClippyCache } from "./cargo.js";
-import { getBool, getNumber, readConfig } from "./config.js";
+import { getBool, getNumber, readConfig, recordProjectTrust } from "./config.js";
 import { clippyIssuesForFile, workspaceClippyErrors } from "./lint-hooks.js";
 
 const INSTALL_SYMBOL = Symbol.for("vstack.pi-hooks.installed");
@@ -29,6 +29,7 @@ export default function piHooks(pi: ExtensionAPI): void {
 	});
 
 	pi.on("tool_call", async (event, ctx: ExtensionContext) => {
+		recordProjectTrust(ctx);
 		const cfg = readConfig(ctx.cwd);
 		if (!getBool(cfg, "enabled")) return undefined;
 		if (event.toolName !== "bash") return undefined;
@@ -58,6 +59,7 @@ export default function piHooks(pi: ExtensionAPI): void {
 	});
 
 	pi.on("tool_result", async (event, ctx: ExtensionContext) => {
+		recordProjectTrust(ctx);
 		const cfg = readConfig(ctx.cwd);
 		if (!getBool(cfg, "enabled")) return undefined;
 
@@ -87,6 +89,7 @@ export default function piHooks(pi: ExtensionAPI): void {
 	});
 
 	pi.on("turn_end", async (_event, ctx: ExtensionContext) => {
+		recordProjectTrust(ctx);
 		const cfg = readConfig(ctx.cwd);
 		if (!getBool(cfg, "enabled")) return undefined;
 		if (!getBool(cfg, "taskCompletedCheck")) return undefined;

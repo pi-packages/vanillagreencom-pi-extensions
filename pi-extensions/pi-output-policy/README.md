@@ -58,6 +58,8 @@ Restart Pi after installation.
 
 Open `/extensions:settings`; settings appear under the **Output Policy** tab.
 
+Project settings in `.pi/settings.json` apply only after Pi marks the workspace trusted; before trust, vstack Pi extensions read user/global settings only.
+
 ### General
 
 | Setting | What it does |

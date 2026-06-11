@@ -118,7 +118,7 @@ test("project npm package settings override same global npm package", () => {
 	writePackage(userPackageDir, "@scope/dupe-settings", "User Copy", "userFlag");
 	writePackage(projectPackageDir, "@scope/dupe-settings", "Project Copy", "projectFlag");
 
-	const inv = inventory(project);
+	const inv = inventoryWithTrust(project, true);
 	const copies = inv.packages.filter((pkg) => pkg.packageName === "@scope/dupe-settings");
 	expect(copies).toHaveLength(2);
 	expect(copies.find((pkg) => pkg.scope === "project")?.state).toBe("active");
@@ -203,7 +203,7 @@ test("reads settings schemas from project git package clones", () => {
 	writeJson(join(projectPi, "settings.json"), { packages: ["git:github.com/acme/pi-package@v1.0.0"] });
 	writePackage(gitPackageDir, "acme-pi-package", "Git Package", "gitFlag");
 
-	const inv = inventory(project);
+	const inv = inventoryWithTrust(project, true);
 	const item = inv.packages.find((pkg) => pkg.packageName === "acme-pi-package");
 	expect(item?.scope).toBe("project");
 	expect(item?.state).toBe("active");
@@ -224,7 +224,7 @@ test("rejects unsafe git package clone components", () => {
 	writeJson(join(projectPi, "settings.json"), { packages: [maliciousSource] });
 	writePackage(join(projectPi, "escape"), "escaped-package", "Escaped Package", "escapedFlag");
 
-	const inv = inventory(project);
+	const inv = inventoryWithTrust(project, true);
 	expect(inv.packages.some((pkg) => pkg.packageName === "escaped-package")).toBe(false);
 	const item = inv.packages.find((pkg) => pkg.sourceName === maliciousSource);
 	expect(item?.state).toBe("broken");
@@ -239,7 +239,7 @@ test("toggles project npm packages by original settings source", () => {
 	writeJson(settingsPath, { packages: ["npm:@scope/toggle-settings"] });
 	writePackage(projectPackageDir, "@scope/toggle-settings", "Toggle Settings", "enabled");
 
-	const inv = inventory(project);
+	const inv = inventoryWithTrust(project, true);
 	const item = inv.packages.find((pkg) => pkg.packageName === "@scope/toggle-settings");
 	expect(item?.sourcePath).toBe(projectPackageDir);
 	toggleItem({} as never, { cwd: project, ui: { notify() {} } } as never, inv, item!);

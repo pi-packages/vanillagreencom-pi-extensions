@@ -133,9 +133,44 @@ function projectSettingsPath(cwd: string): string {
 	}
 }
 
+const PROJECT_TRUST_SYMBOL = Symbol.for("vstack.pi.project-trust");
+
+interface ProjectTrustRegistry {
+	projectSettings?: Map<string, boolean>;
+}
+
+function projectTrustRegistry(): ProjectTrustRegistry {
+	const host = globalThis as unknown as Record<PropertyKey, ProjectTrustRegistry | undefined>;
+	const existing = host[PROJECT_TRUST_SYMBOL];
+	if (existing) return existing;
+	const created: ProjectTrustRegistry = {};
+	host[PROJECT_TRUST_SYMBOL] = created;
+	return created;
+}
+
+export function recordProjectTrust(ctx: { cwd?: string; isProjectTrusted?: () => boolean }): void {
+	if (!ctx.cwd) return;
+	let trusted = true;
+	try {
+		trusted = ctx.isProjectTrusted?.() === true;
+	} catch {
+		trusted = false;
+	}
+	const registry = projectTrustRegistry();
+	if (!registry.projectSettings) registry.projectSettings = new Map();
+	registry.projectSettings.set(projectSettingsPath(ctx.cwd), trusted);
+}
+
+function projectSettingsTrusted(settingsPath: string): boolean {
+	return projectTrustRegistry().projectSettings?.get(settingsPath) === true;
+}
+
+
 function piSettingsPaths(cwd = process.cwd()): string[] {
 	const userDir = resolve(expandHome(process.env.PI_CODING_AGENT_DIR?.trim() || "~/.pi/agent"));
-	return [join(userDir, "settings.json"), projectSettingsPath(cwd)];
+	const user = join(userDir, "settings.json");
+	const project = projectSettingsPath(cwd);
+	return projectSettingsTrusted(project) ? [user, project] : [user];
 }
 
 function readVstackConfig(cwd?: string): VstackConfig {
@@ -975,6 +1010,7 @@ export default function questions(pi: ExtensionAPI): void {
 	let activeCtx: ExtensionContext | undefined;
 
 	pi.on("session_start", (_event, ctx) => {
+		recordProjectTrust(ctx);
 		activeCtx = ctx;
 		attachContext(ctx, service);
 	});

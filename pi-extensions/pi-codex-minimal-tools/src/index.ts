@@ -5,7 +5,7 @@ import { registerBackgroundImageGenerationCommand } from "./background-image-gen
 import { computeNextActiveTools, computeToolCapabilities, modelKey, PACKAGE_TOOL_NAMES, type ModelLike } from "./capabilities.js";
 import { registerOpenAICodexCustomProvider } from "./provider-shim.js";
 import { rewriteNativeOpenAiTools } from "./provider-native-tools.js";
-import { loadSettings, settingsDiagnostics } from "./settings.js";
+import { loadSettings, recordProjectTrust, settingsDiagnostics } from "./settings.js";
 import { createApplyPatchToolDefinition } from "./tools/apply-patch.js";
 import { createImageGenerationToolDefinition } from "./tools/image-generation.js";
 import { viewImage, viewImageToolSchema, type ValidatedImage, type ViewImageInput } from "./tools/view-image.js";
@@ -201,11 +201,21 @@ export default function codexMinimalTools(pi: ExtensionAPI): void {
 
 	registerDiagnosticCommand(pi);
 
-	pi.on("session_start", async (_event, ctx) => syncActiveTools(pi, ctx, ensureToolsRegistered(ctx)));
-	pi.on("model_select", async (_event, ctx) => syncActiveTools(pi, ctx, ensureToolsRegistered(ctx)));
-	pi.on("thinking_level_select", async (_event, ctx) => syncActiveTools(pi, ctx, ensureToolsRegistered(ctx)));
+	pi.on("session_start", async (_event, ctx) => {
+		recordProjectTrust(ctx);
+		syncActiveTools(pi, ctx, ensureToolsRegistered(ctx));
+	});
+	pi.on("model_select", async (_event, ctx) => {
+		recordProjectTrust(ctx);
+		syncActiveTools(pi, ctx, ensureToolsRegistered(ctx));
+	});
+	pi.on("thinking_level_select", async (_event, ctx) => {
+		recordProjectTrust(ctx);
+		syncActiveTools(pi, ctx, ensureToolsRegistered(ctx));
+	});
 
 	pi.on("before_provider_request", (event, ctx) => {
+		recordProjectTrust(ctx);
 		currentCwd = ctx.cwd;
 		const settings = loadSettings(ctx.cwd);
 		if (!settings.enabled || !settings.nativeProviderTools || !hasOpenAiModelsLoaded(ctx) || contextModel(ctx)?.provider !== "openai-codex") return undefined;

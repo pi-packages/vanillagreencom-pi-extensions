@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 
-import { bridgeCavemanHookEnabled, configurationSource, instructions, shouldClarityEscape, type Mode } from "../extensions/prompt.ts";
+import { bridgeCavemanHookEnabled, configurationSource, instructions, recordProjectTrust, shouldClarityEscape, type Mode } from "../extensions/prompt.ts";
 
 const SNAP_DIR = join(dirname(fileURLToPath(import.meta.url)), "__snapshots__");
 const UPDATE = process.env.UPDATE_SNAPSHOTS === "1";
@@ -207,6 +207,7 @@ describe("configurationSource() and bridgeCavemanHookEnabled()", () => {
 		writeUserConfig({ mode: "full" });
 		const projectSettings = { vstack: { extensionManager: { config: { "@vanillagreen/pi-caveman": { mode: "lite" } } } } };
 		writeFileSync(join(projectDir, ".pi", "settings.json"), JSON.stringify(projectSettings));
+		recordProjectTrust({ cwd: projectDir, isProjectTrusted: () => true });
 		const src = configurationSource(projectDir);
 		assert.equal(src.source, "project");
 		assert.equal(src.path, join(projectDir, ".pi", "settings.json"));

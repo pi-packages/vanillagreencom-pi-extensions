@@ -67,6 +67,8 @@ Arguments support autocomplete.
 
 All settings are toggled in the extension manager (or written directly to Pi/vstack `settings.json`).
 
+Project settings in `.pi/settings.json` apply only after Pi marks the workspace trusted; before trust, vstack Pi extensions read user/global settings only.
+
 | Setting | Default | What it does |
 | --- | --- | --- |
 | `mode` | `off` | Default caveman mode for new sessions. |
