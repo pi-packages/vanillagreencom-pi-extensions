@@ -109,7 +109,7 @@
           "label": "Reused session context limit tokens",
           "description": "Model context limit used by the reused-session file-size heuristic.",
           "type": "number",
-          "default": 200000,
+          "default": 272000,
           "category": "Execution",
           "apply": "live"
         },

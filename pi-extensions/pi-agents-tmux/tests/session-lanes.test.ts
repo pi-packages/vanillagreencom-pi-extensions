@@ -13,6 +13,7 @@ import {
 	validateAgentInventory,
 } from "../extensions/subagent/dispatch.js";
 import {
+	DEFAULT_MODEL_CONTEXT_LIMIT_TOKENS,
 	isContextLengthExceededEnvelope,
 	isContextLengthExceededText,
 	ONESHOT_SESSION_PREFIX,
@@ -729,6 +730,8 @@ test("explicit sessionKey reuses same lane", () => {
 
 test("context_length_exceeded detection triggers one retry with fresh session", async () => {
 	assert.equal(isContextLengthExceededText('Codex error: {"type":"error","error":{"type":"invalid_request_error","code":"context_length_exceeded"}}'), true);
+	assert.equal(isContextLengthExceededText("Input length (265330) exceeds model's maximum context length (262144)."), true);
+	assert.equal(isContextLengthExceededText("Your input exceeds the context window of this model"), true);
 	assert.equal(isContextLengthExceededEnvelope({ type: "turn_end", message: { errorMessage: "context_length_exceeded" } }), true);
 	const calls = installMockSpawn([
 		{ code: 1, stdout: `${JSON.stringify({ error: { type: "invalid_request_error", code: "context_length_exceeded" } })}\n` },
@@ -761,6 +764,10 @@ test("context_length_exceeded detection triggers one retry with fresh session", 
 	} finally {
 		setSingleAgentSpawnForTests();
 	}
+});
+
+test("default reused-session context limit tracks current Codex backend cap", () => {
+	assert.equal(DEFAULT_MODEL_CONTEXT_LIMIT_TOKENS, 272_000);
 });
 
 test("context_length_exceeded text in normal tool output does not trigger retry", async () => {
@@ -1212,7 +1219,7 @@ test("reused session budget guard refuses over-threshold explicit session by def
 	const cwd = tempRuntime();
 	const session = resolveBgSession(runtimeRoot, "reviewer-test", "reuse");
 	mkdirSync(dirname(session.path), { recursive: true });
-	writeFileSync(session.path, "x".repeat(700_000), "utf8");
+	writeFileSync(session.path, "x".repeat(900_000), "utf8");
 	const calls = installMockSpawn([{ code: 0 }]);
 	try {
 		const result = await runSingleAgent(

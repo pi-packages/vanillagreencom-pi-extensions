@@ -128,7 +128,7 @@ Pane `markTaskNeedsCompletion` persists and returns the `needs_completion` recor
 ## Compact-then-empty needs-completion detector
 
 For vstack#38, bg subagent runs detect `session_compact → agent_end{content:[]}` or content with no `type:"text"` parts on the post-compact bridge-stream slice only. This emits `subagents:needs_completion` with `reason: "compact-then-empty"`.
-The detector is mutually exclusive with the `context_length_exceeded` throw-path retry from PR #35: retry logic handles thrown overflows first, and compact-then-empty only classifies attempts that did not trigger that retry path. Retry detection only trusts error envelopes/stderr; normal tool output or assistant text that mentions `context_length_exceeded` must not trigger a retry.
+The detector is mutually exclusive with the context-overflow throw-path retry from PR #35: retry logic handles thrown overflows first, and compact-then-empty only classifies attempts that did not trigger that retry path. Retry detection only trusts error envelopes/stderr; normal tool output or assistant text that mentions overflow strings must not trigger a retry. The text matcher follows Pi core overflow wording for OpenAI/Codex-style errors, including `context_length_exceeded`, `exceeds the context window`, and parenthesized `maximum context length (N)` messages.
 
 ## Bg one-shot timeout watchdog
 

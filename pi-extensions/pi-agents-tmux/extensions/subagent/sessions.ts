@@ -7,7 +7,15 @@ import type { AttemptSummary, SingleResult } from "./types.js";
 
 export const ONESHOT_SESSION_PREFIX = "oneshot-";
 export const DEFAULT_REUSED_SESSION_BUDGET_THRESHOLD = 0.8;
-export const DEFAULT_MODEL_CONTEXT_LIMIT_TOKENS = 200_000;
+export const DEFAULT_MODEL_CONTEXT_LIMIT_TOKENS = 272_000;
+
+const CONTEXT_OVERFLOW_PATTERNS = [
+	/context[_-]length[_-]exceeded/i,
+	/"code"\s*:\s*"context_length_exceeded"/i,
+	/"type"\s*:\s*"context_length_exceeded"/i,
+	/exceeds the context window/i,
+	/exceeds (?:the )?(?:model'?s )?maximum context length(?: of [\d,]+ tokens?|\s*\([\d,]+\))/i,
+] as const;
 
 type ReusedSessionBudgetPolicy = "compact-then-resume" | "refuse-and-warn" | "warn";
 
@@ -195,9 +203,7 @@ export function isContextLengthExceededEnvelope(value: unknown): boolean {
 
 export function isContextLengthExceededText(text: string | undefined): boolean {
 	if (!text) return false;
-	return /context[_-]length[_-]exceeded/i.test(text)
-		|| /"code"\s*:\s*"context_length_exceeded"/i.test(text)
-		|| /"type"\s*:\s*"context_length_exceeded"/i.test(text);
+	return CONTEXT_OVERFLOW_PATTERNS.some((pattern) => pattern.test(text));
 }
 
 export function resultHasContextLengthExceeded(result: SingleResult): boolean {

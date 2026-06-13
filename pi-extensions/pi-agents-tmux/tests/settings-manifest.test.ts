@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { bgTaskTimeoutMs, DEFAULT_BG_TASK_TIMEOUT_MS, recordProjectTrust, settingNumber } from "../extensions/subagent/settings.js";
+import { DEFAULT_MODEL_CONTEXT_LIMIT_TOKENS } from "../extensions/subagent/sessions.js";
 import { MAX_CONCURRENCY } from "../extensions/subagent/types.js";
 
 type ManifestSetting = {
@@ -62,6 +63,15 @@ test("settings metadata keeps bgTaskTimeoutMs visible and disableable", () => {
 		if (previousPiDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 		else process.env.PI_CODING_AGENT_DIR = previousPiDir;
 	}
+});
+
+test("settings metadata keeps reused session context limit aligned with runtime default", () => {
+	const limit = manifestSettings().find((item) => item.key === "reusedSessionContextLimitTokens");
+	assert.ok(limit, "reusedSessionContextLimitTokens setting remains visible");
+	assert.equal(limit.default, DEFAULT_MODEL_CONTEXT_LIMIT_TOKENS);
+	assert.equal(limit.type, "number");
+	assert.equal(limit.category, "Execution");
+	assert.equal(limit.apply, "live");
 });
 
 test("legacy maxParallelTasks setting does not affect maxConcurrency", () => {
