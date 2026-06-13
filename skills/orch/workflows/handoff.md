@@ -9,7 +9,13 @@ Launch one or more independent work item sessions. This is launch-only.
 | `tracker` | `linear` or `github` |
 | `items` | Linear IDs or GitHub issue numbers |
 | `repo` | Required for GitHub if `gh repo view` cannot resolve |
-| `harness` | `claude`, `codex`, `codex-app`, `opencode`, or `pi` |
+| `harness` | `claude`, `codex`, `codex-app`, `opencode`, or `pi`; optional when Codex app thread tools are exposed |
+
+## 0. Resolve Harness
+
+1. If the user explicitly selected a harness, use it.
+2. Else if multiple items were provided and `codex_app.create_thread` is exposed, set `harness=codex-app`.
+3. Else resolve the normal terminal harness for the current environment before launch.
 
 ## 1. Confirm Launch
 
@@ -28,24 +34,15 @@ Present:
 
 ## 2. Launch
 
-### Codex App
+### Codex Desktop Threads
 
 **Skip if** `harness != codex-app`.
 
-Use this branch only for app-visible Codex Desktop handoff. Prefer native Codex app thread-management tools exposed by the current runtime.
+Use this branch only inside Codex Desktop or another runtime that exposes the `codex_app` thread tools. The Codex CLI does not expose these tools.
 
 For each item:
 
-1. Create or reuse the worktree:
-   ```bash
-   # Linear
-   WT_PATH=$(.agents/skills/worktree/scripts/worktree create [ISSUE_ID])
-
-   # GitHub
-   WT_PATH=$(.agents/skills/worktree/scripts/worktree create issue-[N])
-   ```
-2. If native thread tools are available, create one Codex app thread with `cwd = $WT_PATH`.
-3. Send exactly one initial message:
+1. Resolve the exact start prompt:
    ```text
    # Linear
    $orch start [ISSUE_ID]
@@ -53,11 +50,15 @@ For each item:
    # GitHub
    $orch start github [OWNER/REPO]#[N]
    ```
-4. Record the returned thread ID.
+2. Create exactly one Codex app thread for that item with `codex_app.create_thread`.
+   - The prompt must be exactly the start prompt from step 1.
+   - Target the current saved project with a separate worktree environment for that issue. Do not run all issues in the controller thread, do not launch all issues in one child thread, and do not pass multiple issue IDs to a child thread.
+   - Use the current model and thinking settings unless the user explicitly requested overrides.
+3. If the runtime creates the thread before accepting the prompt, immediately call `codex_app.send_message_to_thread` for the returned `threadId` with the exact start prompt from step 1.
+4. If `codex_app.set_thread_title` is exposed, title the thread with the item identifier, such as `orch [ISSUE_ID]` or `orch github #[N]`.
+5. Record the returned thread ID.
 
-If native thread tools are not available, do not substitute terminal launch. Print the worktree path and exact initial message for each item so the user can paste it into a Codex app thread.
-
-Do not use `codex debug app-server send-message-v2` for workflow automation. Do not use raw `codex app-server` for unattended handoff unless the active client can surface approvals to the user.
+If the `codex_app` thread tools are not exposed, stop the `codex-app` handoff and report that Codex Desktop thread tools are unavailable in this runtime. Do not substitute terminal launch, `codex debug app-server`, raw `codex app-server`, or manual app-thread instructions.
 
 ### Terminal Harnesses
 
@@ -80,7 +81,7 @@ Do not use `codex debug app-server send-message-v2` for workflow automation. Do 
 |-------|-------|
 | Launched | [N] |
 | Items | [ITEMS] |
-| Mode | [codex-app|terminal|manual] |
+| Mode | [codex-app|terminal|unavailable] |
 | Threads | [THREAD_IDS or none] |
 | Worktrees | [WORKTREE_PATHS or none] |
 | Monitoring | none |

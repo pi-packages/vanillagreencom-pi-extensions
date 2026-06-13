@@ -27,7 +27,7 @@ Load IN ORDER before anything else. Do not proceed if any fails.
 
 > If you are running in **Codex**: Spawn workers with `fork_context: false`. Two-step pattern: (1) spawn with the `<bootstrap_format>` message, (2) `send_input` a `DELEGATION:` prefixed message containing exactly the filled `<delegation_format>` content — nothing more.
 >
-> For **Codex app-visible handoff**, invoke `workflows/handoff.md` with `harness=codex-app`. Use native Codex app thread-management tools when they are exposed by the runtime. If they are not exposed, print manual app-thread commands; do not substitute terminal launch or debug app-server automation.
+> For **Codex Desktop app handoff**, invoke `workflows/handoff.md` with `harness=codex-app`. When `handoff` receives multiple issues and the runtime exposes Codex app thread tools, default to `harness=codex-app` unless the user explicitly selected another harness. Create one Codex app thread per issue with `codex_app.create_thread`, start it with exactly `$orch start [ISSUE_ID]` or `$orch start github [OWNER/REPO]#[N]`, and record the returned thread ID. If the runtime separates thread creation from prompting, call `codex_app.send_message_to_thread` once with that same start prompt. The Codex CLI does not expose these tools; do not emulate app handoff with terminal launch, `codex debug app-server`, raw `codex app-server`, or manual app-thread instructions.
 
 > If you are running in **OpenCode**: The persistent identity of a spawned sub-agent is the `task_id` returned by `functions.task`. On first spawn, store that `task_id` in workflow state (`child_sessions[agent].agent_id` for dev/QA, `review_agent_ids[reviewer-name]` for reviewers). On re-delegation (fix cycles, re-review), call `functions.task(task_id=<stored_id>)` — never spawn a fresh task when a stored ID exists. Fresh spawn only if: no stored ID, one resume attempt fails, or the prior task is confirmed dead.
 
@@ -50,7 +50,7 @@ When invoked with `<command> [args]`, route to the corresponding workflow.
 |---------|-----------|----------|-------|
 | `start` | `[ISSUE_ID]` \| `github OWNER/REPO#N` | `workflows/start.md` or `workflows/start-worktree.md` | Context-aware routing |
 | `start new` | `linear|github ...` | `workflows/start-new.md` | Create one issue then start it |
-| `handoff` | `linear|github ...` | `workflows/handoff.md` | Launch-only; no monitoring; Codex app uses native app threads when available |
+| `handoff` | `linear|github ...` | `workflows/handoff.md` | Launch-only; no monitoring; Codex Desktop creates one app thread per issue |
 | `plan-issues` | `PLAN_PATH linear|github` | `workflows/plan-issues.md` | Convert plan items into issues |
 | `parallel-check` | `[ISSUE_IDS]` | `workflows/parallel-check.md` | Safe parallel handoff analysis |
 | `initialize` | `[ISSUE_ID]` | `workflows/initialize.md` | Team setup, auth, cache, state (standalone) |
@@ -94,7 +94,7 @@ Follow ALL [Workflow Execution](#workflow-execution) rules for every command.
 | `workflows/start.md` | `start` from main repo | Select/prepare one Linear or GitHub work item |
 | `workflows/start-worktree.md` | `start` (from worktree) | Full session: dev → review → submit → finalize |
 | `workflows/start-new.md` | `start new` | Create one Linear or GitHub issue |
-| `workflows/handoff.md` | `handoff` | Launch-only worktree handoff |
+| `workflows/handoff.md` | `handoff` | Launch-only work item handoff |
 | `workflows/plan-issues.md` | `plan-issues` | Convert plan items into issues |
 | `workflows/parallel-check.md` | `parallel-check` | Check safe parallel handoff groups |
 

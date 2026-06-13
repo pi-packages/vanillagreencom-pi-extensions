@@ -82,7 +82,7 @@ Ask one action:
 |--------|--------|
 | Continue here | Execute `workflows/start-worktree.md` using `[WT_PATH]` as the worktree context |
 | Launch handoff | Invoke `workflows/handoff.md` |
-| Launch Codex app | Invoke `workflows/handoff.md` with `harness=codex-app`; use native Codex app thread tools if available, otherwise print manual app-thread commands |
+| Launch Codex app | Invoke `workflows/handoff.md` with `harness=codex-app`; Codex Desktop creates one app thread per issue via `codex_app` thread tools |
 | Manual | Print worktree path and exact `/orch start ...` command |
 
 <output_format>

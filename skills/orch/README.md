@@ -11,7 +11,7 @@ Invoke via your AI coding harness (e.g., `/orch <command>` or `/skill:orch <comm
 | `start [ISSUE_ID]` | Prepare/start one Linear issue |
 | `start github OWNER/REPO#N` | Prepare/start one GitHub issue |
 | `start new linear\|github ...` | Create one issue, then start it |
-| `handoff linear\|github ...` | Launch worktree sessions only; no monitoring |
+| `handoff linear\|github ...` | Launch independent work item sessions; no monitoring |
 | `plan-issues PLAN_PATH linear\|github` | Convert plan items into tracker issues |
 | `dev-start [ISSUE_ID]` | Delegate implementation to specialist agents |
 | `dev-fix [ISSUE_ID]` | Delegate review fix items |
@@ -60,10 +60,10 @@ See [`DEVELOPMENT.md`](./DEVELOPMENT.md) for GitHub auth fallback details and th
 
 - `jq`, `bash` 4+, `flock` (util-linux)
 
-## Codex Desktop Worktrees
+## Codex Desktop Threads
 
-For app-visible handoff, use `handoff ... --harness codex-app` from the orch workflow. The Codex app branch creates/reuses the vstack worktree, then uses native Codex app thread-management tools when the runtime exposes them. If those tools are absent, it prints the worktree path and exact `$orch start ...` message for manual app-thread launch.
+For app-visible handoff, use `handoff ... --harness codex-app` from the orch workflow while running inside Codex Desktop. This path uses `codex_app` thread tools, not the Codex CLI.
 
-Let Codex Desktop own Codex-managed worktree creation, branch metadata, and teardown when using its built-in worktree mode. Configure the worktree skill's `codex-setup` and `codex-cleanup` hooks in the Codex environment, then run `initialize [ISSUE_ID]` or `start [ISSUE_ID]` with an explicit issue ID.
+For multi-issue handoff, `handoff ISSUE_ID ISSUE_ID` defaults to Codex app threads when those tools are exposed. Create one Codex app thread per issue. Start each thread with exactly `$orch start ISSUE_ID` for Linear or `$orch start github OWNER/REPO#N` for GitHub. If the runtime separates thread creation from prompting, call `codex_app.send_message_to_thread` once for the returned thread ID with that same start prompt.
 
-Do not automate app-visible handoff with `codex debug app-server send-message-v2`. Do not run raw `codex app-server` unattended unless the active client can surface approvals to the user.
+The Codex CLI does not expose these thread tools. Do not automate app-visible handoff with terminal launch helpers, `codex debug app-server`, raw `codex app-server`, or manual app-thread instructions.
