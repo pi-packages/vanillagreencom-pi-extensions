@@ -31,6 +31,7 @@ const OPENAI_CODEX_IMAGE_DIR = ".pi/openai-codex-images";
 const OPENAI_CODEX_LATEST_IMAGE_NAME = "latest.png";
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 1000;
+const SSE_RESPONSE_HEADER_TIMEOUT_MS = 20_000;
 const CODEX_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]);
 const CODEX_RESPONSE_STATUSES = new Set(["completed", "incomplete", "failed", "cancelled", "queued", "in_progress"]);
 const OPENAI_BETA_RESPONSES_WEBSOCKETS = "responses_websockets=2026-02-06";
@@ -608,6 +609,42 @@ function sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
 			{ once: true },
 		);
 	});
+}
+
+export async function fetchWithResponseHeaderTimeout(
+	url: string,
+	init: RequestInit,
+	parentSignal: AbortSignal | undefined,
+	timeoutMs = SSE_RESPONSE_HEADER_TIMEOUT_MS,
+): Promise<Response> {
+	if (parentSignal?.aborted) throw new Error("Request was aborted");
+
+	const controller = new AbortController();
+	let timedOut = false;
+	let parentAborted = false;
+	const timeoutMessage = `Codex Responses SSE response headers timed out after ${timeoutMs}ms`;
+
+	const onParentAbort = () => {
+		parentAborted = true;
+		controller.abort(parentSignal?.reason);
+	};
+
+	if (parentSignal) parentSignal.addEventListener("abort", onParentAbort, { once: true });
+	const timeout = setTimeout(() => {
+		timedOut = true;
+		controller.abort(new Error(timeoutMessage));
+	}, Math.max(1, timeoutMs));
+
+	try {
+		return await fetch(url, { ...init, signal: controller.signal });
+	} catch (error) {
+		if (timedOut) throw new Error(timeoutMessage);
+		if (parentAborted || parentSignal?.aborted) throw new Error("Request was aborted");
+		throw error;
+	} finally {
+		clearTimeout(timeout);
+		if (parentSignal) parentSignal.removeEventListener("abort", onParentAbort);
+	}
 }
 
 async function* parseSSE(response: Response): AsyncIterable<StreamEventShape> {
@@ -1650,13 +1687,12 @@ function createCodexStream<TApi extends Api>(
 				}
 
 				try {
-					response = await fetch(sseUrl, {
+					response = await fetchWithResponseHeaderTimeout(sseUrl, {
 						method: "POST",
 						headers: sseHeaders,
 						body: bodyJson,
-						signal: options?.signal,
 						...(sseDispatcher ? { dispatcher: sseDispatcher } : {}),
-					} as RequestInit);
+					} as RequestInit, options?.signal);
 
 					await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
 

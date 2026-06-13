@@ -15,7 +15,8 @@ afterEach(() => {
 });
 
 function installImmediateRetryTimers(): void {
-	globalThis.setTimeout = ((callback: TimerHandler, _delay?: number, ...args: unknown[]) => {
+	globalThis.setTimeout = ((callback: TimerHandler, delay?: number, ...args: unknown[]) => {
+		if (delay === 20_000) return 0 as unknown as ReturnType<typeof setTimeout>;
 		queueMicrotask(() => {
 			if (typeof callback === "function") {
 				callback(...args);
