@@ -14,7 +14,7 @@ CLI wrapper for GitHub API operations used in PR workflows.
 
 1. Authenticate: `gh auth login`
 2. Optionally set `GH_BOT_TOKEN` in `.env.local` for bot account operations
-3. Optionally set `GH_ISSUE_PATTERN` if branches don't use `ABC-123` style IDs
+3. Optionally set non-secret defaults such as `GH_ISSUE_PATTERN`, `GH_BOT_USERNAME`, and `GH_VERIFY_CMD` in committed `vstack.settings.toml`
 
 ```bash
 ./scripts/github.sh pr-view 123 --json number,title,state
@@ -28,6 +28,8 @@ CLI wrapper for GitHub API operations used in PR workflows.
 | `GH_BOT_TOKEN` | Bot account GitHub token | Falls back to `gh` auth |
 | `GH_BOT_USERNAME` | Bot username for filtering | `review-bot[bot]` |
 | `GH_ISSUE_PATTERN` | Regex for branch issue extraction | `[A-Z]+-[0-9]+` |
+
+Keep tokens in `.env.local`. Shared non-secret defaults can live in `vstack.settings.toml` under `[env]`; `.env.local` still wins for local overrides.
 
 ## Adding a Command
 

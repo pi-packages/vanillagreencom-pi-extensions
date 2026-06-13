@@ -16,8 +16,9 @@
 #      the current `gh auth status` already succeeds. Always returns 0.
 #
 #   2. orch_load_env_bot_token <project_root>
-#      Look for `GH_BOT_TOKEN` in `<project_root>/.env.local` then
-#      `<project_root>/.env` (`.env.local` wins). Resolve `op://`
+#      Look for `GH_BOT_TOKEN` after loading `<project_root>/.env`,
+#      `<project_root>/vstack.settings.toml`, then `<project_root>/.env.local`.
+#      Resolve `op://`
 #      references via `op read` when available. If the resolved value
 #      looks like a GitHub token, export it as GH_TOKEN and return 0.
 #      Returns 1 if nothing valid was found.
@@ -40,24 +41,24 @@ orch_sanitize_gh_env() {
 
 orch_load_env_bot_token() {
   local project_root="${1:?orch_load_env_bot_token: project_root required}"
-  local env_file resolved bot_token
-  for env_file in "$project_root/.env.local" "$project_root/.env"; do
-    [[ -f "$env_file" ]] || continue
-    bot_token=$(
-      set +u
-      # shellcheck disable=SC1090
-      source "$env_file" >/dev/null 2>&1 || true
-      printf '%s' "${GH_BOT_TOKEN:-}"
-    )
-    [[ -n "$bot_token" ]] || continue
-    if [[ "$bot_token" == op://* ]] && command -v op >/dev/null 2>&1; then
-      resolved=$(op read "$bot_token" 2>/dev/null || true)
-      [[ -n "$resolved" ]] && bot_token="$resolved"
-    fi
-    if [[ "$bot_token" =~ ^gh[pors]_ ]] || [[ "$bot_token" =~ ^github_pat_ ]]; then
-      export GH_TOKEN="$bot_token"
-      return 0
-    fi
-  done
+  local resolved bot_token
+  bot_token=$(
+    set +u
+    local lib_dir
+    lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    # shellcheck disable=SC1091
+    source "$lib_dir/vstack-env.sh" >/dev/null 2>&1 || true
+    vstack_load_project_env "$project_root" >/dev/null 2>&1 || true
+    printf '%s' "${GH_BOT_TOKEN:-}"
+  )
+  [[ -n "$bot_token" ]] || return 1
+  if [[ "$bot_token" == op://* ]] && command -v op >/dev/null 2>&1; then
+    resolved=$(op read "$bot_token" 2>/dev/null || true)
+    [[ -n "$resolved" ]] && bot_token="$resolved"
+  fi
+  if [[ "$bot_token" =~ ^gh[pors]_ ]] || [[ "$bot_token" =~ ^github_pat_ ]]; then
+    export GH_TOKEN="$bot_token"
+    return 0
+  fi
   return 1
 }

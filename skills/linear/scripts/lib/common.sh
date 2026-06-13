@@ -7,12 +7,6 @@ set -euo pipefail
 # Configuration
 LINEAR_API="https://api.linear.app/graphql"
 
-# Default values - can be overridden in .env.local
-# LINEAR_TEAM, LINEAR_FORMAT, LINEAR_TEAM_PREFIX set in .env.local take precedence
-DEFAULT_TEAM="${LINEAR_TEAM:-Claude}"
-DEFAULT_FORMAT="${LINEAR_FORMAT:-safe}"    # safe, raw, ids, table
-DEFAULT_PREFIX="${LINEAR_TEAM_PREFIX:-PROJ}" # Issue identifier prefix (e.g., PROJ-123)
-
 # Linear API field limits (discovered through testing)
 LINEAR_LIMIT_SHORT_DESC=255    # Initiatives, projects, milestones, labels
 LINEAR_LIMIT_ISSUE_DESC=100000 # Issues have no practical limit
@@ -21,19 +15,29 @@ LINEAR_LIMIT_ISSUE_DESC=100000 # Issues have no practical limit
 _LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
 
+# Inline secret overrides must beat project files. Cache-only commands rely on
+# this so fake/op:// test values are not replaced by a developer's .env.local.
+_CALLER_LINEAR_API_KEY_SET="${LINEAR_API_KEY+x}"
+_CALLER_LINEAR_API_KEY="${LINEAR_API_KEY:-}"
+
+# Load public config and local secrets before deriving defaults.
+# shellcheck source=vstack-env.sh
+source "$_LIB_DIR/vstack-env.sh"
+vstack_load_project_env "$PROJECT_ROOT"
+
+if [[ -n "$_CALLER_LINEAR_API_KEY_SET" ]]; then
+    LINEAR_API_KEY="$_CALLER_LINEAR_API_KEY"
+    export LINEAR_API_KEY
+fi
+unset _CALLER_LINEAR_API_KEY_SET _CALLER_LINEAR_API_KEY
+
+# Default values can be overridden by vstack.settings.toml [env] or .env.local.
+DEFAULT_TEAM="${LINEAR_TEAM:-Claude}"
+DEFAULT_FORMAT="${LINEAR_FORMAT:-safe}"    # safe, raw, ids, table
+DEFAULT_PREFIX="${LINEAR_TEAM_PREFIX:-PROJ}" # Issue identifier prefix (e.g., PROJ-123)
+
 # Source formatters
 source "$_LIB_DIR/formatters.sh"
-
-# Load API key from .env.local or .env if not already set
-if [ -z "${LINEAR_API_KEY:-}" ]; then
-    if [ -f "$PROJECT_ROOT/.env.local" ]; then
-        # shellcheck source=/dev/null
-        source "$PROJECT_ROOT/.env.local"
-    elif [ -f "$PROJECT_ROOT/.env" ]; then
-        # shellcheck source=/dev/null
-        source "$PROJECT_ROOT/.env"
-    fi
-fi
 
 # Resolve 1Password references when the env file contains op:// secrets.
 resolve_linear_api_key() {

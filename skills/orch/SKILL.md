@@ -154,7 +154,7 @@ Both `bot-review-wait` and `ci-wait` share `scripts/lib/gh-auth.sh` for a four-s
 
 ### `workflow-state` actions
 
-`ORCH_STATE_DIR` overrides state directory (default: `tmp`).
+`ORCH_STATE_DIR` overrides state directory (default: `tmp`). Put non-secret workflow settings in committed `vstack.settings.toml` under `[env]`; `.env.local` remains supported for secrets and personal overrides.
 
 | Action | Purpose |
 |--------|---------|

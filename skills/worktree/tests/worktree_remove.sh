@@ -231,8 +231,8 @@ assert_eq "$noenv_out" "Restored symlinks in $NOENV_ROOT/trees/issue-noenv" "fix
 assert_path_absent "$NOENV_ROOT/trees/issue-noenv/.env.local" ".env.local not linked unless configured"
 
 # WORKTREE_BASE_DIR can be set in .env or .env.local. Relative values resolve
-# from the main checkout; .env.local overrides .env and trailing slashes are
-# ignored.
+# from the main checkout; vstack.settings.toml overrides legacy .env, and
+# .env.local overrides both. Trailing slashes are ignored.
 CONFIG_ROOT="$TMP_ROOT/config"
 make_repo "$CONFIG_ROOT/main"
 cat > "$CONFIG_ROOT/main/.env" <<'ENV'
@@ -240,6 +240,13 @@ WORKTREE_BASE_DIR="../from-env"
 ENV
 config_path=$(cd "$CONFIG_ROOT/main" && "$WORKTREE_SCRIPT" path ISSUE-CONFIG)
 assert_eq "$config_path" "$CONFIG_ROOT/from-env/issue-config" ".env WORKTREE_BASE_DIR controls path"
+cat > "$CONFIG_ROOT/main/vstack.settings.toml" <<'TOML'
+[env]
+WORKTREE_BASE_DIR = "../from-settings"
+WORKTREE_MKDIRS = ["tmp", "cache"]
+TOML
+config_settings_path=$(cd "$CONFIG_ROOT/main" && "$WORKTREE_SCRIPT" path ISSUE-CONFIG)
+assert_eq "$config_settings_path" "$CONFIG_ROOT/from-settings/issue-config" "vstack.settings.toml WORKTREE_BASE_DIR overrides .env"
 cat > "$CONFIG_ROOT/main/.env.local" <<ENV
 WORKTREE_BASE_DIR="$CONFIG_ROOT/from-local/"
 ENV

@@ -5,11 +5,10 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-ENV_FILE="$PROJECT_ROOT/.env.local"
-if [[ -f "$ENV_FILE" ]]; then
-    # shellcheck source=/dev/null
-    source "$ENV_FILE"
-fi
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/vstack-env.sh
+source "$SCRIPT_DIR/lib/vstack-env.sh"
+vstack_load_project_env "$PROJECT_ROOT"
 
 STATE_DIR="${ORCH_STATE_DIR:-tmp}"
 STATE_PREFIX="workflow-state"

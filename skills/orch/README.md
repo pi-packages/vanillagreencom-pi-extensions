@@ -37,12 +37,12 @@ Invoke via your AI coding harness (e.g., `/orch <command>` or `/skill:orch <comm
 ## Setup
 
 1. Install dependency skills: `github`, `worktree`, `decider`, `project-management`; add `linear` for Linear workflows.
-2. Set runtime config in `.env` or `.env.local`.
+2. Set non-sensitive runtime defaults in `vstack.settings.toml`; keep secrets in `.env.local`.
 3. Verify each skill works from the project root before invoking a workflow.
 
 ## Configuration
 
-Set in `.env` or `.env.local` (`.env.local` wins). Helper scripts source both automatically.
+Set non-sensitive values in `vstack.settings.toml` under `[env]`. Existing `.env` and `.env.local` files still work; load order is `.env`, then `vstack.settings.toml`, then `.env.local`.
 
 | Variable | Purpose | Default |
 |----------|---------|---------|

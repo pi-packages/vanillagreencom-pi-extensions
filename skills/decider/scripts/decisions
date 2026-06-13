@@ -24,6 +24,13 @@
 #
 set -euo pipefail
 
+# Load optional project config before DECISIONS_DIR auto-discovery.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+# shellcheck source=lib/vstack-env.sh
+source "$SCRIPT_DIR/lib/vstack-env.sh"
+vstack_load_project_env "$PROJECT_ROOT"
+
 # --- Prerequisites ------------------------------------------------------------
 
 if ! command -v jq &>/dev/null; then

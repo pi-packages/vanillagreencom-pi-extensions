@@ -23,7 +23,7 @@ skills/linear/
 ## Setup
 
 1. Add `LINEAR_API_KEY` to `.env.local` for live API commands and sync
-2. Optionally set `LINEAR_TEAM` and `LINEAR_TEAM_PREFIX` if defaults don't match
+2. Optionally set non-secret defaults such as `LINEAR_TEAM`, `LINEAR_FORMAT`, and `LINEAR_TEAM_PREFIX` in committed `vstack.settings.toml`
 
 ```bash
 ./scripts/linear.sh auth-check
@@ -42,6 +42,8 @@ Read-only cache queries (`./scripts/linear.sh cache ...` except `cache attachmen
 | `LINEAR_TEAM` | Default team name | `Claude` |
 | `LINEAR_FORMAT` | Default output format | `safe` |
 | `LINEAR_TEAM_PREFIX` | Issue identifier prefix | `CC` |
+
+Keep `LINEAR_API_KEY` in `.env.local`. Shared non-secret defaults can live in `vstack.settings.toml` under `[env]`; `.env.local` still wins for local overrides.
 
 ## Adding a Resource
 

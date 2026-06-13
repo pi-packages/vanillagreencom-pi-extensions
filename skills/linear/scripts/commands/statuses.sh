@@ -18,10 +18,10 @@ Actions:
   get     Get a single state by name
 
 List Options:
-  --team <name>         Team name (default: from .env.local)
+  --team <name>         Team name (default: from project config)
 
 Get Options:
-  --team <name>         Team name (default: from .env.local)
+  --team <name>         Team name (default: from project config)
   --name <name>         State name (required)
 
 Examples:

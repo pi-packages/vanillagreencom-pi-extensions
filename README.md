@@ -114,6 +114,16 @@ Key rules:
 
 > **v3 migration:** legacy shared `[agent-frontmatter]` and `tools` allowlists are no longer read. Move overrides into `[agent-frontmatter.<harness>]` and switch allowlists to `deny-tools`.
 
+### Runtime Settings
+
+Portable skill scripts load runtime settings in this order:
+
+1. `.env`
+2. `vstack.settings.toml` or `.vstack/settings.toml`
+3. `.env.local`
+
+Use `vstack.settings.toml` for non-sensitive project defaults that should be committed, such as worktree paths, issue regexes, bot usernames, default Linear team names, and second-opinion command defaults. Keep `.env.local` for secrets, tokens, API keys, private URLs, signing keys, and personal overrides. See [`vstack.settings.toml.example`](vstack.settings.toml.example) and [`.env.local.example`](.env.local.example).
+
 ## Supported Tools
 
 | Tool | Notes |

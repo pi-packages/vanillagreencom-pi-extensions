@@ -36,7 +36,7 @@ EOF
 
 2. Verify: `decisions list && decisions next-id`
 
-Optionally set `DECISIONS_DIR` in `.env.local` to override auto-discovery (searches `docs/decisions/`, `decisions/`, `doc/decisions/`, `adr/`).
+Optionally set `DECISIONS_DIR` in committed `vstack.settings.toml` under `[env]` to override auto-discovery (searches `docs/decisions/`, `decisions/`, `doc/decisions/`, `adr/`). Existing `.env.local` overrides still work.
 
 ## Decision Templates
 

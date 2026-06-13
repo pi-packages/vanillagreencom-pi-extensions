@@ -17,46 +17,44 @@ if [ "${1:-}" = "-C" ]; then
     shift 2
 fi
 
-# Auto-source .env.local and export GH_TOKEN for all subcommands.
+# Auto-source project config and export GH_TOKEN for all subcommands.
 # Handles the case where `gh auth login` is tied to a different account than
 # the repo grants permissions to — without GH_TOKEN, read commands fail with
-# "Could not resolve to a Repository". Only overrides when GH_TOKEN is unset.
-if [ -z "${GH_TOKEN:-}" ]; then
-    _env_root=""
-    if [ -n "$WORK_DIR" ]; then
-        _env_root=$(cd "$WORK_DIR" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null || true)
-    else
-        _env_root=$(git rev-parse --show-toplevel 2>/dev/null || true)
-    fi
-    if [ -n "$_env_root" ]; then
-        for _env_file in "$_env_root/.env.local" "$_env_root/.env"; do
-            if [ -f "$_env_file" ]; then
-                # shellcheck disable=SC1090
-                _env_bot_token=$(
-                    set +u
-                    # shellcheck disable=SC1090
-                    source "$_env_file" >/dev/null 2>&1 || true
-                    printf '%s' "${GH_BOT_TOKEN:-}"
-                )
-                if [ -n "$_env_bot_token" ]; then
-                    # Resolve 1Password reference if needed
-                    if [[ "$_env_bot_token" == op://* ]]; then
-                        if command -v op &>/dev/null; then
-                            _resolved=$(op read "$_env_bot_token" 2>/dev/null || true)
-                            [ -n "$_resolved" ] && _env_bot_token="$_resolved"
-                        fi
-                    fi
-                    # Only export if it looks like a valid token
-                    if [[ "$_env_bot_token" =~ ^gh[pors]_ ]] || [[ "$_env_bot_token" =~ ^github_pat_ ]]; then
-                        export GH_TOKEN="$_env_bot_token"
-                    fi
-                    break
-                fi
-            fi
-        done
-    fi
-    unset _env_root _env_file _env_bot_token _resolved
+# "Could not resolve to a Repository". Only fills GH_TOKEN from GH_BOT_TOKEN
+# when GH_TOKEN is still unset after config load.
+_CALLER_GH_TOKEN_SET="${GH_TOKEN+x}"
+_CALLER_GH_TOKEN="${GH_TOKEN:-}"
+_CALLER_GITHUB_TOKEN_SET="${GITHUB_TOKEN+x}"
+_CALLER_GITHUB_TOKEN="${GITHUB_TOKEN:-}"
+
+_env_root=""
+if [ -n "$WORK_DIR" ]; then
+    _env_root=$(cd "$WORK_DIR" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null || true)
+else
+    _env_root=$(git rev-parse --show-toplevel 2>/dev/null || true)
 fi
+if [ -n "$_env_root" ]; then
+    # shellcheck source=lib/vstack-env.sh
+    source "$SCRIPT_DIR/lib/vstack-env.sh"
+    vstack_load_project_env "$_env_root"
+fi
+if [ -n "$_CALLER_GH_TOKEN_SET" ]; then
+    export GH_TOKEN="$_CALLER_GH_TOKEN"
+fi
+if [ -n "$_CALLER_GITHUB_TOKEN_SET" ]; then
+    export GITHUB_TOKEN="$_CALLER_GITHUB_TOKEN"
+fi
+if [ -z "${GH_TOKEN:-}" ] && [ -n "${GH_BOT_TOKEN:-}" ]; then
+    _env_bot_token="$GH_BOT_TOKEN"
+    if [[ "$_env_bot_token" == op://* ]] && command -v op &>/dev/null; then
+        _resolved=$(op read "$_env_bot_token" 2>/dev/null || true)
+        [ -n "$_resolved" ] && _env_bot_token="$_resolved"
+    fi
+    if [[ "$_env_bot_token" =~ ^gh[pors]_ ]] || [[ "$_env_bot_token" =~ ^github_pat_ ]]; then
+        export GH_TOKEN="$_env_bot_token"
+    fi
+fi
+unset _env_root _env_bot_token _resolved _CALLER_GH_TOKEN_SET _CALLER_GH_TOKEN _CALLER_GITHUB_TOKEN_SET _CALLER_GITHUB_TOKEN
 
 show_help() {
     cat << 'EOF'

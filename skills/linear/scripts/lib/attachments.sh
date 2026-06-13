@@ -99,15 +99,13 @@ attach_download_url() {
         return 2
     fi
 
-    # Source API key
+    # Source API key from project config/secrets.
     if [[ -z "${LINEAR_API_KEY:-}" ]]; then
-        if [[ -f "$ATTACH_CACHE_PROJECT_ROOT/.env.local" ]]; then
-            # shellcheck source=/dev/null
-            source "$ATTACH_CACHE_PROJECT_ROOT/.env.local"
-        elif [[ -f "$ATTACH_CACHE_PROJECT_ROOT/.env" ]]; then
-            # shellcheck source=/dev/null
-            source "$ATTACH_CACHE_PROJECT_ROOT/.env"
-        fi
+        local lib_dir
+        lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        # shellcheck source=vstack-env.sh
+        source "$lib_dir/vstack-env.sh"
+        vstack_load_project_env "$ATTACH_CACHE_PROJECT_ROOT"
     fi
 
     if ! resolve_linear_api_key; then

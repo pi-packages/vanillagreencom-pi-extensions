@@ -11,8 +11,8 @@
 #   1. orch_sanitize_gh_env — drop stale GH_TOKEN/GITHUB_TOKEN
 #      env vars that mask working `gh` keyring auth.
 #   2. If GH_TOKEN ended up empty (never set, or step 1 cleared it), match
-#      skills/github/scripts/github.sh and load a .env.local/.env
-#      GH_BOT_TOKEN if one is present.
+#      skills/github/scripts/github.sh and load GH_BOT_TOKEN from project
+#      config/secrets if one is present.
 #   3. If the current `gh auth status` still fails, drop any remaining
 #      stale env token and retry the GH_BOT_TOKEN load — covers the
 #      stale-env-token + bad-keyring + valid-bot-token combination.
@@ -49,7 +49,7 @@ fi
 if ! gh auth status >/dev/null 2>&1; then
   {
     echo "ci-wait: no working GitHub auth path."
-    echo "Tried: env GH_TOKEN/GITHUB_TOKEN, gh keyring, .env.local/.env GH_BOT_TOKEN."
+    echo "Tried: env GH_TOKEN/GITHUB_TOKEN, gh keyring, project GH_BOT_TOKEN."
     echo "Run: gh auth login   (or set a valid GH_BOT_TOKEN in .env.local)."
   } >&2
   exit 3

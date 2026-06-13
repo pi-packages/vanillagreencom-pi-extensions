@@ -97,7 +97,7 @@ List Options:
   --state <name>        Filter by state (e.g., "Todo", "In Progress,Todo")
   --project <name>      Filter by project name
   --project-id <uuid>   Filter by project ID
-  --team <name>         Filter by team name (default: \$LINEAR_TEAM from .env.local)
+  --team <name>         Filter by team name (default: \$LINEAR_TEAM from project config)
   --assignee <name|me>  Filter by assignee
   --updated-since <Nd>  Filter by updated date (e.g., "7d")
   --created-since <Nd>  Filter by created date
@@ -121,7 +121,7 @@ Bulk Update:
 
 Create Options:
   --title <text>        Issue title (required)
-  --team <name>         Team name (default: $LINEAR_TEAM from .env.local)
+  --team <name>         Team name (default: $LINEAR_TEAM from project config)
   --description <text>  Issue description
   --label(s) <a,b,c>    Comma-separated label names
   --project <name|uuid> Project (name or UUID, auto-resolved)

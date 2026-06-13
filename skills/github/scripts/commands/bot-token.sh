@@ -22,7 +22,7 @@ Options:
   --format=text   Human-readable text: "configured" or "not configured"
   --json          Alias for --format=safe (deprecated)
 
-Checks if GH_BOT_TOKEN is configured and valid in .env.local.
+Checks if GH_BOT_TOKEN is configured and valid in project config/secrets.
 Supports direct tokens (ghp_*, gho_*, etc.) and 1Password references (op://...).
 
 Examples:

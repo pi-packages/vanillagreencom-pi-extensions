@@ -1,0 +1,101 @@
+# Copy this file to `vstack.settings.toml` and commit it when the values are
+# safe to share with everyone working in the project. Keep secrets in
+# `.env.local`.
+#
+# vstack skill scripts read only the `[env]` table. Keys intentionally match
+# the historical environment variable names so existing scripts and docs remain
+# compatible.
+
+[env]
+
+# WORKTREE / SHARED WORKFLOW PATHS
+
+WORKTREE_DEFAULT_BRANCH = "main"
+# Used by: worktree, orch
+
+WORKTREE_BASE_DIR = "../trees"
+# Used by: worktree. Relative paths resolve from the main checkout.
+
+WORKTREE_SYMLINKS = ".env.local opencode.json .agents .cursor .codex .opencode .pi .claude/settings.json .claude/agents .claude/hooks .claude/skills"
+# Used by: worktree. Include `.env.local` only when worktrees should share local secrets.
+
+WORKTREE_RELATIVE_SYMLINKS = ".claude/CLAUDE.md=../AGENTS.md .claude/AGENTS.md=../AGENTS.md"
+# Used by: worktree.
+
+WORKTREE_COPIES = ".vstack-lock.json"
+# Used by: worktree.
+
+WORKTREE_MKDIRS = "tmp"
+# Used by: worktree. Intended for gitignored scratch dirs.
+
+ORCH_STATE_DIR = "tmp"
+# Used by: orch.
+
+ORCH_CACHE_DIR = ".cache/orch"
+# Used by: orch (`parallel-groups`).
+
+# BOT / COMMIT IDENTITY
+
+BOT_NAME = "automation-bot"
+# Used by: worktree.
+
+BOT_EMAIL = "you+bot@example.com"
+# Used by: worktree.
+
+BOT_REMOTE_NAME = "bot-remote"
+# Used by: worktree.
+
+BOT_REVIEWERS = "review-bot-a[bot],review-bot-b[bot]"
+# Used by: github, orch.
+
+BOT_CHECK_NAME = "review-bot"
+# Used by: orch (`bot-review-wait`).
+
+# DECIDER
+
+DECISIONS_DIR = "docs/decisions"
+# Used by: decider. Auto-discovered when omitted.
+
+# LINEAR
+
+LINEAR_TEAM = "MyTeam"
+# Used by: linear.
+
+LINEAR_FORMAT = "safe"
+# Used by: linear. Values: safe, table, ids, raw.
+
+LINEAR_TEAM_PREFIX = "PROJ"
+# Used by: linear.
+
+# GITHUB
+
+GH_BOT_USERNAME = "automation[bot]"
+# Used by: github.
+
+GH_ISSUE_PATTERN = "[A-Z]+-[0-9]+"
+# Used by: github, orch.
+
+GH_VERIFY_CMD = "make verify"
+# Used by: github (`pr-cross-check --verify`).
+
+# SECOND OPINION
+
+SECOND_OPINION_TARGET = "codex"
+# Used by: second-opinion. Values: claude, codex.
+
+SECOND_OPINION_TIMEOUT = "600"
+# Used by: second-opinion.
+
+SECOND_OPINION_CLAUDE_CMD = "claude -p --no-session-persistence --model opus --effort max --allowedTools Bash(read-only:true),Read,Glob,Grep"
+# Used by: second-opinion.
+
+SECOND_OPINION_CODEX_CMD = "codex exec -m gpt-5.4 -s read-only -c model_reasoning_effort=xhigh --ephemeral"
+# Used by: second-opinion.
+
+# DEBUG / OVERRIDE HOOKS
+
+WORKTREE_CLI = ".agents/skills/worktree/scripts/worktree"
+# Used by: orch (`open-terminal`).
+
+GIT_HOST_CLI = ".agents/skills/github/scripts/github.sh"
+# Used by: orch (`bot-review-wait`, `ci-wait`).

@@ -27,14 +27,10 @@ _CALLER_TIMEOUT="${SECOND_OPINION_TIMEOUT:-}"
 _CALLER_CLAUDE_CMD="${SECOND_OPINION_CLAUDE_CMD:-}"
 _CALLER_CODEX_CMD="${SECOND_OPINION_CODEX_CMD:-}"
 
-# Source env if available
-if [[ -f "$PROJECT_ROOT/.env.local" ]]; then
-  # shellcheck source=/dev/null
-  source "$PROJECT_ROOT/.env.local"
-elif [[ -f "$PROJECT_ROOT/.env" ]]; then
-  # shellcheck source=/dev/null
-  source "$PROJECT_ROOT/.env"
-fi
+# Source project config/secrets. .env.local overrides public settings.
+# shellcheck source=lib/vstack-env.sh
+source "$SCRIPT_DIR/lib/vstack-env.sh"
+vstack_load_project_env "$PROJECT_ROOT"
 
 # Restore caller-set env vars — inline overrides beat .env files
 [[ -n "$_CALLER_TARGET" ]] && SECOND_OPINION_TARGET="$_CALLER_TARGET"
@@ -95,7 +91,7 @@ Options:
   --timeout <secs>  CLI timeout (default: 300, env: SECOND_OPINION_TIMEOUT)
   -h, --help        Show this help
 
-Environment (set in .env.local):
+Environment (set in vstack.settings.toml [env] or .env.local):
   SECOND_OPINION_TARGET      Force target CLI
   SECOND_OPINION_TIMEOUT     Timeout in seconds (default: 300)
   SECOND_OPINION_CLAUDE_CMD  Full claude command (default below)
@@ -333,7 +329,7 @@ trap 'rm -f "$PROMPT_TMP" "$STDERR_TMP"' EXIT
 RESULT=""
 EXIT_CODE=0
 
-# Full command templates — override the entire command via .env.local
+# Full command templates — override the entire command via project config
 CLAUDE_CMD="${SECOND_OPINION_CLAUDE_CMD:-claude -p --no-session-persistence --model opus --effort max --allowedTools Bash(read-only:true),Read,Glob,Grep}"
 CODEX_CMD="${SECOND_OPINION_CODEX_CMD:-codex exec -m gpt-5.4 -s read-only -c model_reasoning_effort=xhigh --ephemeral}"
 

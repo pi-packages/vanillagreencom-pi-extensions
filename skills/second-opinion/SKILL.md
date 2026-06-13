@@ -20,7 +20,7 @@ Cross-model second opinion via external AI CLI. Auto-detects the current harness
 | Pi | Claude |
 | OpenCode / Cursor / unknown | Claude (prefers cross-model) |
 
-Override with `SECOND_OPINION_TARGET=claude|codex` in `.env.local`.
+Override with `SECOND_OPINION_TARGET=claude|codex` in committed `vstack.settings.toml` for shared defaults, or `.env.local` for personal overrides.
 
 ```bash
 .agents/skills/second-opinion/scripts/second-opinion <mode> [options]
@@ -53,14 +53,14 @@ All modes accept:
 
 - Execute all workflow sections in order. The workflow decides what to skip via "**Skip if**" conditions — never skip based on your own scope assessment.
 - `<output_format>` tags are literal templates: fill `[PLACEHOLDERS]`, omit empty lines, add nothing else, do not paraphrase.
-- **Pass `--target`** when the user explicitly requests a specific model/CLI (e.g., "use Claude", "ask Codex"). Otherwise omit it — the script auto-detects from the current harness and `.env.local`.
-- **Do not pass `--timeout`** unless the user explicitly asks for a different value for this specific call — the script reads the default from `.env.local`.
+- **Pass `--target`** when the user explicitly requests a specific model/CLI (e.g., "use Claude", "ask Codex"). Otherwise omit it — the script auto-detects from the current harness and project config.
+- **Do not pass `--timeout`** unless the user explicitly asks for a different value for this specific call — the script reads the default from project config.
 - **Always pass `--cwd`** with the absolute project root path. Never use `--cwd .` — the external CLI needs the full path to find project files.
 - For `quick` mode, you can pass the question as an inline argument instead of writing a file: `second-opinion quick "your question here" --cwd /path`
 
 ## Configuration
 
-Set in `.env.local` (or `.env` as fallback) at project root — the script sources it automatically.
+Set non-sensitive defaults in `vstack.settings.toml` under `[env]`. Existing `.env.local` and `.env` values still work; `.env.local` wins.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -81,7 +81,7 @@ SECOND_OPINION_CLAUDE_CMD="claude -p --no-session-persistence --model opus --eff
 SECOND_OPINION_CODEX_CMD="codex exec -m gpt-5.5 -s read-only -c model_reasoning_effort=xhigh --ephemeral"
 ```
 
-To customize, copy the full command into `.env.local` and edit any flags. The entire variable is used as-is.
+To customize, copy the full command into `vstack.settings.toml` for shared defaults or `.env.local` for personal overrides and edit any flags. The entire variable is used as-is.
 
 ## Error Handling
 

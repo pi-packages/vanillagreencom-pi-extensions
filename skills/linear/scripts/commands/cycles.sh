@@ -19,13 +19,13 @@ Actions:
   update  Update a cycle (name, dates)
 
 List Options:
-  --team <name>         Team name (default: from .env.local)
+  --team <name>         Team name (default: from project config)
   --type <type>         Filter: current, previous, next, or all (default: all)
   --limit <n>           Max results (default: 50)
 
 Create Options:
   --name <text>         Cycle name (optional, defaults to "Cycle N")
-  --team <name>         Team name (default: from .env.local)
+  --team <name>         Team name (default: from project config)
   --start <date>        Start date (YYYY-MM-DD, required)
   --end <date>          End date (YYYY-MM-DD, required)
 

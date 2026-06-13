@@ -101,6 +101,8 @@ linear.sh sync --full           # Full re-sync
 | `LINEAR_FORMAT` | Default output format | `safe` |
 | `LINEAR_TEAM_PREFIX` | Issue identifier prefix | `CC` |
 
+Put `LINEAR_API_KEY` in `.env.local`. Put non-secret defaults in committed `vstack.settings.toml` under `[env]`; `.env.local` still wins for local overrides.
+
 ## Safe Format Field Mapping
 
 ```

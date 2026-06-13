@@ -1,0 +1,25 @@
+# Public vstack settings. Keep secrets in .env.local.
+# vstack skill scripts read this [env] table after .env and before .env.local.
+
+[env]
+BOT_EMAIL = "brad+claude@vanillagreen.com"
+BOT_NAME = "vg-claude"
+BOT_REMOTE_NAME = "vg-claude"
+BOT_REVIEWERS = "vg-claude"
+DECISIONS_DIR = "docs/decisions"
+GH_BOT_USERNAME = "vg-claude"
+GH_ISSUE_PATTERN = "cc-[0-9]+"
+GH_VERIFY_CMD = ""
+LINEAR_FORMAT = "safe"
+LINEAR_TEAM = "Claude"
+LINEAR_TEAM_PREFIX = "CC"
+ORCH_STATE_DIR = "tmp"
+SECOND_OPINION_CLAUDE_CMD = "claude -p --no-session-persistence --model opus --effort max --allowedTools Bash(read-only:true),Read,Glob,Grep"
+SECOND_OPINION_CODEX_CMD = "codex exec -m gpt-5.5 -s read-only -c model_reasoning_effort=xhigh --ephemeral"
+SECOND_OPINION_TIMEOUT = "30000"
+WORKTREE_BASE_DIR = "trees"
+WORKTREE_COPIES = ".vstack-lock.json"
+WORKTREE_DEFAULT_BRANCH = "main"
+WORKTREE_MKDIRS = "tmp"
+WORKTREE_RELATIVE_SYMLINKS = ".claude/CLAUDE.md=../AGENTS.md"
+WORKTREE_SYMLINKS = ".env.local opencode.json .agents .cursor .codex .opencode .pi .claude/settings.json .claude/agents .claude/hooks .claude/skills"

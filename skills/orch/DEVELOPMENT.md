@@ -7,8 +7,8 @@ Implementation details and contributor notes. End-user setup: [`README.md`](./RE
 `bot-review-wait` and `ci-wait` share `scripts/lib/gh-auth.sh::orch_sanitize_gh_env`. Four-step ladder:
 
 1. **Sanitize.** Env tokens set but `gh auth status` fails → try `env -u GH_TOKEN -u GITHUB_TOKEN gh auth status`. If that succeeds, warn on stderr and unset.
-2. **Bot-token load.** `GH_TOKEN` empty → load `GH_BOT_TOKEN` from `.env.local`/`.env`. `op://` references resolve via `op read`.
-3. **Fallback retry.** Auth still fails → drop env tokens, retry bot-token load. Recovers when `.env.local` has a valid token despite broken keyring.
+2. **Bot-token load.** `GH_TOKEN` empty → load `GH_BOT_TOKEN` from `.env`, `vstack.settings.toml`, then `.env.local`. `op://` references resolve via `op read`.
+3. **Fallback retry.** Auth still fails → drop env tokens, retry bot-token load. Recovers when project config/secrets have a valid token despite broken keyring.
 4. **Hard fail.** No path works → exit `3` with diagnostic. Callers do not poll against empty output.
 
 ## Tests

@@ -20,15 +20,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 SKILLS_DIR="$PROJECT_ROOT/.agents/skills"
 
-source_project_env() {
-  local env_file
-  for env_file in "$PROJECT_ROOT/.env" "$PROJECT_ROOT/.env.local"; do
-    if [[ -f "$env_file" ]]; then
-      # shellcheck source=/dev/null
-      source "$env_file"
-    fi
-  done
-}
+# shellcheck source=lib/vstack-env.sh
+source "$SCRIPT_DIR/lib/vstack-env.sh"
 
 is_codex_managed_worktree() {
   local project_real codex_real
@@ -58,8 +51,8 @@ normalize_codex_issue_branch() {
   "$worktree_script" codex-branch "$issue_id" "$PROJECT_ROOT" >/dev/null
 }
 
-# Source project config/secrets. .env.local overrides .env when both exist.
-source_project_env
+# Source project config/secrets. .env.local overrides public settings.
+vstack_load_project_env "$PROJECT_ROOT"
 
 # Sibling skill scripts (resolved from install location)
 LINEAR="$SKILLS_DIR/linear/scripts/linear.sh"
@@ -376,7 +369,7 @@ trap 'rm -rf "$_tmp"' EXIT
       _active="$_gh_user"
     fi
 
-    # Bot token check (from .env.local GH_BOT_TOKEN)
+    # Bot token check (from project GH_BOT_TOKEN)
     if [[ -n "${GH_BOT_TOKEN:-}" ]]; then
       if [[ -n "$GH_BOT_TOKEN_RESOLVED" ]]; then
         _bu=$(gh_with_token "$GH_BOT_TOKEN_RESOLVED" api user --jq '.login' 2>/dev/null || echo "")

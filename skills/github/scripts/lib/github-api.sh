@@ -283,23 +283,20 @@ parse_format_arg() {
     echo "${remaining_args[@]:-}"
 }
 
-# Load and validate bot token from .env.local or .env
+# Load and validate bot token from project config/env
 # Supports direct tokens (ghp_*, gho_*, ghs_*, ghr_*) and 1Password references (op://...)
 # Returns: token string if valid, empty string if not configured/invalid
 # Outputs: diagnostic messages to stderr
 load_bot_token() {
     local token=""
 
-    # Load from .env.local first, fall back to .env
-    if [ -f "$PROJECT_ROOT/.env.local" ]; then
-        # shellcheck disable=SC1090
-        source "$PROJECT_ROOT/.env.local"
-        token="${GH_BOT_TOKEN:-}"
-    elif [ -f "$PROJECT_ROOT/.env" ]; then
-        # shellcheck disable=SC1090
-        source "$PROJECT_ROOT/.env"
-        token="${GH_BOT_TOKEN:-}"
-    fi
+    # Load .env, public settings, then .env.local. .env.local still wins.
+    local lib_dir
+    lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    # shellcheck source=vstack-env.sh
+    source "$lib_dir/vstack-env.sh"
+    vstack_load_project_env "$PROJECT_ROOT"
+    token="${GH_BOT_TOKEN:-}"
 
     # Empty token - not configured
     if [ -z "$token" ]; then

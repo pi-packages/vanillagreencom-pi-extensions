@@ -37,7 +37,7 @@ Safety Checks (run by default):
   2. Head branch has commits ahead of base
   3. Branch has been pushed to remote
 
-The command uses GH_BOT_TOKEN from .env.local to create PRs as the bot account.
+The command uses GH_BOT_TOKEN from project config/secrets to create PRs as the bot account.
 If token is not configured, falls back to current user's gh authentication.
 
 Examples:

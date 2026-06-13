@@ -7,6 +7,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)"
 SKILLS_DIR="$PROJECT_ROOT/.agents/skills"
+# shellcheck source=lib/vstack-env.sh
+source "$SCRIPT_DIR/lib/vstack-env.sh"
+vstack_load_project_env "$PROJECT_ROOT"
 WORKTREE_CLI="${WORKTREE_CLI:-$SKILLS_DIR/worktree/scripts/worktree}"
 GH_ISSUE_PATTERN="${GH_ISSUE_PATTERN:-[A-Z]+-[0-9]+}"
 

@@ -54,6 +54,7 @@ Examples:
 
 Environment:
   LINEAR_API_KEY  Required. Set in .env.local or export directly.
+                  Non-secret defaults such as LINEAR_TEAM can be set in vstack.settings.toml.
 
 For resource-specific help:
   ./linear.sh <resource> --help

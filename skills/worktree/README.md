@@ -13,7 +13,7 @@ skills/worktree/
 
 ## Setup
 
-Run from the main checkout of a git repo with an `origin` remote. Optionally add `.env` or `.env.local` settings.
+Run from the main checkout of a git repo with an `origin` remote. Optionally add committed settings in `vstack.settings.toml` and local secrets/overrides in `.env.local`.
 
 ```bash
 ./scripts/worktree create PROJ-123
@@ -51,7 +51,7 @@ Cleanup script:
 
 ## Configuration
 
-Set in `.env` or `.env.local` — all optional. When both files exist, `.env.local` wins.
+Set non-sensitive project defaults in `vstack.settings.toml` under `[env]`. Existing `.env` and `.env.local` files still work; load order is `.env`, then `vstack.settings.toml`, then `.env.local`.
 
 | Variable | Purpose |
 |----------|---------|
@@ -65,15 +65,16 @@ Set in `.env` or `.env.local` — all optional. When both files exist, `.env.loc
 | `BOT_SIGNING_KEY` | SSH signing key for commits |
 | `BOT_REMOTE_NAME` / `BOT_REMOTE_URL` | Remote for bot pushes |
 
-Include `.env.local` in `WORKTREE_SYMLINKS` when worktree sessions should share the main checkout's local environment/config.
+Include `.env.local` in `WORKTREE_SYMLINKS` only when worktree sessions should share the main checkout's local secrets or personal overrides. Public settings should live in committed `vstack.settings.toml`.
 If a configured symlink path is already tracked in the worktree branch, the script marks that path assume-unchanged before replacing it so `git status` stays clean.
 
 Example for sharing local env plus generated Claude assets while keeping `.claude/CLAUDE.md`
 pointed at each worktree's own `AGENTS.md`:
 
-```bash
-WORKTREE_BASE_DIR="../trees"
-WORKTREE_SYMLINKS=".env.local .claude/agents .claude/hooks .claude/skills"
-WORKTREE_RELATIVE_SYMLINKS=".claude/CLAUDE.md=../AGENTS.md"
-WORKTREE_MKDIRS="tmp"
+```toml
+[env]
+WORKTREE_BASE_DIR = "../trees"
+WORKTREE_SYMLINKS = ".env.local .claude/agents .claude/hooks .claude/skills"
+WORKTREE_RELATIVE_SYMLINKS = ".claude/CLAUDE.md=../AGENTS.md"
+WORKTREE_MKDIRS = "tmp"
 ```

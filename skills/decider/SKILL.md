@@ -56,6 +56,8 @@ Project-level configuration:
 |----------|---------|---------|
 | `$DECISIONS_DIR` | Path to decision documents directory | Auto-discovers `docs/decisions/`, `decisions/`, `doc/decisions/`, or `adr/` with `INDEX.md` |
 
+Set `DECISIONS_DIR` in committed `vstack.settings.toml` under `[env]` when it is shared project policy. `.env.local` remains supported for local overrides.
+
 ## Decision Lifecycle
 
 ```

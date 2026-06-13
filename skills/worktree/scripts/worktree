@@ -7,9 +7,9 @@
 #     --pr NUMBER     Look up the branch from a PR number (implies --base)
 #
 # Layout: project/main (repo) + project/trees/{id} (worktrees by default)
-# Config: reads .env then .env.local for optional settings (see below)
+# Config: reads .env, vstack.settings.toml, then .env.local for optional settings (see below)
 #
-# .env/.env.local config vars:
+# vstack.settings.toml [env] and .env/.env.local config vars:
 #   WORKTREE_BASE_DIR        - parent directory for worktrees (relative to main checkout or absolute; default: ../trees)
 #   WORKTREE_DEFAULT_BRANCH  - default branch name (auto-detected if unset, fallback: main)
 #   WORKTREE_SYMLINKS        - space-separated paths to symlink from main into worktrees
@@ -37,14 +37,11 @@ if [[ "$_git_common_dir" != ".git" && -n "$_git_common_dir" ]]; then
   PROJECT_ROOT="$(cd "$PROJECT_ROOT" && cd "$(dirname "$_git_common_dir")" && pwd)"
 fi
 
-# Load config from .env and .env.local (optional — .env.local wins when both exist)
-for ENV_FILE in "$PROJECT_ROOT/.env" "$PROJECT_ROOT/.env.local"; do
-  if [[ -f "$ENV_FILE" ]]; then
-    # shellcheck source=/dev/null
-    source "$ENV_FILE"
-  fi
-done
-unset ENV_FILE
+# Load project config and secrets. .env.local still wins for compatibility.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/vstack-env.sh
+source "$SCRIPT_DIR/lib/vstack-env.sh"
+vstack_load_project_env "$PROJECT_ROOT"
 
 strip_trailing_slashes() {
   local path="$1"
@@ -522,7 +519,7 @@ case "${1:-}" in
       echo "Usage: $0 push [ID|/path] [--set-upstream|-u] [--no-rebase]"
       echo ""
       echo "Push worktree branch to remote. Auto-rebases onto origin/$DEFAULT_BRANCH first."
-      echo "Uses BOT_REMOTE_NAME from .env.local if set, otherwise falls back to origin."
+      echo "Uses BOT_REMOTE_NAME from project config if set, otherwise falls back to origin."
       echo ""
       echo "Options:"
       echo "  -u, --set-upstream    Set upstream tracking branch"

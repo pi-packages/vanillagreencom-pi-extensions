@@ -48,7 +48,7 @@ From the shell:
 
 ## Configuration
 
-All optional — defaults work out of the box. Set in `.env.local` at project root.
+All optional — defaults work out of the box. Set shared, non-sensitive defaults in `vstack.settings.toml` under `[env]`. Existing `.env.local` values still work and should be reserved for personal overrides.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|

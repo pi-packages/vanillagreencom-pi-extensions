@@ -124,6 +124,8 @@ Resolution rules:
 
 Bot token supports direct tokens (`ghp_*`, `gho_*`, `ghs_*`, `ghr_*`, `github_pat_*`) and 1Password references (`op://vault/item/field`).
 
+Non-secret GitHub defaults can live in committed `vstack.settings.toml` under `[env]`. Keep tokens in `.env.local`.
+
 ## Error Handling
 
 - Returns `{"error": "message"}` on stderr with exit code 1
