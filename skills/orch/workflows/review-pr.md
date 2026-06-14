@@ -19,27 +19,20 @@ Pre-submission code review: fix handling, QA checks, and issue audit.
 
 **If PR# provided:**
 ```bash
-ISSUE=$(.agents/skills/github/scripts/github.sh pr-issue [PR_NUMBER] --format=text)
+.agents/skills/github/scripts/github.sh pr-issue [PR_NUMBER] --format=text
 ```
+Use the output as `ISSUE`.
 
 Apply [Worktree Scope](../SKILL.md#worktree-scope). If no worktree exists for `$ISSUE`, ask the user before running `worktree create $ISSUE --pr [PR_NUMBER]`. If no argument: set `WT_PATH` to current directory.
 
 **Standalone init** (`lifecycle: "self"` only):
 ```bash
 # Extract issue from branch if not provided
-ISSUE_ID=$(git rev-parse --abbrev-ref HEAD | grep -oiP "$GH_ISSUE_PATTERN")
+.agents/skills/orch/scripts/git-context issue-from-branch .
 # Init workflow state if not exists
-if ! .agents/skills/orch/scripts/workflow-state exists $ISSUE_ID; then
-  .agents/skills/orch/scripts/workflow-state init $ISSUE_ID --worktree "$WT_PATH" --branch "$(git -C $WT_PATH rev-parse --abbrev-ref HEAD)"
-  TRACKER=$(.agents/skills/orch/scripts/tracker-for-issue "$ISSUE_ID")
-  if [[ "$TRACKER" == "github" ]]; then
-    QA_LABELS=$(gh issue view ${ISSUE_ID#issue-} --json labels --jq '[.labels[].name | select(startswith("needs-"))]')
-  else
-    QA_LABELS=$(.agents/skills/linear/scripts/linear.sh cache issues get $ISSUE_ID | jq '[.labels[] | select(startswith("needs-"))]')
-  fi
-  .agents/skills/orch/scripts/workflow-state set $ISSUE_ID qa_labels "$QA_LABELS"
-fi
+.agents/skills/orch/scripts/workflow-state exists --json [ISSUE_ID]
 ```
+Use the output as `ISSUE_ID`. If `.exists` is `false`, initialize with `git-context branch "$WT_PATH"` and `workflow-state init`, then resolve `TRACKER` and set `qa_labels` from the issue labels.
 
 ---
 
@@ -70,10 +63,11 @@ Collect decision IDs and summaries from the JSON output. If decisions found: inc
 ### 1.2 Check for Re-Review Context
 
 ```bash
-CYCLES=$(.agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.cycles // 0')
-FIXED=$(.agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.fixed_items // []')
-ESCALATED=$(.agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.escalated_items // []')
+.agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.cycles // 0'
+.agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.fixed_items // []'
+.agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.escalated_items // []'
 ```
+Use the outputs as `CYCLES`, `FIXED`, and `ESCALATED`.
 
 If `CYCLES > 0`: include the "Previous review cycle context" section in the delegation prompt, populated from `FIXED` and `ESCALATED`.
 
@@ -81,26 +75,25 @@ If `CYCLES > 0`: include the "Previous review cycle context" section in the dele
 
 **Detect team context**:
 ```bash
-TEAM=$(.agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.team_name // empty')
+.agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.team_name // empty'
 ```
+Use the output as `TEAM`.
 
 **Determine agent list**: If `agents` context provided, use only those. Otherwise enumerate every `reviewer-*` agent from active harness registries (do not hardcode a count):
 
 ```bash
-AGENTS=$(.agents/skills/orch/scripts/list-review-agents)
-if [ $? -ne 0 ] || [ -z "$AGENTS" ]; then
-  echo "No reviewer-* agents installed in any harness registry; skipping review delegation" >&2
-  # → § 5 (verdict pass, no items to handle)
-fi
+.agents/skills/orch/scripts/list-review-agents
 ```
+Use the output as `AGENTS`. If the command fails or prints no agents, skip review delegation and go to § 5 with verdict pass.
 
 `list-review-agents` scans `.pi/agents`, `.claude/agents`, `.agents`, `.codex/agents`, and `.opencode/agents` for `reviewer-*` files, dedupes, and exits non-zero if none found. Output: one agent name per line.
 
 Before any spawn, read existing reviewer state:
 ```bash
-EXISTING_REVIEW_AGENTS=$(.agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.review_agents // []')
-EXISTING_REVIEW_AGENT_IDS=$(.agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.review_agent_ids // {}')
+.agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.review_agents // []'
+.agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.review_agent_ids // {}'
 ```
+Use the outputs as `EXISTING_REVIEW_AGENTS` and `EXISTING_REVIEW_AGENT_IDS`.
 
 For each reviewer in `[AGENTS]`: reuse by exact name when `review_agent_ids` points to a live/recoverable session. If only `review_agents` exists, attempt one recovery/resume, then treat as missing. Spawn only the missing, closed, or confirmed-stuck reviewer. Do not respawn already-live reviewers.
 
@@ -119,8 +112,9 @@ External review runs automatically alongside internal reviewers when the second-
 **Skip if** `.agents/skills/second-opinion/scripts/second-opinion` does not exist. Set `EXTERNAL_REVIEW_REQUESTED=false` → § 2.2.
 
 ```bash
-EXTERNAL_TARGET=$(.agents/skills/second-opinion/scripts/second-opinion detect 2>/dev/null) || true
+.agents/skills/second-opinion/scripts/second-opinion detect
 ```
+If the command fails or prints `none`, set `EXTERNAL_REVIEW_REQUESTED=false`. Otherwise use the output as `EXTERNAL_TARGET`.
 
 **Skip if** `EXTERNAL_TARGET` is empty or `"none"`. Set `EXTERNAL_REVIEW_REQUESTED=false` → § 2.2. Otherwise `EXTERNAL_REVIEW_REQUESTED=true` → § 2.2.
 
@@ -128,7 +122,7 @@ EXTERNAL_TARGET=$(.agents/skills/second-opinion/scripts/second-opinion detect 2>
 
 **Record delegation timestamp** before delegating — gates the § 3 watchdog filesystem fallback against stale JSONs from earlier cycles:
 ```bash
-.agents/skills/orch/scripts/workflow-state set [ISSUE_ID] review_delegated_at "$(date +%s)"
+.agents/skills/orch/scripts/workflow-state set-now [ISSUE_ID] review_delegated_at
 ```
 
 Delegate to each active reviewer in `[AGENTS]` in parallel. **If `EXTERNAL_REVIEW_REQUESTED=true`**, launch the external review in the *same parallel batch*.
@@ -158,8 +152,9 @@ Re-review cycle [N]. Already resolved — do NOT re-report:
 **External review execution** (only if `EXTERNAL_REVIEW_REQUESTED=true`; default timeout: `SECOND_OPINION_TIMEOUT` env var or 300s):
 
 ```bash
-TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-EXTERNAL_OUTPUT="[WORKTREE_PATH]/tmp/review-external-${TIMESTAMP}.json"
+mkdir -p [WORKTREE_PATH]/tmp
+.agents/skills/orch/scripts/git-context timestamp compact
+# Use [WORKTREE_PATH]/tmp/review-external-[TIMESTAMP_FROM_PREVIOUS_COMMAND].json as EXTERNAL_OUTPUT.
 .agents/skills/second-opinion/scripts/second-opinion review \
   --cwd [WORKTREE_PATH] \
   --output "$EXTERNAL_OUTPUT"
@@ -285,7 +280,7 @@ If >4 suggestion items: show first 3 + `All N fixes`. Refine via "Other".
 
 1. **Capture pre-fix state**:
    ```bash
-   .agents/skills/orch/scripts/workflow-state set [ISSUE_ID] pre_delegate_sha "$(git -C [WORKTREE_PATH] rev-parse HEAD)"
+   .agents/skills/orch/scripts/workflow-state set-git-head [ISSUE_ID] pre_delegate_sha [WORKTREE_PATH]
    ```
 
 2. **Run Workflow**: `⤵ workflows/dev-fix.md § 1-3 → § 4 step 3` with context:
@@ -298,9 +293,10 @@ If >4 suggestion items: show first 3 + `All N fixes`. Refine via "Other".
 
 3. **Route based on fix scope**:
    ```bash
-   PRE_SHA=$(.agents/skills/orch/scripts/workflow-state get [ISSUE_ID] .pre_delegate_sha)
+   .agents/skills/orch/scripts/workflow-state get [ISSUE_ID] .pre_delegate_sha
    .agents/skills/github/scripts/git-diff-summary -C [WORKTREE_PATH] $PRE_SHA
    ```
+   Use the workflow-state output as `PRE_SHA`.
 
    | `files_changed` | `risk_flags` | `scope` | Route |
    |-----------------|--------------|---------|-------|
@@ -324,8 +320,9 @@ If >4 suggestion items: show first 3 + `All N fixes`. Refine via "Other".
 
 2. **Check skip_qa flag**:
    ```bash
-   SKIP_QA=$(.agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.skip_qa // false')
+   .agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.skip_qa // false'
    ```
+   Use the output as `SKIP_QA`.
    If `true`: `.agents/skills/orch/scripts/workflow-state set [ISSUE_ID] skip_qa false` → § 8
 
 3. **Read state**: `.agents/skills/orch/scripts/workflow-state get [ISSUE_ID] .qa_labels`
@@ -509,9 +506,10 @@ Issue suggestions: [N] items → § 9 audit
 
 2. **Extract discovered work** from completion summaries — **Linear only**; GitHub/ad-hoc: parse the dev agent's return message for a "Discovered Work" section instead:
    ```bash
-   .agents/skills/linear/scripts/linear.sh cache comments list [ISSUE_ID] | jq -r '.[] | select(.body | contains("Discovered Work")) | .body'
+   .agents/skills/linear/scripts/linear.sh cache comments list [ISSUE_ID]
    ```
-   If bundled: also check sub-issues via `.agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID] --with-bundle | jq -r '.children[].id'`.
+   Read matching comments from the JSON output with the filter `.[] | select(.body | contains("Discovered Work")) | .body`.
+   If bundled: also run `.agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID] --with-bundle` and read `.children[].id` from the JSON output.
    Parse "Discovered Work" bullets into audit items with `origin: "discovered"`, `found_by: [agent]`. Skip if section absent or "(Skip if none)".
 
    **Filter out workflow-internal handoffs.** Skip any Discovered Work bullet whose leading token after `- ` is one of the markers below. The marker MUST be the first token — anything before it (such as `[Type]`) prevents the match. The canonical bullet form is documented in `dev/workflows/dev-implement.md` § 9:
@@ -554,7 +552,7 @@ Issue suggestions: [N] items → § 9 audit
 
 3. **Capture pre-delegate state**:
    ```bash
-   .agents/skills/orch/scripts/workflow-state set [ISSUE_ID] pre_delegate_sha "$(git -C [WORKTREE_PATH] rev-parse HEAD)"
+   .agents/skills/orch/scripts/workflow-state set-git-head [ISSUE_ID] pre_delegate_sha [WORKTREE_PATH]
    ```
 
 4. **Delegate immediately.** Do **not** surface a Defer/Skip prompt — § 10 is mandatory once § 9 created `make_child` issues under `[ISSUE_ID]`.
@@ -562,9 +560,9 @@ Issue suggestions: [N] items → § 9 audit
    If delegation is skipped (user override, escalation), § 10 must FIRST detach every `audit_issues_created` entry from `[ISSUE_ID]` before returning to § 11 — otherwise `merge-pr.md` will cascade-Done them.
 
    ```bash
-   .agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.audit_issues_created // []' | jq -r '.[]'
+   .agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.audit_issues_created // []'
    ```
-   Capture each line as `[CHILD_ID]`, then for each:
+   Read each array item as `[CHILD_ID]`, then for each:
    ```bash
    .agents/skills/linear/scripts/linear.sh issues update [CHILD_ID] --remove-parent
    .agents/skills/linear/scripts/linear.sh issues add-relation [CHILD_ID] --related [ISSUE_ID]
@@ -579,9 +577,10 @@ Issue suggestions: [N] items → § 9 audit
 
 5. **Assess re-review scope**:
    ```bash
-   PRE_SHA=$(.agents/skills/orch/scripts/workflow-state get [ISSUE_ID] .pre_delegate_sha)
+   .agents/skills/orch/scripts/workflow-state get [ISSUE_ID] .pre_delegate_sha
    .agents/skills/github/scripts/git-diff-summary -C [WORKTREE_PATH] $PRE_SHA
    ```
+   Use the workflow-state output as `PRE_SHA`.
 
    | `risk_flags` | `scope` | Action | Route |
    |--------------|---------|--------|-------|

@@ -27,16 +27,18 @@ When `all` or 2+ PRs requested:
 ### 2.1 Run Quick Pre-Check
 
 ```bash
-QUICK=$(.agents/skills/github/scripts/github.sh pr-cross-check [PR_NUMBERS] --quick --json)
+.agents/skills/github/scripts/github.sh pr-cross-check [PR_NUMBERS] --quick --json
 ```
+Use the output as `QUICK`.
 
 If quick check finds high-severity issues (conflicts): Show issues, abort early.
 
 ### 2.2 Run Full Verification (if quick check passes)
 
 ```bash
-VERIFY=$(.agents/skills/github/scripts/github.sh pr-cross-check [PR_NUMBERS] --verify --json)
+.agents/skills/github/scripts/github.sh pr-cross-check [PR_NUMBERS] --verify --json
 ```
+Use the output as `VERIFY`.
 
 Creates temp worktree from main, merges PRs sequentially, runs build + test, reports + cleans up.
 
@@ -59,8 +61,9 @@ Verification failed:
 For each PR:
 
 ```bash
-CHECK=$(.agents/skills/github/scripts/github.sh pr-merge [PR_NUMBER] --check)
+.agents/skills/github/scripts/github.sh pr-merge [PR_NUMBER] --check
 ```
+Use the output as `CHECK`.
 
 ### 3.1 Resolve transient "unknown" before prompting
 
@@ -68,8 +71,9 @@ If `issues` contains an entry starting with `unknown:` (GitHub still computing m
 
 ```bash
 .agents/skills/github/scripts/github.sh await-mergeable [PR_NUMBER]
-CHECK=$(.agents/skills/github/scripts/github.sh pr-merge [PR_NUMBER] --check)
+.agents/skills/github/scripts/github.sh pr-merge [PR_NUMBER] --check
 ```
+Use the second command output as `CHECK`.
 
 `await-mergeable` polls `state` + `mergeStateStatus` (never `mergeable` — stays UNKNOWN after merge, hangs forever). Exit 124 on timeout → surface to user.
 
@@ -101,8 +105,9 @@ PR #N ready with warnings:
 ### 4.1 Check Worktree Cleanup
 
 ```bash
-ISSUE=$(.agents/skills/github/scripts/github.sh pr-issue [PR_NUMBER] --format=text)
+.agents/skills/github/scripts/github.sh pr-issue [PR_NUMBER] --format=text
 ```
+Use the output as `ISSUE`.
 
 If `ISSUE` is non-empty, check whether its worktree exists:
 
@@ -115,8 +120,9 @@ If worktree exists: Ask user `"Cleanup worktree for [ISSUE_ID]?"` → store for 
 ### 4.2 Verify Bot Token
 
 ```bash
-.agents/skills/github/scripts/github.sh bot-token | jq -r '.configured'
+.agents/skills/github/scripts/github.sh bot-token
 ```
+Read `.configured` from the JSON output.
 
 If `false`: Ask user: `Merge as current user` | `Abort`
 
@@ -155,15 +161,15 @@ merge. Detach them first.
 
    a. Read parent metadata. Capture `.title` → `[PARENT_TITLE]`, `.project.id` → `[PARENT_PROJECT]`, joined labels → `[PARENT_LABELS]`:
       ```bash
-      .agents/skills/linear/scripts/linear.sh cache issues get [ISSUE] \
-          | jq -r '"title=\(.title)\nproject=\(.project.id // .project.name // "")\nlabels=\([.labels.nodes[].name] | join(","))"'
+      .agents/skills/linear/scripts/linear.sh cache issues get [ISSUE]
       ```
+      Read `.title`, `.project.id // .project.name // ""`, and joined `.labels.nodes[].name` from the JSON output.
 
    b. Compute `[BUNDLE_PRIORITY]` (highest-priority across `[SAFE_IDS]`; Linear: `1`=Urgent…`4`=Low, lower=higher; default `3`):
       ```bash
-      .agents/skills/linear/scripts/linear.sh cache issues children [ISSUE] --pending --recursive \
-          | jq '[.[] | select(.priority > 0) | .priority] | (min // 3)'
+      .agents/skills/linear/scripts/linear.sh cache issues children [ISSUE] --pending --recursive
       ```
+      Read priorities from the JSON output and use the minimum positive priority, or `3` when none exists.
 
    c. Build `[BUNDLE_DESC]` per `.agents/skills/project-management/templates/parent-issue-template.md` — 1-2 sentence summary synthesized from orphan titles, `## Sub-Issues` listing each safe ID, `## Context` line: `Detached from [ISSUE] before merge to prevent cascade-Done.`
 
@@ -194,34 +200,35 @@ merge. Detach them first.
 
 ## 5. Execute Merge
 
-**Note**: Some harnesses reset cwd per shell call — use `cd && ...` chains or absolute paths.
+**Note**: Some harnesses reset cwd per shell call. Prefer helper scripts and `-C`/absolute-path options over `cd && ...` chains in generated commands.
 
 1. **Resolve main repo root** (needed when running from a worktree):
    ```bash
-   MAIN_REPO_ROOT=$(git rev-parse --git-common-dir | sed 's|/\.git$||')
-   [[ "$MAIN_REPO_ROOT" == ".git" ]] && MAIN_REPO_ROOT="$PWD"
-   echo "$MAIN_REPO_ROOT"
+   .agents/skills/orch/scripts/git-context common-root .
    ```
+   Use the output as `MAIN_REPO_ROOT`.
 
 2. **Merge** (before cleanup — worktree survives if merge fails):
    ```bash
-   (cd [MAIN_REPO_ROOT] && .agents/skills/github/scripts/github.sh pr-merge [PR_NUMBER] [--force])
+   [MAIN_REPO_ROOT]/.agents/skills/github/scripts/github.sh -C [MAIN_REPO_ROOT] pr-merge [PR_NUMBER] [--force]
    ```
 
    Exit `75` = queued for auto-merge (fires when CI + branch protection clear). Wait before sync:
    ```bash
-   (cd [MAIN_REPO_ROOT] && .agents/skills/github/scripts/github.sh await-mergeable [PR_NUMBER])
+   [MAIN_REPO_ROOT]/.agents/skills/github/scripts/github.sh -C [MAIN_REPO_ROOT] await-mergeable [PR_NUMBER]
    ```
    Never poll `gh pr view --json mergeable` — stays UNKNOWN after merge, loops forever.
 
 3. **Sync issue tracker cache** — **Linear only** (merged PRs close issues via magic words; cache must reflect done states):
    ```bash
-   (cd [MAIN_REPO_ROOT] && .agents/skills/linear/scripts/linear.sh sync --reconcile)
+   [MAIN_REPO_ROOT]/.agents/skills/linear/scripts/linear.sh sync --reconcile
    ```
 
 4. **Sync main repo** (ALWAYS runs after merge):
    ```bash
-   (cd [MAIN_REPO_ROOT] && for remote in $(git remote); do git fetch "$remote" --prune || true; done && git pull --rebase && git worktree prune)
+   git -C [MAIN_REPO_ROOT] fetch --all --prune
+   git -C [MAIN_REPO_ROOT] pull --rebase
+   git -C [MAIN_REPO_ROOT] worktree prune
    ```
    `--rebase` prevents merge-bubble commits when local main diverged.
 
@@ -231,11 +238,12 @@ merge. Detach them first.
 
    1. Resolve the merged PR branch:
       ```bash
-      PR_BRANCH=$(gh pr view [PR_NUMBER] --json headRefName --jq .headRefName)
+      gh pr view [PR_NUMBER] --json headRefName --jq .headRefName
       ```
+      Use the output as `PR_BRANCH`.
    2. If `[PR_BRANCH]` exists locally and is not the current branch, delete it:
       ```bash
-      (cd [MAIN_REPO_ROOT] && git branch -D "$PR_BRANCH")
+      git -C [MAIN_REPO_ROOT] branch -D "$PR_BRANCH"
       ```
    3. Worktree removal is handled by step 6 when § 4.1 captured a cleanup request.
 
@@ -243,8 +251,9 @@ merge. Detach them first.
 
    Run only for `merge-pr all` or explicit user request. Find local branches whose remote PRs are merged/closed:
    ```bash
-   (cd [MAIN_REPO_ROOT] && git branch --format='%(refname:short)' | grep -v '^main$')
+   git -C [MAIN_REPO_ROOT] branch --format='%(refname:short)'
    ```
+   Ignore the default branch from this output.
 
    For each branch, check PR status:
    ```bash
@@ -252,21 +261,21 @@ merge. Detach them first.
    ```
 
    - **MERGED/CLOSED with no worktree**: Auto-delete (`git branch -D [BRANCH]`). Report in § 7.
-   - **MERGED/CLOSED with worktree**: Ask user `"Stale worktree for [BRANCH] (PR already merged). Remove?"`. If yes: `(cd [MAIN_REPO_ROOT] && .agents/skills/worktree/scripts/worktree remove [ISSUE_ID])` then `git branch -D [BRANCH]`.
+   - **MERGED/CLOSED with worktree**: Ask user `"Stale worktree for [BRANCH] (PR already merged). Remove?"`. If yes: `[MAIN_REPO_ROOT]/.agents/skills/worktree/scripts/worktree remove [ISSUE_ID]` then `git -C [MAIN_REPO_ROOT] branch -D [BRANCH]`.
    - **OPEN**: Leave alone (active work).
    - **No PR found**: Ask user `"Local branch [BRANCH] has no associated PR. Delete?"`. Show last commit for context.
 
    Also check for orphan worktree directories:
    ```bash
-   ls [TREES_DIR]/ | while read d; do
-       git worktree list --porcelain | grep -q "$d" || echo "orphan: $d"
-   done
+   ls [TREES_DIR]/
+   git -C [MAIN_REPO_ROOT] worktree list --porcelain
    ```
+   Compare the two outputs; any tree directory absent from `git worktree list --porcelain` is an orphan.
    If orphans found: Ask user before `rm -rf`.
 
 6. **Cleanup current worktree** (if requested in § 4.1 — **must be last**, destroys session cwd):
    ```bash
-   (cd [MAIN_REPO_ROOT] && .agents/skills/worktree/scripts/worktree remove "[ISSUE_ID]")
+   [MAIN_REPO_ROOT]/.agents/skills/worktree/scripts/worktree remove "[ISSUE_ID]"
    ```
    If this prints `SESSION CWD DESTROYED`: present § 7 immediately, tell user to end the session — no further shell calls will succeed. Skip if cleanup not requested.
 
@@ -324,7 +333,7 @@ For each file flagged as overlapping in § 2.1:
 | ⏭️ | #[P] | [ISSUE_ID] - [TITLE] | Review threads |
 | ❌ | #[Q] | [ISSUE_ID] - [TITLE] | Merge conflicts |
 
-Total: [N] PRs merged | Synced: git fetch --prune && git pull
+Total: [N] PRs merged | Synced: git fetch --all --prune; git pull --rebase
 
 ### 🧹 STALE CLEANUP
 

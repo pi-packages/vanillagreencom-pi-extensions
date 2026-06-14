@@ -18,8 +18,9 @@ Ad-hoc full-codebase reviewer fanout. No PR, no issue, no diff, no fix delegatio
 If `[PATH]` is provided, use it. Otherwise use current directory.
 
 ```bash
-WT_PATH=$(git -C [PATH_OR_PWD] rev-parse --show-toplevel 2>/dev/null)
+.agents/skills/orch/scripts/git-context repo-root [PATH_OR_PWD]
 ```
+Use the output as `WT_PATH`.
 
 **If not a git worktree**: report `review-codebase requires a git worktree` and **END**.
 
@@ -36,8 +37,9 @@ mkdir -p "$WT_PATH/tmp"
 Enumerate every installed `reviewer-*` agent from active harness registries:
 
 ```bash
-AGENTS=$(.agents/skills/orch/scripts/list-review-agents)
+.agents/skills/orch/scripts/list-review-agents
 ```
+Use the output as `AGENTS`.
 
 If no agents are found, report `No reviewer-* agents installed; cannot run codebase review` and **END**. Use the full list — do not path-filter.
 

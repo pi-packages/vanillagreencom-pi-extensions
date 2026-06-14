@@ -17,17 +17,20 @@ Delegate development work to specialist agent(s). Handles single issues and bund
 
 **Standalone init** (`lifecycle: "self"` only):
 ```bash
-ISSUE_ID=${ARG:-$(git rev-parse --abbrev-ref HEAD | grep -oiP "$GH_ISSUE_PATTERN")}
+# If ARG was provided, use it as ISSUE_ID. Otherwise:
+.agents/skills/orch/scripts/git-context issue-from-branch .
 ```
+Use the output as `ISSUE_ID`.
 
 Apply [Worktree Scope](../SKILL.md#worktree-scope): if in a worktree and `ISSUE_ID` ≠ the current branch's issue, ask the user before proceeding. Resolve `WT_PATH`:
-- Inside a worktree → `WT_PATH=$(pwd)`
-- Main repo, worktree exists → `WT_PATH=$(.agents/skills/worktree/scripts/worktree path $ISSUE_ID)`
+- Inside a worktree → use current directory as `WT_PATH`
+- Main repo, worktree exists → run `.agents/skills/worktree/scripts/worktree path [ISSUE_ID]` and use the output as `WT_PATH`
 - Main repo, worktree missing → ask the user before creating
 
 ```bash
-TRACKER=$(.agents/skills/orch/scripts/tracker-for-issue "$ISSUE_ID")
+.agents/skills/orch/scripts/tracker-for-issue [ISSUE_ID]
 ```
+Use the output as `TRACKER`.
 
 If workflow state already exists, skip initialization:
 
@@ -38,8 +41,9 @@ If workflow state already exists, skip initialization:
 If `.exists` is `false`, initialize workflow state. Linear only: first check for parent context from a start-new sub-issue:
 
 ```bash
-PARENT_ID=$(.agents/skills/linear/scripts/linear.sh cache issues get $ISSUE_ID --format=compact | jq -r '.parent.identifier // empty')
+.agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID] --format=compact
 ```
+Read `.parent.identifier // empty` from the JSON output and use it as `PARENT_ID`.
 
 If `PARENT_ID` is non-empty, check whether the parent workflow state exists:
 
@@ -50,20 +54,23 @@ If `PARENT_ID` is non-empty, check whether the parent workflow state exists:
 If `.exists` is `true`, read the parent team and worktree:
 
 ```bash
-TEAM=$(.agents/skills/orch/scripts/workflow-state get $PARENT_ID '.team_name // empty')
-WT_PATH=$(.agents/skills/orch/scripts/workflow-state get $PARENT_ID '.worktree // empty')
+.agents/skills/orch/scripts/workflow-state get [PARENT_ID] '.team_name // empty'
+.agents/skills/orch/scripts/workflow-state get [PARENT_ID] '.worktree // empty'
 ```
+Use the outputs as `TEAM` and `WT_PATH`.
 
 Then initialize child state with the inherited context:
 
 ```bash
-.agents/skills/orch/scripts/workflow-state init $ISSUE_ID --worktree "$WT_PATH" --branch "$(git rev-parse --abbrev-ref HEAD)" --team "$TEAM"
+.agents/skills/orch/scripts/git-context branch "$WT_PATH"
+.agents/skills/orch/scripts/workflow-state init $ISSUE_ID --worktree "$WT_PATH" --branch "[BRANCH_FROM_PREVIOUS_COMMAND]" --team "$TEAM"
 ```
 
 Otherwise, initialize state with the current worktree:
 
 ```bash
-.agents/skills/orch/scripts/workflow-state init $ISSUE_ID --worktree "$WT_PATH" --branch "$(git rev-parse --abbrev-ref HEAD)"
+.agents/skills/orch/scripts/git-context branch "$WT_PATH"
+.agents/skills/orch/scripts/workflow-state init $ISSUE_ID --worktree "$WT_PATH" --branch "[BRANCH_FROM_PREVIOUS_COMMAND]"
 ```
 
 ## 1. Determine Agent
@@ -72,7 +79,8 @@ Otherwise, initialize state with the current worktree:
 
 ```bash
 # Linear
-.agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID] --format=compact | jq -r '.labels[]'
+.agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID] --format=compact
+# Read `.labels[]` from the JSON output.
 
 # GitHub
 gh issue view ${ISSUE_ID#issue-} --json labels --jq '.labels[].name'
@@ -87,7 +95,7 @@ gh issue view ${ISSUE_ID#issue-} --json labels --jq '.labels[].name'
 Before each implementation delegation, capture the current `HEAD`:
 
 ```bash
-.agents/skills/orch/scripts/workflow-state set [ISSUE_ID] pre_delegate_sha "$(git -C [WORKTREE_PATH] rev-parse HEAD)"
+.agents/skills/orch/scripts/workflow-state set-git-head [ISSUE_ID] pre_delegate_sha [WORKTREE_PATH]
 ```
 
 **After each spawn**, persist the agent session:
@@ -122,8 +130,9 @@ Blocks: [BLOCKED_ISSUE_IDS or "none"]
 
 a. For each sub-issue completed by any prior agent group (cumulative):
    ```bash
-   .agents/skills/linear/scripts/linear.sh cache comments list [COMPLETED_ISSUE_ID] | jq -r '.[] | select(.body | contains("Handoff Notes")) | .body'
+   .agents/skills/linear/scripts/linear.sh cache comments list [COMPLETED_ISSUE_ID]
    ```
+   Read bodies containing `Handoff Notes` from the JSON output.
 b. Extract "Handoff Notes" sections. Combine into a single block.
 c. Include in next delegation as `Handoff from prior agents:` (see below). Omit if none found.
 
@@ -167,15 +176,16 @@ Handoff from prior agents:
 
 1. **Run ALL checks** — do not proceed if ANY fails:
    ```bash
-   PRE_SHA=$(.agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.pre_delegate_sha // empty')
-   HEAD_SHA=$(git -C "[WORKTREE_PATH]" rev-parse HEAD)
+   .agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.pre_delegate_sha // empty'
+   .agents/skills/orch/scripts/git-context head [WORKTREE_PATH]
 
    # Check the implementation produced committed work.
    git -C "[WORKTREE_PATH]" log -1 --oneline
-   test -z "$PRE_SHA" || test "$HEAD_SHA" != "$PRE_SHA"
+   # The previous two SHA outputs must differ unless pre_delegate_sha was empty.
 
    # Check no implemented files were left outside the commit.
-   test -z "$(git -C "[WORKTREE_PATH]" status --porcelain)"
+   git -C "[WORKTREE_PATH]" status --porcelain
+   # The status output must be empty.
 
    # Linear only: check state + summary (auto-includes pending children from bundle)
    .agents/skills/linear/scripts/linear.sh issues validate-completion [ISSUE_ID] --include-children-of [ISSUE_ID]

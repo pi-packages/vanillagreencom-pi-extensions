@@ -19,15 +19,15 @@ Post summary comments to git host and issue tracker, and selective handoff comme
 **Standalone init** (`lifecycle: "self"` only):
 ```bash
 # Extract issue from branch if not provided
-ISSUE_ID=$(git rev-parse --abbrev-ref HEAD | grep -oiP "$GH_ISSUE_PATTERN")
-TRACKER=$(.agents/skills/orch/scripts/tracker-for-issue "$ISSUE_ID")
-WT_PATH=$(.agents/skills/worktree/scripts/worktree path $ISSUE_ID 2>/dev/null || echo ".")
-PR_NUMBER=$(.agents/skills/github/scripts/github.sh -C "$WT_PATH" pr-view --json number 2>/dev/null | jq -r .number)
+.agents/skills/orch/scripts/git-context issue-from-branch .
+.agents/skills/orch/scripts/tracker-for-issue [ISSUE_ID]
+.agents/skills/worktree/scripts/worktree exists [ISSUE_ID]
+.agents/skills/worktree/scripts/worktree path [ISSUE_ID]
+.agents/skills/orch/scripts/pr-view-json [WT_PATH] --json number
 # Init workflow state if not exists
-if ! .agents/skills/orch/scripts/workflow-state exists $ISSUE_ID; then
-  .agents/skills/orch/scripts/workflow-state init $ISSUE_ID --worktree "$WT_PATH" --branch "$(git rev-parse --abbrev-ref HEAD)"
-fi
+.agents/skills/orch/scripts/workflow-state exists --json [ISSUE_ID]
 ```
+Use the first output as `ISSUE_ID` and the tracker output as `TRACKER`. Use current directory as `WT_PATH` unless `worktree exists` confirms a different path. Read `PR_NUMBER` from the PR JSON output. If `.exists` is `false`, initialize with `git-context branch [WT_PATH]` and `workflow-state init`.
 
 ---
 
@@ -35,24 +35,24 @@ fi
 
 1. **Read state**:
    ```bash
-   FIXED_COUNT=$(.agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.fixed_items | length')
-   ESCALATED_COUNT=$(.agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.escalated_items | length')
-   AUDIT_ISSUES=$(.agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.audit_issues_created | length')
-   PR_ISSUES=$(.agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.pr_comment_review.issues_created | length')
-   CYCLES=$(.agents/skills/orch/scripts/workflow-state get [ISSUE_ID] .cycles)
+   .agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.fixed_items | length'
+   .agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.escalated_items | length'
+   .agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.audit_issues_created | length'
+   .agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.pr_comment_review.issues_created | length'
+   .agents/skills/orch/scripts/workflow-state get [ISSUE_ID] .cycles
    ```
+   Use the outputs as `FIXED_COUNT`, `ESCALATED_COUNT`, `AUDIT_ISSUES`, `PR_ISSUES`, and `CYCLES`.
 
 2. **Skip if** `FIXED_COUNT == 0` AND `AUDIT_ISSUES == 0` AND `PR_ISSUES == 0` AND `ESCALATED_COUNT == 0`. → § 2
 
 3. **Post to git host and issue tracker** — consolidate all review cycle results from state. Write to a file first (same backtick hazard as submit-pr PR body):
    ```bash
-   SUMMARY_FILE="[WORKTREE_PATH]/tmp/post-summary-[ISSUE_ID]-$(date +%Y%m%d-%H%M%S).md"
-   mkdir -p "$(dirname "$SUMMARY_FILE")"
-   cat > "$SUMMARY_FILE" <<'SUMMARY_EOF'
-   [filled SUMMARY_CONTENT — see template below]
-   SUMMARY_EOF
+   mkdir -p [WORKTREE_PATH]/tmp
+   .agents/skills/orch/scripts/git-context timestamp compact
+   # Write SUMMARY_CONTENT to [WORKTREE_PATH]/tmp/post-summary-[ISSUE_ID]-[TIMESTAMP_FROM_PREVIOUS_COMMAND].md
    .agents/skills/github/scripts/github.sh post-comment [PR_NUMBER] --body-file "$SUMMARY_FILE"
    ```
+   Use the summary file path as `SUMMARY_FILE`.
 
    Linear only — GitHub items get linkage via `Closes #N` in the PR body:
 
@@ -97,7 +97,7 @@ fi
 
 **Skip if** `TRACKER=github` (dependencies live in issue bodies, not tracked relations). → § 3
 
-1. **Check unblocked issues**: `.agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID] | jq '.blocks'`
+1. **Check unblocked issues**: run `.agents/skills/linear/scripts/linear.sh cache issues get [ISSUE_ID]`, then read `.blocks` from the JSON output.
 
 2. **Evaluate conditions** — post handoff only if:
    - Downstream description references files touched in this PR
