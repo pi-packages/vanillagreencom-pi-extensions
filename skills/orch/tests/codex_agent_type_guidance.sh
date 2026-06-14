@@ -39,6 +39,9 @@ skill="$REPO_ROOT/skills/orch/SKILL.md"
 review_pr="$REPO_ROOT/skills/orch/workflows/review-pr.md"
 review="$REPO_ROOT/skills/orch/workflows/review.md"
 dev_start="$REPO_ROOT/skills/orch/workflows/dev-start.md"
+handoff="$REPO_ROOT/skills/orch/workflows/handoff.md"
+readme="$REPO_ROOT/skills/orch/README.md"
+development="$REPO_ROOT/skills/orch/DEVELOPMENT.md"
 
 assert_not_contains "$skill" "Spawn workers with \`fork_context: false\`" "Codex top-level guidance does not default to worker"
 assert_contains "$skill" "Spawn generated vstack agents with \`agent_type\` set to the actual generated agent name" "Codex top-level guidance requires generated agent_type"
@@ -63,6 +66,16 @@ assert_contains "$dev_start" "unless the generated-agent spawn was attempted and
 assert_contains "$dev_start" "keep the logical selected agent name in bootstrap/delegation text, reports, and workflow-state keys" "dev-start preserves logical dev identity"
 assert_contains "$dev_start" "\"runtime_agent_type\": \"[RUNTIME_AGENT_TYPE]\"" "dev-start records runtime agent type"
 assert_contains "$dev_start" "\"agent_type_fallback\": [FALLBACK_REASON_JSON_OR_NULL]" "dev-start records fallback reason"
+
+assert_contains "$skill" "target a worktree environment whose \`startingState\` is \`type=\"branch\"\`" "Codex app handoff uses branch starting state at top level"
+assert_contains "$skill" "run the Codex app agent preflight" "Codex app handoff requires generated-agent preflight"
+assert_contains "$handoff" "Use the output as \`BASE_BRANCH\`" "handoff resolves base branch before app thread creation"
+assert_contains "$handoff" ".agents/skills/orch/scripts/codex-app-agent-preflight ." "handoff invokes generated-agent preflight helper"
+assert_contains "$handoff" "Set the worktree \`startingState\` to \`{type: \"branch\", branchName: \"[BASE_BRANCH]\"}\`" "handoff requires branchName starting state"
+assert_contains "$handoff" "Do not use \`{type: \"working-tree\"}\` for orch handoff" "handoff forbids normal working-tree app launch"
+assert_contains "$readme" "startingState: {type: \"branch\", branchName: \"[BASE_BRANCH]\"}" "README documents branchName app handoff"
+assert_contains "$readme" "run \`skills/orch/scripts/codex-app-agent-preflight .\`" "README documents app handoff preflight"
+assert_contains "$development" "setup hooks, \`WORKTREE_SYMLINKS\`, and \`codex-setup\` run too late" "development docs record setup timing failure mode"
 
 printf 'pass: %d   fail: %d\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]]
