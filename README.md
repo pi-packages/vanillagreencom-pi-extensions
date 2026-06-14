@@ -97,7 +97,7 @@ rust = { color = "orange", model = "opus[1m]", effort = "xhigh", deny-tools = ["
 rust = { color = "#f97316", model = "openai/gpt-5.5", model-reasoning-effort = "xhigh", deny-tools = ["task", "question"], mode = "subagent" }
 
 [agent-frontmatter.codex]
-rust = { model = "gpt-5.5", model-reasoning-effort = "xhigh", sandbox-mode = "danger-full-access" }
+rust = { nickname-candidates = ["Rust-Atlas", "Rust-Delta"], model = "gpt-5.5", model-reasoning-effort = "xhigh", sandbox-mode = "danger-full-access" }
 
 [agent-frontmatter.pi]
 rust = { color = "orange", model = "openai-codex/gpt-5.5:xhigh", deny-tools = ["subagent", "question"], allowed-subagents = ["scout"], pane = true }
@@ -106,6 +106,7 @@ rust = { color = "orange", model = "openai-codex/gpt-5.5:xhigh", deny-tools = ["
 Key rules:
 
 - **Prefer `deny-tools` over allowlists.** Each harness inherits its normal tool set and blocks only what you list. Claude Code writes it as native `disallowedTools`; OpenCode emits `permission: <tool>: deny`; Pi enforces it via `pi-agents-tmux`. Cursor and Codex don't use per-agent deny lists — Codex subagents use `sandbox-mode`/approval instead.
+- **Codex `nickname-candidates` are display-only.** Generated Codex agents use name-prefixed candidates such as `Rust-Atlas` and `Rust-Delta` so the Codex app nickname still shows which agent definition was launched. Codex still identifies the subagent by its `name`.
 - **Pi `allowed-subagents` enables `delegate_subagent`.** vstack engineer agents default to `allowed-subagents = ["scout"]` so dev agents can dispatch read-only reconnaissance without gaining full orchestration controls. Set `[]` to disable; non-engineer roles default to disabled (and gain `delegate_subagent` in their `deny-tools`). Aliases: `allowedSubagents`, `subagent-agents`, `subagent_agents`.
 - **`effort` is written verbatim** by each harness after per-harness frontmatter overrides are applied. Valid: `low`, `medium`, `high`, `xhigh` (Claude also accepts `max`). Pi appends it to its model id as `:<effort>`; Pi has no native `max` thinking level, so provider metadata or bridge-specific overrides must map `xhigh` to provider values when needed.
 - **OpenCode agents default to `mode: subagent`.** Set `mode = "primary"` only when you want an OpenCode primary agent. OpenCode `color` must be hex.

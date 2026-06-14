@@ -141,7 +141,7 @@ rust = { color = "orange", model = "opus[1m]", effort = "xhigh", deny-tools = ["
 rust = { color = "#f97316", model = "openai/gpt-5.5", model-reasoning-effort = "xhigh", deny-tools = ["task", "question"], mode = "subagent" }
 
 [agent-frontmatter.codex]
-rust = { model = "gpt-5.5", model-reasoning-effort = "xhigh", sandbox-mode = "danger-full-access" }
+rust = { nickname-candidates = ["Rust-Atlas", "Rust-Delta"], model = "gpt-5.5", model-reasoning-effort = "xhigh", sandbox-mode = "danger-full-access" }
 
 [agent-frontmatter.pi]
 rust = { color = "orange", model = "openai-codex/gpt-5.5:xhigh", deny-tools = ["subagent", "get_subagent_result", "steer_subagent", "stop_subagent", "question"], allowed-subagents = ["scout"], pane = true }
