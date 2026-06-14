@@ -68,14 +68,17 @@ assert_contains "$dev_start" "\"runtime_agent_type\": \"[RUNTIME_AGENT_TYPE]\"" 
 assert_contains "$dev_start" "\"agent_type_fallback\": [FALLBACK_REASON_JSON_OR_NULL]" "dev-start records fallback reason"
 
 assert_contains "$skill" "target a worktree environment whose \`startingState\` is \`type=\"branch\"\`" "Codex app handoff uses branch starting state at top level"
-assert_contains "$skill" "run the Codex app agent preflight" "Codex app handoff requires generated-agent preflight"
+assert_contains "$skill" "If preflight reports a warning, present the exact message and continue only after explicit user acceptance" "Codex app handoff warning requires user acceptance"
 assert_contains "$handoff" "Use the output as \`BASE_BRANCH\`" "handoff resolves base branch before app thread creation"
 assert_contains "$handoff" ".agents/skills/orch/scripts/codex-app-agent-preflight ." "handoff invokes generated-agent preflight helper"
+assert_contains "$handoff" "Continue only after the user explicitly accepts" "handoff permits warning only after user acceptance"
 assert_contains "$handoff" "Set the worktree \`startingState\` to \`{type: \"branch\", branchName: \"[BASE_BRANCH]\"}\`" "handoff requires branchName starting state"
 assert_contains "$handoff" "Do not use \`{type: \"working-tree\"}\` for orch handoff" "handoff forbids normal working-tree app launch"
 assert_contains "$readme" "startingState: {type: \"branch\", branchName: \"[BASE_BRANCH]\"}" "README documents branchName app handoff"
 assert_contains "$readme" "run \`skills/orch/scripts/codex-app-agent-preflight .\`" "README documents app handoff preflight"
+assert_contains "$readme" "continue only after the user explicitly accepts the risk" "README documents warning acceptance"
 assert_contains "$development" "setup hooks, \`WORKTREE_SYMLINKS\`, and \`codex-setup\` run too late" "development docs record setup timing failure mode"
+assert_contains "$development" "warning gate, not a hard blocker" "development docs record non-blocking preflight"
 
 printf 'pass: %d   fail: %d\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]]

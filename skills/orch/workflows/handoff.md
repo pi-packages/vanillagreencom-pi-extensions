@@ -40,18 +40,23 @@ Present:
 
 Use this branch only inside Codex Desktop or another runtime that exposes the `codex_app` thread tools. The Codex CLI does not expose these tools.
 
-For each item:
-
 1. Resolve the base branch for the new app worktree:
    ```bash
    .agents/skills/orch/scripts/resolve-base-branch .
    ```
    Use the output as `BASE_BRANCH`.
-2. Confirm app-created worktrees will expose generated Codex agents before launch:
+2. Check whether app-created worktrees will expose generated Codex agents before launch:
    ```bash
    .agents/skills/orch/scripts/codex-app-agent-preflight .
    ```
-   Read `.status`, `.ok`, `.message`, `.tracked_agents`, and `.visible_agents` from the JSON output. If `.ok` is not `true`, stop the `codex-app` handoff and report the message. Do not create child threads that will start without generated agent types and then fall back to `worker`.
+   Read `.status`, `.severity`, `.ok`, `.requires_confirmation`, `.message`, `.tracked_agents`, and `.visible_agents` from the JSON output.
+   - If `.severity` is `error`, stop the `codex-app` handoff and report the message.
+   - If `.requires_confirmation` is `true`, present the warning message, explain that child threads may fall back to `worker`, and ask whether to continue anyway. Continue only after the user explicitly accepts. If the user declines, stop before creating child threads.
+   - If `.ok` is `true`, continue without extra confirmation.
+   Do not silently create child threads that will start without generated agent types and then fall back to `worker`.
+
+For each item:
+
 3. Resolve the exact start prompt:
    ```text
    # Linear
