@@ -113,6 +113,9 @@ fn is_agent_frontmatter_override(value: &toml::Value) -> bool {
         "mode",
         "sandbox-mode",
         "model-reasoning-effort",
+        "nickname-candidates",
+        "nickname_candidates",
+        "nicknameCandidates",
     ]
     .iter()
     .any(|key| table.contains_key(*key))
@@ -1086,6 +1089,12 @@ fn codex_frontmatter_defaults(
 ) -> Vec<(String, String)> {
     let mut fields = Vec::new();
     fields.push((
+        "nickname-candidates".into(),
+        toml_inline_array(&crate::harness::codex::default_nickname_candidates(
+            &agent.name,
+        )),
+    ));
+    fields.push((
         "model".into(),
         toml_inline_string(&codex_model_name(
             frontmatter.model.as_deref().unwrap_or(&agent.model),
@@ -1925,7 +1934,7 @@ fn agent_frontmatter_heading() -> String {
     out.push_str("# Harness-specific entries apply only to that harness.\n");
     out.push_str("# Fields: color, model, effort, deny-tools, allowed-subagents,\n");
     out.push_str("# pane, background, isolation, memory, mode, sandbox-mode,\n");
-    out.push_str("# model-reasoning-effort.\n");
+    out.push_str("# model-reasoning-effort, nickname-candidates.\n");
     out.push_str("# Claude background is seeded from Pi pane on first install (pane=true -> false, pane=false -> true), then preserved on refresh.\n");
     out.push_str("# Pi allowed-subagents is the restricted delegation allowlist for delegate_subagent (engineer default ['scout']; set [] to disable).\n");
     out.push_str(
@@ -2588,6 +2597,9 @@ researcher = { color = "purple", model = "generic-model", effort = "high", backg
 [agent-frontmatter.pi]
 researcher = { model = "openai-codex/gpt-5.5:xhigh", deny-tools = "bash, question" }
 
+[agent-frontmatter.codex]
+researcher = { nickname-candidates = "Researcher-One, Researcher-Two" }
+
 [agent-frontmatter.claude]
 researcher = { model = "opus[1m]", effort = "xhigh", background = true, isolation = "worktree" }
 "#,
@@ -2602,6 +2614,11 @@ researcher = { model = "opus[1m]", effort = "xhigh", background = true, isolatio
         assert_eq!(pi.color.as_deref(), None);
         assert_eq!(pi.model.as_deref(), Some("openai-codex/gpt-5.5:xhigh"));
         assert_eq!(pi.deny_tools, Some(vec!["bash".into(), "question".into()]));
+        let codex = config.frontmatter_for("researcher", "codex");
+        assert_eq!(
+            codex.nickname_candidates,
+            Some(vec!["Researcher-One".into(), "Researcher-Two".into()])
+        );
         let claude = config.frontmatter_for("researcher", "claude-code");
         assert_eq!(claude.model.as_deref(), Some("opus[1m]"));
         assert_eq!(claude.effort.as_deref(), Some("xhigh"));
@@ -3055,6 +3072,47 @@ scout = { pane = false }
         );
         let updated = std::fs::read_to_string(&path).unwrap();
         assert!(updated.contains("rust = { model = \"openai/gpt-5.5\", deny-tools = [\"task\", \"question\"], mode = \"primary\", model-reasoning-effort = \"xhigh\" }"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_agent_frontmatter_defaults_seeds_codex_nickname_candidates() {
+        let dir = std::env::temp_dir().join(format!(
+            "vstack_test_agent_frontmatter_codex_nicknames_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("vstack.toml");
+        std::fs::write(&path, "[agent-frontmatter.codex]\n").unwrap();
+
+        let rust = crate::agent::Agent {
+            name: "rust".into(),
+            description: "Rust agent".into(),
+            model: "opus".into(),
+            role: crate::agent::AgentRole::Engineer,
+            color: None,
+            effort: Some("xhigh".into()),
+            body: String::new(),
+            source_path: std::path::PathBuf::new(),
+        };
+        let mut harnesses = HashMap::new();
+        harnesses.insert("rust".into(), vec![crate::harness::Harness::Codex]);
+
+        write_agent_frontmatter_defaults(
+            &dir,
+            &[rust],
+            &harnesses,
+            &crate::mapping::MappingConfig::default(),
+        );
+
+        let updated = std::fs::read_to_string(&path).unwrap();
+        let rust_line = updated
+            .lines()
+            .find(|line| line.starts_with("rust =") && line.contains("nickname-candidates"))
+            .expect("rust codex frontmatter line missing nickname-candidates");
+        assert!(rust_line.contains("nickname-candidates = [\"Rust-Atlas\", \"Rust-Delta\""));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

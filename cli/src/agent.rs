@@ -269,6 +269,15 @@ pub struct AgentFrontmatterOverrides {
     pub sandbox_mode: Option<String>,
     /// Codex reasoning effort override.
     pub model_reasoning_effort: Option<String>,
+    /// Codex display nickname candidates. Codex still identifies the
+    /// subagent by `name`; nicknames are presentation-only.
+    #[serde(
+        default,
+        alias = "nicknameCandidates",
+        alias = "nickname_candidates",
+        deserialize_with = "deserialize_optional_tools"
+    )]
+    pub nickname_candidates: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -324,6 +333,10 @@ impl AgentFrontmatterOverrides {
                 .model_reasoning_effort
                 .clone()
                 .or_else(|| self.model_reasoning_effort.clone()),
+            nickname_candidates: harness
+                .nickname_candidates
+                .clone()
+                .or_else(|| self.nickname_candidates.clone()),
         }
     }
 

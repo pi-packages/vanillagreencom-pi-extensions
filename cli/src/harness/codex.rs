@@ -49,11 +49,27 @@ pub fn generate_agent(
         .or_else(|| frontmatter.effort.clone())
         .or_else(|| agent.effort.clone())
         .filter(|effort| !is_none_value(effort));
+    let nickname_candidates = frontmatter
+        .nickname_candidates
+        .clone()
+        .map(|candidates| {
+            candidates
+                .into_iter()
+                .map(|candidate| candidate.trim().to_string())
+                .filter(|candidate| !candidate.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .filter(|candidates| !candidates.is_empty())
+        .unwrap_or_else(|| default_nickname_candidates(&agent.name));
 
     // Build TOML manually to control format (triple-quoted developer_instructions)
     let mut output = String::new();
     output.push_str("# Never edit this file directly. To make additions or modifications, edit the appropriate section in ./vstack.toml. Then run `vstack refresh`.\n\n");
     output.push_str(&format!("name = \"{}\"\n", escape_toml(&agent.name)));
+    output.push_str(&format!(
+        "nickname_candidates = {}\n",
+        toml_string_array(&nickname_candidates)
+    ));
     output.push_str(&format!(
         "description = \"{}\"\n",
         escape_toml(&agent.description)
@@ -88,6 +104,54 @@ pub fn generate_agent(
 
 fn escape_toml(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+pub fn default_nickname_candidates(agent_name: &str) -> Vec<String> {
+    const SUFFIXES: &[&str] = &["Atlas", "Delta", "Echo", "Nova", "Orion", "Vector"];
+    let prefix = display_agent_name(agent_name);
+    SUFFIXES
+        .iter()
+        .map(|suffix| format!("{prefix}-{suffix}"))
+        .collect()
+}
+
+fn display_agent_name(agent_name: &str) -> String {
+    let parts = agent_name
+        .trim()
+        .split(|ch: char| ch == '-' || ch == '_' || ch.is_whitespace())
+        .filter(|part| !part.is_empty())
+        .map(display_agent_name_part)
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        "Agent".into()
+    } else {
+        parts.join("-")
+    }
+}
+
+fn display_agent_name_part(part: &str) -> String {
+    if part.eq_ignore_ascii_case("tpm") {
+        return "TPM".into();
+    }
+    let mut chars = part.chars();
+    let Some(first) = chars.next() else {
+        return String::new();
+    };
+    let mut out = String::new();
+    out.extend(first.to_uppercase());
+    for ch in chars {
+        out.extend(ch.to_lowercase());
+    }
+    out
+}
+
+fn toml_string_array(values: &[String]) -> String {
+    let values = values
+        .iter()
+        .map(|value| format!("\"{}\"", escape_toml(value)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("[{values}]")
 }
 
 fn codex_model_for_override(model: &str) -> String {
@@ -133,6 +197,60 @@ mod tests {
             generate_agent(&agent, &dir, &[], &[], &AgentExtras::default()).expect("generate ok");
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("sandbox_mode = \"workspace-write\""));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn writes_name_prefixed_nickname_candidates() {
+        let dir = std::env::temp_dir().join(format!(
+            "vstack_codex_nickname_default_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let agent = agent_fixture("reviewer-arch", AgentRole::Reviewer);
+        let path =
+            generate_agent(&agent, &dir, &[], &[], &AgentExtras::default()).expect("generate ok");
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            content.contains(
+                "nickname_candidates = [\"Reviewer-Arch-Atlas\", \"Reviewer-Arch-Delta\""
+            )
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn default_nickname_candidates_preserve_known_acronyms() {
+        assert_eq!(
+            default_nickname_candidates("tpm")[0],
+            "TPM-Atlas".to_string()
+        );
+    }
+
+    #[test]
+    fn nickname_candidates_can_be_overridden() {
+        let dir = std::env::temp_dir().join(format!(
+            "vstack_codex_nickname_override_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let agent = agent_fixture("rust", AgentRole::Engineer);
+        let extras = AgentExtras {
+            frontmatter: agent::AgentFrontmatterOverrides {
+                nickname_candidates: Some(vec!["Rust-One".into(), "Rust-Two".into()]),
+                ..Default::default()
+            },
+            ..AgentExtras::default()
+        };
+        let path = generate_agent(&agent, &dir, &[], &[], &extras).expect("generate ok");
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("nickname_candidates = [\"Rust-One\", \"Rust-Two\"]"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
