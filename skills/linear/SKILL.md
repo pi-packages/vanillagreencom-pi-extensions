@@ -36,7 +36,7 @@ CLI wrapper for Linear's GraphQL API with local cache, bulk operations, and stru
 
 | Resource | Actions |
 |----------|---------|
-| `issues` | list, get, create, update, children, relations, bulk-get |
+| `issues` | list, get, create, update, children, relations, bulk-get, bulk-update |
 | `comments` | list, create (`--body` or `--body-file`) |
 | `projects` | list, get, create, update, dependencies, updates |
 | `initiatives` | list, get, create, add-project |
@@ -135,6 +135,7 @@ sortOrder → sort_order  # Manual sort position
 - `agent:*` labels are mutually exclusive (only one per issue)
 - `--labels` replaces the full issue-label set on update. Workflow callers must fetch current labels, compute the final set, validate against `cache labels list --format=safe`, then call update with the full final set.
 - `cache labels list --format=safe` returns issue labels with `id`, `name`, `team`, `parent`, and `is_group` so workflows can reject parent/group labels before mutation.
+- `issues bulk-update` is non-atomic. If one item fails after earlier updates succeeded, it emits a JSON summary with `partial: true`, per-issue results, and exits nonzero.
 
 ## Troubleshooting
 
