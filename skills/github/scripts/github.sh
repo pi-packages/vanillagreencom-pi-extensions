@@ -5,6 +5,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/gh-auth.sh
+source "$SCRIPT_DIR/lib/gh-auth.sh"
 
 # Parse -C flag (must come before command, like git)
 WORK_DIR=""
@@ -49,47 +51,9 @@ fi
 if [ -n "$_CALLER_GH_BOT_TOKEN_SET" ]; then
     export GH_BOT_TOKEN="$_CALLER_GH_BOT_TOKEN"
 fi
-if [ -z "$_CALLER_GH_TOKEN" ] && [ -z "$_CALLER_GITHUB_TOKEN" ] && [ -n "$_CALLER_GH_BOT_TOKEN_SET" ]; then
-    if [[ "$_CALLER_GH_BOT_TOKEN" =~ ^gh[pors]_ ]] || [[ "$_CALLER_GH_BOT_TOKEN" =~ ^github_pat_ ]]; then
-        export GH_TOKEN="$_CALLER_GH_BOT_TOKEN"
-    fi
-fi
-if [ -z "${GH_TOKEN:-}" ] && [ -n "${GH_BOT_TOKEN:-}" ]; then
-    _env_bot_token="$GH_BOT_TOKEN"
-    if [[ "$_env_bot_token" == op://* ]] && command -v op &>/dev/null; then
-        _op_timeout="${VSTACK_GITHUB_OP_TIMEOUT:-10}"
-        _op_status=0
-        if command -v timeout &>/dev/null; then
-            _resolved=$(timeout "${_op_timeout}s" op read "$_env_bot_token" 2>&1) || _op_status=$?
-        else
-            _resolved=$(op read "$_env_bot_token" 2>&1) || _op_status=$?
-        fi
-        if [ "$_op_status" -eq 0 ] && [ -n "$_resolved" ]; then
-            _env_bot_token="$_resolved"
-        else
-            case "$_op_status" in
-                124)
-                    export VSTACK_GITHUB_TOKEN_ERROR_TYPE="token_resolution_timeout"
-                    export VSTACK_GITHUB_TOKEN_ERROR="Timed out resolving GH_BOT_TOKEN 1Password reference after ${_op_timeout}s"
-                    ;;
-                *)
-                    export VSTACK_GITHUB_TOKEN_ERROR_TYPE="token_resolution_failed"
-                    export VSTACK_GITHUB_TOKEN_ERROR="Failed to resolve GH_BOT_TOKEN 1Password reference"
-                    ;;
-            esac
-            if [ -n "$_resolved" ]; then
-                export VSTACK_GITHUB_TOKEN_ERROR_DETAIL="$(printf '%s' "$_resolved" | head -c 500 | tr '\n' ' ')"
-            fi
-        fi
-    elif [[ "$_env_bot_token" == op://* ]]; then
-        export VSTACK_GITHUB_TOKEN_ERROR_TYPE="token_resolution_unavailable"
-        export VSTACK_GITHUB_TOKEN_ERROR="GH_BOT_TOKEN is a 1Password reference but 'op' CLI is not available"
-    fi
-    if [[ "$_env_bot_token" =~ ^gh[pors]_ ]] || [[ "$_env_bot_token" =~ ^github_pat_ ]]; then
-        export GH_TOKEN="$_env_bot_token"
-    fi
-fi
-unset _env_root _env_bot_token _resolved _op_timeout _op_status _CALLER_GH_TOKEN_SET _CALLER_GH_TOKEN _CALLER_GITHUB_TOKEN_SET _CALLER_GITHUB_TOKEN _CALLER_GH_BOT_TOKEN_SET _CALLER_GH_BOT_TOKEN
+vstack_github_apply_selected_auth_token router || true
+vstack_github_sanitize_gh_env
+unset _env_root _CALLER_GH_TOKEN_SET _CALLER_GH_TOKEN _CALLER_GITHUB_TOKEN_SET _CALLER_GITHUB_TOKEN _CALLER_GH_BOT_TOKEN_SET _CALLER_GH_BOT_TOKEN
 
 show_help() {
     cat << 'EOF'
@@ -108,9 +72,12 @@ Commands:
   pr-list-ready      List PRs ready for merge
   pr-list-failing    List PRs with CI failures
   pr-create          Create PR as bot account
+  pr-edit-body       Update PR body from a file
   pr-merge           Merge PR as bot account (with safety checks)
   pr-cross-check     Analyze multiple PRs for conflicts/dependencies
   pr-issue           Extract issue ID from PR branch name
+  label-add          Add a PR/issue label
+  label-remove       Remove a PR/issue label
   await-mergeable    Wait for GitHub to resolve a PR's merge state (post-push or post-merge)
   ci-logs            Get CI failure logs for a PR
   bot-token          Check bot token configuration
@@ -152,7 +119,7 @@ command="${1:-help}"
 shift || true
 
 case "$command" in
-    pr-data|pr-view|pr-threads|pr-review-status|pr-list-ready|pr-list-failing|pr-create|pr-merge|pr-cross-check|pr-issue|await-mergeable|ci-logs|bot-token|dismiss-review|resolve-thread|unresolve-thread|post-reply|post-comment|find-comment|edit-comment|sticky-comment)
+    pr-data|pr-view|pr-threads|pr-review-status|pr-list-ready|pr-list-failing|pr-create|pr-edit-body|pr-merge|pr-cross-check|pr-issue|label-add|label-remove|await-mergeable|ci-logs|bot-token|dismiss-review|resolve-thread|unresolve-thread|post-reply|post-comment|find-comment|edit-comment|sticky-comment)
         script="$SCRIPT_DIR/commands/${command}.sh"
         if [ -f "$script" ]; then
             if [ -n "$WORK_DIR" ]; then
