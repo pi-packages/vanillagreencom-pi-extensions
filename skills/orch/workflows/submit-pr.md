@@ -77,7 +77,7 @@ Use the first output as `ISSUE_ID`. For no-arg standalone flow, prefer the curre
    mkdir -p [WORKTREE_PATH]/tmp
    .agents/skills/orch/scripts/git-context timestamp compact
    ```
-   Write the PR body to `[WORKTREE_PATH]/tmp/pr-body-[ISSUE_ID]-[TIMESTAMP_FROM_PREVIOUS_COMMAND].md` and use that path as `BODY_FILE`.
+   Write the PR body to `[WORKTREE_PATH]/tmp/pr-body-[ISSUE_ID]-[TIMESTAMP_FROM_PREVIOUS_COMMAND].md` with the harness file-write/edit tool or `apply_patch`, then use that path as `BODY_FILE`. Do not use shell redirection or heredocs to create the file.
 
    ```markdown
    ## Summary
@@ -139,11 +139,11 @@ Use the first output as `ISSUE_ID`. For no-arg standalone flow, prefer the curre
 Wait for bot review to complete (sticky comment with verdict). CI is deferred via label.
 
 ```bash
-.agents/skills/orch/scripts/bot-review-wait [PR_NUMBER] 15 600 --json --reviewers "$BOT_REVIEWERS"
+.agents/skills/orch/scripts/bot-review-wait [PR_NUMBER] 15 600 --json
 ```
 Use the returned JSON fields as `BOT_STATUS`, `BOT_VERDICT`, and `PENDING_REVIEWERS`.
 
-Waits for all configured bot reviewers (`$BOT_REVIEWERS`). Auto-detects if not configured. Max wait 600s. Understands Claude-style (formal review + sticky verdict comment) and Codex-style (reactions + inline threads) signaling. Unrelated automation comments do not block. `status=complete` only when no reviewer is pending. If sticky prose is stale but GitHub reports `reviewDecision=APPROVED`, any configured `BOT_CHECK_NAME` has passed, and no unresolved review threads remain, `bot-review-wait` returns approved with `pr_review_decision:approved` and `pr_threads:clear` signals without waiting on the stale checklist. To ignore a reviewer: `--skip "bot-login"` or `BOT_SKIPPED_REVIEWERS`.
+This is the preferred harness-safe path. `bot-review-wait` automatically honors configured `BOT_REVIEWERS` and `BOT_SKIPPED_REVIEWERS` from the environment or project settings, and auto-detects reviewers when no explicit configuration exists. Max wait 600s. Use literal `--reviewers "[COMMA_SEPARATED_REVIEWERS]"` or `--skip "[BOT_LOGIN]"` only for intentional ad-hoc overrides. Understands Claude-style (formal review + sticky verdict comment) and Codex-style (reactions + inline threads) signaling. Unrelated automation comments do not block. `status=complete` only when no reviewer is pending. If sticky prose is stale but GitHub reports `reviewDecision=APPROVED`, any configured `BOT_CHECK_NAME` has passed, and no unresolved review threads remain, `bot-review-wait` returns approved with `pr_review_decision:approved` and `pr_threads:clear` signals without waiting on the stale checklist.
 
 **Route result**:
 
@@ -163,23 +163,16 @@ Waits for all configured bot reviewers (`$BOT_REVIEWERS`). Auto-detects if not c
 
 ```bash
 # "Wait 5 min" path: extend checklist wait
-.agents/skills/orch/scripts/bot-review-wait [PR_NUMBER] 30 300 --json --reviewers "$BOT_REVIEWERS"
+.agents/skills/orch/scripts/bot-review-wait [PR_NUMBER] 30 300 --json
 ```
 Use the returned JSON status and pending reviewer fields to re-route. If it still reports checklist timeout or pending reviewers, ask the user `Wait` | `Skip pending bot` | `Abort`; otherwise continue to § 3.
 
 **Extended poll** (timeout + pending only):
 ```bash
-# Re-run multi-reviewer wait every 30s for up to 300s more.
-BOT_WAIT_ARGS=([PR_NUMBER] 30 300 --json)
-if [[ -n "${BOT_REVIEWERS:-}" ]]; then
-  BOT_WAIT_ARGS+=(--reviewers "$BOT_REVIEWERS")
-fi
-if [[ -n "${BOT_SKIPPED_REVIEWERS:-}" ]]; then
-  BOT_WAIT_ARGS+=(--skip "$BOT_SKIPPED_REVIEWERS")
-fi
-.agents/skills/orch/scripts/bot-review-wait "${BOT_WAIT_ARGS[@]}"
+.agents/skills/orch/scripts/bot-review-wait [PR_NUMBER] 30 300 --json
 # Proceed to § 3 if complete/terminal; otherwise ask with pending reviewers.
 ```
+If the user chooses to skip a pending bot, run a second explicit command with `--skip "[BOT_LOGIN]"`. Use literal `--reviewers "[COMMA_SEPARATED_REVIEWERS]"` only for an intentional ad-hoc override; normal configured reviewers are already honored by the simple command.
 Use the returned JSON fields as `BOT_STATUS`, `BOT_VERDICT`, and `PENDING_REVIEWERS`.
 
 ---
@@ -190,16 +183,10 @@ Use the returned JSON fields as `BOT_STATUS`, `BOT_VERDICT`, and `PENDING_REVIEW
 
 1. **Bot completion pre-check** — ensure all configured/detected bot reviewers have terminal status before triaging:
    ```bash
-   BOT_WAIT_ARGS=([PR_NUMBER] 30 180 --json)
-   if [[ -n "${BOT_REVIEWERS:-}" ]]; then
-     BOT_WAIT_ARGS+=(--reviewers "$BOT_REVIEWERS")
-   fi
-   if [[ -n "${BOT_SKIPPED_REVIEWERS:-}" ]]; then
-     BOT_WAIT_ARGS+=(--skip "$BOT_SKIPPED_REVIEWERS")
-   fi
-   .agents/skills/orch/scripts/bot-review-wait "${BOT_WAIT_ARGS[@]}"
+   .agents/skills/orch/scripts/bot-review-wait [PR_NUMBER] 30 180 --json
    # Proceed if complete/terminal; if still pending, include PENDING_REVIEWERS in triage notes.
    ```
+   Configured reviewers and skipped reviewers from environment/project settings are already honored. Use literal `--reviewers` / `--skip` arguments only for intentional ad-hoc overrides.
    Use the returned JSON fields as `BOT_STATUS`, `BOT_VERDICT`, and `PENDING_REVIEWERS`.
 
 2. **Run Workflow**: `⤵ workflows/review-pr-comments.md [PR_NUMBER] § 1-8 → § 3.1` with context:
@@ -249,10 +236,10 @@ After fixes pushed, wait for bot re-review (CI still deferred). Re-run `workflow
    # 2. Read baseline from state
    .agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.pr_review_baseline.last_ts // empty'
    .agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.pr_review_baseline.last_threads // 0'
-   # Use the outputs as LAST_TS and LAST_THREADS.
+   # Use the outputs as LAST_TS_FROM_PREVIOUS_COMMAND and LAST_THREADS_FROM_PREVIOUS_COMMAND.
 
    # 3. Check status against baseline
-   .agents/skills/github/scripts/github.sh pr-review-status [PR_NUMBER] --baseline-ts "$LAST_TS" --baseline-threads "$LAST_THREADS"
+   .agents/skills/github/scripts/github.sh pr-review-status [PR_NUMBER] --baseline-ts "[LAST_TS_FROM_PREVIOUS_COMMAND]" --baseline-threads "[LAST_THREADS_FROM_PREVIOUS_COMMAND]"
    # Save output to tmp/pr_status_[PR_NUMBER].json with the harness file-write tool.
    ```
 
@@ -276,9 +263,9 @@ After fixes pushed, wait for bot re-review (CI still deferred). Re-run `workflow
    # Update baseline
    jq -r '.sticky_updated_at' tmp/pr_status_[PR_NUMBER].json
    jq -r '.unresolved_threads' tmp/pr_status_[PR_NUMBER].json
-   .agents/skills/orch/scripts/workflow-state set [ISSUE_ID] pr_review_baseline "{\"last_ts\":\"$NEW_TS\",\"last_threads\":$NEW_THREADS}"
+   .agents/skills/orch/scripts/workflow-state set [ISSUE_ID] pr_review_baseline '{"last_ts":"[NEW_TS_FROM_PREVIOUS_COMMAND]","last_threads":[NEW_THREADS_FROM_PREVIOUS_COMMAND]}'
    ```
-   Use the two `jq` outputs as `NEW_TS` and `NEW_THREADS`.
+   Use the two `jq` outputs as `NEW_TS_FROM_PREVIOUS_COMMAND` and `NEW_THREADS_FROM_PREVIOUS_COMMAND`.
 
 5. **Max iterations exceeded**: Report to user with status, recommendation, and proceed to § 4.
 
@@ -346,27 +333,21 @@ All bot review comments resolved (or max iterations). Verify no late-arriving th
    # Wait for late-arriving threads (bot posts inline comments after sticky update)
    sleep 15
    .agents/skills/github/scripts/github.sh pr-threads [PR_NUMBER] --unresolved
-   # Read `.unresolved_count` from the JSON output and use it as UNRESOLVED.
-   # If UNRESOLVED is 0, sleep 15 and run the same command again to double-check.
+   # Read `.unresolved_count` from the JSON output and use it as UNRESOLVED_FROM_PREVIOUS_COMMAND.
+   # If UNRESOLVED_FROM_PREVIOUS_COMMAND is 0, sleep 15 and run the same command again to double-check.
    .agents/skills/orch/scripts/workflow-state get [ISSUE_ID] '.pr_comment_review.ci_gate_rerouted // false'
    ```
-   Use the workflow-state output as `CI_GATE_REROUTED`.
+   Use the workflow-state output as `CI_GATE_REROUTED_FROM_PREVIOUS_COMMAND`.
 
-   | `UNRESOLVED` | `CI_GATE_REROUTED` | Action |
+   | `UNRESOLVED_FROM_PREVIOUS_COMMAND` | `CI_GATE_REROUTED_FROM_PREVIOUS_COMMAND` | Action |
    |--------------|---------------------|--------|
    | `0` | any | → step 2 (remove label) |
    | `>0` | `false` | Set `ci_gate_rerouted=true`, → § 3.1 (one triage pass) |
    | `>0` | `true` | Ask user: "Bot posted N unresolved threads after iteration limit" — `Triage now` \| `Skip and trigger CI` \| `Abort` |
 
+   For `>0` plus `false`, run this explicit command, then route to § 3.1:
    ```bash
-   if [ "$UNRESOLVED" -gt 0 ]; then
-     if [ "$CI_GATE_REROUTED" = "false" ]; then
-       .agents/skills/orch/scripts/workflow-state set [ISSUE_ID] pr_comment_review.ci_gate_rerouted true
-       # → § 3.1
-     else
-       # Ask user with 3 options
-     fi
-   fi
+   .agents/skills/orch/scripts/workflow-state set [ISSUE_ID] pr_comment_review.ci_gate_rerouted true
    ```
 
 2. **Remove label**:
@@ -418,7 +399,7 @@ All bot review comments resolved (or max iterations). Verify no late-arriving th
    ```bash
    mkdir -p [WORKTREE_PATH]/tmp
    .agents/skills/orch/scripts/git-context timestamp compact
-   # Write SUMMARY_CONTENT to [WORKTREE_PATH]/tmp/submit-summary-[ISSUE_ID]-[TIMESTAMP_FROM_PREVIOUS_COMMAND].md
+   # Write SUMMARY_CONTENT to [WORKTREE_PATH]/tmp/submit-summary-[ISSUE_ID]-[TIMESTAMP_FROM_PREVIOUS_COMMAND].md with the harness file-write/edit tool or apply_patch.
    .agents/skills/github/scripts/github.sh post-comment [PR_NUMBER] --body-file "$SUMMARY_FILE"
    ```
    Use the summary file path as `SUMMARY_FILE`.
