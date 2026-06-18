@@ -172,25 +172,47 @@ ensure_gh_ready() {
     return 1
   fi
 
-  local auth_output
-  if auth_output=$(gh auth status 2>&1); then
+  local auth_timeout="${VSTACK_GITHUB_AUTH_TIMEOUT:-10}"
+  local auth_tmp auth_out auth_err auth_output auth_rc=0
+  local initial_had_env_token=false
+  [[ -n "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]] && initial_had_env_token=true
+  auth_tmp="$(mktemp -d)"
+  auth_out="$auth_tmp/auth.out"
+  auth_err="$auth_tmp/auth.err"
+  if orch_github_auth_status_capture "$auth_timeout" "$auth_out" "$auth_err"; then
+    rm -rf "$auth_tmp"
     return 0
+  else
+    auth_rc=$?
+  fi
+  auth_output="$(cat "$auth_out" "$auth_err" 2>/dev/null | head -c 1000)"
+  rm -rf "$auth_tmp"
+  [[ "$auth_rc" -eq 124 && -z "$auth_output" ]] && auth_output="GitHub auth preflight timed out after ${auth_timeout}s"
+
+  if [[ "$auth_rc" -eq 124 ]]; then
+    unset GH_TOKEN GITHUB_TOKEN
+    if orch_load_env_bot_token "$PROJECT_ROOT" && \
+       orch_github_auth_status; then
+      return 0
+    fi
+    printf '%s\n' "$auth_output" >&2
+    return 1
   fi
 
-  # A bad GH_TOKEN/GITHUB_TOKEN masks gh keyring auth. If keyring auth works
-  # with those variables removed, prefer the working auth source instead of
-  # polling until timeout with every API read degraded to "unknown".
-  orch_sanitize_gh_env
-  if gh auth status >/dev/null 2>&1; then
-    return 0
+  # A bad GH_TOKEN/GITHUB_TOKEN masks gh keyring auth. Probe each candidate
+  # source once: selected env token, keyring, then project GH_BOT_TOKEN.
+  if [[ "$initial_had_env_token" == "true" ]]; then
+    if [[ "${VSTACK_GITHUB_SELECTED_TOKEN_SOURCE:-}" != "GH_BOT_TOKEN" ]] && orch_github_keyring_auth_status; then
+      echo "Warning: GH_TOKEN/GITHUB_TOKEN failed gh auth; unsetting them and using gh keyring auth." >&2
+      unset GH_TOKEN GITHUB_TOKEN
+      export VSTACK_GITHUB_AUTH_FALLBACK="keyring"
+      return 0
+    fi
+    unset GH_TOKEN GITHUB_TOKEN
   fi
 
-  # Final fallback: a stale env token plus broken keyring may still recover
-  # if project config/secrets carry a valid GH_BOT_TOKEN. Drop any remaining
-  # stale env token first so we are not just retrying the bad one.
-  unset GH_TOKEN GITHUB_TOKEN
   if orch_load_env_bot_token "$PROJECT_ROOT" && \
-     gh auth status >/dev/null 2>&1; then
+     orch_github_auth_status; then
     return 0
   fi
 

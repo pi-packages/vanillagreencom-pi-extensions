@@ -59,12 +59,26 @@ case "${1:-}" in
       if [[ "${STUB_AUTH_SLEEP:-0}" == "1" ]]; then
         sleep 5
       fi
+      if [[ "${STUB_AUTH_STATUS_FAIL:-0}" == "1" ]]; then
+        echo "keyring default failed" >&2
+        exit 1
+      fi
       if _auth_ok; then
         echo "Logged in"
         exit 0
       fi
       echo "gh auth failed" >&2
       exit 1
+    fi
+    ;;
+  api)
+    if [[ "${2:-}" == "user" ]]; then
+      if [[ "${STUB_API_USER_SLEEP:-0}" == "1" ]]; then
+        sleep 5
+      fi
+      _auth_ok || { echo "HTTP 401: Bad credentials" >&2; exit 1; }
+      echo "test-user"
+      exit 0
     fi
     ;;
   pr)
@@ -140,6 +154,22 @@ rc=$?
 set -e
 assert_eq "$rc" "124" "auth preflight timeout exits 124" "$stderr"
 assert_eq "$(jq -r .status <<<"$output")" "auth_timeout" "auth timeout emits structured status" "$stderr"
+
+stderr="$TMP_ROOT/api-user-auth-timeout.err"
+set +e
+output=$(run_pr_view GH_TOKEN=ghs_VALIDBOT123 STUB_API_USER_SLEEP=1 VSTACK_GITHUB_AUTH_TIMEOUT=1 2>"$stderr")
+rc=$?
+set -e
+assert_eq "$rc" "124" "env-token auth preflight timeout exits 124" "$stderr"
+assert_eq "$(jq -r .status <<<"$output")" "auth_timeout" "env-token auth timeout emits structured status" "$stderr"
+
+stderr="$TMP_ROOT/stale-keyring.err"
+set +e
+output=$(run_pr_view GH_TOKEN=ghs_VALIDBOT123 STUB_AUTH_STATUS_FAIL=1 2>"$stderr")
+rc=$?
+set -e
+assert_eq "$rc" "0" "valid selected token ignores stale keyring status" "$stderr"
+assert_eq "$(jq -r .number <<<"$output")" "42" "valid selected token preserves gh JSON" "$stderr"
 
 stderr="$TMP_ROOT/pr-view-timeout.err"
 set +e

@@ -33,7 +33,13 @@ cat >"$STUB_BIN/git" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
   "rev-parse --show-toplevel") printf '%s\n' "${TEST_PROJECT_ROOT:?}" ;;
-  "rev-parse --git-common-dir") printf '%s\n' "${TEST_PROJECT_ROOT:?}/../main/.git" ;;
+  "rev-parse --git-common-dir")
+    if [[ "${TEST_WORKTREE:-true}" == "false" ]]; then
+      printf '%s\n' "${TEST_PROJECT_ROOT:?}/.git"
+    else
+      printf '%s\n' "${TEST_PROJECT_ROOT:?}/../main/.git"
+    fi
+    ;;
   "branch --show-current") printf '%s\n' "issue-322" ;;
   *) exit 1 ;;
 esac
@@ -47,12 +53,46 @@ exit 1
 SH
 chmod +x "$STUB_BIN/op"
 
+cat >"$STUB_BIN/gh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+
+case "${1:-}" in
+  auth)
+    if [[ "${2:-}" == "status" ]]; then
+      tok="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+      [[ "$tok" == "gho_VALID123" ]] || { echo "auth failed" >&2; exit 1; }
+      if [[ "$*" == *"--json hosts"* ]]; then
+        printf '%s\n' '{"hosts":{"github.com":[{"login":"test-user","state":"success","gitProtocol":"https","active":true}]}}'
+      else
+        echo "Logged in"
+      fi
+      exit 0
+    fi
+    ;;
+  api)
+    if [[ "${2:-}" == "user" ]]; then
+      tok="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+      [[ "$tok" == "gho_VALID123" ]] || { echo "HTTP 401: Bad credentials" >&2; exit 1; }
+      echo "test-user"
+      exit 0
+    fi
+    ;;
+esac
+printf 'unexpected gh call: %s\n' "$*" >&2
+exit 1
+SH
+chmod +x "$STUB_BIN/gh"
+
 make_worktree() {
-  local name="$1" with_linear="${2:-yes}"
+  local name="$1" with_linear="${2:-yes}" with_github="${3:-no}"
   local wt="$TMP_ROOT/$name"
   mkdir -p "$wt/.agents/skills"
   if [[ "$with_linear" == "yes" ]]; then
     cp -R "$LINEAR_SKILL" "$wt/.agents/skills/linear"
+  fi
+  if [[ "$with_github" == "yes" ]]; then
+    ln -s "$REPO_ROOT/skills/github" "$wt/.agents/skills/github"
   fi
   printf 'LINEAR_API_KEY=op://vault/item/field\n' >"$wt/.env.local"
   printf '%s\n' "$wt"
@@ -95,6 +135,24 @@ assert_eq "$issue" "issue-356" "GitHub refs normalize to issue-N in worktree ini
 assert_eq "$tracker" "github" "GitHub refs report github tracker"
 assert_eq "$repo" "vanillagreencom/vstack" "GitHub refs preserve owner/repo"
 assert_eq "$number" "356" "GitHub refs preserve issue number"
+
+WT_GITHUB_TOKEN="$(make_worktree wt-github-token yes yes)"
+out="$(
+  cd "$WT_GITHUB_TOKEN"
+  TEST_PROJECT_ROOT="$WT_GITHUB_TOKEN" PATH="$STUB_BIN:$PATH" GITHUB_TOKEN=gho_VALID123 "$SCRIPT" --json
+)"
+gh_auth="$(jq -r '.gh_auth // false' <<<"$out")"
+assert_eq "$gh_auth" "true" "worktree GitHub auth accepts selected GITHUB_TOKEN"
+
+WT_DASHBOARD_TOKEN="$(make_worktree wt-dashboard-token yes yes)"
+out="$(
+  cd "$WT_DASHBOARD_TOKEN"
+  TEST_PROJECT_ROOT="$WT_DASHBOARD_TOKEN" TEST_WORKTREE=false PATH="$STUB_BIN:$PATH" GITHUB_TOKEN=gho_VALID123 "$SCRIPT" --json
+)"
+gh_available="$(jq -r '.gh_auth.available // false' <<<"$out")"
+gh_active="$(jq -r '.gh_auth.active_account // empty' <<<"$out")"
+assert_eq "$gh_available" "true" "dashboard GitHub auth accepts selected GITHUB_TOKEN"
+assert_eq "$gh_active" "test-user" "dashboard GitHub auth reports selected token account"
 
 printf 'pass: %d   fail: %d\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]]
