@@ -2,12 +2,12 @@
 # vstack skill scripts read this [env] table after .env and before .env.local.
 
 [env]
-BOT_EMAIL = "brad+claude@vanillagreen.com"
-BOT_NAME = "vg-claude"
-BOT_REMOTE_NAME = "vg-claude"
-BOT_REVIEWERS = "vg-claude"
+BOT_EMAIL = ""
+BOT_NAME = ""
+BOT_REMOTE_NAME = ""
+BOT_REVIEWERS = ""
 DECISIONS_DIR = "docs/decisions"
-GH_BOT_USERNAME = "vg-claude"
+GH_BOT_USERNAME = ""
 GH_ISSUE_PATTERN = "cc-[0-9]+"
 GH_VERIFY_CMD = ""
 LINEAR_FORMAT = "safe"
