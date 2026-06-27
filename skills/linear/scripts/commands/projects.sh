@@ -92,7 +92,7 @@ Examples:
   projects.sh delete <id>
 
   # Project dependencies
-  projects.sh list-dependencies <project-id>
+  projects.sh list-dependencies <id-or-name>
   projects.sh add-dependency <project-id> --blocked-by <other-id>
   projects.sh add-dependency <project-id> --blocks <other-id>
   projects.sh remove-dependency <relation-id>
@@ -610,7 +610,44 @@ delete_project() {
 }
 
 list_dependencies() {
-    local project_id="$1"
+    local project_id=""
+    FORMAT="raw"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+        --format)
+            if [ -z "${2:-}" ]; then
+                echo '{"error": "Missing value for --format"}' >&2
+                return 1
+            fi
+            FORMAT="$2"
+            shift 2
+            ;;
+        --format=*)
+            FORMAT="${1#--format=}"
+            shift
+            ;;
+        *)
+            if [ -z "$project_id" ]; then
+                project_id="$1"
+                shift
+            else
+                echo "{\"error\": \"Unexpected argument: $1\"}" >&2
+                return 1
+            fi
+            ;;
+        esac
+    done
+
+    if [ -z "$project_id" ]; then
+        echo '{"error": "Project ID or name required"}' >&2
+        return 1
+    fi
+
+    local resolved_project_id
+    if ! resolved_project_id=$(resolve_project_id "$project_id"); then
+        return 1
+    fi
 
     local query='
     query GetProjectDependencies($id: String!) {
@@ -638,8 +675,18 @@ list_dependencies() {
         }
     }'
 
-    local variables="{\"id\": \"$project_id\"}"
-    graphql_query "$query" "$variables"
+    local variables="{\"id\": \"$resolved_project_id\"}"
+    local result
+    result=$(graphql_query "$query" "$variables")
+
+    case "$FORMAT" in
+    raw)
+        echo "$result"
+        ;;
+    safe | *)
+        format_project_dependencies "$result"
+        ;;
+    esac
 }
 
 add_dependency() {
@@ -1185,12 +1232,12 @@ delete)
     fi
     delete_project "$1"
     ;;
-list-dependencies)
+list-dependencies | dependencies)
     if [ -z "${1:-}" ]; then
         echo '{"error": "Usage: projects.sh list-dependencies <id>"}' >&2
         exit 1
     fi
-    list_dependencies "$1"
+    list_dependencies "$@"
     ;;
 add-dependency)
     if [ -z "${1:-}" ]; then
