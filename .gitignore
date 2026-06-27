@@ -19,12 +19,14 @@ docs/plans/
 /.claude/**
 /.cursor
 /.cursor/**
-/.codex
 /.codex/**
+!/.codex/environments/
+!/.codex/environments/environment.toml
 /.opencode
 /.opencode/**
-/.pi
 /.pi/**
+!/.pi/prompts/
+!/.pi/prompts/pi-update.md
 /opencode.json
 
 # npm artifacts (pi-extensions are published to npm)
