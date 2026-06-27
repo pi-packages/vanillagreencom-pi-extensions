@@ -398,7 +398,6 @@ describe("needs_completion cwd snapshots", () => {
 	test("pollPaneCompletions preserves existing archive path when duplicate poll archive persistence fails", async () => {
 		const runtimeRoot = tempDir("needs-completion-runtime-");
 		const cwd = tempGitRepo();
-		let lockDir: string | undefined;
 		try {
 			const seeded = await seedPaneTask(runtimeRoot, cwd, "task-duplicate-archive");
 			const outboxFile = join(runtimeRoot, "outbox", "rust", "task-duplicate-archive.json");
@@ -432,12 +431,8 @@ describe("needs_completion cwd snapshots", () => {
 						updatedAt: "2026-05-20T00:00:02.000Z",
 					},
 				});
+				rmSync(outboxFile, { force: true });
 				setBeforeCompletionRegistryUpdateForTests();
-			});
-			setAfterCompletionArchiveForTests(({ runtimeRoot: hookRuntimeRoot }) => {
-				lockDir = holdTaskRegistryLock(hookRuntimeRoot);
-				forceFastRegistryLockTimeout();
-				setAfterCompletionArchiveForTests();
 			});
 
 			const count = await pollPaneCompletions(runtimeRoot, {
@@ -446,18 +441,69 @@ describe("needs_completion cwd snapshots", () => {
 			} as any);
 			const persisted = (await readTaskRegistry(runtimeRoot))["task-duplicate-archive"]!;
 
-			expect(count).toBe(1);
+			expect(count).toBe(0);
 			expect(persisted.status).toBe("completed");
 			expect(persisted.completionArchivePath).toBe(existingArchivePath);
 			expect(persisted.completionSourcePath).toBe(outboxFile);
 			expect(existsSync(existingArchivePath)).toBe(true);
-			expect(existsSync(outboxFile)).toBe(true);
+			expect(existsSync(outboxFile)).toBe(false);
+			expect(emitted.filter((event) => event.name === "subagents:completed")).toHaveLength(0);
+		} finally {
+			setAfterCompletionArchiveForTests();
+			setBeforeCompletionRegistryUpdateForTests();
+			setFileLockOptionsForTests();
+			rmSync(`${taskRegistryPath(runtimeRoot)}.lock`, { force: true, recursive: true });
+			rmSync(runtimeRoot, { force: true, recursive: true });
+			rmSync(cwd, { force: true, recursive: true });
+		}
+	});
+
+	test("pollPaneCompletions allows terminal completion after needs_completion was persisted", async () => {
+		const runtimeRoot = tempDir("needs-completion-runtime-");
+		const cwd = tempGitRepo();
+		try {
+			const seeded = await seedPaneTask(runtimeRoot, cwd, "task-late-terminal");
+			const outboxFile = join(runtimeRoot, "outbox", "rust", "task-late-terminal.json");
+			mkdirSync(dirname(outboxFile), { recursive: true });
+			writeFileSync(outboxFile, JSON.stringify({
+				agent: "rust",
+				filesChanged: ["x.ts"],
+				status: "completed",
+				summary: "late terminal completion",
+				taskId: "task-late-terminal",
+				validation: ["ok"],
+			}), "utf8");
+			const emitted: Array<{ name: string; payload: any }> = [];
+			setBeforeCompletionRegistryUpdateForTests(async () => {
+				await writeTaskRegistry(runtimeRoot, {
+					"task-late-terminal": {
+						...seeded,
+						completedAt: "2026-05-20T00:00:02.000Z",
+						completionSourcePath: outboxFile,
+						status: "needs_completion",
+						summary: "needs completion before late terminal",
+						updatedAt: "2026-05-20T00:00:02.000Z",
+					},
+				});
+				setBeforeCompletionRegistryUpdateForTests();
+			});
+
+			const count = await pollPaneCompletions(runtimeRoot, {
+				events: { emit: (name: string, payload: any) => emitted.push({ name, payload }) },
+				sendMessage: () => undefined,
+			} as any);
+			const persisted = (await readTaskRegistry(runtimeRoot))["task-late-terminal"]!;
+
+			expect(count).toBe(1);
+			expect(persisted.status).toBe("completed");
+			expect(persisted.summary).toBe("late terminal completion");
+			expect(persisted.completionArchivePath).toContain(join(runtimeRoot, "processed", "rust"));
+			expect(existsSync(outboxFile)).toBe(false);
 			expect(emitted.filter((event) => event.name === "subagents:completed")).toHaveLength(1);
 		} finally {
 			setAfterCompletionArchiveForTests();
 			setBeforeCompletionRegistryUpdateForTests();
 			setFileLockOptionsForTests();
-			if (lockDir) rmSync(lockDir, { force: true, recursive: true });
 			rmSync(`${taskRegistryPath(runtimeRoot)}.lock`, { force: true, recursive: true });
 			rmSync(runtimeRoot, { force: true, recursive: true });
 			rmSync(cwd, { force: true, recursive: true });
