@@ -231,15 +231,21 @@ merge. Detach them first.
    Use the output as `BASE_BRANCH`.
 
    ```bash
-   [MAIN_REPO_ROOT]/.agents/skills/github/scripts/git-https-auth -C [MAIN_REPO_ROOT] fetch --prune origin
-   [MAIN_REPO_ROOT]/.agents/skills/github/scripts/git-https-auth -C [MAIN_REPO_ROOT] pull --rebase origin [BASE_BRANCH]
+   [MAIN_REPO_ROOT]/.agents/skills/github/scripts/git-https-auth -C [MAIN_REPO_ROOT] fetch --prune origin "+refs/heads/[BASE_BRANCH]:refs/remotes/origin/[BASE_BRANCH]"
+   git -C [MAIN_REPO_ROOT] merge --ff-only "origin/[BASE_BRANCH]"
    git -C [MAIN_REPO_ROOT] worktree prune
    ```
    Target `origin` only. Optional secondary remotes must not block closure of
-   the current PR. `git-https-auth` preserves normal SSH behavior unless a
-   GitHub SSH remote is present and `gh` auth is valid, in which case it
-   applies a per-command HTTPS/`gh auth git-credential` fallback. `--rebase`
-   prevents merge-bubble commits when local main diverged.
+   the current PR. The fetch uses `git-https-auth`, which preserves normal SSH
+   behavior unless a GitHub SSH remote is present and `gh` auth is valid; then
+   it applies a per-command HTTPS/`gh auth git-credential` fallback. Fetch the
+   base branch with an explicit refspec so narrowed `remote.origin.fetch`
+   config cannot leave `origin/[BASE_BRANCH]` stale or missing. Keep the local
+   fast-forward merge on plain `git` so credential helper config is not exposed
+   to merge-time repository hooks. Sync to the explicit fetched
+   `origin/[BASE_BRANCH]` ref with `--ff-only` so local main never gains
+   merge-bubble commits; if the fast-forward fails, stop and surface the
+   divergence for manual handling.
 
 5. **Sweep stale branches & worktrees** (after all PRs merged and synced). Default: scoped to current PR only — do not enumerate unrelated branches or sibling worktrees.
 
@@ -342,7 +348,7 @@ For each file flagged as overlapping in § 2.1:
 | ⏭️ | #[P] | [ISSUE_ID] - [TITLE] | Review threads |
 | ❌ | #[Q] | [ISSUE_ID] - [TITLE] | Merge conflicts |
 
-Total: [N] PRs merged | Synced: origin fetch/pull via git-https-auth
+Total: [N] PRs merged | Synced: origin fetch via git-https-auth + local ff-only merge
 
 ### 🧹 STALE CLEANUP
 
